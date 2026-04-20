@@ -1,0 +1,22 @@
+{
+  "name": "corolla-fix-helper-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --watch-path=src src/index.js",
+    "start": "node src/index.js",
+    "build": "node -e \"console.log('No server build step needed yet.')\"",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "multer": "^2.1.1",
+    "pdfjs-dist": "^5.6.205"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.4"
+  }
+}

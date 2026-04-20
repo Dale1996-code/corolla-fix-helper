@@ -1,0 +1,22 @@
+{
+  "name": "corolla-fix-helper",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first repair helper for a 2009 Toyota Corolla LE 1.8L",
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "npm --prefix server run build",
+    "build:client": "npm --prefix client run build",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "npm --prefix server run test",
+    "test:client": "npm --prefix client run test",
+    "start": "npm --prefix server run start",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,48 @@
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - paragraph [ref=e7]: Corolla Fix Helper
+      - heading "Repair Document Organizer" [level=1] [ref=e8]
+      - paragraph [ref=e9]: Local-first notes and document lookup for a 2009 Toyota Corolla LE 1.8L.
+    - navigation [ref=e10]:
+      - link "Dashboard" [ref=e11] [cursor=pointer]:
+        - /url: /dashboard
+      - link "Documents" [ref=e12] [cursor=pointer]:
+        - /url: /documents
+      - link "Search" [ref=e13] [cursor=pointer]:
+        - /url: /search
+      - link "Symptoms" [ref=e14] [cursor=pointer]:
+        - /url: /symptoms
+      - link "Procedures" [ref=e15] [cursor=pointer]:
+        - /url: /procedures
+      - link "Notes" [ref=e16] [cursor=pointer]:
+        - /url: /notes
+      - link "Settings" [ref=e17] [cursor=pointer]:
+        - /url: /settings
+  - main [ref=e18]:
+    - generic [ref=e19]:
+      - paragraph [ref=e20]: Working Feature
+      - heading "Documents" [level=2] [ref=e21]
+      - paragraph [ref=e22]: This is the first fully working feature in the app shell. It fetches sample document data from the Express server so you can confirm the database, API, and React page are connected correctly.
+    - generic [ref=e23]:
+      - paragraph [ref=e25]: Showing 1 document from the local database.
+      - article [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - heading "Sample Maintenance Schedule" [level=3] [ref=e29]
+            - paragraph [ref=e30]: 2009-corolla-maintenance-sample.pdf
+          - generic [ref=e31]:
+            - generic [ref=e32]: Favorite
+            - generic [ref=e33]: Bookmarked
+        - generic [ref=e34]:
+          - paragraph [ref=e35]: "Vehicle: 2009 Toyota Corolla LE"
+          - paragraph [ref=e36]: "System: Engine"
+          - paragraph [ref=e37]: "Document type: Maintenance Schedule"
+          - paragraph [ref=e38]: "Stored file: sample-maintenance-schedule.pdf"
+        - generic [ref=e39]:
+          - paragraph [ref=e40]: "Notes: Starter sample document used to prove the Documents feature is working."
+          - paragraph [ref=e41]: "Extracted text: Oil changes every 5,000 miles. Inspect belts, hoses, spark plugs, and engine air filter."
+        - generic [ref=e42]:
+          - generic [ref=e43]: "#maintenance"
+          - generic [ref=e44]: "#engine"
+          - generic [ref=e45]: "#sample"
