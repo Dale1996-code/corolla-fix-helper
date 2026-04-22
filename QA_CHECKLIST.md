@@ -82,13 +82,19 @@ Check that:
 
 1. Create a note.
 2. Pick a note type.
-3. Optionally link it to a document.
+3. Link it to a document, symptom, or procedure if one is available.
+4. Use the Note type filter, Linked item filter, and Sort control.
+5. Open the saved note in the detail panel.
 
 Check that:
 
 - the note saves successfully
 - the note appears in the list
 - the detail panel shows the saved content
+- the list shows the linked item title when the note is linked
+- the note filters and sort controls change the visible list
+- the "Showing X of Y notes" count updates while browsing
+- the detail panel shows the linked item and can open that linked record page
 
 ## 8) Run build and tests
 

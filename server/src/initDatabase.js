@@ -46,23 +46,9 @@ function createTables() {
       extraction_status TEXT NOT NULL DEFAULT 'not_attempted',
       page_count INTEGER,
       is_favorite INTEGER NOT NULL DEFAULT 0,
-      is_bookmarked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
-    );
-
-    CREATE TABLE IF NOT EXISTS document_tags (
-      document_id INTEGER NOT NULL,
-      tag_id INTEGER NOT NULL,
-      PRIMARY KEY (document_id, tag_id),
-      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
-      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS symptoms (
@@ -201,9 +187,8 @@ function seedDocument(vehicleId) {
       extracted_text,
       extraction_status,
       page_count,
-      is_favorite,
-      is_bookmarked
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      is_favorite
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = insertDocument.run(
@@ -221,33 +206,10 @@ function seedDocument(vehicleId) {
     "Oil changes every 5,000 miles. Inspect belts, hoses, spark plugs, and engine air filter.",
     "completed",
     1,
-    1,
     1
   );
 
   return result.lastInsertRowid;
-}
-
-function seedTags(documentId) {
-  const tagNames = ["maintenance", "engine", "sample"];
-
-  const insertTag = db.prepare(`
-    INSERT INTO tags (name)
-    VALUES (?)
-    ON CONFLICT(name) DO NOTHING
-  `);
-
-  const selectTag = db.prepare("SELECT id FROM tags WHERE name = ?");
-  const linkTag = db.prepare(`
-    INSERT OR IGNORE INTO document_tags (document_id, tag_id)
-    VALUES (?, ?)
-  `);
-
-  for (const tagName of tagNames) {
-    insertTag.run(tagName);
-    const tag = selectTag.get(tagName);
-    linkTag.run(documentId, tag.id);
-  }
 }
 
 function backfillSeedDocument() {
@@ -290,8 +252,7 @@ export function initializeDatabase() {
   createTables();
   ensureAppSettingsRecord();
   const vehicleId = seedVehicle();
-  const documentId = seedDocument(vehicleId);
+  seedDocument(vehicleId);
   backfillSeedDocument();
   backfillNotesData();
-  seedTags(documentId);
 }
