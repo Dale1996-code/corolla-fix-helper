@@ -48,7 +48,6 @@ Main fields:
 - `extraction_status`
 - `page_count`
 - `is_favorite`
-- `is_bookmarked`
 - `created_at`
 - `updated_at`
 
@@ -59,6 +58,10 @@ Current v1 use:
 - track page count
 - mark favorites
 - open the stored PDF from the app
+
+Important note:
+- favorites are the only saved-document flag supported in the current V1 workflow
+- older databases may still contain leftover bookmark or tag data from earlier experiments, but the current app does not use them
 
 ### `symptoms`
 Stores repair symptoms or problems the user wants to track.
@@ -154,34 +157,15 @@ Main fields:
 Current v1 use:
 - create, edit, and delete notes
 - store note title and main note content
-- link notes to documents in the current UI
-
-Backend support that is broader than the current confirmed UI:
-- `related_entity_type` can store `document`, `symptom`, or `procedure`
-- `related_entity_id` stores the matching record ID
+- link notes to one document, symptom, or procedure in the current UI
+- return linked record details in the API as `linkedDocument`, `linkedSymptom`, or `linkedProcedure`
 
 Important note:
-- the backend schema supports broader note relationships, but the current UI is only clearly confirmed for document linking
+- `related_entity_type` stores whether the note is linked to a `document`, `symptom`, `procedure`, or to `none`
+- `related_entity_id` stores the matching record ID when a link is present
 - older note rows may still use `document_id` and `body`; the server includes backfill logic to keep older data usable
 
 ## Supporting tables
-
-### `tags`
-Stores reusable tag names.
-
-Main fields:
-- `id`
-- `name`
-
-### `document_tags`
-Join table between documents and tags.
-
-Main fields:
-- `document_id`
-- `tag_id`
-
-Current v1 note:
-- these tables exist in the schema, but tagging is not a major part of the current confirmed UI workflow
 
 ## Search data expectations
 There is no separate search table.
@@ -192,4 +176,4 @@ The current `/api/search` route searches document data using fields already stor
 - favorite filter state
 
 Current v1 meaning:
-- Search is currently document search, not a full global search across symptoms, procedures, and notes
+- Search is a one-page workspace search with separate sections for documents, symptoms, procedures, and notes

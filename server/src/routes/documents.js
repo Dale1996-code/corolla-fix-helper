@@ -215,9 +215,8 @@ documentsRouter.post("/upload", async (request, response) => {
           extraction_status,
           page_count,
           notes,
-          is_favorite,
-          is_bookmarked
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_favorite
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         vehicleId,
@@ -234,7 +233,6 @@ documentsRouter.post("/upload", async (request, response) => {
         extractionResult.extractionStatus,
         extractionResult.pageCount,
         notes,
-        0,
         0
       );
 

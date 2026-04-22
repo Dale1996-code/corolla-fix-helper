@@ -1140,10 +1140,19 @@ export function DocumentsPage() {
       <PageHeader
         eyebrow="Ready to Use"
         title="Documents"
-        description="Import repair PDFs, check extraction status, sort and filter your library, then open files quickly while keeping document details clean."
+        description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites to keep the most important documents easy to find."
       />
 
       <div className="space-y-6">
+        <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
+          <p className="text-sm font-semibold text-sky-900">
+            Favorites are the only saved-document flag in V1.
+          </p>
+          <p className="mt-1 text-sm text-sky-800">
+            Tags and bookmarks are not part of the current document workflow.
+          </p>
+        </section>
+
         <UploadForm
           form={uploadForm}
           uploading={uploading}

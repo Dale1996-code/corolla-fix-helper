@@ -12,7 +12,7 @@ Version 1 currently includes these main areas:
 
 - Dashboard
 - Documents
-- Document Search
+- Search
 - Symptoms
 - Procedures
 - Notes
@@ -59,6 +59,9 @@ What it can do:
 - sort and filter the document list
 - show document details in a side panel
 
+For V1, favorites are the only saved-document flag in the app.
+Tags and bookmarks are not part of the current document workflow.
+
 Document fields currently used in the app include:
 
 - title
@@ -68,18 +71,18 @@ Document fields currently used in the app include:
 - source
 - notes
 
-### Document Search
+### Search
 
-The Document Search page is implemented.
+The Search page is implemented.
 
-It lets you search through imported documents and filter results by things like:
+It gives you four separate search sections on one page:
 
-- keyword
-- system
-- document type
-- favorites
+- documents
+- symptoms
+- procedures
+- notes
 
-It does not search symptoms, procedures, or notes yet.
+Each section keeps its own keyword box, filters, and results so you can search one area without changing the others.
 
 ### Symptoms
 
@@ -120,9 +123,10 @@ What it can do:
 - edit notes
 - delete notes
 - organize notes by note type
-- link notes to a document in the current UI
-
-The backend has room for broader note linking, but the current Notes page should only be described as having document linking unless that UI is expanded later.
+- link notes to a document, symptom, or procedure in the current UI
+- browse saved notes with note type, linked item, and sort controls
+- show a visible "Showing X of Y notes" count while browsing
+- open the linked document, symptom, or procedure from the note details panel
 
 ### Settings
 

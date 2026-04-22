@@ -9,7 +9,7 @@ Corolla Fix Helper is a local-first repair helper for one vehicle:
 Version 1 is no longer just a PDF organizer. The current product combines:
 
 - repair documents
-- document search
+- whole-app search
 - dashboard summaries
 - symptom tracking
 - procedure tracking
@@ -32,7 +32,7 @@ The app is meant to help one person keep repair information in one local workspa
 - Sidebar-based app shell
 - Dashboard page
 - Documents page
-- Document Search page
+- Search page
 - Symptoms page
 - Procedures page
 - Notes page
@@ -49,11 +49,12 @@ The app is meant to help one person keep repair information in one local workspa
 - Open uploaded PDFs from the app
 - Sort and filter documents
 - View document details
+- Use favorites as the only saved-document flag in V1
 
-### Document Search
+### Search
 
-- Search across imported documents
-- Filter search results by current document fields
+- Search documents, symptoms, procedures, and notes from one page
+- Keep each search area separate with its own filters and results
 
 ### Symptoms
 
@@ -71,7 +72,9 @@ The app is meant to help one person keep repair information in one local workspa
 
 - Create, edit, and delete notes
 - Organize notes by note type
-- Link notes to documents in the current UI
+- Link notes to documents, symptoms, and procedures in the current UI
+- Browse saved notes with note type, linked item, and sort controls
+- Show note details with the linked record title and an open link to that record
 
 ### Settings
 
@@ -89,6 +92,8 @@ The app is meant to help one person keep repair information in one local workspa
 - auth
 - voice features
 - parts integrations
+- document tags
+- document bookmarks
 - major architecture rewrites
 
 ## 5) Primary user workflows
@@ -112,7 +117,7 @@ The app is meant to help one person keep repair information in one local workspa
 ### Daily use workflow
 
 1. Open the Dashboard to see recent activity
-2. Search imported documents when you need a manual or reference
+2. Search the saved workspace when you need a manual, symptom, procedure, or note
 3. Update symptoms, procedures, and notes as repair work changes
 
 ## 6) Definition of useful
