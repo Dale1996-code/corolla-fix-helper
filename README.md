@@ -112,7 +112,8 @@ What it can do:
 - delete procedures
 - store steps, tools, parts, safety notes, difficulty, and confidence
 - link procedures to documents
-- reuse saved Settings system suggestions while entering the system field
+- show linked documents in the procedure details and open them from there
+- reuse saved Settings system suggestions while entering the system field in create and edit forms
 - search procedures by title, system, tools, parts, steps, and notes
 - filter procedures by system, difficulty, and confidence
 - sort procedures by newest update, oldest update, or title

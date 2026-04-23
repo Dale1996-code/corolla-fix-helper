@@ -42,16 +42,18 @@ Check that:
 - the detail panel shows the saved metadata
 - the PDF opens successfully
 
-## 4) Check Document Search
+## 4) Check Search
 
-1. Open the Document Search page.
-2. Search for a keyword from an uploaded document.
-3. Try at least one filter such as system or favorites.
+1. Open the Search page.
+2. In the Documents section, search for a keyword from an uploaded document.
+3. Try at least one Documents filter such as system or favorites.
+4. Confirm the same page also shows sections for symptoms, procedures, and notes.
 
 Check that:
 
-- results appear when the keyword exists
-- filters narrow the results correctly
+- document results appear when the keyword exists
+- document filters narrow the results correctly
+- the Search page also shows separate sections for symptoms, procedures, and notes
 
 ## 5) Check Symptoms
 
@@ -70,15 +72,20 @@ Check that:
 ## 6) Check Procedures
 
 1. Create a procedure.
-2. Fill in tools, parts, safety notes, or steps.
-3. Save it and open it in the detail panel.
-4. Use the search box, at least one filter, and a sort option.
-5. If you have more than one procedure, apply a filter that hides the currently selected procedure.
+2. If a document is available, link it to the procedure.
+3. Fill in tools, parts, safety notes, or steps.
+4. Save it and open it in the detail panel.
+5. If Settings already has saved common systems, click into the System field in create or edit mode and confirm the suggestions appear.
+6. Use the search box, at least one filter, and a sort option.
+7. If you linked a document, open it from the procedure detail panel.
+8. If you have more than one procedure, apply a filter that hides the currently selected procedure.
 
 Check that:
 
 - the procedure saves successfully
 - the detail panel shows the new content
+- the linked document appears in the detail panel and opens the correct document page
+- saved system suggestions appear in the System field if they already exist in Settings
 - the list shows the updated procedure count while you browse
 - the search, filters, and sort controls change the visible list correctly
 - the no-results message appears when filters remove everything

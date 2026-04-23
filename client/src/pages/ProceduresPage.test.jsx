@@ -10,6 +10,11 @@ function jsonResponse(payload, ok = true) {
   });
 }
 
+function getCountTextMatcher(expectedText) {
+  return (_content, element) =>
+    element?.tagName === "P" && element.textContent === expectedText;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -148,11 +153,13 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
   );
 
   expect(await screen.findByPlaceholderText("Search title, system, tools, parts, steps, or notes")).toBeInTheDocument();
+  expect(screen.getByText(getCountTextMatcher("Showing 2 of 2 procedures."))).toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText("Search title, system, tools, parts, steps, or notes"), {
     target: { value: "brake" },
   });
 
+  expect(screen.getByText(getCountTextMatcher("Showing 1 of 2 procedures."))).toBeInTheDocument();
   expect(screen.getAllByText("Rear brake pad replacement").length).toBeGreaterThan(0);
   expect(screen.queryAllByText("Throttle body cleaning")).toHaveLength(0);
 
@@ -160,9 +167,11 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
     target: { value: "beginner" },
   });
 
+  expect(screen.getByText(getCountTextMatcher("Showing 0 of 2 procedures."))).toBeInTheDocument();
   expect(await screen.findByText("No procedures match the current filters.")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(await screen.findByText(getCountTextMatcher("Showing 2 of 2 procedures."))).toBeInTheDocument();
   expect(await screen.findByText("Throttle body cleaning")).toBeInTheDocument();
 });
 
@@ -252,5 +261,77 @@ test("ProceduresPage keeps the detail panel on a visible procedure when filters 
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("heading", { name: "Rear brake pad replacement" })
+  ).not.toBeInTheDocument();
+});
+
+test("ProceduresPage selects the requested procedure from the URL when the id exists", async () => {
+  const proceduresPayload = {
+    procedures: [
+      {
+        id: 31,
+        title: "Throttle body cleaning",
+        system: "Engine",
+        difficulty: "beginner",
+        toolsNeeded: "Socket set",
+        partsNeeded: "",
+        safetyNotes: "",
+        steps: "Clean throttle plate.",
+        notes: "",
+        confidence: "medium",
+        createdAt: "2026-04-18T10:00:00.000Z",
+        updatedAt: "2026-04-18T12:00:00.000Z",
+        linkedDocumentIds: [],
+        linkedDocuments: [],
+      },
+      {
+        id: 32,
+        title: "Rear brake pad replacement",
+        system: "Brakes",
+        difficulty: "advanced",
+        toolsNeeded: "Caliper tool",
+        partsNeeded: "Brake pads",
+        safetyNotes: "",
+        steps: "Service rear brakes.",
+        notes: "",
+        confidence: "high",
+        createdAt: "2026-04-19T10:00:00.000Z",
+        updatedAt: "2026-04-19T12:00:00.000Z",
+        linkedDocumentIds: [],
+        linkedDocuments: [],
+      },
+    ],
+    total: 2,
+  };
+
+  const documentsPayload = {
+    documents: [],
+    total: 0,
+  };
+
+  const fetchMock = vi.fn((url) => {
+    if (url === "/api/procedures") {
+      return jsonResponse(proceduresPayload);
+    }
+
+    if (url === "/api/documents") {
+      return jsonResponse(documentsPayload);
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/procedures?procedureId=32"]}>
+      <ProceduresPage />
+    </MemoryRouter>
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Rear brake pad replacement" })
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Throttle body cleaning" })
   ).not.toBeInTheDocument();
 });

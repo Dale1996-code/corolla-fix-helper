@@ -1,5 +1,10 @@
 # Corolla Fix Helper — Project Brief + Master Build Checklist
 
+Historical note:
+This file is an older planning artifact, not the current V1 source of truth.
+The live app now treats favorites as the only saved-document flag.
+Any bookmark or tag references below are older planning leftovers.
+
 ## Project Summary
 
 Corolla Fix Helper is a private, local-first repair document organizer and lookup app built first for a **2009 Toyota Corolla LE 1.8L**. Its job is to help me find the right repair information fast, keep notes tied to real problems, and turn scattered manuals and writeups into a usable repair workflow.
