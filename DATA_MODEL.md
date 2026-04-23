@@ -11,7 +11,7 @@ The current v1 workflow is built around:
 - symptom tracking
 - repair procedures
 - notes
-- document search
+- workspace search across documents, symptoms, procedures, and notes
 
 ## Main entities
 
@@ -61,7 +61,7 @@ Current v1 use:
 
 Important note:
 - favorites are the only saved-document flag supported in the current V1 workflow
-- older databases may still contain leftover bookmark or tag data from earlier experiments, but the current app does not use them
+- older local SQLite files may still contain unused `is_bookmarked`, `tags`, and `document_tags` leftovers from earlier experiments, but the current app does not read or write them
 
 ### `symptoms`
 Stores repair symptoms or problems the user wants to track.
@@ -170,10 +170,11 @@ Important note:
 ## Search data expectations
 There is no separate search table.
 
-The current `/api/search` route searches document data using fields already stored in `documents`, especially:
-- document metadata
-- extracted text
-- favorite filter state
+The current search endpoints use data already stored in the main app tables:
+- `/api/search` uses document metadata, extracted text, and favorite filter state
+- `/api/search/symptoms` uses stored symptom fields
+- `/api/search/procedures` uses stored procedure fields
+- `/api/search/notes` uses stored note fields plus linked record details
 
 Current v1 meaning:
 - Search is a one-page workspace search with separate sections for documents, symptoms, procedures, and notes
