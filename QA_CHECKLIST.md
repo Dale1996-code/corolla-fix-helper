@@ -72,11 +72,18 @@ Check that:
 1. Create a procedure.
 2. Fill in tools, parts, safety notes, or steps.
 3. Save it and open it in the detail panel.
+4. Use the search box, at least one filter, and a sort option.
+5. If you have more than one procedure, apply a filter that hides the currently selected procedure.
 
 Check that:
 
 - the procedure saves successfully
 - the detail panel shows the new content
+- the list shows the updated procedure count while you browse
+- the search, filters, and sort controls change the visible list correctly
+- the no-results message appears when filters remove everything
+- the `Clear filters` button restores the full list
+- the detail panel switches to a visible procedure instead of staying stuck on a hidden one
 
 ## 7) Check Notes
 

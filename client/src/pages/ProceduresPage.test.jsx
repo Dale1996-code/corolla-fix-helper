@@ -165,3 +165,92 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(await screen.findByText("Throttle body cleaning")).toBeInTheDocument();
 });
+
+test("ProceduresPage keeps the detail panel on a visible procedure when filters hide the current selection", async () => {
+  const proceduresPayload = {
+    procedures: [
+      {
+        id: 31,
+        title: "Throttle body cleaning",
+        system: "Engine",
+        difficulty: "beginner",
+        toolsNeeded: "Socket set",
+        partsNeeded: "",
+        safetyNotes: "",
+        steps: "Clean throttle plate.",
+        notes: "",
+        confidence: "medium",
+        createdAt: "2026-04-18T10:00:00.000Z",
+        updatedAt: "2026-04-18T12:00:00.000Z",
+        linkedDocumentIds: [],
+        linkedDocuments: [],
+      },
+      {
+        id: 32,
+        title: "Rear brake pad replacement",
+        system: "Brakes",
+        difficulty: "advanced",
+        toolsNeeded: "Caliper tool",
+        partsNeeded: "Brake pads",
+        safetyNotes: "",
+        steps: "Service rear brakes.",
+        notes: "",
+        confidence: "high",
+        createdAt: "2026-04-19T10:00:00.000Z",
+        updatedAt: "2026-04-19T12:00:00.000Z",
+        linkedDocumentIds: [],
+        linkedDocuments: [],
+      },
+    ],
+    total: 2,
+  };
+
+  const documentsPayload = {
+    documents: [],
+    total: 0,
+  };
+
+  const fetchMock = vi.fn((url) => {
+    if (url === "/api/procedures") {
+      return jsonResponse(proceduresPayload);
+    }
+
+    if (url === "/api/documents") {
+      return jsonResponse(documentsPayload);
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/procedures"]}>
+      <ProceduresPage />
+    </MemoryRouter>
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Throttle body cleaning" })
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByText("Rear brake pad replacement"));
+
+  expect(
+    await screen.findByRole("heading", { name: "Rear brake pad replacement" })
+  ).toBeInTheDocument();
+
+  fireEvent.change(
+    screen.getByPlaceholderText("Search title, system, tools, parts, steps, or notes"),
+    {
+      target: { value: "throttle" },
+    }
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Throttle body cleaning" })
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Rear brake pad replacement" })
+  ).not.toBeInTheDocument();
+});

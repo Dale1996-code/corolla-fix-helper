@@ -67,6 +67,11 @@ The app is meant to help one person keep repair information in one local workspa
 - Create, edit, and delete procedures
 - Track steps, tools, parts, safety notes, difficulty, and confidence
 - Link procedures to supporting documents
+- Search procedures by title, system, tools, parts, steps, and notes
+- Filter procedures by system, difficulty, and confidence
+- Sort procedures by newest update, oldest update, or title
+- Show a visible count while browsing the filtered procedure list
+- Keep the details panel synced to a visible procedure when filters change
 
 ### Notes
 

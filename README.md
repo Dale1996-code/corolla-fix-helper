@@ -110,8 +110,14 @@ What it can do:
 - create procedures
 - edit procedures
 - delete procedures
-- store steps, tools, parts, safety notes, and confidence
+- store steps, tools, parts, safety notes, difficulty, and confidence
 - link procedures to documents
+- reuse saved Settings system suggestions while entering the system field
+- search procedures by title, system, tools, parts, steps, and notes
+- filter procedures by system, difficulty, and confidence
+- sort procedures by newest update, oldest update, or title
+- show a visible "Showing X of Y procedures" count while browsing
+- keep the detail panel focused on a visible procedure when filters change
 
 ### Notes
 
