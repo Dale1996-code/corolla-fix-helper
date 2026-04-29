@@ -255,6 +255,7 @@ documentsRouter.post("/upload", async (request, response) => {
   }
 });
 
+documentsRouter.post("/:id/extract", async (request, response) => {
 
 
 documentsRouter.delete("/:id", async (request, response) => {
@@ -275,13 +276,62 @@ documentsRouter.delete("/:id", async (request, response) => {
     `)
     .get(documentId);
 
-  if (!existingDocument) {
+d  if (!existingDocument) {
     response.status(404).json({
       error: "Document not found.",
     });
     return;
   }
 
+  const fileName =
+    document.stored_filename ||
+    path.basename(document.file_path || "");
+
+  if (!fileName) {
+    response.status(404).json({
+      error: "Uploaded file reference is missing for this document.",
+    });
+    return;
+  }
+
+  const safeFileName = path.basename(fileName);
+  const absoluteFilePath = path.join(config.uploadsDir, safeFileName);
+
+  let fileBuffer;
+
+  try {
+    fileBuffer = await fs.readFile(absoluteFilePath);
+  } catch {
+    response.status(404).json({
+      error: "Uploaded file was not found on disk.",
+    });
+    return;
+  }
+
+  const extractionResult = await extractPdfData(fileBuffer);
+
+  db.prepare(`
+    UPDATE documents
+    SET
+      extracted_text = ?,
+      extraction_status = ?,
+      page_count = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    extractionResult.extractedText,
+    extractionResult.extractionStatus,
+    extractionResult.pageCount,
+    documentId
+  );
+
+  const documents = listDocuments();
+  const updatedDocument = documents.find((entry) => entry.id === documentId);
+
+  response.json({
+    message: "Extraction re-run complete.",
+    document: updatedDocument,
+  });
   const linkedCounts = db
     .prepare(`
       SELECT

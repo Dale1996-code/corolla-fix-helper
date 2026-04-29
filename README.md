@@ -50,6 +50,7 @@ What it can do:
 - save uploaded PDFs into `server/uploads`
 - store document details in SQLite
 - try to extract text from PDFs
+- manually re-run extraction for a single document from the detail panel
 - store extraction status
 - store page count
 - edit document metadata after upload
