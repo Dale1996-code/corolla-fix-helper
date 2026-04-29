@@ -41,6 +41,8 @@ Check that:
 - the document appears in the list
 - the detail panel shows the saved metadata
 - the PDF opens successfully
+- the detail panel includes a **Re-run extraction** button
+- clicking **Re-run extraction** updates extraction status/page count and shows a clear success or error message
 
 ## 4) Check Search
 
