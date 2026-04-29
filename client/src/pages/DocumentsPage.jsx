@@ -539,6 +539,7 @@ function DocumentDetails({
   isEditing,
   editValues,
   saveState,
+  extractionRunState,
   systemSuggestions,
   documentTypeSuggestions,
   onStartEdit,
@@ -547,6 +548,7 @@ function DocumentDetails({
   onSaveEdit,
   onOpenFile,
   onToggleFavorite,
+  onRerunExtraction,
 }) {
   if (!document) {
     return (
@@ -587,6 +589,14 @@ function DocumentDetails({
             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
           >
             Edit metadata
+          </button>
+          <button
+            type="button"
+            onClick={() => onRerunExtraction(document.id)}
+            disabled={extractionRunState.running}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {extractionRunState.running ? "Re-running..." : "Re-run extraction"}
           </button>
         </div>
       </div>
@@ -675,6 +685,16 @@ function DocumentDetails({
           {saveState.error}
         </p>
       ) : null}
+      {extractionRunState.message ? (
+        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {extractionRunState.message}
+        </p>
+      ) : null}
+      {extractionRunState.error ? (
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {extractionRunState.error}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -714,6 +734,12 @@ export function DocumentsPage() {
   });
   const [favoriteUpdateState, setFavoriteUpdateState] = useState({
     documentId: null,
+    error: "",
+  });
+  const [extractionRunState, setExtractionRunState] = useState({
+    documentId: null,
+    running: false,
+    message: "",
     error: "",
   });
 
@@ -976,6 +1002,12 @@ export function DocumentsPage() {
       message: "",
       error: "",
     });
+    setExtractionRunState({
+      documentId,
+      running: false,
+      message: "",
+      error: "",
+    });
   }
 
   function startEditingDocument(document) {
@@ -1135,6 +1167,53 @@ export function DocumentsPage() {
     window.open(`/api/documents/${documentId}/file`, "_blank", "noopener,noreferrer");
   }
 
+  async function rerunExtraction(documentId) {
+    setExtractionRunState({
+      documentId,
+      running: true,
+      message: "",
+      error: "",
+    });
+
+    try {
+      const response = await fetch(`/api/documents/${documentId}/extract`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not re-run extraction.");
+      }
+
+      const updatedDocument = payload.document;
+      const extraction = normalizeExtractionStatus(updatedDocument?.extractionStatus);
+
+      if (updatedDocument?.id) {
+        setDocuments((currentDocuments) =>
+          currentDocuments.map((currentDocument) =>
+            currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
+          )
+        );
+      } else {
+        await loadDocuments();
+      }
+
+      setExtractionRunState({
+        documentId,
+        running: false,
+        message: `Extraction re-run complete. Status: ${extraction.label}.`,
+        error: "",
+      });
+    } catch (error) {
+      setExtractionRunState({
+        documentId,
+        running: false,
+        message: "",
+        error: error.message || "Could not re-run extraction.",
+      });
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -1221,12 +1300,14 @@ export function DocumentsPage() {
                   isEditing={editingDocumentId === selectedDocumentId}
                   editValues={editForm}
                   saveState={saveState}
+                  extractionRunState={extractionRunState}
                   onStartEdit={startEditingDocument}
                   onCancelEdit={cancelEditingDocument}
                   onEditChange={handleEditFormChange}
                   onSaveEdit={handleSaveMetadata}
                   onOpenFile={openDocumentFile}
                   onToggleFavorite={toggleFavorite}
+                  onRerunExtraction={rerunExtraction}
                   systemSuggestions={systemSuggestions}
                   documentTypeSuggestions={documentTypeSuggestions}
                 />

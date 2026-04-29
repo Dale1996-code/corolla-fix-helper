@@ -255,6 +255,85 @@ documentsRouter.post("/upload", async (request, response) => {
   }
 });
 
+documentsRouter.post("/:id/extract", async (request, response) => {
+  const documentId = Number(request.params.id);
+
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    response.status(400).json({
+      error: "Document ID must be a positive number.",
+    });
+    return;
+  }
+
+  const document = db
+    .prepare(`
+      SELECT
+        id,
+        stored_filename,
+        file_path
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+
+  if (!document) {
+    response.status(404).json({
+      error: "Document not found.",
+    });
+    return;
+  }
+
+  const fileName =
+    document.stored_filename ||
+    path.basename(document.file_path || "");
+
+  if (!fileName) {
+    response.status(404).json({
+      error: "Uploaded file reference is missing for this document.",
+    });
+    return;
+  }
+
+  const safeFileName = path.basename(fileName);
+  const absoluteFilePath = path.join(config.uploadsDir, safeFileName);
+
+  let fileBuffer;
+
+  try {
+    fileBuffer = await fs.readFile(absoluteFilePath);
+  } catch {
+    response.status(404).json({
+      error: "Uploaded file was not found on disk.",
+    });
+    return;
+  }
+
+  const extractionResult = await extractPdfData(fileBuffer);
+
+  db.prepare(`
+    UPDATE documents
+    SET
+      extracted_text = ?,
+      extraction_status = ?,
+      page_count = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    extractionResult.extractedText,
+    extractionResult.extractionStatus,
+    extractionResult.pageCount,
+    documentId
+  );
+
+  const documents = listDocuments();
+  const updatedDocument = documents.find((entry) => entry.id === documentId);
+
+  response.json({
+    message: "Extraction re-run complete.",
+    document: updatedDocument,
+  });
+});
+
 documentsRouter.put("/:id", (request, response) => {
   const documentId = Number(request.params.id);
 

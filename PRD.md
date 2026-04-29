@@ -42,6 +42,7 @@ The app is meant to help one person keep repair information in one local workspa
 - Upload PDF documents into local storage (`server/uploads`)
 - Store document metadata in SQLite
 - Attempt PDF text extraction
+- Allow manual single-document extraction re-run from document details
 - Store extraction status
 - Store page count
 - Edit document metadata after upload
@@ -110,8 +111,9 @@ The app is meant to help one person keep repair information in one local workspa
 1. Upload a repair PDF
 2. Add or fix basic metadata
 3. Review extraction status and page count
-4. Favorite important documents
-5. Open the PDF again when needed
+4. If extraction failed or needs refresh, re-run extraction for that document
+5. Favorite important documents
+6. Open the PDF again when needed
 
 ### Repair tracking workflow
 

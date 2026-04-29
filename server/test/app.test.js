@@ -128,6 +128,63 @@ test("documents API keeps favorites as the only saved-document flag in V1", asyn
   assert.equal("isBookmarked" in firstDocument, false);
 });
 
+test("POST /api/documents/:id/extract re-runs extraction and updates status fields", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  assert.ok(vehicle);
+
+  const sourcePdf = path.join(process.cwd(), "server", "uploads", "sample-maintenance-schedule.pdf");
+  const storedFilename = "extract-rerun-test.pdf";
+  const uploadedPdfPath = path.join(process.env.UPLOADS_DIR, storedFilename);
+  fs.copyFileSync(sourcePdf, uploadedPdfPath);
+
+  const documentId = Number(
+    db.prepare(`
+      INSERT INTO documents (
+        vehicle_id,
+        title,
+        original_filename,
+        stored_filename,
+        file_path,
+        file_type,
+        system,
+        document_type,
+        extracted_text,
+        extraction_status,
+        page_count
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      vehicle.id,
+      "Extraction retry test document",
+      "extract-rerun-test.pdf",
+      storedFilename,
+      `server/uploads/${storedFilename}`,
+      "application/pdf",
+      "Engine",
+      "Reference",
+      "",
+      "failed: prior error",
+      null
+    ).lastInsertRowid
+  );
+
+  const response = await request(app).post(`/api/documents/${documentId}/extract`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.message, "Extraction re-run complete.");
+  assert.equal(response.body.document.id, documentId);
+  assert.ok(["completed", "no_text_found"].includes(response.body.document.extractionStatus));
+  assert.equal(typeof response.body.document.extractedText, "string");
+  assert.equal(typeof response.body.document.pageCount, "number");
+});
+
+test("POST /api/documents/:id/extract returns 404 when document does not exist", async () => {
+  const response = await request(app).post("/api/documents/999999/extract");
+
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error, "Document not found.");
+});
+
 test("notes API returns linked symptom and procedure details", async () => {
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
 
