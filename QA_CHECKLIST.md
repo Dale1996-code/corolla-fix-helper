@@ -27,6 +27,8 @@ Check that:
 - you see a success message
 - the updated value stays visible after saving
 - local runtime info is shown as read-only
+- clicking **Export backup (.tar.gz)** downloads a backup file
+- you see the backup success message after export
 
 ## 3) Check Documents
 
@@ -39,6 +41,19 @@ Check that:
 
 - the upload succeeds
 - the document appears in the list
+
+### 3b) Delete a bad document import safely
+1. In Documents, select an uploaded test document.
+2. Click **Delete document** in the details panel.
+3. Confirm the delete prompt.
+4. Verify linked symptom/procedure relationships are removed for that document.
+5. Verify linked notes no longer show that document in note details.
+
+Expected:
+- a clear confirmation appears before delete
+- the document disappears from the list
+- opening the document URL now returns not found
+- no stale document links remain in symptoms, procedures, or notes
 - the detail panel shows the saved metadata
 - the PDF opens successfully
 - the detail panel includes a **Re-run extraction** button
