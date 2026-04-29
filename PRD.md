@@ -90,6 +90,8 @@ The app is meant to help one person keep repair information in one local workspa
 - Edit the single stored vehicle profile
 - Show local runtime info for database path, uploads path, upload size limit, and ports
 - Keep runtime path editing out of the browser
+- Provide one manual local backup/export action from Settings that downloads a packaged archive containing the SQLite DB and uploaded PDFs
+- Keep restore out of scope for this phase
 
 ## 4) Out of scope right now
 

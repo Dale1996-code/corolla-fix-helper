@@ -149,9 +149,10 @@ What it can do:
 - show the local uploads folder
 - show the upload size limit
 - show the frontend and backend ports
+- export a local backup archive (.tar.gz) that includes the database and uploaded PDFs
 
 The runtime path values are read-only in the browser. They come from local config and optional `.env` values.
-Backup/export is still not wired up yet, so Settings shows that honestly instead of exposing a fake folder field.
+Settings now includes a manual **Export backup (.tar.gz)** action. It downloads one archive that contains the SQLite database and all uploaded PDFs so you can store a local backup copy on your computer. Restore is not included in this phase.
 
 ## Tech stack
 

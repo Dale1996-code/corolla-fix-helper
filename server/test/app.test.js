@@ -37,7 +37,7 @@ test("GET /api/settings returns vehicle and runtime info", async () => {
   assert.ok(Array.isArray(response.body.documentDefaults.commonSystems));
   assert.ok(response.body.documentDefaults.commonSystems.includes("Engine"));
   assert.ok(Array.isArray(response.body.documentDefaults.documentTypes));
-  assert.equal(response.body.backupExport.supported, false);
+  assert.equal(response.body.backupExport.supported, true);
 });
 
 test("PUT /api/settings/vehicle updates the stored vehicle profile", async () => {
