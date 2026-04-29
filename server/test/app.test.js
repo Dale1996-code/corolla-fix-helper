@@ -37,7 +37,7 @@ test("GET /api/settings returns vehicle and runtime info", async () => {
   assert.ok(Array.isArray(response.body.documentDefaults.commonSystems));
   assert.ok(response.body.documentDefaults.commonSystems.includes("Engine"));
   assert.ok(Array.isArray(response.body.documentDefaults.documentTypes));
-  assert.equal(response.body.backupExport.supported, false);
+  assert.equal(response.body.backupExport.supported, true);
 });
 
 test("PUT /api/settings/vehicle updates the stored vehicle profile", async () => {
@@ -623,3 +623,21 @@ test("GET /api/search/notes returns matching notes with filters and linked entit
   assert.ok(response.body.filters.relatedEntityTypes.includes("procedure"));
   assert.ok(response.body.filters.relatedEntityTypes.includes("document"));
 });
+
+test("GET /api/settings/backup-export downloads a tar.gz backup", async () => {
+  const response = await request(app)
+    .get("/api/settings/backup-export")
+    .buffer(true)
+    .parse((res, callback) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => callback(null, Buffer.concat(chunks)));
+    });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["content-type"], /application\/gzip/);
+  assert.match(response.headers["content-disposition"], /attachment; filename=/);
+  assert.ok(Buffer.isBuffer(response.body));
+  assert.ok(response.body.length > 50);
+});
+

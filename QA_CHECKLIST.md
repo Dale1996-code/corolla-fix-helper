@@ -27,6 +27,8 @@ Check that:
 - you see a success message
 - the updated value stays visible after saving
 - local runtime info is shown as read-only
+- clicking **Export backup (.tar.gz)** downloads a backup file
+- you see the backup success message after export
 
 ## 3) Check Documents
 
