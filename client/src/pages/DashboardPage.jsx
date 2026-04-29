@@ -4,6 +4,7 @@ import { PageHeader } from "../components/PageHeader";
 import { buildEntityLink } from "../lib/navigation";
 
 const emptyDashboardData = {
+  vehicle: null,
   summary: {
     totalDocuments: 0,
     favoriteDocuments: 0,
@@ -20,6 +21,17 @@ const emptyDashboardData = {
   activeSymptoms: [],
   recentActivity: [],
 };
+
+function formatVehicleProfile(vehicle) {
+  if (!vehicle) {
+    return "Vehicle profile not set";
+  }
+
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.engine]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
 
 const quickActions = [
   {
@@ -107,7 +119,7 @@ function SummaryCard({ label, value, helperText }) {
   );
 }
 
-function QuickActions() {
+function QuickActions({ vehicle }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -119,7 +131,7 @@ function QuickActions() {
         </div>
 
         <p className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-          2009 Toyota Corolla LE 1.8L
+          {formatVehicleProfile(vehicle)}
         </p>
       </div>
 
@@ -415,6 +427,7 @@ export function DashboardPage() {
         }
 
         setDashboardData({
+          vehicle: payload.vehicle || null,
           summary: {
             ...emptyDashboardData.summary,
             ...(payload.summary || {}),
@@ -506,7 +519,7 @@ export function DashboardPage() {
               />
             </section>
 
-            <QuickActions />
+            <QuickActions vehicle={dashboardData.vehicle} />
 
             <div className="grid gap-6 xl:grid-cols-2">
               <SectionCard
