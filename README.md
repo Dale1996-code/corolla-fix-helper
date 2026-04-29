@@ -55,6 +55,8 @@ What it can do:
 - edit document metadata after upload
 - mark documents as favorites
 - open an uploaded PDF from the app
+- delete a document with a confirmation prompt
+- when deleting, remove linked symptom/procedure links, clear linked note references, and remove the stored PDF file safely
 - use saved Settings suggestions while entering system and document type
 - sort and filter the document list
 - show document details in a side panel

@@ -623,3 +623,77 @@ test("GET /api/search/notes returns matching notes with filters and linked entit
   assert.ok(response.body.filters.relatedEntityTypes.includes("procedure"));
   assert.ok(response.body.filters.relatedEntityTypes.includes("document"));
 });
+
+
+test("DELETE /api/documents/:id removes document file and clears links safely", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  assert.ok(vehicle);
+
+  const insertDocument = db.prepare(`
+    INSERT INTO documents (
+      vehicle_id,
+      title,
+      original_filename,
+      stored_filename,
+      file_path,
+      file_type,
+      system,
+      document_type,
+      extraction_status,
+      is_favorite
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const storedFilename = "delete-me.pdf";
+  const filePath = path.join(process.env.UPLOADS_DIR, storedFilename);
+  fs.writeFileSync(filePath, "%PDF-1.4 test");
+
+  const documentId = Number(
+    insertDocument.run(
+      vehicle.id,
+      "Delete Me",
+      storedFilename,
+      storedFilename,
+      `server/uploads/${storedFilename}`,
+      "application/pdf",
+      "Engine",
+      "Reference",
+      "completed",
+      0
+    ).lastInsertRowid
+  );
+
+  const symptomId = Number(
+    db.prepare(`INSERT INTO symptoms (vehicle_id, title, status) VALUES (?, ?, ?)`)
+      .run(vehicle.id, "Linked symptom", "open").lastInsertRowid
+  );
+  db.prepare("INSERT INTO symptom_documents (symptom_id, document_id) VALUES (?, ?)").run(symptomId, documentId);
+
+  const procedureId = Number(
+    db.prepare(`INSERT INTO procedures (vehicle_id, title, status) VALUES (?, ?, ?)`)
+      .run(vehicle.id, "Linked procedure", "draft").lastInsertRowid
+  );
+  db.prepare("INSERT INTO procedure_documents (procedure_id, document_id) VALUES (?, ?)").run(procedureId, documentId);
+
+  db.prepare(`
+    INSERT INTO notes (vehicle_id, title, content, related_entity_type, related_entity_id, document_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(vehicle.id, "Linked note", "Keep this for now.", "document", documentId, documentId);
+
+  const response = await request(app).delete(`/api/documents/${documentId}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.cleanup.symptomLinksRemoved, 1);
+  assert.equal(response.body.cleanup.procedureLinksRemoved, 1);
+  assert.equal(response.body.cleanup.noteLinksCleared, 1);
+
+  const deletedDocument = db.prepare("SELECT id FROM documents WHERE id = ?").get(documentId);
+  assert.equal(deletedDocument, undefined);
+
+  const noteAfterDelete = db.prepare("SELECT related_entity_type, related_entity_id, document_id FROM notes WHERE title = ?").get("Linked note");
+  assert.equal(noteAfterDelete.related_entity_type, "none");
+  assert.equal(noteAfterDelete.related_entity_id, null);
+  assert.equal(noteAfterDelete.document_id, null);
+
+  assert.equal(fs.existsSync(filePath), false);
+});

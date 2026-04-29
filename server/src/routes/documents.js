@@ -255,6 +255,80 @@ documentsRouter.post("/upload", async (request, response) => {
   }
 });
 
+
+
+documentsRouter.delete("/:id", async (request, response) => {
+  const documentId = Number(request.params.id);
+
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    response.status(400).json({
+      error: "Document ID must be a positive number.",
+    });
+    return;
+  }
+
+  const existingDocument = db
+    .prepare(`
+      SELECT id, stored_filename, file_path
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+
+  if (!existingDocument) {
+    response.status(404).json({
+      error: "Document not found.",
+    });
+    return;
+  }
+
+  const linkedCounts = db
+    .prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM symptom_documents WHERE document_id = ?) AS symptom_count,
+        (SELECT COUNT(*) FROM procedure_documents WHERE document_id = ?) AS procedure_count,
+        (SELECT COUNT(*) FROM notes WHERE related_entity_type = 'document' AND related_entity_id = ?) AS note_count
+    `)
+    .get(documentId, documentId, documentId);
+
+  const storedFileName = existingDocument.stored_filename || path.basename(existingDocument.file_path || "");
+  const safeStoredFileName = storedFileName ? path.basename(storedFileName) : "";
+  const absoluteFilePath = safeStoredFileName
+    ? path.join(config.uploadsDir, safeStoredFileName)
+    : null;
+
+  try {
+    db.prepare(`
+      UPDATE notes
+      SET related_entity_type = 'none',
+          related_entity_id = NULL,
+          document_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE related_entity_type = 'document' AND related_entity_id = ?
+    `).run(documentId);
+
+    db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
+
+    if (absoluteFilePath) {
+      await fs.rm(absoluteFilePath, { force: true });
+    }
+
+    response.json({
+      message: "Document deleted.",
+      cleanup: {
+        symptomLinksRemoved: linkedCounts.symptom_count,
+        procedureLinksRemoved: linkedCounts.procedure_count,
+        noteLinksCleared: linkedCounts.note_count,
+        fileRemoved: Boolean(absoluteFilePath),
+      },
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not delete document.",
+    });
+  }
+});
+
 documentsRouter.put("/:id", (request, response) => {
   const documentId = Number(request.params.id);
 

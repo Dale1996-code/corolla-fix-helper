@@ -547,6 +547,7 @@ function DocumentDetails({
   onSaveEdit,
   onOpenFile,
   onToggleFavorite,
+  onDeleteDocument,
 }) {
   if (!document) {
     return (
@@ -587,6 +588,13 @@ function DocumentDetails({
             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
           >
             Edit metadata
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteDocument(document)}
+            className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+          >
+            Delete document
           </button>
         </div>
       </div>
@@ -1131,6 +1139,45 @@ export function DocumentsPage() {
     }
   }
 
+  async function handleDeleteDocument(document) {
+    const confirmed = window.confirm(
+      `Delete "${document.title}"? This removes the document record and uploaded PDF file. Linked symptom/procedure references will be removed and linked notes will be cleared.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/documents/${document.id}`, {
+        method: "DELETE",
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not delete document.");
+      }
+
+      setSaveState({
+        documentId: null,
+        saving: false,
+        message: payload.message || "Document deleted.",
+        error: "",
+      });
+
+      setEditingDocumentId(null);
+      await loadDocuments();
+    } catch (error) {
+      setSaveState({
+        documentId: document.id,
+        saving: false,
+        message: "",
+        error: error.message || "Could not delete document.",
+      });
+    }
+  }
+
   function openDocumentFile(documentId) {
     window.open(`/api/documents/${documentId}/file`, "_blank", "noopener,noreferrer");
   }
@@ -1227,6 +1274,7 @@ export function DocumentsPage() {
                   onSaveEdit={handleSaveMetadata}
                   onOpenFile={openDocumentFile}
                   onToggleFavorite={toggleFavorite}
+                  onDeleteDocument={handleDeleteDocument}
                   systemSuggestions={systemSuggestions}
                   documentTypeSuggestions={documentTypeSuggestions}
                 />

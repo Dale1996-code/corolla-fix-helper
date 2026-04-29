@@ -49,6 +49,8 @@ The app is meant to help one person keep repair information in one local workspa
 - Open uploaded PDFs from the app
 - Sort and filter documents
 - View document details
+- Delete a document with a confirmation flow that removes the DB record and stored PDF file
+- On document delete, remove symptom/procedure links and clear note document links safely
 - Use favorites as the only saved-document flag in V1
 
 ### Search
