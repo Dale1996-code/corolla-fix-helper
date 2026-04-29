@@ -46,7 +46,7 @@ const quickActions = [
   },
   {
     label: "Open Search",
-    description: "Search across imported document text and metadata.",
+    description: "Search documents, symptoms, procedures, and notes from one page.",
     to: "/search",
   },
   {

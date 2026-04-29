@@ -56,6 +56,8 @@ What it can do:
 - edit document metadata after upload
 - mark documents as favorites
 - open an uploaded PDF from the app
+- delete a document with a confirmation prompt
+- when deleting, remove linked symptom/procedure links, clear linked note references, and remove the stored PDF file safely
 - use saved Settings suggestions while entering system and document type
 - sort and filter the document list
 - show document details in a side panel
@@ -148,9 +150,10 @@ What it can do:
 - show the local uploads folder
 - show the upload size limit
 - show the frontend and backend ports
+- export a local backup archive (.tar.gz) that includes the database and uploaded PDFs
 
 The runtime path values are read-only in the browser. They come from local config and optional `.env` values.
-Backup/export is still not wired up yet, so Settings shows that honestly instead of exposing a fake folder field.
+Settings now includes a manual **Export backup (.tar.gz)** action. It downloads one archive that contains the SQLite database and all uploaded PDFs so you can store a local backup copy on your computer. Restore is not included in this phase.
 
 ## Tech stack
 

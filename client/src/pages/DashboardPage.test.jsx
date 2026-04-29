@@ -15,6 +15,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("Dashboard quick actions describe Search as a whole-app page", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      jsonResponse({
+        summary: {},
+        favoriteDocuments: [],
+        recentDocuments: [],
+        recentSymptoms: [],
+        recentProcedures: [],
+        recentNotes: [],
+        activeSymptoms: [],
+        recentActivity: [],
+      })
+    )
+  );
+
+  render(
+    <MemoryRouter initialEntries={["/dashboard"]}>
 test("DashboardPage shows saved vehicle profile from dashboard data", async () => {
   vi.stubGlobal("fetch", vi.fn(() => jsonResponse({
     vehicle: {
@@ -41,5 +60,7 @@ test("DashboardPage shows saved vehicle profile from dashboard data", async () =
     </MemoryRouter>
   );
 
+  expect(await screen.findByText("Open Search")).toBeInTheDocument();
+  expect(screen.getByText("Search documents, symptoms, procedures, and notes from one page.")).toBeInTheDocument();
   expect(await screen.findByText("2012 Toyota Corolla S 1.8L")).toBeInTheDocument();
 });
