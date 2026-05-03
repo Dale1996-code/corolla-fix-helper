@@ -9,9 +9,12 @@ const __dirname = path.dirname(__filename);
 const serverRoot = path.resolve(__dirname, "..");
 const projectRoot = path.resolve(serverRoot, "..");
 
+const clientPort = Number(process.env.CLIENT_PORT || 5173);
+
 export const config = {
   port: Number(process.env.PORT || 4000),
-  clientPort: Number(process.env.CLIENT_PORT || 5173),
+  clientPort,
+  corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
   databaseFile:
     process.env.DATABASE_FILE ||

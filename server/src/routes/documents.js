@@ -256,9 +256,6 @@ documentsRouter.post("/upload", async (request, response) => {
 });
 
 documentsRouter.post("/:id/extract", async (request, response) => {
-
-
-documentsRouter.delete("/:id", async (request, response) => {
   const documentId = Number(request.params.id);
 
   if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -276,7 +273,7 @@ documentsRouter.delete("/:id", async (request, response) => {
     `)
     .get(documentId);
 
-d  if (!existingDocument) {
+  if (!existingDocument) {
     response.status(404).json({
       error: "Document not found.",
     });
@@ -284,8 +281,8 @@ d  if (!existingDocument) {
   }
 
   const fileName =
-    document.stored_filename ||
-    path.basename(document.file_path || "");
+    existingDocument.stored_filename ||
+    path.basename(existingDocument.file_path || "");
 
   if (!fileName) {
     response.status(404).json({
@@ -332,6 +329,33 @@ d  if (!existingDocument) {
     message: "Extraction re-run complete.",
     document: updatedDocument,
   });
+});
+
+documentsRouter.delete("/:id", async (request, response) => {
+  const documentId = Number(request.params.id);
+
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    response.status(400).json({
+      error: "Document ID must be a positive number.",
+    });
+    return;
+  }
+
+  const existingDocument = db
+    .prepare(`
+      SELECT id, stored_filename, file_path
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+
+  if (!existingDocument) {
+    response.status(404).json({
+      error: "Document not found.",
+    });
+    return;
+  }
+
   const linkedCounts = db
     .prepare(`
       SELECT
