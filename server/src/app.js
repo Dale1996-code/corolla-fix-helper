@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
@@ -11,6 +13,10 @@ import { searchRouter } from "./routes/search.js";
 import { settingsRouter } from "./routes/settings.js";
 import { symptomsRouter } from "./routes/symptoms.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "..", "..");
+const clientDistDir = path.join(projectRoot, "client", "dist");
+
 export function createApp() {
   initializeDatabase();
 
@@ -23,12 +29,16 @@ export function createApp() {
   );
   app.use(express.json());
 
-  app.get("/", (_request, response) => {
-    response.json({
-      name: "Corolla Fix Helper API",
-      version: "0.1.0",
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (!isProduction) {
+    app.get("/", (_request, response) => {
+      response.json({
+        name: "Corolla Fix Helper API",
+        version: "0.1.0",
+      });
     });
-  });
+  }
 
   app.use("/api/health", healthRouter);
   app.use("/api/dashboard", dashboardRouter);
@@ -38,6 +48,14 @@ export function createApp() {
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/settings", settingsRouter);
+
+  if (isProduction) {
+    app.use(express.static(clientDistDir));
+
+    app.get(/^\/(?!api\/).*/, (_request, response) => {
+      response.sendFile(path.join(clientDistDir, "index.html"));
+    });
+  }
 
   return app;
 }
