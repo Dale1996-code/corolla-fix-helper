@@ -17,7 +17,9 @@
     "install:all": "npm install && npm install --prefix server && npm install --prefix client"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "vite": "^8.0.10"
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }
