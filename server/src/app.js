@@ -24,7 +24,7 @@ export function createApp() {
 
   app.use(
     cors({
-      origin: `http://localhost:${config.clientPort}`,
+      origin: config.corsOrigin,
     })
   );
   app.use(express.json());
