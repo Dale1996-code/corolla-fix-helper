@@ -60,6 +60,41 @@ function getDifficultyBadgeClass(difficulty) {
   return "bg-emerald-100 text-emerald-800";
 }
 
+function getSortTimestamp(procedure) {
+  const value = procedure.updatedAt || procedure.createdAt;
+  const time = new Date(value || "").getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function compareProcedures(firstProcedure, secondProcedure, sortBy) {
+  if (sortBy === "oldest") {
+    return getSortTimestamp(firstProcedure) - getSortTimestamp(secondProcedure);
+  }
+
+  if (sortBy === "title") {
+    return firstProcedure.title.localeCompare(secondProcedure.title);
+  }
+
+  return getSortTimestamp(secondProcedure) - getSortTimestamp(firstProcedure);
+}
+
+function matchesSearch(procedure, query) {
+  if (!query) {
+    return true;
+  }
+
+  const searchableFields = [
+    procedure.title,
+    procedure.system,
+    procedure.toolsNeeded,
+    procedure.partsNeeded,
+    procedure.notes,
+    procedure.steps,
+  ];
+
+  return searchableFields.some((value) => value?.toLowerCase().includes(query));
+}
+
 function TextField({
   label,
   name,
@@ -320,9 +355,124 @@ function ProcedureCreateForm({
   );
 }
 
-function ProceduresList({ procedures, selectedProcedureId, onSelectProcedure }) {
+function ProceduresListControls({
+  searchValue,
+  onSearchChange,
+  systemFilter,
+  onSystemFilterChange,
+  difficultyFilter,
+  onDifficultyFilterChange,
+  confidenceFilter,
+  onConfidenceFilterChange,
+  sortBy,
+  onSortByChange,
+  systems,
+  totalCount,
+  visibleCount,
+  hasActiveFilters,
+  onClearFilters,
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Search</span>
+          <input
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-sky-500"
+            value={searchValue}
+            onChange={onSearchChange}
+            placeholder="Search title, system, tools, parts, steps, or notes"
+          />
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>System filter</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={systemFilter}
+            onChange={onSystemFilterChange}
+          >
+            <option value="all">All systems</option>
+            {systems.map((system) => (
+              <option key={system} value={system}>
+                {system}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Difficulty filter</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={difficultyFilter}
+            onChange={onDifficultyFilterChange}
+          >
+            <option value="all">All difficulty levels</option>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Confidence filter</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={confidenceFilter}
+            onChange={onConfidenceFilterChange}
+          >
+            <option value="all">All confidence levels</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Sort</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={sortBy}
+            onChange={onSortByChange}
+          >
+            <option value="newest">Newest updates first</option>
+            <option value="oldest">Oldest updates first</option>
+            <option value="title">Title A-Z</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+        <p className="text-sm text-slate-600">
+          Showing <span className="font-semibold text-slate-900">{visibleCount}</span> of{" "}
+          <span className="font-semibold text-slate-900">{totalCount}</span> procedure
+          {totalCount === 1 ? "" : "s"}.
+        </p>
+
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            onClick={onClearFilters}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+          >
+            Clear filters
+          </button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ProceduresList({
+  procedures,
+  totalProcedures,
+  hasActiveFilters,
+  selectedProcedureId,
+  onSelectProcedure,
+}) {
   const listGridClass =
-    "grid grid-cols-[minmax(13rem,2.5fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(6rem,0.8fr)] gap-3";
+    "grid grid-cols-[minmax(13rem,2.5fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(6rem,0.8fr)_minmax(9rem,1fr)] gap-3";
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -336,11 +486,15 @@ function ProceduresList({ procedures, selectedProcedureId, onSelectProcedure }) 
             <span>Difficulty</span>
             <span>Confidence</span>
             <span>Linked docs</span>
+            <span>Updated</span>
           </div>
 
           {procedures.length === 0 ? (
             <div className="px-4 py-6 text-sm text-slate-600">
-              No procedures saved yet.
+              {totalProcedures === 0 ? "No procedures saved yet." : null}
+              {totalProcedures > 0 && hasActiveFilters
+                ? "No procedures match the current filters."
+                : null}
             </div>
           ) : null}
 
@@ -366,6 +520,7 @@ function ProceduresList({ procedures, selectedProcedureId, onSelectProcedure }) 
                 </span>
                 <span className="truncate text-slate-700">{labelize(procedure.confidence)}</span>
                 <span className="text-slate-700">{procedure.linkedDocumentIds.length}</span>
+                <span className="truncate text-xs text-slate-600">{formatDate(procedure.updatedAt)}</span>
               </div>
             );
           })}
@@ -681,14 +836,62 @@ export function ProceduresPage() {
     deletingId: null,
     error: "",
   });
+  const [searchValue, setSearchValue] = useState("");
+  const [systemFilter, setSystemFilter] = useState("all");
+  const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const [confidenceFilter, setConfidenceFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
+
+  const availableSystems = useMemo(
+    () =>
+      Array.from(new Set(procedures.map((procedure) => procedure.system).filter(Boolean))).sort(
+        (a, b) => a.localeCompare(b)
+      ),
+    [procedures]
+  );
+
+  const filteredProcedures = useMemo(() => {
+    const normalizedQuery = searchValue.trim().toLowerCase();
+
+    return [...procedures]
+      .filter((procedure) => {
+        if (!matchesSearch(procedure, normalizedQuery)) {
+          return false;
+        }
+
+        if (systemFilter !== "all" && procedure.system !== systemFilter) {
+          return false;
+        }
+
+        if (difficultyFilter !== "all" && procedure.difficulty !== difficultyFilter) {
+          return false;
+        }
+
+        if (confidenceFilter !== "all" && procedure.confidence !== confidenceFilter) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((firstProcedure, secondProcedure) =>
+        compareProcedures(firstProcedure, secondProcedure, sortBy)
+      );
+  }, [procedures, searchValue, systemFilter, difficultyFilter, confidenceFilter, sortBy]);
+
+  const hasActiveFilters =
+    searchValue.trim() !== "" ||
+    systemFilter !== "all" ||
+    difficultyFilter !== "all" ||
+    confidenceFilter !== "all" ||
+    sortBy !== "newest";
 
   const selectedProcedure = useMemo(() => {
     if (!selectedProcedureId) {
       return null;
     }
 
-    return procedures.find((procedure) => procedure.id === selectedProcedureId) || null;
-  }, [procedures, selectedProcedureId]);
+    return filteredProcedures.find((procedure) => procedure.id === selectedProcedureId) || null;
+  }, [filteredProcedures, selectedProcedureId]);
 
   const systemSuggestions = useMemo(() => {
     return mergeSuggestionValues([
@@ -770,6 +973,20 @@ export function ProceduresPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setSelectedProcedureId((currentId) => {
+      if (!filteredProcedures.length) {
+        return null;
+      }
+
+      if (currentId && filteredProcedures.some((procedure) => procedure.id === currentId)) {
+        return currentId;
+      }
+
+      return filteredProcedures[0].id;
+    });
+  }, [filteredProcedures]);
 
   function handleCreateFormChange(event) {
     const { name, value } = event.target;
@@ -1042,9 +1259,35 @@ export function ProceduresPage() {
                 procedure{procedures.length === 1 ? "" : "s"} saved.
               </section>
 
+              <ProceduresListControls
+                searchValue={searchValue}
+                onSearchChange={(event) => setSearchValue(event.target.value)}
+                systemFilter={systemFilter}
+                onSystemFilterChange={(event) => setSystemFilter(event.target.value)}
+                difficultyFilter={difficultyFilter}
+                onDifficultyFilterChange={(event) => setDifficultyFilter(event.target.value)}
+                confidenceFilter={confidenceFilter}
+                onConfidenceFilterChange={(event) => setConfidenceFilter(event.target.value)}
+                sortBy={sortBy}
+                onSortByChange={(event) => setSortBy(event.target.value)}
+                systems={availableSystems}
+                totalCount={procedures.length}
+                visibleCount={filteredProcedures.length}
+                hasActiveFilters={hasActiveFilters}
+                onClearFilters={() => {
+                  setSearchValue("");
+                  setSystemFilter("all");
+                  setDifficultyFilter("all");
+                  setConfidenceFilter("all");
+                  setSortBy("newest");
+                }}
+              />
+
               <div className="grid gap-6 xl:grid-cols-2">
                 <ProceduresList
-                  procedures={procedures}
+                  procedures={filteredProcedures}
+                  totalProcedures={procedures.length}
+                  hasActiveFilters={hasActiveFilters}
                   selectedProcedureId={selectedProcedureId}
                   onSelectProcedure={setSelectedProcedureId}
                 />

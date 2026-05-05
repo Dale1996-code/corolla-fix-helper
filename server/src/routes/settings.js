@@ -1,3 +1,8 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { Router } from "express";
 import { config } from "../config.js";
 import { db } from "../database.js";
@@ -73,11 +78,34 @@ function getRuntimeSettings() {
 
 function getBackupExportSettings() {
   return {
-    supported: false,
-    path: "",
+    supported: true,
+    path: "Download from Settings",
     message:
-      "Backup and export are not wired up yet, so there is no working backup folder setting to edit in the browser.",
+      "Use Export backup to download one .tar.gz file containing your SQLite database and uploaded PDFs.",
   };
+}
+
+function formatBackupFilename() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `corolla-fix-helper-backup-${stamp}.tar.gz`;
+}
+
+async function createBackupStagingDir() {
+  const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-backup-"));
+  const databaseDir = path.join(stagingRoot, "database");
+  const uploadsDir = path.join(stagingRoot, "uploads");
+
+  fs.mkdirSync(databaseDir, { recursive: true });
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const databaseFilename = path.basename(config.databaseFile) || `backup-${randomUUID()}.db`;
+  fs.copyFileSync(config.databaseFile, path.join(databaseDir, databaseFilename));
+
+  if (fs.existsSync(config.uploadsDir)) {
+    fs.cpSync(config.uploadsDir, uploadsDir, { recursive: true });
+  }
+
+  return stagingRoot;
 }
 
 settingsRouter.get("/", (_request, response) => {
@@ -93,6 +121,49 @@ settingsRouter.get("/", (_request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error.message || "Could not load settings.",
+    });
+  }
+});
+
+settingsRouter.get("/backup-export", async (_request, response) => {
+  let stagingRoot = "";
+
+  try {
+    stagingRoot = await createBackupStagingDir();
+
+    response.setHeader("Content-Type", "application/gzip");
+    response.setHeader("Content-Disposition", `attachment; filename="${formatBackupFilename()}"`);
+
+    const tarProcess = spawn("tar", ["-czf", "-", "-C", stagingRoot, "database", "uploads"]);
+
+    tarProcess.stdout.pipe(response);
+
+    tarProcess.on("close", (exitCode) => {
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+
+      if (exitCode !== 0 && !response.headersSent) {
+        response.status(500).json({
+          error: "Could not create backup export archive.",
+        });
+      }
+    });
+
+    tarProcess.on("error", () => {
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+
+      if (!response.headersSent) {
+        response.status(500).json({
+          error: "Backup export is unavailable because this system could not run tar.",
+        });
+      }
+    });
+  } catch (error) {
+    if (stagingRoot) {
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+    }
+
+    response.status(500).json({
+      error: error.message || "Could not export backup.",
     });
   }
 });

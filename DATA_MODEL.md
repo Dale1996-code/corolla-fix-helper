@@ -13,7 +13,7 @@ The current v1 workflow is built around:
 - symptom tracking
 - repair procedures
 - notes
-- document search
+- workspace search across documents, symptoms, procedures, and notes
 
 ## Main entities
 
@@ -50,7 +50,6 @@ Main fields:
 - `extraction_status`
 - `page_count`
 - `is_favorite`
-- `is_bookmarked`
 - `created_at`
 - `updated_at`
 
@@ -63,6 +62,10 @@ Current v1 use:
 - open the stored PDF from the app
 
 The actual uploaded PDF files live in the configured uploads folder. In a VM demo, `UPLOADS_DIR` should also point to persistent storage.
+
+Important note:
+- favorites are the only saved-document flag supported in the current V1 workflow
+- older local SQLite files may still contain unused `is_bookmarked`, `tags`, and `document_tags` leftovers from earlier experiments, but the current app does not read or write them
 
 ### `symptoms`
 Stores repair symptoms or problems the user wants to track.
@@ -158,41 +161,24 @@ Main fields:
 Current v1 use:
 - create, edit, and delete notes
 - store note title and main note content
-- link notes to documents, symptoms, or procedures in the current UI
-
-Current relationship support:
-- `related_entity_type` can store `document`, `symptom`, or `procedure`
-- `related_entity_id` stores the matching record ID
+- link notes to one document, symptom, or procedure in the current UI
+- return linked record details in the API as `linkedDocument`, `linkedSymptom`, or `linkedProcedure`
 
 Important note:
+- `related_entity_type` stores whether the note is linked to a `document`, `symptom`, `procedure`, or to `none`
+- `related_entity_id` stores the matching record ID when a link is present
 - older note rows may still use `document_id` and `body`; the server includes backfill logic to keep older data usable
 
 ## Supporting tables
 
-### `tags`
-Stores reusable tag names.
-
-Main fields:
-- `id`
-- `name`
-
-### `document_tags`
-Join table between documents and tags.
-
-Main fields:
-- `document_id`
-- `tag_id`
-
-Current v1 note:
-- these tables exist in the schema, but tagging is not a major part of the current confirmed UI workflow
-
 ## Search data expectations
 There is no separate search table.
 
-The current `/api/search` route searches document data using fields already stored in `documents`, especially:
-- document metadata
-- extracted text
-- favorite filter state
+The current search endpoints use data already stored in the main app tables:
+- `/api/search` uses document metadata, extracted text, and favorite filter state
+- `/api/search/symptoms` uses stored symptom fields
+- `/api/search/procedures` uses stored procedure fields
+- `/api/search/notes` uses stored note fields plus linked record details
 
 Current v1 meaning:
-- Search is currently document search, not a full global search across symptoms, procedures, and notes
+- Search is a one-page workspace search with separate sections for documents, symptoms, procedures, and notes

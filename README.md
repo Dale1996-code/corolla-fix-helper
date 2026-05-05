@@ -12,7 +12,7 @@ Version 1 currently includes these main areas:
 
 - Dashboard
 - Documents
-- Document Search
+- Search
 - Symptoms
 - Procedures
 - Notes
@@ -44,7 +44,9 @@ It also gives quick links into the main parts of the app.
 
 ### Documents
 
-The Documents area is fully working for the main document workflow.
+The Documents area covers the main document workflow. Some end-to-end
+flows are still being stabilized; the area should be considered fully
+working only once `npm run test` is consistently green.
 
 What it can do:
 
@@ -52,14 +54,20 @@ What it can do:
 - save uploaded PDFs into `server/uploads`
 - store document details in SQLite
 - try to extract text from PDFs
+- manually re-run extraction for a single document from the detail panel
 - store extraction status
 - store page count
 - edit document metadata after upload
 - mark documents as favorites
 - open an uploaded PDF from the app
+- delete a document with a confirmation prompt
+- when deleting, remove linked symptom/procedure links, clear linked note references, and remove the stored PDF file safely
 - use saved Settings suggestions while entering system and document type
 - sort and filter the document list
 - show document details in a side panel
+
+For V1, favorites are the only saved-document flag in the app.
+Tags and bookmarks are not part of the current document workflow.
 
 Document fields currently used in the app include:
 
@@ -70,18 +78,18 @@ Document fields currently used in the app include:
 - source
 - notes
 
-### Document Search
+### Search
 
-The Document Search page is implemented.
+The Search page is implemented.
 
-It lets you search through imported documents and filter results by things like:
+It gives you four separate search sections on one page:
 
-- keyword
-- system
-- document type
-- favorites
+- documents
+- symptoms
+- procedures
+- notes
 
-It does not search symptoms, procedures, or notes yet.
+Each section keeps its own keyword box, filters, and results so you can search one area without changing the others.
 
 ### Symptoms
 
@@ -109,8 +117,15 @@ What it can do:
 - create procedures
 - edit procedures
 - delete procedures
-- store steps, tools, parts, safety notes, and confidence
+- store steps, tools, parts, safety notes, difficulty, and confidence
 - link procedures to documents
+- show linked documents in the procedure details and open them from there
+- reuse saved Settings system suggestions while entering the system field in create and edit forms
+- search procedures by title, system, tools, parts, steps, and notes
+- filter procedures by system, difficulty, and confidence
+- sort procedures by newest update, oldest update, or title
+- show a visible "Showing X of Y procedures" count while browsing
+- keep the detail panel focused on a visible procedure when filters change
 
 ### Notes
 
@@ -122,7 +137,10 @@ What it can do:
 - edit notes
 - delete notes
 - organize notes by note type
-- link notes to one document, symptom, or procedure in the current UI
+- link notes to a document, symptom, or procedure in the current UI
+- browse saved notes with note type, linked item, and sort controls
+- show a visible "Showing X of Y notes" count while browsing
+- open the linked document, symptom, or procedure from the note details panel
 
 ### Settings
 
@@ -136,9 +154,10 @@ What it can do:
 - show the local uploads folder
 - show the upload size limit
 - show the frontend and backend ports
+- export a local backup archive (.tar.gz) that includes the database and uploaded PDFs
 
 The runtime path values are read-only in the browser. They come from local config and optional `.env` values.
-Backup/export is still not wired up yet, so Settings shows that honestly instead of exposing a fake folder field.
+Settings now includes a manual **Export backup (.tar.gz)** action. It downloads one archive that contains the SQLite database and all uploaded PDFs so you can store a local backup copy on your computer. Restore is not included in this phase.
 
 ## Tech stack
 
@@ -158,10 +177,9 @@ corolla-fix-helper/
 
 ## First-time setup
 
-Open a terminal in the project folder:
+Open a terminal in the project folder, then run:
 
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+```bash
 npm run install:all
 ```
 
@@ -175,8 +193,7 @@ What this does:
 
 ## Run the app
 
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+```bash
 npm run dev
 ```
 
@@ -190,43 +207,43 @@ After that:
 
 Run only the server:
 
-```powershell
+```bash
 npm run dev:server
 ```
 
 Run only the client:
 
-```powershell
+```bash
 npm run dev:client
 ```
 
 Build the app:
 
-```powershell
+```bash
 npm run build
 ```
 
 Run both test suites:
 
-```powershell
+```bash
 npm run test
 ```
 
 Run only the backend tests:
 
-```powershell
+```bash
 npm run test:server
 ```
 
 Run only the frontend tests:
 
-```powershell
+```bash
 npm run test:client
 ```
 
 Start the app with the built client:
 
-```powershell
+```bash
 npm run build
 npm start
 ```
@@ -286,3 +303,20 @@ Important values:
 - `DATABASE_FILE=./server/data/corolla-fix-helper.db` sets the SQLite database file path
 - `UPLOADS_DIR=./server/uploads` sets where uploaded PDFs are stored
 - `MAX_UPLOAD_SIZE_MB=20` sets the PDF upload size limit
+- `NODE_ENV=production` marks the app as a production run for deployment tooling
+- `CORS_ORIGIN=http://localhost:5173` sets the allowed CORS origin for the API
+
+## Deploying to GCP
+
+A multi-stage `Dockerfile` at the repo root produces a production image.
+It builds the React client, prunes the server's devDependencies, and
+runs `node server/src/index.js` on port 4000 from a `node:24-bookworm-slim`
+base.
+
+The recommended V1 demo target is still a Compute Engine VM with persistent local storage. The Dockerfile is useful if you want to build a container image for that VM or for later GCP experiments.
+
+```bash
+gcloud builds submit --tag gcr.io/<project>/corolla-fix-helper
+```
+
+Persistent state means the SQLite database file and uploaded PDFs need to live on durable VM storage. Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.

@@ -39,9 +39,9 @@ test("SettingsPage loads settings and saves vehicle changes", async () => {
       documentTypes: ["Repair Manual", "Wiring Diagram", "Inspection"],
     },
     backupExport: {
-      supported: false,
-      path: "",
-      message: "Backup and export are not wired up yet.",
+      supported: true,
+      path: "Download from Settings",
+      message: "Use Export backup to download one .tar.gz file containing your SQLite database and uploaded PDFs.",
     },
   };
 
@@ -62,6 +62,16 @@ test("SettingsPage loads settings and saves vehicle changes", async () => {
           model: body.model,
           trim: body.trim,
           engine: body.engine,
+        },
+      });
+    }
+
+    if (url === "/api/settings/backup-export") {
+      return Promise.resolve({
+        ok: true,
+        blob: async () => new Blob(["backup"]),
+        headers: {
+                    get: () => 'attachment; filename="corolla-test-backup.tar.gz"',
         },
       });
     }
@@ -131,6 +141,18 @@ test("SettingsPage loads settings and saves vehicle changes", async () => {
     commonSystems: ["Engine", "Cooling", "Electrical"],
     documentTypes: ["Repair Manual", "Wiring Diagram", "Inspection"],
   });
+
+  const createObjectURLSpy = vi
+    .spyOn(URL, "createObjectURL")
+    .mockReturnValue("blob:backup-url");
+  const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+  fireEvent.click(screen.getByRole("button", { name: "Export backup (.tar.gz)" }));
+
+  expect(await screen.findByText(/Backup exported\./i)).toBeInTheDocument();
+  expect(createObjectURLSpy).toHaveBeenCalled();
+  expect(revokeObjectURLSpy).toHaveBeenCalled();
+
 });
 
 test("SymptomsPage supports search, filters, sorting, and empty filtered states", async () => {
