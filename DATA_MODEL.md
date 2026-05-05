@@ -6,6 +6,8 @@ This file explains the main SQLite tables used by the current app.
 The app is local-first and currently centered on one vehicle:
 - 2009 Toyota Corolla LE 1.8L
 
+For V1, SQLite remains local-file storage. That means the database is one file on disk. In a VM demo, `DATABASE_FILE` should point to a persistent folder so the data survives app restarts.
+
 The current v1 workflow is built around:
 - imported repair documents
 - symptom tracking
@@ -59,6 +61,8 @@ Current v1 use:
 - track page count
 - mark favorites
 - open the stored PDF from the app
+
+The actual uploaded PDF files live in the configured uploads folder. In a VM demo, `UPLOADS_DIR` should also point to persistent storage.
 
 ### `symptoms`
 Stores repair symptoms or problems the user wants to track.
@@ -154,14 +158,13 @@ Main fields:
 Current v1 use:
 - create, edit, and delete notes
 - store note title and main note content
-- link notes to documents in the current UI
+- link notes to documents, symptoms, or procedures in the current UI
 
-Backend support that is broader than the current confirmed UI:
+Current relationship support:
 - `related_entity_type` can store `document`, `symptom`, or `procedure`
 - `related_entity_id` stores the matching record ID
 
 Important note:
-- the backend schema supports broader note relationships, but the current UI is only clearly confirmed for document linking
 - older note rows may still use `document_id` and `body`; the server includes backfill logic to keep older data usable
 
 ## Supporting tables

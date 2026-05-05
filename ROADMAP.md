@@ -3,7 +3,8 @@
 ## Summary
 - Finish the app as a polished local-first V1 without adding any new feature area.
 - Keep this phase focused on four deliverables: real Settings, Symptoms polish, basic automated tests, and a manual QA checklist.
-- End the phase by updating the docs so the repo truthfully says V1 is finished.
+- End the phase by updating the docs so the repo truthfully says V1 is ready for a manual V1 demo setup.
+- Use Google Cloud Compute Engine, Node.js 24, and persistent local storage for the V1 demo deployment path.
 
 ## Public Interfaces
 - Add `GET /api/settings` returning:
@@ -40,3 +41,5 @@
 - Browser-based Settings will not edit filesystem paths or `.env` values.
 - No new database tables are needed for this phase.
 - Any polish outside Settings and Symptoms stays minor and does not turn into an app-wide redesign.
+- Cloud Run is a later option only if storage is redesigned away from local SQLite and local PDF uploads.
+- Public demos use sample or fake PDFs until auth exists.
