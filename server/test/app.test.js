@@ -758,3 +758,223 @@ test("DELETE /api/documents/:id removes document file and clears links safely", 
 
   assert.equal(fs.existsSync(filePath), false);
 });
+
+
+test("GET /api/dashboard returns summary counts and recent lists", async () => {
+  const response = await request(app).get("/api/dashboard");
+
+  assert.equal(response.status, 200);
+  assert.equal(typeof response.body.vehicle, "object");
+  assert.equal(typeof response.body.summary, "object");
+  assert.equal(typeof response.body.summary.totalDocuments, "number");
+  assert.equal(typeof response.body.summary.totalSymptoms, "number");
+  assert.equal(typeof response.body.summary.totalProcedures, "number");
+  assert.equal(typeof response.body.summary.totalNotes, "number");
+  assert.ok(Array.isArray(response.body.recentDocuments));
+  assert.ok(Array.isArray(response.body.recentSymptoms));
+  assert.ok(Array.isArray(response.body.recentProcedures));
+  assert.ok(Array.isArray(response.body.recentNotes));
+  assert.ok(Array.isArray(response.body.activeSymptoms));
+  assert.ok(Array.isArray(response.body.recentActivity));
+  assert.ok(Array.isArray(response.body.favoriteDocuments));
+});
+
+test("POST /api/documents/upload accepts a PDF and returns document metadata", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .attach("pdfFile", sourcePdf, "sample-maintenance-schedule.pdf")
+    .field("system", "Engine")
+    .field("documentType", "Reference")
+    .field("title", "Upload test document");
+
+  assert.equal(response.status, 201);
+  assert.equal(typeof response.body.document.id, "number");
+  assert.equal(response.body.document.system, "Engine");
+  assert.equal(response.body.document.documentType, "Reference");
+  assert.equal(response.body.document.title, "Upload test document");
+  assert.equal(typeof response.body.document.extractionStatus, "string");
+});
+
+test("GET /api/documents/:id/file serves the uploaded PDF file", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+  const storedFilename = "file-serve-test.pdf";
+  const dest = path.join(process.env.UPLOADS_DIR, storedFilename);
+  fs.copyFileSync(sourcePdf, dest);
+
+  const documentId = Number(
+    db.prepare(`
+      INSERT INTO documents (
+        vehicle_id, title, original_filename, stored_filename,
+        file_path, file_type, system, document_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      vehicle.id,
+      "File serve test",
+      "sample.pdf",
+      storedFilename,
+      `server/uploads/${storedFilename}`,
+      "application/pdf",
+      "Engine",
+      "Reference"
+    ).lastInsertRowid
+  );
+
+  const response = await request(app).get(`/api/documents/${documentId}/file`);
+
+  assert.equal(response.status, 200);
+  assert.ok(response.headers["content-type"].includes("application/pdf"));
+});
+
+test("PUT /api/documents/:id updates document metadata", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+
+  const documentId = Number(
+    db.prepare(`
+      INSERT INTO documents (
+        vehicle_id, title, original_filename, stored_filename,
+        file_path, file_type, system, document_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      vehicle.id,
+      "Original title",
+      "put-test.pdf",
+      "put-test.pdf",
+      "server/uploads/put-test.pdf",
+      "application/pdf",
+      "Cooling",
+      "Bulletin"
+    ).lastInsertRowid
+  );
+
+  const response = await request(app)
+    .put(`/api/documents/${documentId}`)
+    .send({
+      title: "Updated title",
+      system: "Cooling",
+      documentType: "Reference",
+      isFavorite: true,
+    });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.document.title, "Updated title");
+  assert.equal(response.body.document.documentType, "Reference");
+  assert.equal(response.body.document.isFavorite, true);
+});
+
+test("POST /api/symptoms creates a symptom and GET returns it", async () => {
+  const createResponse = await request(app)
+    .post("/api/symptoms")
+    .send({
+      title: "Oil pressure warning light",
+      system: "Engine",
+      status: "open",
+      confidence: "high",
+      description: "Light came on at idle after oil change.",
+      suspectedCauses: "Low oil level or faulty sensor",
+    });
+
+  assert.equal(createResponse.status, 201);
+  assert.equal(createResponse.body.symptom.title, "Oil pressure warning light");
+  assert.equal(createResponse.body.symptom.system, "Engine");
+  assert.equal(createResponse.body.symptom.status, "open");
+  assert.equal(createResponse.body.symptom.confidence, "high");
+
+  const symptomId = createResponse.body.symptom.id;
+
+  const listResponse = await request(app).get("/api/symptoms");
+
+  assert.equal(listResponse.status, 200);
+  assert.ok(listResponse.body.symptoms.some((s) => s.id === symptomId));
+});
+
+test("PUT /api/symptoms/:id updates status and title", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const symptomId = Number(
+    db.prepare(`INSERT INTO symptoms (vehicle_id, title, system, status) VALUES (?, ?, ?, ?)`)
+      .run(vehicle.id, "Brake squeak", "Brakes", "open").lastInsertRowid
+  );
+
+  const response = await request(app)
+    .put(`/api/symptoms/${symptomId}`)
+    .send({ status: "monitoring", title: "Brake squeak (rear)" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.symptom.status, "monitoring");
+  assert.equal(response.body.symptom.title, "Brake squeak (rear)");
+});
+
+test("DELETE /api/symptoms/:id removes the symptom", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const symptomId = Number(
+    db.prepare(`INSERT INTO symptoms (vehicle_id, title, status) VALUES (?, ?, ?)`)
+      .run(vehicle.id, "Delete-me symptom", "open").lastInsertRowid
+  );
+
+  const response = await request(app).delete(`/api/symptoms/${symptomId}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.message, "Symptom deleted.");
+
+  const notFound = await request(app).delete(`/api/symptoms/${symptomId}`);
+  assert.equal(notFound.status, 404);
+});
+
+test("POST /api/procedures creates a procedure and GET returns it", async () => {
+  const createResponse = await request(app)
+    .post("/api/procedures")
+    .send({
+      title: "Change engine air filter",
+      system: "Engine",
+      difficulty: "beginner",
+      confidence: "high",
+      steps: "1. Open hood. 2. Remove air box lid. 3. Swap filter. 4. Reinstall lid.",
+      toolsNeeded: "Flathead screwdriver",
+      partsNeeded: "Air filter (Fram CA10755 or equivalent)",
+    });
+
+  assert.equal(createResponse.status, 201);
+  assert.equal(createResponse.body.procedure.title, "Change engine air filter");
+  assert.equal(createResponse.body.procedure.difficulty, "beginner");
+
+  const procedureId = createResponse.body.procedure.id;
+
+  const listResponse = await request(app).get("/api/procedures");
+
+  assert.equal(listResponse.status, 200);
+  assert.ok(listResponse.body.procedures.some((p) => p.id === procedureId));
+});
+
+test("PUT /api/procedures/:id updates difficulty and steps", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const procedureId = Number(
+    db.prepare(`INSERT INTO procedures (vehicle_id, title, system, difficulty) VALUES (?, ?, ?, ?)`)
+      .run(vehicle.id, "Flush coolant", "Cooling", "intermediate").lastInsertRowid
+  );
+
+  const response = await request(app)
+    .put(`/api/procedures/${procedureId}`)
+    .send({ difficulty: "advanced", steps: "Drain, flush, refill with 50/50 mix." });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.procedure.difficulty, "advanced");
+  assert.equal(response.body.procedure.steps, "Drain, flush, refill with 50/50 mix.");
+});
+
+test("DELETE /api/procedures/:id removes the procedure", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const procedureId = Number(
+    db.prepare(`INSERT INTO procedures (vehicle_id, title, system, difficulty) VALUES (?, ?, ?, ?)`)
+      .run(vehicle.id, "Delete-me procedure", "Engine", "beginner").lastInsertRowid
+  );
+
+  const response = await request(app).delete(`/api/procedures/${procedureId}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.message, "Procedure deleted.");
+
+  const notFound = await request(app).delete(`/api/procedures/${procedureId}`);
+  assert.equal(notFound.status, 404);
+});

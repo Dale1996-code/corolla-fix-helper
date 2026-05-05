@@ -1,0 +1,37 @@
+[Unit]
+Description=Corolla Fix Helper
+Documentation=https://github.com/dale1996-code/corolla-fix-helper
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+
+# /etc/corolla.env must define at minimum:
+#   NODE_ENV=production
+#   CORS_ORIGIN=https://yourdomain.example.com
+#   DATABASE_FILE=/var/lib/corolla/corolla-fix-helper.db
+#   UPLOADS_DIR=/var/lib/corolla/uploads
+#   MAX_UPLOAD_SIZE_MB=20
+#   COROLLA_IMAGE=us-central1-docker.pkg.dev/<project>/apps/corolla-fix-helper:<sha>
+EnvironmentFile=/etc/corolla.env
+
+# Remove any leftover container from a prior (possibly unclean) run
+ExecStartPre=-/usr/bin/docker rm -f corolla
+
+# Bind to loopback only — Caddy reverse-proxies from the internet
+ExecStart=/usr/bin/docker run \
+  --name corolla \
+  --rm \
+  --user 1000:1000 \
+  -p 127.0.0.1:4000:4000 \
+  -v /var/lib/corolla:/var/lib/corolla \
+  --env-file /etc/corolla.env \
+  ${COROLLA_IMAGE}
+
+ExecStop=/usr/bin/docker stop -t 30 corolla
+
+[Install]
+WantedBy=multi-user.target

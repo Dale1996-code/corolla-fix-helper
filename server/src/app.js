@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
+import pinoHttp from "pino-http";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { initializeDatabase } from "./initDatabase.js";
@@ -22,12 +23,14 @@ export function createApp() {
 
   const app = express();
 
+  app.use(pinoHttp());
+
   app.use(
     cors({
       origin: config.corsOrigin,
     })
   );
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" }));
 
   const isProduction = process.env.NODE_ENV === "production";
 

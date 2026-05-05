@@ -1,0 +1,45 @@
+# Caddyfile — reverse proxy + TLS for Corolla Fix Helper
+#
+# Replace yourdomain.example.com with your actual hostname.
+# Caddy obtains a Let's Encrypt certificate automatically on first start.
+#
+# ACCESS CONTROL — two options (pick one and delete the other):
+#
+# Option A: HTTP basic auth (default, simplest)
+# -----------------------------------------------
+# This is a publicly reachable URL behind a password gate, NOT private networking.
+# The hostname is enumerable via cert-transparency logs. Any auth bug or
+# password leak exposes the data. Fine as a starting point, but not "private."
+#
+#   Generate a hash:  caddy hash-password
+#   Set environment vars in /etc/caddy/caddy.env:
+#     CADDY_ADMIN_USER=admin
+#     CADDY_ADMIN_HASH=<bcrypt hash from caddy hash-password>
+#
+# Option B: GCP Identity-Aware Proxy (actually private)
+# -----------------------------------------------
+# Put a GCE HTTPS Load Balancer + IAP in front instead of Caddy.
+# IAP rejects unauthenticated requests before they reach the VM.
+# Identity is your Google account. No app changes required.
+# More setup (LB, backend service, OAuth consent screen) but the right
+# answer if "private" is meant literally.
+#
+# Recommendation: start with Option A to get going, graduate to Option B
+# once the deploy is otherwise stable. Mark this as a deliberate trade-off,
+# not a finished story.
+
+yourdomain.example.com {
+    # --- Option A: basic auth (remove this block when switching to IAP) ---
+    basicauth {
+        {$CADDY_ADMIN_USER} {$CADDY_ADMIN_HASH}
+    }
+    # --- end Option A ---
+
+    reverse_proxy 127.0.0.1:4000
+
+    encode gzip
+
+    log {
+        output file /var/log/caddy/corolla-access.log
+    }
+}

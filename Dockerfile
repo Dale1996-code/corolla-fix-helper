@@ -29,6 +29,13 @@ ENV NODE_ENV=production \
 COPY --from=build /app/server ./server
 COPY --from=build /app/client/dist ./client/dist
 
+RUN chown -R 1000:1000 /app
+
+USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 EXPOSE 4000
 
 CMD ["node", "server/src/index.js"]
