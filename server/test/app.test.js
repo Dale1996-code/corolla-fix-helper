@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import request from "supertest";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const fixturesDir = path.join(__dirname, "fixtures");
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-server-"));
 
@@ -132,7 +136,7 @@ test("POST /api/documents/:id/extract re-runs extraction and updates status fiel
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
   assert.ok(vehicle);
 
-  const sourcePdf = path.join(process.cwd(), "server", "uploads", "sample-maintenance-schedule.pdf");
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
   const storedFilename = "extract-rerun-test.pdf";
   const uploadedPdfPath = path.join(process.env.UPLOADS_DIR, storedFilename);
   fs.copyFileSync(sourcePdf, uploadedPdfPath);

@@ -42,7 +42,9 @@ It also gives quick links into the main parts of the app.
 
 ### Documents
 
-The Documents area is fully working for the main document workflow.
+The Documents area covers the main document workflow. Some end-to-end
+flows are still being stabilized; the area should be considered fully
+working only once `npm run test` is consistently green.
 
 What it can do:
 
@@ -172,10 +174,9 @@ corolla-fix-helper/
 
 ## First-time setup
 
-Open a terminal in the project folder:
+Open a terminal in the project folder, then run:
 
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+```bash
 npm run install:all
 ```
 
@@ -187,8 +188,7 @@ What this does:
 
 ## Run the app
 
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+```bash
 npm run dev
 ```
 
@@ -202,43 +202,43 @@ After that:
 
 Run only the server:
 
-```powershell
+```bash
 npm run dev:server
 ```
 
 Run only the client:
 
-```powershell
+```bash
 npm run dev:client
 ```
 
 Build the client:
 
-```powershell
+```bash
 npm run build
 ```
 
 Run both test suites:
 
-```powershell
+```bash
 npm run test
 ```
 
 Run only the backend tests:
 
-```powershell
+```bash
 npm run test:server
 ```
 
 Run only the frontend tests:
 
-```powershell
+```bash
 npm run test:client
 ```
 
 Start the app with the built client:
 
-```powershell
+```bash
 npm start
 ```
 
@@ -257,3 +257,26 @@ Important values:
 - `DATABASE_FILE=./server/data/corolla-fix-helper.db` sets the SQLite database file path
 - `UPLOADS_DIR=./server/uploads` sets where uploaded PDFs are stored
 - `MAX_UPLOAD_SIZE_MB=20` sets the PDF upload size limit
+- `NODE_ENV=production` switches the server into production mode (serves the built client)
+- `CORS_ORIGIN=http://localhost:5173` sets the allowed CORS origin for the API
+
+## Deploying to GCP
+
+A multi-stage `Dockerfile` at the repo root produces a production image.
+It builds the React client, prunes the server's devDependencies, and
+runs `node server/src/index.js` on port 4000 from a `node:22-bookworm-slim`
+base.
+
+A typical GCP deploy goes through Cloud Build and Cloud Run:
+
+```bash
+gcloud builds submit --tag gcr.io/<project>/corolla-fix-helper
+gcloud run deploy corolla-fix-helper \
+  --image gcr.io/<project>/corolla-fix-helper \
+  --set-env-vars NODE_ENV=production,CORS_ORIGIN=https://<your-domain>
+```
+
+Persistent state (the SQLite database and uploaded PDFs) needs a
+mounted volume — Cloud Run is stateless, so use a Cloud Storage FUSE
+mount, a Filestore volume, or migrate to a managed database before
+relying on remote uploads.

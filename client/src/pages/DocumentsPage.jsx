@@ -598,6 +598,9 @@ function DocumentDetails({
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {extractionRunState.running ? "Re-running..." : "Re-run extraction"}
+          </button>
+          <button
+            type="button"
             onClick={() => onDeleteDocument(document)}
             className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
           >
