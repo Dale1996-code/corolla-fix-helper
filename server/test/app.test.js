@@ -10,16 +10,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, "fixtures");
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-server-"));
+const testClientDistDir = path.join(tempRoot, "client-dist");
+const testAssetDir = path.join(testClientDistDir, "assets");
 
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 process.env.PORT = "4100";
 process.env.CLIENT_PORT = "5174";
 
+fs.mkdirSync(testAssetDir, { recursive: true });
+fs.writeFileSync(
+  path.join(testClientDistDir, "index.html"),
+  '<!doctype html><html><body><div id="root">Built Corolla app</div></body></html>'
+);
+fs.writeFileSync(path.join(testAssetDir, "app.js"), "console.log('built asset');");
+
 const { createApp } = await import("../src/app.js");
 const { db } = await import("../src/database.js");
 
-const app = createApp();
+const app = createApp({ clientDistDir: testClientDistDir });
 
 after(() => {
   if (typeof db.close === "function") {
@@ -116,6 +125,31 @@ test("existing core routes still respond after the app startup refactor", async 
   assert.ok(Array.isArray(documentsResponse.body.documents));
   assert.equal(symptomsResponse.status, 200);
   assert.ok(Array.isArray(symptomsResponse.body.symptoms));
+});
+
+test("serves the built frontend while keeping API routes separate", async () => {
+  const [rootResponse, frontendRouteResponse, assetResponse, healthResponse] =
+    await Promise.all([
+      request(app).get("/"),
+      request(app).get("/documents/123"),
+      request(app).get("/assets/app.js"),
+      request(app).get("/api/health"),
+    ]);
+
+  assert.equal(rootResponse.status, 200);
+  assert.match(rootResponse.headers["content-type"], /html/);
+  assert.match(rootResponse.text, /Built Corolla app/);
+
+  assert.equal(frontendRouteResponse.status, 200);
+  assert.match(frontendRouteResponse.headers["content-type"], /html/);
+  assert.match(frontendRouteResponse.text, /Built Corolla app/);
+
+  assert.equal(assetResponse.status, 200);
+  assert.match(assetResponse.headers["content-type"], /javascript/);
+  assert.match(assetResponse.text, /built asset/);
+
+  assert.equal(healthResponse.status, 200);
+  assert.equal(healthResponse.body.status, "ok");
 });
 
 test("documents API keeps favorites as the only saved-document flag in V1", async () => {

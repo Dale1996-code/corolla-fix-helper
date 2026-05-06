@@ -26,6 +26,8 @@ Version 1 is still limited in a few important ways:
 - No user accounts
 - No AI chat
 
+For a V1 demo deployment, the recommended target is a Google Cloud Compute Engine VM. That keeps the app close to how it works locally: one Node server, one local SQLite database file, and one local uploads folder.
+
 ## What the app does right now
 
 ### Dashboard
@@ -161,6 +163,7 @@ Settings now includes a manual **Export backup (.tar.gz)** action. It downloads 
 
 - `client`: React + Vite + Tailwind CSS
 - `server`: Node.js + Express
+- `runtime`: Node.js 24
 - `database`: SQLite
 - `file storage`: local `server/uploads` folder
 
@@ -179,6 +182,8 @@ Open a terminal in the project folder, then run:
 ```bash
 npm run install:all
 ```
+
+Use Node.js 24 for this app. That matters because the backend uses `node:sqlite`, which is Node's built-in SQLite feature.
 
 What this does:
 
@@ -212,7 +217,7 @@ Run only the client:
 npm run dev:client
 ```
 
-Build the client:
+Build the app:
 
 ```bash
 npm run build
@@ -239,12 +244,53 @@ npm run test:client
 Start the app with the built client:
 
 ```bash
+npm run build
 npm start
 ```
+
+After `npm start`, the built app should load from the backend at `http://localhost:4000`.
 
 Manual QA checklist:
 
 - `QA_CHECKLIST.md`
+
+## Recommended V1 demo deployment
+
+For a public V1 demo, use a Google Cloud Compute Engine VM with Node.js 24.
+
+Plain-English storage notes:
+
+- SQLite is a local database file. In this app, that file stores the app records.
+- Uploaded PDFs are local files. They are saved in the uploads folder.
+- Persistent storage means the database file and PDFs survive app restarts.
+- A public demo should use sample or fake PDFs because the app does not have user accounts yet.
+
+Use a durable VM folder or a persistent disk folder for app data. Example environment values:
+
+```bash
+DATABASE_FILE=/opt/corolla-fix-helper-data/corolla-fix-helper.db
+UPLOADS_DIR=/opt/corolla-fix-helper-data/uploads
+MAX_UPLOAD_SIZE_MB=20
+PORT=4000
+```
+
+Typical manual VM setup:
+
+```bash
+npm run install:all
+npm run build
+npm start
+```
+
+Production demo details:
+
+- build command: `npm run build`
+- start command: `npm start`
+- health check path: `/api/health`
+- internal Node port: `4000`, or another value set with `PORT`
+- optional web proxy: Nginx can forward public web traffic to `http://localhost:4000`
+
+Cloud Run is not the preferred V1 demo target for this app because the current design uses a local SQLite file and local uploaded PDF files. Cloud Run can be considered later only if storage is redesigned, for example with Cloud SQL for the database and object storage for PDFs.
 
 ## Environment values
 
@@ -257,26 +303,20 @@ Important values:
 - `DATABASE_FILE=./server/data/corolla-fix-helper.db` sets the SQLite database file path
 - `UPLOADS_DIR=./server/uploads` sets where uploaded PDFs are stored
 - `MAX_UPLOAD_SIZE_MB=20` sets the PDF upload size limit
-- `NODE_ENV=production` switches the server into production mode (serves the built client)
+- `NODE_ENV=production` marks the app as a production run for deployment tooling
 - `CORS_ORIGIN=http://localhost:5173` sets the allowed CORS origin for the API
 
 ## Deploying to GCP
 
 A multi-stage `Dockerfile` at the repo root produces a production image.
 It builds the React client, prunes the server's devDependencies, and
-runs `node server/src/index.js` on port 4000 from a `node:22-bookworm-slim`
+runs `node server/src/index.js` on port 4000 from a `node:24-bookworm-slim`
 base.
 
-A typical GCP deploy goes through Cloud Build and Cloud Run:
+The recommended V1 demo target is still a Compute Engine VM with persistent local storage. The Dockerfile is useful if you want to build a container image for that VM or for later GCP experiments.
 
 ```bash
 gcloud builds submit --tag gcr.io/<project>/corolla-fix-helper
-gcloud run deploy corolla-fix-helper \
-  --image gcr.io/<project>/corolla-fix-helper \
-  --set-env-vars NODE_ENV=production,CORS_ORIGIN=https://<your-domain>
 ```
 
-Persistent state (the SQLite database and uploaded PDFs) needs a
-mounted volume — Cloud Run is stateless, so use a Cloud Storage FUSE
-mount, a Filestore volume, or migrate to a managed database before
-relying on remote uploads.
+Persistent state means the SQLite database file and uploaded PDFs need to live on durable VM storage. Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.

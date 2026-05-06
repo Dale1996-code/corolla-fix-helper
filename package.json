@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "description": "Local-first repair helper for a 2009 Toyota Corolla LE 1.8L",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm --prefix server run dev",
@@ -18,8 +21,5 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
-  },
-  "engines": {
-    "node": ">=22.5.0"
   }
 }

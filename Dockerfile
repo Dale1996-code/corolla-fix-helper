@@ -1,4 +1,4 @@
-FROM node:22-bookworm AS build
+FROM node:24-bookworm AS build
 WORKDIR /app
 
 ENV NPM_CONFIG_AUDIT=false \
@@ -20,7 +20,7 @@ RUN npm run build:client
 RUN npm prune --omit=dev --prefix server
 
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

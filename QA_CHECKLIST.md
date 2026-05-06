@@ -142,3 +142,36 @@ Check that:
 - the build finishes without errors
 - the backend tests pass
 - the frontend tests pass
+
+## 9) Production demo smoke test
+
+Use this before a V1 demo deployment.
+
+On a Google Cloud Compute Engine VM, use Node.js 24 and configure a persistent data folder. Example environment values:
+
+```bash
+DATABASE_FILE=/opt/corolla-fix-helper-data/corolla-fix-helper.db
+UPLOADS_DIR=/opt/corolla-fix-helper-data/uploads
+MAX_UPLOAD_SIZE_MB=20
+PORT=4000
+```
+
+From the project root, run:
+
+```bash
+npm run install:all
+npm run build
+npm start
+```
+
+Check that:
+
+- the app opens at `http://localhost:4000`
+- the health check returns OK at `http://localhost:4000/api/health`
+- a frontend route still loads the app after refreshing the browser
+- you can upload a sample PDF
+- you can open that sample PDF from the app
+- you can search for text from that sample PDF after extraction finishes
+- after stopping and restarting the app with the same `DATABASE_FILE` and `UPLOADS_DIR`, the uploaded document record and PDF are still there
+
+For a public demo, use sample or fake PDFs only. The app does not have user accounts yet.

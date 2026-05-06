@@ -6,6 +6,8 @@ This file explains the main SQLite tables used by the current app.
 The app is local-first and currently centered on one vehicle:
 - 2009 Toyota Corolla LE 1.8L
 
+For V1, SQLite remains local-file storage. That means the database is one file on disk. In a VM demo, `DATABASE_FILE` should point to a persistent folder so the data survives app restarts.
+
 The current v1 workflow is built around:
 - imported repair documents
 - symptom tracking
@@ -58,6 +60,8 @@ Current v1 use:
 - track page count
 - mark favorites
 - open the stored PDF from the app
+
+The actual uploaded PDF files live in the configured uploads folder. In a VM demo, `UPLOADS_DIR` should also point to persistent storage.
 
 Important note:
 - favorites are the only saved-document flag supported in the current V1 workflow

@@ -22,6 +22,7 @@ The app is meant to help one person keep repair information in one local workspa
 - One vehicle only
 - Local-first storage
 - No cloud dependency
+- V1 demo deployment can run on one Google Cloud Compute Engine VM using persistent local storage
 - Real repair usefulness over extra features
 - Beginner-friendly code and structure
 
@@ -99,6 +100,7 @@ The app is meant to help one person keep repair information in one local workspa
 - AI chat
 - embeddings or vector database
 - cloud sync
+- Cloud Run deployment with the current local SQLite and upload storage design
 - completed OCR pipeline beyond the current PDF extraction attempt
 - multi-vehicle support
 - auth
@@ -138,7 +140,10 @@ The app is meant to help one person keep repair information in one local workspa
 Version 1 is useful if it is:
 
 - fast to run on one local machine
+- clear enough to demo from one VM with persistent local storage
 - easy to understand
 - good at storing and reopening repair PDFs
 - good at tracking symptoms, procedures, and notes in one place
 - honest about current local-only limits
+
+For any public demo, use sample or fake PDFs until user accounts and access control are added.

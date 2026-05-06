@@ -1,5 +1,5 @@
+import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import { config } from "./config.js";
@@ -13,14 +13,45 @@ import { searchRouter } from "./routes/search.js";
 import { settingsRouter } from "./routes/settings.js";
 import { symptomsRouter } from "./routes/symptoms.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..", "..");
-const clientDistDir = path.join(projectRoot, "client", "dist");
+function addApiInfoRoute(app) {
+  app.get("/api", (_request, response) => {
+    response.json({
+      name: "Corolla Fix Helper API",
+      version: "0.1.0",
+    });
+  });
+}
 
-export function createApp() {
+function addFrontendRoutes(app, clientDistDir) {
+  const indexFile = path.join(clientDistDir, "index.html");
+
+  if (!fs.existsSync(indexFile)) {
+    app.get("/", (_request, response) => {
+      response.json({
+        name: "Corolla Fix Helper API",
+        version: "0.1.0",
+        frontend: "Run npm run build before npm start to serve the built app.",
+      });
+    });
+    return;
+  }
+
+  app.use(express.static(clientDistDir));
+
+  app.use((request, response, next) => {
+    if (request.method !== "GET" || request.path.startsWith("/api")) {
+      return next();
+    }
+
+    return response.sendFile(indexFile);
+  });
+}
+
+export function createApp(options = {}) {
   initializeDatabase();
 
   const app = express();
+  const clientDistDir = options.clientDistDir || config.clientDistDir;
 
   app.use(
     cors({
@@ -29,17 +60,7 @@ export function createApp() {
   );
   app.use(express.json());
 
-  const isProduction = process.env.NODE_ENV === "production";
-
-  if (!isProduction) {
-    app.get("/", (_request, response) => {
-      response.json({
-        name: "Corolla Fix Helper API",
-        version: "0.1.0",
-      });
-    });
-  }
-
+  addApiInfoRoute(app);
   app.use("/api/health", healthRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/documents", documentsRouter);
@@ -49,13 +70,7 @@ export function createApp() {
   app.use("/api/notes", notesRouter);
   app.use("/api/settings", settingsRouter);
 
-  if (isProduction) {
-    app.use(express.static(clientDistDir));
-
-    app.get(/^\/(?!api\/).*/, (_request, response) => {
-      response.sendFile(path.join(clientDistDir, "index.html"));
-    });
-  }
+  addFrontendRoutes(app, clientDistDir);
 
   return app;
 }

@@ -16,6 +16,7 @@ export const config = {
   clientPort,
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
+  clientDistDir: path.join(projectRoot, "client", "dist"),
   databaseFile:
     process.env.DATABASE_FILE ||
     path.join(projectRoot, "server", "data", "corolla-fix-helper.db"),
