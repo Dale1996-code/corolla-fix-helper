@@ -313,6 +313,9 @@ It builds the React client, prunes the server's devDependencies, and
 runs `node server/src/index.js` on port 4000 from a `node:24-bookworm-slim`
 base.
 
+For the full beginner-friendly deployment checklist, use
+[`docs/GCE_DEPLOYMENT_RUNBOOK.md`](docs/GCE_DEPLOYMENT_RUNBOOK.md).
+
 The recommended V1 demo target is still a Google Compute Engine VM with persistent local storage. That means the SQLite database file and uploaded PDFs should live in a VM folder or persistent disk folder that is kept outside the container.
 
 Create the Artifact Registry Docker repository once, then build the image:
