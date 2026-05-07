@@ -23,7 +23,7 @@ const emptyBackupExport = {
   supported: false,
   path: "",
   message:
-    "Backup and export are not wired up yet, so there is no working backup folder setting to edit in the browser.",
+    "Backup export details are not available from the server yet. Restart the app and try again.",
 };
 
 function listToTextareaValue(items) {

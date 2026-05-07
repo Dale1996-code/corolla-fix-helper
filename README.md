@@ -306,17 +306,58 @@ Important values:
 - `NODE_ENV=production` marks the app as a production run for deployment tooling
 - `CORS_ORIGIN=http://localhost:5173` sets the allowed CORS origin for the API
 
-## Deploying to GCP
+## Docker on Google Compute Engine
 
 A multi-stage `Dockerfile` at the repo root produces a production image.
 It builds the React client, prunes the server's devDependencies, and
 runs `node server/src/index.js` on port 4000 from a `node:24-bookworm-slim`
 base.
 
-The recommended V1 demo target is still a Compute Engine VM with persistent local storage. The Dockerfile is useful if you want to build a container image for that VM or for later GCP experiments.
+For the full beginner-friendly deployment checklist, use
+[`docs/GCE_DEPLOYMENT_RUNBOOK.md`](docs/GCE_DEPLOYMENT_RUNBOOK.md).
+
+The recommended V1 demo target is still a Google Compute Engine VM with persistent local storage. That means the SQLite database file and uploaded PDFs should live in a VM folder or persistent disk folder that is kept outside the container.
+
+Create the Artifact Registry Docker repository once, then build the image:
 
 ```bash
-gcloud builds submit --tag gcr.io/<project>/corolla-fix-helper
+gcloud artifacts repositories create corolla-fix-helper \
+  --repository-format=docker \
+  --location=us-central1 \
+  --description="Corolla Fix Helper Docker images"
+
+gcloud builds submit --tag us-central1-docker.pkg.dev/<project-id>/corolla-fix-helper/corolla-fix-helper:latest
 ```
 
-Persistent state means the SQLite database file and uploaded PDFs need to live on durable VM storage. Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.
+On the Compute Engine VM, let Docker pull from Artifact Registry and create the persistent data folder:
+
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
+sudo mkdir -p /opt/corolla-fix-helper-data/uploads
+```
+
+Run the container with the required deployment values:
+
+```bash
+sudo docker run -d \
+  --name corolla-fix-helper \
+  --restart unless-stopped \
+  -p 4000:4000 \
+  -e DATABASE_FILE=/opt/corolla-fix-helper-data/corolla-fix-helper.db \
+  -e UPLOADS_DIR=/opt/corolla-fix-helper-data/uploads \
+  -e MAX_UPLOAD_SIZE_MB=20 \
+  -e PORT=4000 \
+  -v /opt/corolla-fix-helper-data:/opt/corolla-fix-helper-data \
+  us-central1-docker.pkg.dev/<project-id>/corolla-fix-helper/corolla-fix-helper:latest
+```
+
+The `-v` line is a bind mount. In plain English, it makes the VM data folder available inside the container so the database and uploaded PDFs are not lost when the container is replaced.
+
+Before relying on this for a real demo:
+
+- use `--restart unless-stopped` or a `systemd` service so the app starts again after a VM reboot
+- put HTTPS in front of the app before public sharing; a common setup is Nginx forwarding traffic to `http://localhost:4000`
+- use fake or sample PDFs unless user accounts and access control are added later
+- configure VM disk snapshots or another backup plan before trusting real repair data to the VM
+
+Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.
