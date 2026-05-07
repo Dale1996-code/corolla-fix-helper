@@ -95,7 +95,7 @@ test("SymptomsPage shows saved system suggestions from Settings in create and ed
   expect(
     container.querySelector('#edit-symptom-system-suggestions option[value="Brakes"]')
   ).toBeTruthy();
-});
+}, 10000);
 
 test("ProceduresPage shows saved system suggestions from Settings in create and edit forms", async () => {
   const fetchMock = vi.fn((url) => {

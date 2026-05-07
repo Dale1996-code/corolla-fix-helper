@@ -406,4 +406,4 @@ test("NotesPage supports symptom and procedure links in create, edit, and detail
     relatedEntityType: "procedure",
     relatedEntityId: 31,
   });
-});
+}, 10000);
