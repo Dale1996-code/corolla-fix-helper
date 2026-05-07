@@ -878,9 +878,9 @@ SQLite database or uploaded PDFs.
 
 ## References
 
-- Google Artifact Registry Docker quickstart: https://cloud.google.com/artifact-registry/docs/docker/store-docker-container-images
-- Google Artifact Registry Docker authentication: https://cloud.google.com/artifact-registry/docs/docker/authentication
-- Google Compute Engine VM creation: https://cloud.google.com/compute/docs/instances/create-start-instance
-- Google Cloud firewall rules: https://cloud.google.com/firewall/docs/using-firewalls
-- Google Compute Engine snapshots: https://cloud.google.com/compute/docs/disks/create-snapshots
-- Google Compute Engine snapshot schedules: https://cloud.google.com/compute/docs/disks/scheduled-snapshots
+- [Google Artifact Registry Docker quickstart](https://cloud.google.com/artifact-registry/docs/docker/store-docker-container-images)
+- [Google Artifact Registry Docker authentication](https://cloud.google.com/artifact-registry/docs/docker/authentication)
+- [Google Compute Engine VM creation](https://cloud.google.com/compute/docs/instances/create-start-instance)
+- [Google Cloud firewall rules](https://cloud.google.com/firewall/docs/using-firewalls)
+- [Google Compute Engine snapshots](https://cloud.google.com/compute/docs/disks/create-snapshots)
+- [Google Compute Engine snapshot schedules](https://cloud.google.com/compute/docs/disks/scheduled-snapshots)
