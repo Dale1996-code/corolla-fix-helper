@@ -44,9 +44,7 @@ It also gives quick links into the main parts of the app.
 
 ### Documents
 
-The Documents area covers the main document workflow. Some end-to-end
-flows are still being stabilized; the area should be considered fully
-working only once `npm run test` is consistently green.
+The Documents area covers the main document workflow.
 
 What it can do:
 
@@ -163,7 +161,7 @@ Settings now includes a manual **Export backup (.tar.gz)** action. It downloads 
 
 - `client`: React + Vite + Tailwind CSS
 - `server`: Node.js + Express
-- `runtime`: Node.js 24
+- `runtime`: Node.js >=24 <25
 - `database`: SQLite
 - `file storage`: local `server/uploads` folder
 
@@ -183,7 +181,7 @@ Open a terminal in the project folder, then run:
 npm run install:all
 ```
 
-Use Node.js 24 for this app. That matters because the backend uses `node:sqlite`, which is Node's built-in SQLite feature.
+Use Node.js >=24 <25 for this app. That matters because the backend uses `node:sqlite` with `DatabaseSync`, and backend validation is not supported on Node 20.
 
 What this does:
 
@@ -254,9 +252,27 @@ Manual QA checklist:
 
 - `QA_CHECKLIST.md`
 
+
+## V1 readiness status
+
+Latest validation in this repo was run on Node.js `v24.15.0` with npm `11.4.2`.
+The root install, build, and automated test commands completed successfully:
+
+```bash
+npm run install:all
+npm run build
+npm run test
+npm run test:server
+npm run test:client
+```
+
+No repo lint or typecheck scripts are currently defined. During install, npm reported one moderate client dependency audit finding; that audit finding did not block the V1 build or automated tests.
+
+Based on the commands above, V1 is ready to tag under Node.js >=24 <25. Do not tag V1 from a Node 20 validation run, because the backend depends on `node:sqlite` with `DatabaseSync`.
+
 ## Recommended V1 demo deployment
 
-For a public V1 demo, use a Google Cloud Compute Engine VM with Node.js 24.
+For a public V1 demo, use a Google Cloud Compute Engine VM with Node.js >=24 <25.
 
 Plain-English storage notes:
 

@@ -147,7 +147,7 @@ Check that:
 
 Use this before a V1 demo deployment.
 
-On a Google Cloud Compute Engine VM, use Node.js 24 and configure a persistent data folder. Example environment values:
+On a Google Cloud Compute Engine VM, use Node.js >=24 <25 and configure a persistent data folder. Node 20 is not supported for backend validation because the backend uses `node:sqlite` with `DatabaseSync`. Example environment values:
 
 ```bash
 DATABASE_FILE=/opt/corolla-fix-helper-data/corolla-fix-helper.db
