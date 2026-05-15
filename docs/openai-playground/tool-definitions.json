@@ -1,0 +1,353 @@
+[
+  {
+    "name": "get_dashboard",
+    "description": "Returns a summary of the vehicle profile, counts of all record types (documents, symptoms, procedures, notes), active/open symptoms, recent activity, and favorite documents. Call this when the user asks for a status overview, a summary of what's in the database, or what issues are currently open.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/dashboard"
+  },
+  {
+    "name": "get_vehicle_info",
+    "description": "Returns the stored vehicle profile (year, make, model, trim, engine) and current app settings including available document systems and document types. Call this when the user asks about the vehicle details or what categories/systems are available.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/settings"
+  },
+  {
+    "name": "list_documents",
+    "description": "Returns all documents in the database (title, system, document type, source, extraction status, is_favorite, page count, notes). Does not return full extracted text — use search_documents to find documents by content. Use this when the user wants to browse the document library.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/documents"
+  },
+  {
+    "name": "search_documents",
+    "description": "Searches documents by keyword across title, extracted PDF text, notes, source, and subsystem fields. Optionally filter by system or document type. Returns matched documents with relevance score and text snippets where the keyword was found. Use this when the user asks about a specific topic, part, or repair procedure that might be covered in an uploaded manual.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "Keyword or phrase to search for across document title, extracted text, notes, and source fields."
+        },
+        "system": {
+          "type": "string",
+          "description": "Filter by vehicle system. Common values: Engine, Brakes, Electrical, Cooling, Drivetrain, Suspension, Steering, HVAC, Body, Interior. Leave empty to search all systems.",
+          "enum": ["Engine", "Brakes", "Electrical", "Cooling", "Drivetrain", "Suspension", "Steering", "HVAC", "Body", "Interior"]
+        },
+        "documentType": {
+          "type": "string",
+          "description": "Filter by document type. Common values: Repair Manual, Wiring Diagram, Inspection, Maintenance Schedule, Procedure, Reference. Leave empty to search all types.",
+          "enum": ["Repair Manual", "Wiring Diagram", "Inspection", "Maintenance Schedule", "Procedure", "Reference"]
+        },
+        "favorite": {
+          "type": "boolean",
+          "description": "If true, only return documents marked as favorite."
+        },
+        "sort": {
+          "type": "string",
+          "description": "Sort order for results.",
+          "enum": ["relevance", "newest", "title"],
+          "default": "relevance"
+        }
+      },
+      "required": ["q"]
+    },
+    "_endpoint": "GET /api/search/documents?q={q}&system={system}&documentType={documentType}&favorite={favorite}&sort={sort}"
+  },
+  {
+    "name": "list_symptoms",
+    "description": "Returns all symptoms stored in the database, each with title, description, system, suspected causes, confidence, severity, status (open/monitoring/resolved), notes, and linked documents. Use this when the user wants to see all known issues or problems with the car.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/symptoms"
+  },
+  {
+    "name": "search_symptoms",
+    "description": "Searches symptoms by keyword across title, description, suspected causes, and notes. Optionally filter by system or status. Returns matched symptoms sorted by relevance. Use this when the user describes a car problem and wants to know if it's already been logged.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "Keyword or phrase to search for. Example: 'rough idle', 'brake squeal', 'check engine light'."
+        },
+        "system": {
+          "type": "string",
+          "description": "Filter results to a specific vehicle system.",
+          "enum": ["Engine", "Brakes", "Electrical", "Cooling", "Drivetrain", "Suspension", "Steering", "HVAC", "Body", "Interior"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Filter by symptom status.",
+          "enum": ["open", "monitoring", "resolved"]
+        },
+        "sort": {
+          "type": "string",
+          "description": "Sort order for results.",
+          "enum": ["relevance", "newest", "title"],
+          "default": "relevance"
+        }
+      },
+      "required": ["q"]
+    },
+    "_endpoint": "GET /api/search/symptoms?q={q}&system={system}&status={status}&sort={sort}"
+  },
+  {
+    "name": "list_procedures",
+    "description": "Returns all repair procedures stored in the database, each with title, system, difficulty level, tools needed, parts needed, safety notes, steps, confidence, status, and linked documents. Use this when the user wants to browse available repair guides.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/procedures"
+  },
+  {
+    "name": "search_procedures",
+    "description": "Searches procedures by keyword across title, steps, tools needed, parts needed, and notes. Optionally filter by system or difficulty. Returns matched procedures sorted by relevance. Use this when the user wants to know how to do a specific repair or maintenance task.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "Keyword or phrase to search for. Example: 'oil change', 'replace brake pads', 'thermostat'."
+        },
+        "system": {
+          "type": "string",
+          "description": "Filter results to a specific vehicle system.",
+          "enum": ["Engine", "Brakes", "Electrical", "Cooling", "Drivetrain", "Suspension", "Steering", "HVAC", "Body", "Interior"]
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Filter by difficulty level.",
+          "enum": ["beginner", "intermediate", "advanced"]
+        },
+        "sort": {
+          "type": "string",
+          "description": "Sort order for results.",
+          "enum": ["relevance", "newest", "title"],
+          "default": "relevance"
+        }
+      },
+      "required": ["q"]
+    },
+    "_endpoint": "GET /api/search/procedures?q={q}&system={system}&difficulty={difficulty}&sort={sort}"
+  },
+  {
+    "name": "list_notes",
+    "description": "Returns all notes in the database, each with title, body/content, note type (general/observation/repair_log/reminder), and any linked record (document, symptom, or procedure). Use this when the user wants to review their logged observations or repair history.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "_endpoint": "GET /api/notes"
+  },
+  {
+    "name": "search_notes",
+    "description": "Searches notes by keyword across title and body/content. Optionally filter by note type or related entity type. Use this when the user wants to find a specific logged observation, repair log entry, or reminder.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "Keyword or phrase to search for across note title and content."
+        },
+        "noteType": {
+          "type": "string",
+          "description": "Filter by note type.",
+          "enum": ["general", "observation", "repair_log", "reminder"]
+        },
+        "relatedEntityType": {
+          "type": "string",
+          "description": "Filter by the type of record this note is linked to.",
+          "enum": ["none", "document", "symptom", "procedure"]
+        },
+        "sort": {
+          "type": "string",
+          "description": "Sort order for results.",
+          "enum": ["relevance", "newest", "title"],
+          "default": "relevance"
+        }
+      },
+      "required": ["q"]
+    },
+    "_endpoint": "GET /api/search/notes?q={q}&noteType={noteType}&relatedEntityType={relatedEntityType}&sort={sort}"
+  },
+  {
+    "name": "create_symptom",
+    "description": "Creates a new symptom record in the database. Use this when the user wants to log a new problem or issue with the car. Always confirm the title and system with the user before calling this tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short, descriptive name for the symptom. Example: 'Rough idle at cold start', 'Brake squeal on left front'."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the symptom including when it occurs, under what conditions, and any relevant observations."
+        },
+        "system": {
+          "type": "string",
+          "description": "The vehicle system this symptom belongs to.",
+          "enum": ["Engine", "Brakes", "Electrical", "Cooling", "Drivetrain", "Suspension", "Steering", "HVAC", "Body", "Interior"]
+        },
+        "suspectedCauses": {
+          "type": "string",
+          "description": "Freeform text listing possible root causes. Example: 'Dirty IAC valve, vacuum leak, fouled spark plugs'."
+        },
+        "confidence": {
+          "type": "string",
+          "description": "Confidence level in the diagnosis so far.",
+          "enum": ["low", "medium", "high"],
+          "default": "low"
+        },
+        "severity": {
+          "type": "string",
+          "description": "How severe or urgent this symptom is. Freeform text, e.g., 'minor', 'moderate', 'safety-critical'."
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status of this symptom.",
+          "enum": ["open", "monitoring", "resolved"],
+          "default": "open"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Any additional context, repair history, or follow-up reminders related to this symptom."
+        }
+      },
+      "required": ["title"]
+    },
+    "_endpoint": "POST /api/symptoms",
+    "_body": "{ title, description, system, suspectedCauses, notes, confidence, status }"
+  },
+  {
+    "name": "update_symptom_status",
+    "description": "Updates the status and/or notes of an existing symptom by its ID. Use this when the user says a problem has been resolved, is being monitored, or they want to add a note to an existing symptom. You must look up the symptom ID first using list_symptoms or search_symptoms.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "The numeric ID of the symptom to update. Obtained from list_symptoms or search_symptoms results."
+        },
+        "status": {
+          "type": "string",
+          "description": "New status to set.",
+          "enum": ["open", "monitoring", "resolved"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Updated or appended notes for this symptom."
+        }
+      },
+      "required": ["id"]
+    },
+    "_endpoint": "PUT /api/symptoms/{id}",
+    "_body": "{ status, notes } — only include fields being updated"
+  },
+  {
+    "name": "create_procedure",
+    "description": "Creates a new repair procedure record in the database. Use this when the user wants to document a repair process for future reference. Always confirm the title and system before calling.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Name of the repair procedure. Example: 'Replace front brake pads', 'Engine oil and filter change'."
+        },
+        "system": {
+          "type": "string",
+          "description": "The vehicle system this procedure addresses.",
+          "enum": ["Engine", "Brakes", "Electrical", "Cooling", "Drivetrain", "Suspension", "Steering", "HVAC", "Body", "Interior"]
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Skill level required to perform this procedure.",
+          "enum": ["beginner", "intermediate", "advanced"],
+          "default": "intermediate"
+        },
+        "toolsNeeded": {
+          "type": "string",
+          "description": "Comma-separated list of tools required. Example: 'Floor jack, jack stands, 14mm socket, torque wrench'."
+        },
+        "partsNeeded": {
+          "type": "string",
+          "description": "Comma-separated list of parts/consumables required. Example: 'Brake pads (Akebono ACT1222), brake cleaner, anti-squeal paste'."
+        },
+        "safetyNotes": {
+          "type": "string",
+          "description": "Critical safety warnings for this procedure. Example: 'Always use jack stands — never work under a car supported only by a floor jack'."
+        },
+        "steps": {
+          "type": "string",
+          "description": "Numbered step-by-step instructions as plain text or markdown. Each step on a new line prefixed with a number."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional tips, torque specs from manuals, common pitfalls, or cross-references."
+        },
+        "confidence": {
+          "type": "string",
+          "description": "How confident you are that these steps are correct and complete.",
+          "enum": ["low", "medium", "high"],
+          "default": "medium"
+        }
+      },
+      "required": ["title"]
+    },
+    "_endpoint": "POST /api/procedures",
+    "_body": "{ title, system, difficulty, toolsNeeded, partsNeeded, safetyNotes, steps, notes, confidence }"
+  },
+  {
+    "name": "create_note",
+    "description": "Creates a new freeform note in the database. Use this when the user wants to log an observation, record that a repair was done, set a reminder, or save a general note about the car.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short descriptive title for the note. Example: 'Oil change done 5/10/2026', 'Check tire pressure next week'."
+        },
+        "content": {
+          "type": "string",
+          "description": "The body/content of the note. Can be as long as needed."
+        },
+        "noteType": {
+          "type": "string",
+          "description": "Category for this note.",
+          "enum": ["general", "observation", "repair_log", "reminder"],
+          "default": "general"
+        },
+        "relatedEntityType": {
+          "type": "string",
+          "description": "If this note relates to a specific record, the type of that record.",
+          "enum": ["none", "document", "symptom", "procedure"],
+          "default": "none"
+        },
+        "relatedEntityId": {
+          "type": "integer",
+          "description": "The numeric ID of the related document, symptom, or procedure. Required if relatedEntityType is not 'none'."
+        }
+      },
+      "required": ["title"]
+    },
+    "_endpoint": "POST /api/notes",
+    "_body": "{ title, content, noteType, relatedEntityType, relatedEntityId }"
+  }
+]
