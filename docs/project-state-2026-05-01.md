@@ -1,112 +1,139 @@
-# Corolla Fix Helper Project State Review (May 1, 2026)
+# Corolla Fix Helper Project State Review (updated May 27, 2026)
 
 ## Purpose
+This is the repo-owned status artifact for the current project state.
 
-This document summarizes the current observed project state, what is still missing or broken, what should be done next, and the tests/checks that should be run.
+The Google Drive doc `Corolla Fix Helper: Master Build Plan` is useful as a planning checklist, but some checked boxes in that doc now overstate what this repo actually implements. A checked box means the plan says "done"; it does not prove the code exists here.
 
-## Current state snapshot
+This file should be used before starting new work so the next task begins from the real repo state.
 
-- Product scope and docs position the app as a polished local-first V1 with Dashboard, Documents, Search, Symptoms, Procedures, Notes, and Settings.
-- Core build command currently completes successfully.
-- Automated tests are currently not green end-to-end.
+## Sources checked
+- Live repo folder: `C:\Users\daleb\source\corolla-fix-helper`
+- Google Drive doc: `Corolla Fix Helper: Master Build Plan`
+- Drive doc id: `1r5RUDfz_o-UOB4v9FhtRQGbTQ-VhYNOGSXsHeipc_U4`
+- Current date of this pass: May 27, 2026
 
-## What's still missing or broken
+## Current repo truth
+- The app is still a local-first helper for one vehicle: a 2009 Toyota Corolla LE 1.8L.
+- The main app pages exist: Dashboard, Documents, Document Search, Symptoms, Procedures, Notes, and Settings.
+- The backend routes exist for health, dashboard, documents, document search, symptoms, procedures, notes, and settings.
+- Documents can be uploaded as PDFs, stored locally, edited for metadata, marked favorite, and opened again from the app.
+- PDF text extraction is attempted during upload, and extraction status is stored.
+- Document Search is implemented, but it searches imported documents only.
+- Symptoms can be created, edited, deleted, filtered, sorted, and linked to documents.
+- Procedures can be created, edited, deleted, and linked to documents.
+- Notes can be created, edited, deleted, filtered, and linked to a document, symptom, or procedure.
+- Settings can edit the vehicle profile, edit document default suggestions, and show local runtime info.
+- `npm run build` and `npm run test` pass when run outside the Codex sandbox.
 
-### 1) Server test suite is currently blocked by a syntax error
+## Biggest misleading claims in the Drive build plan
 
-- `npm run test` fails during `npm run test:server`.
-- Failure is a parsing error in `server/src/routes/documents.js`:
-  - `SyntaxError: Unexpected token 'if'`
-  - Reported around line 279.
-- Impact: backend verification cannot complete, and root `npm run test` fails.
+### 1) Repair Session is checked off, but it is not implemented
+Drive plan claim:
+- `[x] Add "Repair Session" feature (grouping active symptoms and docs for a specific garage day).`
 
-### 2) Client test suite has failing tests
+Live repo truth:
+- There is no Repair Session page.
+- There is no sidebar navigation item for Repair Session.
+- There is no `/api/repair-sessions` route.
+- There is no `repair_sessions` database table.
+- There is no client component or workflow that groups active symptoms and documents for a garage day.
 
-Observed failures include:
+Plain English:
+- The plan says this feature is finished, but the repo has no working Repair Session feature yet.
 
-- `SettingsPage loads settings and saves vehicle changes`
-  - Error: `createObjectURL does not exist`
-- `DocumentsPage confirms before deleting and removes document after success`
-  - Error: unable to find button "Delete document"
-- `DocumentsPage allows re-running extraction from document details`
-  - Error: unable to find button "Re-run extraction"
+### 2) Backup/export is checked off, but it is not implemented
+Drive plan claim:
+- `[x] Implement a simple database backup/export option.`
 
-Impact:
+Live repo truth:
+- `server/src/routes/settings.js` returns `backupExport.supported: false`.
+- The Settings page shows that backup and export are not wired up yet.
+- There is no working backup/export endpoint or browser action.
 
-- Frontend automated test confidence is reduced.
+Plain English:
+- The app is honest in code: backup/export is not ready. The Drive checklist is the misleading part.
 
-- Likely mix of test-environment mocking gaps and UI/test mismatch.
+### 3) Reprocess document is checked off, but it is not implemented
+Drive plan claim:
+- `[x] Add "reprocess document" action.`
 
-### 3) JSX warning in Documents page should be cleaned up
+Live repo truth:
+- The documents API has routes to list documents, upload a PDF, open a stored PDF, and edit metadata.
+- There is no route that re-runs extraction on an existing document.
+- The Documents page does not expose a reprocess or re-run extraction button.
 
-- Build and tests emit a Vite/esbuild warning in `client/src/pages/DocumentsPage.jsx`:
-  - `The character ">" is not valid inside a JSX element`
-- Build still succeeds, but warning indicates malformed JSX that may cause unstable render/test behavior.
+Plain English:
+- Text extraction happens when a PDF is first uploaded. There is not yet a way to click an existing document and re-run extraction.
 
-### 4) No explicit E2E/browser regression suite is present in active scripts
+### 4) Symptom-to-procedure linking is checked off, but it is not implemented
+Drive plan claims:
+- `[x] Create join tables: symptom_documents, procedure_documents, symptom_procedures.`
+- `[x] Link symptoms to documents and procedures.`
 
-- Current root scripts cover build and unit/integration style suites.
-- A manual QA checklist exists, but no automated end-to-end script is wired into root scripts.
+Live repo truth:
+- `symptom_documents` exists.
+- `procedure_documents` exists.
+- `symptom_procedures` does not exist in the live schema setup.
+- The Symptoms page links symptoms to documents only.
+- The Procedures page links procedures to documents only.
 
-## What is still needed (recommended next steps)
+Plain English:
+- Symptoms and procedures both connect to documents, but symptoms do not directly connect to procedures yet.
 
-### Priority 0: restore baseline reliability
+### 5) Search is useful, but narrower than the Drive plan says
+Drive plan claims:
+- Primary goal: search for a Corolla issue and get relevant documents, notes, and procedures.
+- `[x] Build search input (Search title, filename, tags, notes, extracted text).`
 
-1. Fix the server syntax error in `server/src/routes/documents.js` and re-run backend tests.
-2. Fix client test environment support for `URL.createObjectURL` (test setup polyfill or mock).
-3. Resolve Documents page JSX warning and any malformed markup.
-4. Align Documents page tests with rendered UI behavior (or vice versa) for delete and re-run extraction controls.
+Live repo truth:
+- `/api/search` searches documents only.
+- The Search page text clearly says it does not search symptoms, procedures, or notes yet.
+- The search code checks document title, original filename, document notes, and extracted text.
+- Tags tables exist, but tags are not part of the current search query.
 
-### Priority 1: re-establish green CI-equivalent local checks
+Plain English:
+- Search works for documents, but it is not a whole-app search yet.
 
-1. Ensure all these pass in sequence:
-   - `npm run build`
-   - `npm run test:server`
-   - `npm run test:client`
-   - `npm run test`
-2. Keep `npm run test` as the one-command confidence gate before merging.
+### 6) Batch import checklist items are not repo-proven
+Drive plan claims:
+- `[x] First Real Dataset Test: Import 25-75 high-value files...`
+- `[x] Import second batch of files.`
 
-### Priority 2: improve regression safety
+Live repo truth:
+- The app supports one-at-a-time PDF upload.
+- There is no repo-owned batch import workflow or status record proving those dataset milestones.
+- Local uploaded files may exist in `server/uploads`, but that is runtime data, not a reliable code feature or project status checkpoint.
 
-1. Add a minimal automated E2E smoke flow (if desired scope allows):
-   - app starts
-   - health endpoint responds
-   - basic navigation to each top-level page
-2. Keep `QA_CHECKLIST.md` as required manual acceptance for data-linking flows (documents/symptoms/procedures/notes).
+Plain English:
+- The repo can store uploaded PDFs, but the checked batch-import milestones are not proven by the repo itself.
 
-## Tests and checks that should be run
+## What should happen next
+Use the Drive build plan as historical planning context only.
 
-### Core commands (root)
+For future implementation work, treat these as not done unless a new task proves or builds them:
+- Repair Session feature
+- backup/export
+- reprocess document action
+- direct symptom-to-procedure linking
+- whole-app search across documents, symptoms, procedures, and notes
+- tag search
+- repo-owned batch import status or tooling
 
-1. `npm run build`
-2. `npm run test:server`
-3. `npm run test:client`
-4. `npm run test`
+## Verification commands and checks used
 
-### Optional targeted debug runs
+Run from the repo root:
 
-- `node --test server/test/app.test.js`
-- `npm --prefix client run test -- src/pages/SettingsAndSymptoms.test.jsx`
-- `npm --prefix client run test -- src/pages/DocumentsPage.test.jsx`
+```powershell
+cd C:\Users\daleb\source\corolla-fix-helper
+rg --files
+rg -n "session|repair session|Repair Session|repair_sessions|symptom_procedures|backup|export|reprocess|Re-run" -S .
+npm run build
+npm run test
+```
 
-### Manual acceptance checks
-
-Run through `QA_CHECKLIST.md`, with extra attention to:
-
-- Settings backup export flow.
-
-- Document delete cleanup across linked symptoms/procedures/notes.
-
-- Document extraction re-run feedback.
-
-- Notes linked-item details for document/symptom/procedure links.
-
-## Commands used for this assessment
-
-- `npm run test`
-- `npm run build`
-- `npm run test:client`
-- `sed -n '1,220p' README.md`
-- `sed -n '1,260p' ROADMAP.md`
-- `sed -n '1,260p' QA_CHECKLIST.md`
-- `cat package.json`
+Important verification notes:
+- `npm run build` passed outside the Codex sandbox.
+- `npm run test` passed outside the Codex sandbox.
+- The first sandboxed build/test attempt hit a Windows `Access is denied` error while loading `client/vite.config.js`; rerunning outside the sandbox passed, so that looked like an environment issue, not a repo failure.
+- Git also printed a warning about `C:\Users\daleb/.config/git/ignore` permission access. That warning is outside this repo and was not treated as a Corolla Fix Helper code problem.
