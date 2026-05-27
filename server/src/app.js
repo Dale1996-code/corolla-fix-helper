@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { createAskRouter } from "./routes/ask.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { initializeDatabase } from "./initDatabase.js";
@@ -11,7 +12,7 @@ import { searchRouter } from "./routes/search.js";
 import { settingsRouter } from "./routes/settings.js";
 import { symptomsRouter } from "./routes/symptoms.js";
 
-export function createApp() {
+export function createApp({ askQuestion } = {}) {
   initializeDatabase();
 
   const app = express();
@@ -38,6 +39,7 @@ export function createApp() {
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/ask", createAskRouter({ askQuestion }));
 
   return app;
 }

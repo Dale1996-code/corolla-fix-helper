@@ -5,6 +5,7 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { db } from "../database.js";
 import { listDocuments } from "../services/documentService.js";
+import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
 import { extractPdfData } from "../services/pdfService.js";
 import {
   createStoredFilename,
@@ -238,9 +239,12 @@ documentsRouter.post("/upload", async (request, response) => {
         0
       );
 
+    const newDocumentId = Number(result.lastInsertRowid);
+    rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
+
     const documents = listDocuments();
     const newDocument = documents.find(
-      (document) => document.id === Number(result.lastInsertRowid)
+      (document) => document.id === newDocumentId
     );
 
     response.status(201).json({

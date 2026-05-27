@@ -13,6 +13,8 @@ export const config = {
   port: Number(process.env.PORT || 4000),
   clientPort: Number(process.env.CLIENT_PORT || 5173),
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
+  openAiApiKey: typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY : "",
+  openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   databaseFile:
     process.env.DATABASE_FILE ||
     path.join(projectRoot, "server", "data", "corolla-fix-helper.db"),
