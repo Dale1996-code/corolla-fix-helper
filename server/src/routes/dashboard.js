@@ -25,6 +25,38 @@ function getVehicleId() {
   return vehicle.id;
 }
 
+function getVehicleProfile() {
+  const vehicle = db
+    .prepare(
+      `
+      SELECT
+        id,
+        year,
+        make,
+        model,
+        trim,
+        engine
+      FROM vehicles
+      ORDER BY id ASC
+      LIMIT 1
+    `
+    )
+    .get();
+
+  if (!vehicle) {
+    throw new Error("No vehicle record exists yet.");
+  }
+
+  return {
+    id: vehicle.id,
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    trim: vehicle.trim || "",
+    engine: vehicle.engine || "",
+  };
+}
+
 function mapDocumentRow(row) {
   return {
     id: row.id,
@@ -300,7 +332,8 @@ function getSummaryCounts(vehicleId) {
 
 dashboardRouter.get("/", (_request, response) => {
   try {
-    const vehicleId = getVehicleId();
+    const vehicle = getVehicleProfile();
+    const vehicleId = vehicle.id;
     const summary = getSummaryCounts(vehicleId);
     const favoriteDocuments = listFavoriteDocuments(vehicleId, DASHBOARD_LIMITS.favorites);
     const recentDocuments = listRecentDocuments(vehicleId, DASHBOARD_LIMITS.recentDocuments);
@@ -311,6 +344,7 @@ dashboardRouter.get("/", (_request, response) => {
     const recentActivity = listRecentActivity(vehicleId, DASHBOARD_LIMITS.recentActivity);
 
     response.json({
+      vehicle,
       summary,
       favoriteDocuments,
       recentDocuments,

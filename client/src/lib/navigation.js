@@ -1,7 +1,7 @@
 export const navigationItems = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Documents", to: "/documents" },
-  { label: "Document Search", to: "/search" },
+  { label: "Search", to: "/search" },
   { label: "Symptoms", to: "/symptoms" },
   { label: "Procedures", to: "/procedures" },
   { label: "Notes", to: "/notes" },

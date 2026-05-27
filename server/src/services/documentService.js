@@ -1,27 +1,6 @@
 import { db } from "../database.js";
 
-function createTagsMap() {
-  const tagRows = db
-    .prepare(`
-      SELECT
-        document_tags.document_id,
-        tags.name
-      FROM document_tags
-      JOIN tags ON tags.id = document_tags.tag_id
-    `)
-    .all();
-
-  return tagRows.reduce((map, tagRow) => {
-    if (!map.has(tagRow.document_id)) {
-      map.set(tagRow.document_id, []);
-    }
-
-    map.get(tagRow.document_id).push(tagRow.name);
-    return map;
-  }, new Map());
-}
-
-function mapDocumentRow(row, tagsMap) {
+function mapDocumentRow(row) {
   return {
     id: row.id,
     title: row.title,
@@ -38,11 +17,9 @@ function mapDocumentRow(row, tagsMap) {
     extractionStatus: row.extraction_status,
     pageCount: row.page_count,
     isFavorite: Boolean(row.is_favorite),
-    isBookmarked: Boolean(row.is_bookmarked),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     vehicleLabel: `${row.year} ${row.make} ${row.model} ${row.trim}`,
-    tags: tagsMap.get(row.id) || [],
   };
 }
 
@@ -64,7 +41,6 @@ function getDocumentBaseQuery() {
       documents.extraction_status,
       documents.page_count,
       documents.is_favorite,
-      documents.is_bookmarked,
       documents.created_at,
       documents.updated_at,
       vehicles.year,
@@ -84,8 +60,7 @@ export function listDocuments() {
     `)
     .all();
 
-  const tagsMap = createTagsMap();
-  return rows.map((row) => mapDocumentRow(row, tagsMap));
+  return rows.map((row) => mapDocumentRow(row));
 }
 
 export function getDocumentFilterOptions() {
@@ -189,8 +164,8 @@ function buildMatchSnippet(row, query) {
   };
 }
 
-function mapSearchResultRow(row, tagsMap, query) {
-  const baseDocument = mapDocumentRow(row, tagsMap);
+function mapSearchResultRow(row, query) {
+  const baseDocument = mapDocumentRow(row);
   const matchSnippet = buildMatchSnippet(row, query);
 
   return {
@@ -301,7 +276,6 @@ export function searchDocuments({
         documents.extraction_status,
         documents.page_count,
         documents.is_favorite,
-        documents.is_bookmarked,
         documents.created_at,
         documents.updated_at,
         vehicles.year,
@@ -316,7 +290,5 @@ export function searchDocuments({
     `)
     .all(...params);
 
-  const tagsMap = createTagsMap();
-
-  return rows.map((row) => mapSearchResultRow(row, tagsMap, trimmedQuery));
+  return rows.map((row) => mapSearchResultRow(row, trimmedQuery));
 }

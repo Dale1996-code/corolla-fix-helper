@@ -9,7 +9,7 @@ Corolla Fix Helper is a local-first repair helper for one vehicle:
 Version 1 is no longer just a PDF organizer. The current product combines:
 
 - repair documents
-- document search
+- whole-app search
 - dashboard summaries
 - symptom tracking
 - procedure tracking
@@ -22,6 +22,7 @@ The app is meant to help one person keep repair information in one local workspa
 - One vehicle only
 - Local-first storage
 - No cloud dependency
+- V1 demo deployment can run on one Google Cloud Compute Engine VM using persistent local storage
 - Real repair usefulness over extra features
 - Beginner-friendly code and structure
 
@@ -32,7 +33,7 @@ The app is meant to help one person keep repair information in one local workspa
 - Sidebar-based app shell
 - Dashboard page
 - Documents page
-- Document Search page
+- Search page
 - Symptoms page
 - Procedures page
 - Notes page
@@ -42,6 +43,7 @@ The app is meant to help one person keep repair information in one local workspa
 - Upload PDF documents into local storage (`server/uploads`)
 - Store document metadata in SQLite
 - Attempt PDF text extraction
+- Allow manual single-document extraction re-run from document details
 - Store extraction status
 - Store page count
 - Edit document metadata after upload
@@ -49,11 +51,14 @@ The app is meant to help one person keep repair information in one local workspa
 - Open uploaded PDFs from the app
 - Sort and filter documents
 - View document details
+- Delete a document with a confirmation flow that removes the DB record and stored PDF file
+- On document delete, remove symptom/procedure links and clear note document links safely
+- Use favorites as the only saved-document flag in V1
 
-### Document Search
+### Search
 
-- Search across imported documents
-- Filter search results by current document fields
+- Search documents, symptoms, procedures, and notes from one page
+- Keep each search area separate with its own filters and results
 
 ### Symptoms
 
@@ -66,29 +71,43 @@ The app is meant to help one person keep repair information in one local workspa
 - Create, edit, and delete procedures
 - Track steps, tools, parts, safety notes, difficulty, and confidence
 - Link procedures to supporting documents
+- Show linked documents in the procedure details and open them from there
+- Reuse saved Settings system suggestions in create and edit procedure forms
+- Search procedures by title, system, tools, parts, steps, and notes
+- Filter procedures by system, difficulty, and confidence
+- Sort procedures by newest update, oldest update, or title
+- Show a visible count while browsing the filtered procedure list
+- Keep the details panel synced to a visible procedure when filters change
 
 ### Notes
 
 - Create, edit, and delete notes
 - Organize notes by note type
-- Link notes to documents in the current UI
+- Link notes to documents, symptoms, and procedures in the current UI
+- Browse saved notes with note type, linked item, and sort controls
+- Show note details with the linked record title and an open link to that record
 
 ### Settings
 
 - Edit the single stored vehicle profile
 - Show local runtime info for database path, uploads path, upload size limit, and ports
 - Keep runtime path editing out of the browser
+- Provide one manual local backup/export action from Settings that downloads a packaged archive containing the SQLite DB and uploaded PDFs
+- Keep restore out of scope for this phase
 
 ## 4) Out of scope right now
 
 - AI chat
 - embeddings or vector database
 - cloud sync
+- Cloud Run deployment with the current local SQLite and upload storage design
 - completed OCR pipeline beyond the current PDF extraction attempt
 - multi-vehicle support
 - auth
 - voice features
 - parts integrations
+- document tags
+- document bookmarks
 - major architecture rewrites
 
 ## 5) Primary user workflows
@@ -98,8 +117,9 @@ The app is meant to help one person keep repair information in one local workspa
 1. Upload a repair PDF
 2. Add or fix basic metadata
 3. Review extraction status and page count
-4. Favorite important documents
-5. Open the PDF again when needed
+4. If extraction failed or needs refresh, re-run extraction for that document
+5. Favorite important documents
+6. Open the PDF again when needed
 
 ### Repair tracking workflow
 
@@ -112,7 +132,7 @@ The app is meant to help one person keep repair information in one local workspa
 ### Daily use workflow
 
 1. Open the Dashboard to see recent activity
-2. Search imported documents when you need a manual or reference
+2. Search the saved workspace when you need a manual, symptom, procedure, or note
 3. Update symptoms, procedures, and notes as repair work changes
 
 ## 6) Definition of useful
@@ -120,7 +140,10 @@ The app is meant to help one person keep repair information in one local workspa
 Version 1 is useful if it is:
 
 - fast to run on one local machine
+- clear enough to demo from one VM with persistent local storage
 - easy to understand
 - good at storing and reopening repair PDFs
 - good at tracking symptoms, procedures, and notes in one place
 - honest about current local-only limits
+
+For any public demo, use sample or fake PDFs until user accounts and access control are added.

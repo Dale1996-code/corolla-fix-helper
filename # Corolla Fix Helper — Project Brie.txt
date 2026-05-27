@@ -1,657 +1,175 @@
-# Corolla Fix Helper — Project Brief + Master Build Checklist
+# Corolla Fix Helper — Project Brief + Current State Checklist
 
-## Project Summary
+Historical note:
+This file started as an early project planning artifact. It has now been refreshed so it no longer reads like the app is unverified or waiting to get past V1.
 
-Corolla Fix Helper is a private, local-first repair document organizer and lookup app built first for a **2009 Toyota Corolla LE 1.8L**. Its job is to help me find the right repair information fast, keep notes tied to real problems, and turn scattered manuals and writeups into a usable repair workflow.
+For the current source of truth, use these files first:
 
-This is **not** an AI mechanic app in version 1.
+- `README.md` for the current repo baseline and run commands
+- `PRD.md` for current product scope
+- `ROADMAP.md` for the finished V1 phase summary
+- `QA_CHECKLIST.md` for manual acceptance checks
+- `docs/project-state-2026-05-01.md` for the refreshed validation snapshot
+- `docs/GCE_DEPLOYMENT_RUNBOOK.md` for the detailed VM deployment checklist
 
-Version 1 should already be valuable without chat, embeddings, or advanced AI.
+## Current Project Summary
 
-## Primary Goal
+Corolla Fix Helper is a private, local-first repair helper for a 2009 Toyota Corolla LE 1.8L.
 
-In under **30 seconds**, I can search for a Corolla issue and get to the most relevant documents, notes, and procedures.
+The current app is more than the original Day 1 PDF organizer idea. It now has a working V1 baseline with:
 
-## Target User
+- Dashboard
+- Documents
+- Search
+- Symptoms
+- Procedures
+- Notes
+- Settings
+- local SQLite storage
+- local PDF upload storage
+- manual Settings backup export
+- production serving of the built React client from Express
+- a Google Compute Engine VM demo path documented in the repo
 
-Me, while troubleshooting, repairing, researching, or organizing repair knowledge for my Corolla.
+## Current V1 Status
 
-## Version 1 Scope
+V1 is documented as ready to tag from a Node.js `>=24 <25` validation run.
 
-### Must Have
+The latest documented validation used:
 
-* Document import
-* Metadata editing
-* Search
-* Filters
-* Favorites
-* Notes
-* Symptoms
-* Procedures
-* Clean dashboard
-* Local storage
-* SQLite database
+- Node.js `v24.15.0`
+- npm `11.4.2`
 
-### Not in Version 1
+The documented green commands are:
 
-* AI chat over all documents
-* Embeddings/vector database
-* OCR pipeline for everything
-* Multi-vehicle support
-* Cloud sync
-* User accounts
-* Voice assistant
-* Image-based diagnosis
-* Parts store integrations
+```bash
+npm run install:all
+npm run build
+npm run test
+npm run test:server
+npm run test:client
+```
 
-## Product Rules
+Do not validate or tag V1 from Node 20. The backend uses `node:sqlite` with `DatabaseSync`, so Node.js `>=24 <25` is the expected runtime range for this repo.
 
-1. Start with one vehicle only.
-2. Documents first, AI second.
-3. Real usefulness beats flashy features.
-4. Do not rebuild from scratch unless absolutely necessary.
-5. Import files in batches, not all at once.
+## Current Product Rules
 
-## Recommended Stack
+1. Keep V1 single-vehicle and local-first.
+2. Use sample or fake PDFs for public demos until authentication exists.
+3. Do not present the app as having cloud sync, user accounts, AI chat, embeddings, RAG, OCR for every file, or multi-vehicle support.
+4. Keep the current V1 deployment path close to the app design: one Node server, one SQLite database file, and one local uploads folder.
+5. Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.
 
-* Frontend: React + Vite + Tailwind
-* Backend: Node.js + Express
-* Database: SQLite
-* Storage: Local uploads folder + extracted text in database or cache files
-
-## Core App Sections
-
-* Dashboard
-* Documents
-* Search
-* Symptoms
-* Procedures
-* Notes
-* Settings
-
-## Core Data Types
+## Current In-Scope Features
 
 ### Documents
 
-Store:
+- [x] Upload PDF files
+- [x] Store uploaded files locally
+- [x] Store document metadata in SQLite
+- [x] Attempt PDF text extraction
+- [x] Store extraction status
+- [x] Store page count
+- [x] Manually re-run extraction for one document
+- [x] Edit metadata after upload
+- [x] Mark documents as favorites
+- [x] Open uploaded PDFs from the app
+- [x] Sort and filter documents
+- [x] Delete a document with confirmation
+- [x] Clean up linked symptom/procedure links and note references when deleting a document
+- [ ] Document tags are not part of the current V1 workflow
+- [ ] Document bookmarks are not part of the current V1 workflow
 
-* title
-* filename
-* system
-* subsystem
-* document type
-* tags
-* notes
-* favorite status
-* extracted text
-* extraction status
+### Search
+
+- [x] Search documents
+- [x] Search symptoms
+- [x] Search procedures
+- [x] Search notes
+- [x] Keep separate search sections, filters, and results on one page
 
 ### Symptoms
 
-Store:
-
-* title
-* description
-* system
-* suspected causes
-* notes
-* confidence
-* status
-* linked docs
-* linked procedures
+- [x] Create symptoms
+- [x] Edit symptoms
+- [x] Delete symptoms
+- [x] Store status and confidence
+- [x] Search symptoms by title, system, suspected causes, and notes
+- [x] Filter symptoms by status and system
+- [x] Sort symptoms
+- [x] Link symptoms to documents
+- [x] Show linked documents in symptom details
+- [ ] Symptom-to-procedure linking is not part of the current V1 workflow
 
 ### Procedures
 
-Store:
-
-* title
-* system
-* difficulty
-* tools needed
-* parts needed
-* safety notes
-* steps
-* notes
-* confidence
-* linked docs
+- [x] Create procedures
+- [x] Edit procedures
+- [x] Delete procedures
+- [x] Store steps, tools, parts, safety notes, difficulty, and confidence
+- [x] Search procedures by title, system, tools, parts, steps, and notes
+- [x] Filter procedures by system, difficulty, and confidence
+- [x] Sort procedures
+- [x] Link procedures to documents
+- [x] Show linked documents in procedure details
+- [x] Reuse saved Settings system suggestions in create/edit forms
 
 ### Notes
 
-Store:
-
-* title
-* content
-* related entity type
-* related entity id
-
-## First Real Dataset
-
-Start with **25–75 high-value files**, not all 2,000.
-
-Prioritize:
-
-* Belt / pulley / tension docs
-* Battery / charging / cable connection docs
-* Radiator / cooling system docs
-* A/C service docs
-* Wiring diagrams
-* Common maintenance procedures
-
-## Milestone Definition
-
-The first real milestone is reached when:
-
-* I can import a PDF
-* edit its metadata
-* search for it by keyword
-* filter results by system/type
-* open the file quickly
-* link it to a symptom or procedure
-
----
-
-# Master Build Checklist
-
-Status note checked against the live repo on 2026-05-05: `[x]` means the current code clearly ships it. `[ ]` means it is either not implemented yet or not proved by the live code.
-
-## Phase 0 — Project Setup
-
-* [x] Create repo or choose the main repo to continue using
-* [x] Write README.md
-* [x] Write PRD.md
-* [x] Write ROADMAP.md
-* [x] Write DATA_MODEL.md
-* [ ] Write CHANGELOG.md
-* [ ] Write BUGS.md
-* [ ] Create a strict Now / Later / Maybe feature list
-* [ ] Lock version 1 scope
-* [x] Confirm single-vehicle focus: 2009 Toyota Corolla LE 1.8L
-
-## Phase 1 — App Skeleton
-
-* [x] Set up React + Vite frontend
-* [x] Set up Tailwind
-* [x] Set up Express backend
-* [x] Set up SQLite database
-* [x] Create app layout
-* [x] Create navigation/sidebar
-* [x] Add pages: Dashboard, Documents, Search, Symptoms, Procedures, Notes, Settings
-* [x] Confirm frontend can talk to backend
-
-## Phase 2 — Database + Models
-
-* [x] Create vehicles table
-* [x] Create documents table
-* [x] Create tags table
-* [x] Create document_tags join table
-* [x] Create symptoms table
-* [x] Create procedures table
-* [x] Create notes table
-* [x] Create symptom_documents join table
-* [x] Create procedure_documents join table
-* [ ] Create symptom_procedures join table
-* [x] Add seed data support
-
-## Phase 3 — File Import
-
-* [x] Create uploads directory
-* [x] Build upload UI
-* [x] Build upload endpoint
-* [x] Save original file metadata
-* [x] Copy or store uploaded files safely
-* [x] Extract text from PDFs when possible
-* [x] Save extraction status
-* [x] Save page count if available
-* [x] Show success/failure status after import
-* [x] Allow manual metadata correction after import
-
-## Phase 4 — Documents Page
-
-* [x] Build documents list view
-* [ ] Show title, system, type, tags, favorite status
-* [x] Add sorting options
-* [x] Add filter controls
-* [x] Add document details panel
-* [x] Add metadata edit form
-* [x] Add favorite toggle
-* [x] Add document notes section
-* [x] Add open file action
-
-## Phase 5 — Search
-
-* [x] Build search input
-* [x] Search title
-* [x] Search filename
-* [ ] Search tags
-* [x] Search notes
-* [x] Search extracted text
-* [x] Return result snippets
-* [x] Show why a result matched
-* [x] Add filters for system, doc type, favorite status
-* [x] Add sort by relevance/newest/title
-* [x] Make results easy to scan fast
-
-## Phase 6 — Symptoms
-
-* [x] Build symptoms list page
-* [x] Build create/edit symptom form
-* [x] Add status field
-* [x] Add confidence field
-* [x] Add suspected causes field
-* [x] Link symptoms to documents
-* [ ] Link symptoms to procedures
-* [x] Add symptom notes
-* [x] Show symptom detail panel with related docs
-
-## Phase 7 — Procedures
-
-* [x] Build procedures list page
-* [x] Build create/edit procedure form
-* [x] Add difficulty field
-* [x] Add tools needed field
-* [x] Add parts needed field
-* [x] Add safety notes field
-* [x] Add steps field
-* [x] Add confidence field
-* [x] Link procedures to documents
-* [x] Add procedure notes
-* [x] Show procedure detail panel
-
-## Phase 8 — Notes + Favorites + Dashboard
-
-* [x] Build notes list page
-* [x] Support notes on docs, symptoms, and procedures
-* [x] Add recent items widget
-* [x] Add favorites widget
-* [x] Add recent documents widget
-* [x] Add active symptoms widget
-* [x] Add quick actions on dashboard
-
-## Phase 9 — Cleanup + Reliability
-
-* [ ] Add duplicate detection warnings
-* [x] Add extraction failure badges
-* [ ] Add reprocess document action
-* [ ] Add missing metadata warnings
-* [ ] Add simple backup/export option (not wired up yet)
-* [ ] Improve mobile responsiveness
-* [ ] Improve readability for garage use
-* [ ] Test with real files and real workflow
-
-## Phase 10 — Controlled Expansion
-
-* [ ] Import second batch of files
-* [ ] Improve search ranking
-* [ ] Add related-items suggestions
-* [ ] Add repair session feature if still needed
-* [ ] Only after core stability, explore AI summaries on selected documents
-
----
-
-# First Week Checklist
-
-* [x] Pick the repo you will actually continue using
-* [x] Set up or clean up the project structure
-* [x] Create the database schema plan
-* [x] Build the app shell and navigation
-* [x] Create the Documents page and database connection
-* [x] Get one sample document record showing in the UI
-
-# First Build Session Target
-
-Build the shell of the app with working navigation and a Documents page connected to SQLite.
-
-# Definition of “Stay on Track”
-
-Before every work session, answer:
-
-1. What single feature am I finishing today?
-2. What does “done” mean for this session?
-3. What am I deliberately not touching today?
-
-# Guardrails
-
-* Do not restart the whole app because of one bad decision.
-* Do not add AI before search works well.
-* Do not import all files at once.
-* Do not chase polish before core flow works.
-* Do not keep features that don’t speed up finding or using repair info.
-
-# Next Build Order
-
-1. App skeleton
-2. Database tables
-3. Document import
-4. Document list + metadata editing
-5. Search + filters
-6. Symptoms
-7. Procedures
-8. Notes + dashboard
-9. Reliability and scaling
-
-# Success Statement
-
-If this app reliably helps me find the right Corolla repair information faster than digging through folders manually, version 1 is a success.
-
----
-
-# Starter Repo Structure
-
-Historical note: this starter tree is planning material, not the exact current file tree. The live repo now uses files such as `client/src/components/Sidebar.jsx`, `server/src/routes/documents.js`, and `server/src/initDatabase.js`.
-
-```text
-corolla-fix-helper/
-├── client/
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── layout/
-│   │   │   │   ├── AppShell.jsx
-│   │   │   │   ├── Sidebar.jsx
-│   │   │   │   └── Topbar.jsx
-│   │   │   ├── ui/
-│   │   │   │   ├── Button.jsx
-│   │   │   │   ├── Card.jsx
-│   │   │   │   ├── Input.jsx
-│   │   │   │   └── Badge.jsx
-│   │   ├── pages/
-│   │   │   ├── DashboardPage.jsx
-│   │   │   ├── DocumentsPage.jsx
-│   │   │   ├── SearchPage.jsx
-│   │   │   ├── SymptomsPage.jsx
-│   │   │   ├── ProceduresPage.jsx
-│   │   │   ├── NotesPage.jsx
-│   │   │   └── SettingsPage.jsx
-│   │   ├── features/
-│   │   │   ├── documents/
-│   │   │   │   ├── DocumentsTable.jsx
-│   │   │   │   ├── DocumentFilters.jsx
-│   │   │   │   └── documentApi.js
-│   │   │   ├── search/
-│   │   │   │   ├── SearchBar.jsx
-│   │   │   │   └── searchApi.js
-│   │   │   ├── symptoms/
-│   │   │   │   └── symptomApi.js
-│   │   │   ├── procedures/
-│   │   │   │   └── procedureApi.js
-│   │   │   └── notes/
-│   │   │       └── notesApi.js
-│   │   ├── lib/
-│   │   │   ├── apiClient.js
-│   │   │   └── constants.js
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── index.css
-│   ├── package.json
-│   └── vite.config.js
-│
-├── server/
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── env.js
-│   │   ├── db/
-│   │   │   ├── connection.js
-│   │   │   ├── init.js
-│   │   │   └── schema.sql
-│   │   ├── middleware/
-│   │   │   ├── errorHandler.js
-│   │   │   └── notFound.js
-│   │   ├── routes/
-│   │   │   ├── health.routes.js
-│   │   │   ├── documents.routes.js
-│   │   │   ├── search.routes.js
-│   │   │   ├── symptoms.routes.js
-│   │   │   ├── procedures.routes.js
-│   │   │   └── notes.routes.js
-│   │   ├── controllers/
-│   │   │   ├── documents.controller.js
-│   │   │   ├── search.controller.js
-│   │   │   ├── symptoms.controller.js
-│   │   │   ├── procedures.controller.js
-│   │   │   └── notes.controller.js
-│   │   ├── services/
-│   │   │   ├── fileImport.service.js
-│   │   │   ├── pdfText.service.js
-│   │   │   └── search.service.js
-│   │   ├── utils/
-│   │   │   ├── sanitizeFilename.js
-│   │   │   └── mapDocumentRow.js
-│   │   └── index.js
-│   ├── package.json
-│   └── uploads/
-│
-├── data/
-│   └── corolla-fix-helper.sqlite
-│
-├── docs/
-│   ├── PRD.md
-│   ├── ROADMAP.md
-│   ├── DATA_MODEL.md
-│   ├── BUGS.md
-│   └── CHANGELOG.md
-│
-├── scripts/
-│   └── seed.js
-│
-├── .env.example
-├── .gitignore
-├── package.json
-└── README.md
-```
-
-# First File Set To Generate
-
-## Root
-
-* `package.json`
-* `.gitignore`
-* `.env.example`
-* `README.md`
-
-## Client
-
-* `client/package.json`
-* `client/vite.config.js`
-* `client/src/main.jsx`
-* `client/src/App.jsx`
-* `client/src/index.css`
-* `client/src/components/layout/AppShell.jsx`
-* `client/src/components/layout/Sidebar.jsx`
-* `client/src/pages/DocumentsPage.jsx`
-* `client/src/pages/DashboardPage.jsx`
-* `client/src/pages/SearchPage.jsx`
-* `client/src/pages/SymptomsPage.jsx`
-* `client/src/pages/ProceduresPage.jsx`
-* `client/src/pages/NotesPage.jsx`
-* `client/src/pages/SettingsPage.jsx`
-* `client/src/lib/apiClient.js`
-* `client/src/lib/constants.js`
-
-## Server
-
-* `server/package.json`
-* `server/src/index.js`
-* `server/src/config/env.js`
-* `server/src/db/connection.js`
-* `server/src/db/init.js`
-* `server/src/db/schema.sql`
-* `server/src/routes/health.routes.js`
-* `server/src/routes/documents.routes.js`
-* `server/src/controllers/documents.controller.js`
-* `server/src/services/fileImport.service.js`
-* `server/src/services/pdfText.service.js`
-* `server/src/utils/sanitizeFilename.js`
-
-# Minimum Database Schema For Day 1
-
-## vehicles
-
-* id
-* year
-* make
-* model
-* trim
-* engine
-
-## documents
-
-* id
-* vehicle_id
-* title
-* original_filename
-* stored_filename
-* file_path
-* file_type
-* system
-* subsystem
-* document_type
-* source
-* extracted_text
-* extraction_status
-* page_count
-* notes
-* is_favorite
-* created_at
-* updated_at
-
-## tags
-
-* id
-* name
-
-## document_tags
-
-* document_id
-* tag_id
-
-# Day 1 Build Goal
-
-Build a working skeleton where:
-
-* the frontend loads
-* the backend runs
-* SQLite initializes automatically
-* the Documents page can fetch at least one sample document from the server
-* the layout is clean and mobile-friendly
-
-# Day 2 Build Goal
-
-Build a working document import flow where:
-
-* a PDF can be uploaded
-* file metadata is saved
-* text extraction is attempted
-* the document appears in the documents list
-* metadata can be edited after upload
-
-# Starter Prompt For Codex
-
-Use this as the first serious build prompt.
-
-```text
-You are helping me build a real project called Corolla Fix Helper.
-
-Project goal:
-Build a private, local-first repair document organizer and lookup app for a 2009 Toyota Corolla LE 1.8L.
-
-What this app should do in version 1:
-- import repair PDFs
-- store document metadata in SQLite
-- extract text from PDFs when possible
-- list imported documents
-- search documents by title, filename, tags, notes, and extracted text
-- filter by system and document type
-- allow favorite/bookmark toggles
-- support later linking of documents to symptoms and procedures
-
-What this app is NOT in version 1:
-- not an AI mechanic
-- not a chatbot over all files
-- not a vector database app
-- not multi-vehicle
-- not cloud-sync first
-- not user accounts
-
-Tech stack requirements:
-- frontend: React + Vite + Tailwind
-- backend: Node.js + Express
-- database: SQLite
-- file storage: local uploads folder
-- keep code beginner-friendly, readable, and modular
-- do not add extra frameworks unless clearly necessary
-
-Architecture requirements:
-- create a `client` app and `server` app
-- use a root package.json with scripts to run both sides
-- create a clean starter layout with pages for Dashboard, Documents, Search, Symptoms, Procedures, Notes, and Settings
-- the first fully working feature must be Documents
-
-Day 1 objective:
-Create the starter repo structure and implement the minimum working app shell.
-
-Required deliverables for this step:
-1. Root `package.json`
-2. Root `.gitignore`
-3. Root `.env.example`
-4. Root `README.md` with simple run instructions
-5. `client` setup with React + Vite + Tailwind
-6. App shell with sidebar navigation
-7. Placeholder pages for all main sections
-8. `server` setup with Express
-9. SQLite connection and schema initialization
-10. `vehicles`, `documents`, `tags`, and `document_tags` tables
-11. Health route
-12. Documents route that returns at least one seeded sample document
-13. Documents page that fetches and renders server data
-
-Important coding rules:
-- explain your approach briefly before making major changes
-- create files in sensible batches
-- keep naming clean and consistent
-- add comments only where they help a beginner understand structure
-- do not implement AI features yet
-- do not overengineer search yet
-- do not rewrite files unnecessarily once created
-- when a file is created, show the full contents
-- when a command must be run, state exactly where to run it
-
-After creating the starter app, stop and summarize:
-- what was created
-- what still needs to be installed
-- exactly how to run the project
-- what the next best build step should be
-```
-
-# Follow-Up Prompt For Codex After Day 1
-
-```text
-Continue Corolla Fix Helper from the current repo state.
-
-Goal for this step:
-Build the first real document import workflow.
-
-Add:
-- PDF upload UI on the Documents page
-- Express upload endpoint
-- safe local file storage in `server/uploads`
-- metadata save into SQLite
-- PDF text extraction when possible
-- extraction status field
-- document list refresh after upload
-- metadata edit form for title, system, subsystem, document type, source, notes, and favorite status
-
-Rules:
-- keep the current structure unless there is a strong reason to adjust it
-- do not add AI features
-- do not add vector search
-- keep dependencies minimal
-- explain any new package before using it
-- show exact file changes and commands
-- preserve beginner-friendly readability
-
-When finished, summarize:
-- what changed
-- how to test upload end to end
-- what likely edge cases still exist
-- the best next step after import works
-```
+- [x] Create notes
+- [x] Edit notes
+- [x] Delete notes
+- [x] Organize notes by note type
+- [x] Link notes to documents, symptoms, or procedures
+- [x] Open linked records from the note details panel
+
+### Settings
+
+- [x] Edit the single stored vehicle profile
+- [x] Save reusable document defaults for common system names and document types
+- [x] Show local database path
+- [x] Show local uploads folder
+- [x] Show upload size limit
+- [x] Show frontend and backend ports
+- [x] Export a local backup archive (`.tar.gz`) containing the SQLite database and uploaded PDFs
+- [ ] Restore is not included in the current V1 phase
+- [ ] Runtime path editing is not done in the browser
+
+### Deployment / Runtime
+
+- [x] Root scripts exist for install, build, test, dev, and start
+- [x] Built React client can be served by Express in production
+- [x] `Dockerfile` exists for production image builds
+- [x] Google Compute Engine VM runbook exists
+- [x] Persistent local storage path is documented for VM demos
+- [x] Cloud Run is documented as not preferred for the current local-file design
+- [ ] User accounts and access control are not implemented
+- [ ] Automated E2E/browser smoke script is not wired into package scripts
+
+## Out of Scope Right Now
+
+- AI chat over all documents
+- embeddings/vector database
+- full RAG system
+- cloud sync
+- user accounts/auth
+- multi-vehicle support
+- voice assistant
+- image-based diagnosis
+- parts store integrations
+- completed OCR pipeline for every document
+- restore flow from backup archive
+
+## Success Statement
+
+V1 is successful if it helps find and reuse Corolla repair information faster than digging through folders manually, while staying honest about its current local-only limits.
+
+## Best Next Work After V1
+
+Good next candidates are:
+
+1. Deployment hardening for the VM demo path.
+2. A tested backup/restore drill before trusting real data.
+3. Basic access protection before sharing a public URL.
+4. A minimal E2E smoke test for the production build.
+5. Later, optional selected-document AI summaries only after the local-first V1 baseline stays stable.
