@@ -539,6 +539,7 @@ function DocumentDetails({
   isEditing,
   editValues,
   saveState,
+  extractionRunState,
   systemSuggestions,
   documentTypeSuggestions,
   onStartEdit,
@@ -547,6 +548,8 @@ function DocumentDetails({
   onSaveEdit,
   onOpenFile,
   onToggleFavorite,
+  onRerunExtraction,
+  onDeleteDocument,
 }) {
   if (!document) {
     return (
@@ -587,6 +590,21 @@ function DocumentDetails({
             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
           >
             Edit metadata
+          </button>
+          <button
+            type="button"
+            onClick={() => onRerunExtraction(document.id)}
+            disabled={extractionRunState.running}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {extractionRunState.running ? "Re-running..." : "Re-run extraction"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteDocument(document)}
+            className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+          >
+            Delete document
           </button>
         </div>
       </div>
@@ -675,6 +693,16 @@ function DocumentDetails({
           {saveState.error}
         </p>
       ) : null}
+      {extractionRunState.message ? (
+        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {extractionRunState.message}
+        </p>
+      ) : null}
+      {extractionRunState.error ? (
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {extractionRunState.error}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -714,6 +742,12 @@ export function DocumentsPage() {
   });
   const [favoriteUpdateState, setFavoriteUpdateState] = useState({
     documentId: null,
+    error: "",
+  });
+  const [extractionRunState, setExtractionRunState] = useState({
+    documentId: null,
+    running: false,
+    message: "",
     error: "",
   });
 
@@ -976,6 +1010,12 @@ export function DocumentsPage() {
       message: "",
       error: "",
     });
+    setExtractionRunState({
+      documentId,
+      running: false,
+      message: "",
+      error: "",
+    });
   }
 
   function startEditingDocument(document) {
@@ -1131,8 +1171,94 @@ export function DocumentsPage() {
     }
   }
 
+  async function handleDeleteDocument(document) {
+    const confirmed = window.confirm(
+      `Delete "${document.title}"? This removes the document record and uploaded PDF file. Linked symptom/procedure references will be removed and linked notes will be cleared.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/documents/${document.id}`, {
+        method: "DELETE",
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not delete document.");
+      }
+
+      setSaveState({
+        documentId: null,
+        saving: false,
+        message: payload.message || "Document deleted.",
+        error: "",
+      });
+
+      setEditingDocumentId(null);
+      await loadDocuments();
+    } catch (error) {
+      setSaveState({
+        documentId: document.id,
+        saving: false,
+        message: "",
+        error: error.message || "Could not delete document.",
+      });
+    }
+  }
+
   function openDocumentFile(documentId) {
     window.open(`/api/documents/${documentId}/file`, "_blank", "noopener,noreferrer");
+  }
+
+  async function rerunExtraction(documentId) {
+    setExtractionRunState({
+      documentId,
+      running: true,
+      message: "",
+      error: "",
+    });
+
+    try {
+      const response = await fetch(`/api/documents/${documentId}/extract`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not re-run extraction.");
+      }
+
+      const updatedDocument = payload.document;
+      const extraction = normalizeExtractionStatus(updatedDocument?.extractionStatus);
+
+      if (updatedDocument?.id) {
+        setDocuments((currentDocuments) =>
+          currentDocuments.map((currentDocument) =>
+            currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
+          )
+        );
+      } else {
+        await loadDocuments();
+      }
+
+      setExtractionRunState({
+        documentId,
+        running: false,
+        message: `Extraction re-run complete. Status: ${extraction.label}.`,
+        error: "",
+      });
+    } catch (error) {
+      setExtractionRunState({
+        documentId,
+        running: false,
+        message: "",
+        error: error.message || "Could not re-run extraction.",
+      });
+    }
   }
 
   return (
@@ -1140,10 +1266,19 @@ export function DocumentsPage() {
       <PageHeader
         eyebrow="Ready to Use"
         title="Documents"
-        description="Import repair PDFs, check extraction status, sort and filter your library, then open files quickly while keeping document details clean."
+        description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites to keep the most important documents easy to find."
       />
 
       <div className="space-y-6">
+        <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
+          <p className="text-sm font-semibold text-sky-900">
+            Favorites are the only saved-document flag in V1.
+          </p>
+          <p className="mt-1 text-sm text-sky-800">
+            Tags and bookmarks are not part of the current document workflow.
+          </p>
+        </section>
+
         <UploadForm
           form={uploadForm}
           uploading={uploading}
@@ -1212,12 +1347,15 @@ export function DocumentsPage() {
                   isEditing={editingDocumentId === selectedDocumentId}
                   editValues={editForm}
                   saveState={saveState}
+                  extractionRunState={extractionRunState}
                   onStartEdit={startEditingDocument}
                   onCancelEdit={cancelEditingDocument}
                   onEditChange={handleEditFormChange}
                   onSaveEdit={handleSaveMetadata}
                   onOpenFile={openDocumentFile}
                   onToggleFavorite={toggleFavorite}
+                  onRerunExtraction={rerunExtraction}
+                  onDeleteDocument={handleDeleteDocument}
                   systemSuggestions={systemSuggestions}
                   documentTypeSuggestions={documentTypeSuggestions}
                 />

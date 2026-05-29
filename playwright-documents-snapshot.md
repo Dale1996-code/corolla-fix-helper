@@ -1,3 +1,6 @@
+> Historical snapshot note: this capture reflects older UI wording and is not current V1 truth.
+> The live Documents page now uses favorites as the only saved-document flag and does not expose bookmarks.
+
 - generic [ref=e4]:
   - complementary [ref=e5]:
     - generic [ref=e6]:

@@ -4,131 +4,101 @@ Corolla Fix Helper is a local-first repair helper for one vehicle:
 
 - 2009 Toyota Corolla LE 1.8L
 
-It runs on your computer, stores data in a local SQLite database, and keeps uploaded PDF files in a local folder. The goal is to help you keep repair information, symptoms, procedures, and notes in one place while working on the car.
+It stores app records in a local SQLite database and keeps uploaded PDF files in a local folder. The goal is to keep repair documents, symptoms, procedures, and notes in one practical workspace while working on the car.
 
-## Current v1 scope
+## Current repo state on `main`
 
-Version 1 currently includes these main areas:
+This repo is past the early planning/pre-V1 state. The current `main` branch documents a validated local-first V1 demo candidate.
+
+The verified V1 baseline is:
+
+- Dashboard, Documents, Search, Symptoms, Procedures, Notes, and Settings are implemented.
+- Local SQLite storage and local PDF uploads are the current storage model.
+- Node.js `>=24 <25` is required because the backend uses `node:sqlite` with `DatabaseSync`.
+- The last documented validation run used Node.js `v24.15.0` and npm `11.4.2`.
+- `npm run install:all`, `npm run build`, `npm run test`, `npm run test:server`, and `npm run test:client` completed successfully in that validation run.
+
+This README describes the current `main` branch. Unmerged pull requests may contain extra hardening or deployment experiments, but they are not part of the baseline until merged.
+
+## Current V1 scope
+
+V1 includes:
 
 - Dashboard
 - Documents
-- Document Search
+- Search
 - Symptoms
 - Procedures
 - Notes
 - Settings
 
-Version 1 is still limited in a few important ways:
+V1 is intentionally limited:
 
 - Single vehicle only
 - Local-first only
 - No cloud sync
 - No user accounts
 - No AI chat
+- No embeddings or vector database
+- No multi-vehicle support
+
+For a V1 demo deployment, the recommended target is a Google Cloud Compute Engine VM. That keeps the deployed app close to the local architecture: one Node server, one local SQLite database file, and one local uploads folder.
 
 ## What the app does right now
 
 ### Dashboard
 
-The Dashboard gives a quick summary of the current project. It shows counts and recent activity for:
+The Dashboard shows summary counts and recent activity for documents, symptoms, procedures, notes, and favorites. It also provides quick links into the main app sections.
+
+### Documents
+
+The Documents area can:
+
+- upload PDF files
+- save uploaded PDFs into `server/uploads`
+- store document details in SQLite
+- attempt PDF text extraction
+- manually re-run extraction for a single document from the detail panel
+- store extraction status and page count
+- edit document metadata after upload
+- mark documents as favorites
+- open an uploaded PDF from the app
+- delete a document with confirmation
+- clean up linked symptom/procedure links and note references when a document is deleted
+- use saved Settings suggestions while entering system and document type
+- sort and filter the document list
+- show document details in a side panel
+
+For V1, favorites are the only saved-document flag in the app. Tags and bookmarks are not part of the current document workflow.
+
+Document fields currently used in the app include title, system, subsystem, document type, source, and notes.
+
+### Search
+
+The Search page is implemented. It has separate search sections for:
 
 - documents
 - symptoms
 - procedures
 - notes
-- favorites
 
-It also gives quick links into the main parts of the app.
-
-### Documents
-
-The Documents area is fully working for the main document workflow.
-
-What it can do:
-
-- upload PDF files
-- save uploaded PDFs into `server/uploads`
-- store document details in SQLite
-- try to extract text from PDFs
-- store extraction status
-- store page count
-- edit document metadata after upload
-- mark documents as favorites
-- open an uploaded PDF from the app
-- use saved Settings suggestions while entering system and document type
-- sort and filter the document list
-- show document details in a side panel
-
-Document fields currently used in the app include:
-
-- title
-- system
-- subsystem
-- document type
-- source
-- notes
-
-### Document Search
-
-The Document Search page is implemented.
-
-It lets you search through imported documents and filter results by things like:
-
-- keyword
-- system
-- document type
-- favorites
-
-It does not search symptoms, procedures, or notes yet.
+Each section keeps its own keyword box, filters, and results.
 
 ### Symptoms
 
-The Symptoms feature is implemented.
-
-What it can do:
-
-- create symptoms
-- edit symptoms
-- delete symptoms
-- store status and confidence
-- link symptoms to documents
-- show linked documents in the symptom details
-- search symptoms by title, system, suspected causes, and notes
-- filter symptoms by status and system
-- sort symptoms by newest update, oldest update, or title
-- show summary counts for open, monitoring, and resolved symptoms
+The Symptoms feature can create, edit, delete, search, filter, sort, and summarize symptoms. Symptoms can be linked to documents and viewed in a detail panel with their linked documents.
 
 ### Procedures
 
-The Procedures feature is implemented.
-
-What it can do:
-
-- create procedures
-- edit procedures
-- delete procedures
-- store steps, tools, parts, safety notes, and confidence
-- link procedures to documents
+The Procedures feature can create, edit, delete, search, filter, sort, and show procedures. Procedures can store steps, tools, parts, safety notes, difficulty, confidence, and linked documents.
 
 ### Notes
 
-The Notes feature is implemented.
-
-What it can do:
-
-- create notes
-- edit notes
-- delete notes
-- organize notes by note type
-- link notes to a document in the current UI
-
-The backend has room for broader note linking, but the current Notes page should only be described as having document linking unless that UI is expanded later.
+The Notes feature can create, edit, delete, sort, and filter notes. Notes can be linked to a document, symptom, or procedure, and the detail panel can open the linked item.
 
 ### Settings
 
-The Settings page is implemented.
-
-What it can do:
+The Settings page can:
 
 - edit the single stored vehicle profile
 - save reusable document defaults for common system names and document types
@@ -136,14 +106,15 @@ What it can do:
 - show the local uploads folder
 - show the upload size limit
 - show the frontend and backend ports
+- export a local backup archive (`.tar.gz`) containing the SQLite database and uploaded PDFs
 
-The runtime path values are read-only in the browser. They come from local config and optional `.env` values.
-Backup/export is still not wired up yet, so Settings shows that honestly instead of exposing a fake folder field.
+Runtime path values are read-only in the browser. They come from local config and optional `.env` values. Restore is not included in this phase.
 
 ## Tech stack
 
 - `client`: React + Vite + Tailwind CSS
 - `server`: Node.js + Express
+- `runtime`: Node.js `>=24 <25`
 - `database`: SQLite
 - `file storage`: local `server/uploads` folder
 
@@ -153,27 +124,24 @@ Backup/export is still not wired up yet, so Settings shows that honestly instead
 corolla-fix-helper/
   client/   Frontend app
   server/   API, database setup, and file storage
+  docs/     Deployment and project-state notes
 ```
 
 ## First-time setup
 
-Open a terminal in the project folder:
+Use Node.js `>=24 <25`.
 
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+Open a terminal in the project folder, then run:
+
+```bash
 npm run install:all
 ```
 
-What this does:
+This installs the root package, server packages, and client packages.
 
-- installs the root package used to run the client and server together
-- installs server packages
-- installs client packages
+## Run the app locally
 
-## Run the app
-
-```powershell
-cd C:\Users\daleb\source\corolla-fix-helper
+```bash
 npm run dev
 ```
 
@@ -187,49 +155,93 @@ After that:
 
 Run only the server:
 
-```powershell
+```bash
 npm run dev:server
 ```
 
 Run only the client:
 
-```powershell
+```bash
 npm run dev:client
 ```
 
-Build the client:
+Build the app:
 
-```powershell
+```bash
 npm run build
 ```
 
-Run both test suites:
+Run both automated test suites:
 
-```powershell
+```bash
 npm run test
 ```
 
 Run only the backend tests:
 
-```powershell
+```bash
 npm run test:server
 ```
 
 Run only the frontend tests:
 
-```powershell
+```bash
 npm run test:client
 ```
 
 Start the app with the built client:
 
-```powershell
+```bash
+npm run build
 npm start
 ```
 
-Manual QA checklist:
+After `npm start`, the built app should load from the backend at `http://localhost:4000`.
 
-- `QA_CHECKLIST.md`
+## V1 readiness status
+
+Latest documented validation in this repo was run on Node.js `v24.15.0` with npm `11.4.2`.
+
+These commands completed successfully:
+
+```bash
+npm run install:all
+npm run build
+npm run test
+npm run test:server
+npm run test:client
+```
+
+No repo lint or typecheck scripts are currently defined. During install, npm reported one moderate client dependency audit finding; that audit finding did not block the V1 build or automated tests.
+
+Based on the documented validation above, V1 is ready to tag under Node.js `>=24 <25`. Do not tag V1 from a Node 20 validation run, because the backend depends on `node:sqlite` with `DatabaseSync`.
+
+## Manual QA
+
+Use `QA_CHECKLIST.md` before relying on a demo build.
+
+Pay special attention to:
+
+- uploading and opening a sample PDF
+- manually re-running extraction
+- document delete cleanup across linked symptoms, procedures, and notes
+- Settings backup export
+- local production start with `npm run build` then `npm start`
+
+## Recommended V1 demo deployment
+
+For a public or private V1 demo, use a Google Cloud Compute Engine VM with Node.js `>=24 <25` or the included Docker image path.
+
+Plain-English storage notes:
+
+- SQLite is a local database file.
+- Uploaded PDFs are local files.
+- Persistent storage means the database file and PDFs survive app restarts.
+- A demo should use sample or fake PDFs because the app does not have user accounts yet.
+
+Cloud Run is not the preferred V1 target because the current design uses a local SQLite file and local uploaded PDF files. Cloud Run can be considered later only if storage is redesigned, for example with a managed database and object storage for PDFs.
+
+For the beginner-friendly VM deployment checklist, use [`docs/GCE_DEPLOYMENT_RUNBOOK.md`](docs/GCE_DEPLOYMENT_RUNBOOK.md).
 
 ## Environment values
 
@@ -242,3 +254,5 @@ Important values:
 - `DATABASE_FILE=./server/data/corolla-fix-helper.db` sets the SQLite database file path
 - `UPLOADS_DIR=./server/uploads` sets where uploaded PDFs are stored
 - `MAX_UPLOAD_SIZE_MB=20` sets the PDF upload size limit
+- `NODE_ENV=production` marks the app as a production run for deployment tooling
+- `CORS_ORIGIN=http://localhost:5173` sets the allowed CORS origin for the API

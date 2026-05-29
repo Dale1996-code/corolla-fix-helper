@@ -1,0 +1,175 @@
+# Corolla Fix Helper — Project Brief + Current State Checklist
+
+Historical note:
+This file started as an early project planning artifact. It has now been refreshed so it no longer reads like the app is unverified or waiting to get past V1.
+
+For the current source of truth, use these files first:
+
+- `README.md` for the current repo baseline and run commands
+- `PRD.md` for current product scope
+- `ROADMAP.md` for the finished V1 phase summary
+- `QA_CHECKLIST.md` for manual acceptance checks
+- `docs/project-state-2026-05-01.md` for the refreshed validation snapshot
+- `docs/GCE_DEPLOYMENT_RUNBOOK.md` for the detailed VM deployment checklist
+
+## Current Project Summary
+
+Corolla Fix Helper is a private, local-first repair helper for a 2009 Toyota Corolla LE 1.8L.
+
+The current app is more than the original Day 1 PDF organizer idea. It now has a working V1 baseline with:
+
+- Dashboard
+- Documents
+- Search
+- Symptoms
+- Procedures
+- Notes
+- Settings
+- local SQLite storage
+- local PDF upload storage
+- manual Settings backup export
+- production serving of the built React client from Express
+- a Google Compute Engine VM demo path documented in the repo
+
+## Current V1 Status
+
+V1 is documented as ready to tag from a Node.js `>=24 <25` validation run.
+
+The latest documented validation used:
+
+- Node.js `v24.15.0`
+- npm `11.4.2`
+
+The documented green commands are:
+
+```bash
+npm run install:all
+npm run build
+npm run test
+npm run test:server
+npm run test:client
+```
+
+Do not validate or tag V1 from Node 20. The backend uses `node:sqlite` with `DatabaseSync`, so Node.js `>=24 <25` is the expected runtime range for this repo.
+
+## Current Product Rules
+
+1. Keep V1 single-vehicle and local-first.
+2. Use sample or fake PDFs for public demos until authentication exists.
+3. Do not present the app as having cloud sync, user accounts, AI chat, embeddings, RAG, OCR for every file, or multi-vehicle support.
+4. Keep the current V1 deployment path close to the app design: one Node server, one SQLite database file, and one local uploads folder.
+5. Cloud Run is not the preferred V1 target unless storage is redesigned away from local files.
+
+## Current In-Scope Features
+
+### Documents
+
+- [x] Upload PDF files
+- [x] Store uploaded files locally
+- [x] Store document metadata in SQLite
+- [x] Attempt PDF text extraction
+- [x] Store extraction status
+- [x] Store page count
+- [x] Manually re-run extraction for one document
+- [x] Edit metadata after upload
+- [x] Mark documents as favorites
+- [x] Open uploaded PDFs from the app
+- [x] Sort and filter documents
+- [x] Delete a document with confirmation
+- [x] Clean up linked symptom/procedure links and note references when deleting a document
+- [ ] Document tags are not part of the current V1 workflow
+- [ ] Document bookmarks are not part of the current V1 workflow
+
+### Search
+
+- [x] Search documents
+- [x] Search symptoms
+- [x] Search procedures
+- [x] Search notes
+- [x] Keep separate search sections, filters, and results on one page
+
+### Symptoms
+
+- [x] Create symptoms
+- [x] Edit symptoms
+- [x] Delete symptoms
+- [x] Store status and confidence
+- [x] Search symptoms by title, system, suspected causes, and notes
+- [x] Filter symptoms by status and system
+- [x] Sort symptoms
+- [x] Link symptoms to documents
+- [x] Show linked documents in symptom details
+- [ ] Symptom-to-procedure linking is not part of the current V1 workflow
+
+### Procedures
+
+- [x] Create procedures
+- [x] Edit procedures
+- [x] Delete procedures
+- [x] Store steps, tools, parts, safety notes, difficulty, and confidence
+- [x] Search procedures by title, system, tools, parts, steps, and notes
+- [x] Filter procedures by system, difficulty, and confidence
+- [x] Sort procedures
+- [x] Link procedures to documents
+- [x] Show linked documents in procedure details
+- [x] Reuse saved Settings system suggestions in create/edit forms
+
+### Notes
+
+- [x] Create notes
+- [x] Edit notes
+- [x] Delete notes
+- [x] Organize notes by note type
+- [x] Link notes to documents, symptoms, or procedures
+- [x] Open linked records from the note details panel
+
+### Settings
+
+- [x] Edit the single stored vehicle profile
+- [x] Save reusable document defaults for common system names and document types
+- [x] Show local database path
+- [x] Show local uploads folder
+- [x] Show upload size limit
+- [x] Show frontend and backend ports
+- [x] Export a local backup archive (`.tar.gz`) containing the SQLite database and uploaded PDFs
+- [ ] Restore is not included in the current V1 phase
+- [ ] Runtime path editing is not done in the browser
+
+### Deployment / Runtime
+
+- [x] Root scripts exist for install, build, test, dev, and start
+- [x] Built React client can be served by Express in production
+- [x] `Dockerfile` exists for production image builds
+- [x] Google Compute Engine VM runbook exists
+- [x] Persistent local storage path is documented for VM demos
+- [x] Cloud Run is documented as not preferred for the current local-file design
+- [ ] User accounts and access control are not implemented
+- [ ] Automated E2E/browser smoke script is not wired into package scripts
+
+## Out of Scope Right Now
+
+- AI chat over all documents
+- embeddings/vector database
+- full RAG system
+- cloud sync
+- user accounts/auth
+- multi-vehicle support
+- voice assistant
+- image-based diagnosis
+- parts store integrations
+- completed OCR pipeline for every document
+- restore flow from backup archive
+
+## Success Statement
+
+V1 is successful if it helps find and reuse Corolla repair information faster than digging through folders manually, while staying honest about its current local-only limits.
+
+## Best Next Work After V1
+
+Good next candidates are:
+
+1. Deployment hardening for the VM demo path.
+2. A tested backup/restore drill before trusting real data.
+3. Basic access protection before sharing a public URL.
+4. A minimal E2E smoke test for the production build.
+5. Later, optional selected-document AI summaries only after the local-first V1 baseline stays stable.
