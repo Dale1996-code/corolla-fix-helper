@@ -16,6 +16,8 @@ export const config = {
   clientPort,
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
+  openAiApiKey: typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY : "",
+  openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   clientDistDir: path.join(projectRoot, "client", "dist"),
   databaseFile:
     process.env.DATABASE_FILE ||

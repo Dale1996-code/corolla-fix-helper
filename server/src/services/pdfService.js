@@ -10,6 +10,7 @@ export async function extractPdfData(fileBuffer) {
 
     const pdfDocument = await loadingTask.promise;
     const pageTexts = [];
+    const pages = [];
 
     for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
       const page = await pdfDocument.getPage(pageNumber);
@@ -23,6 +24,10 @@ export async function extractPdfData(fileBuffer) {
 
       if (pageText) {
         pageTexts.push(pageText);
+        pages.push({
+          pageNumber,
+          text: pageText,
+        });
       }
     }
 
@@ -32,12 +37,14 @@ export async function extractPdfData(fileBuffer) {
       extractedText,
       extractionStatus: extractedText ? "completed" : "no_text_found",
       pageCount: pdfDocument.numPages,
+      pages,
     };
   } catch (error) {
     return {
       extractedText: "",
       extractionStatus: `failed: ${error.message}`,
       pageCount: null,
+      pages: [],
     };
   }
 }

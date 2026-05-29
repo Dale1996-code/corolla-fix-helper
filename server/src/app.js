@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import cors from "cors";
 import express from "express";
+import { createAskRouter } from "./routes/ask.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { initializeDatabase } from "./initDatabase.js";
@@ -51,6 +52,7 @@ export function createApp(options = {}) {
   initializeDatabase();
 
   const app = express();
+  const { askQuestion } = options;
   const clientDistDir = options.clientDistDir || config.clientDistDir;
 
   app.use(
@@ -69,6 +71,7 @@ export function createApp(options = {}) {
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/ask", createAskRouter({ askQuestion }));
 
   addFrontendRoutes(app, clientDistDir);
 

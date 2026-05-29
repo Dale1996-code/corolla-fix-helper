@@ -117,6 +117,23 @@ function createTables() {
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
       FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS document_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      document_id INTEGER NOT NULL,
+      page_number INTEGER NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      chunk_text TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+      UNIQUE (document_id, page_number, chunk_index)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id
+      ON document_chunks (document_id);
+
+    CREATE INDEX IF NOT EXISTS idx_document_chunks_page
+      ON document_chunks (page_number);
   `);
 
   ensureColumn("documents", "file_type", "TEXT");
