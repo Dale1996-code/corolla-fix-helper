@@ -231,6 +231,178 @@ function SectionStatus({ loading, error, total, label, emptyMessage }) {
   return null;
 }
 
+function AskCitationCard({ citation }) {
+  const documentName =
+    citation.documentTitle || citation.originalFilename || "Untitled document";
+  const pageLabel = citation.pageNumber ? `Page ${citation.pageNumber}` : "Page unknown";
+
+  return (
+    <Link
+      to={buildEntityLink("document", citation.documentId)}
+      aria-label={`Open source ${documentName} ${pageLabel}`}
+      className="block rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="font-semibold text-slate-900">{documentName}</p>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+          {pageLabel}
+        </span>
+      </div>
+      <p className="mt-3 leading-6 text-slate-700">{citation.snippet}</p>
+    </Link>
+  );
+}
+
+function AskStatePanel({ askState }) {
+  if (askState.status === "answered") {
+    return (
+      <div className="space-y-4">
+        <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <p className="font-semibold text-slate-900">Answer</p>
+          <p className="mt-2 leading-6">{askState.answer}</p>
+        </section>
+
+        {askState.citations.length ? (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              {askState.citations.map((citation) => (
+                <AskCitationCard
+                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+                  citation={citation}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (askState.status === "ai_not_configured") {
+    return (
+      <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="font-semibold">AI not configured</p>
+        <p className="mt-2 text-amber-700">{askState.message}</p>
+      </section>
+    );
+  }
+
+  if (askState.status === "not_found") {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        <p className="font-semibold text-slate-900">No answer found</p>
+        <p className="mt-2">{askState.message}</p>
+      </section>
+    );
+  }
+
+  if (askState.status === "error") {
+    return (
+      <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p className="font-semibold text-red-800">Could not ask documents</p>
+        <p className="mt-2">{askState.message}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+      {askState.message}
+    </section>
+  );
+}
+
+function AskDocumentsSection() {
+  const [question, setQuestion] = useState("");
+  const [askState, setAskState] = useState({
+    status: "empty",
+    message: "Type a question about your uploaded documents to begin.",
+    answer: "",
+    citations: [],
+  });
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    const trimmedQuestion = question.trim();
+
+    if (!trimmedQuestion) {
+      setAskState({
+        status: "empty",
+        message: "Enter a question before asking.",
+        answer: "",
+        citations: [],
+      });
+      return;
+    }
+
+    setAskState({
+      status: "loading",
+      message: "Asking your documents...",
+      answer: "",
+      citations: [],
+    });
+
+    try {
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: trimmedQuestion }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not answer this question.");
+      }
+
+      setAskState({
+        status: payload.status || "answered",
+        message: payload.answer || "",
+        answer: payload.answer || "",
+        citations: Array.isArray(payload.citations) ? payload.citations : [],
+      });
+    } catch (error) {
+      setAskState({
+        status: "error",
+        message: error.message || "Could not answer this question.",
+        answer: "",
+        citations: [],
+      });
+    }
+  }
+
+  const isLoading = askState.status === "loading";
+
+  return (
+    <SectionShell title="Ask your documents">
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <label className="grid gap-2 text-sm text-slate-700">
+          <span className="font-medium text-slate-900">Question</span>
+          <textarea
+            className="min-h-24 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="What is the oil drain plug torque?"
+          />
+        </label>
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {isLoading ? "Asking..." : "Ask"}
+          </button>
+        </div>
+      </form>
+
+      <AskStatePanel askState={askState} />
+    </SectionShell>
+  );
+}
+
 function SnippetBlock({ snippet, snippetField, showSnippetReason }) {
   if (!snippet) {
     return null;
@@ -890,6 +1062,7 @@ export function SearchPage() {
       />
 
       <div className="space-y-6">
+        <AskDocumentsSection />
         <DocumentsSection />
         <SymptomsSection />
         <ProceduresSection />
