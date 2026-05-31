@@ -1,39 +1,57 @@
-# Corolla Fix Helper - Current Data Model
+# Corolla Fix Helper Data Model
 
-## Purpose
-This file explains the main SQLite tables used by the current app.
+This file summarizes the current SQLite data model. SQLite is a local database stored as one file.
 
-The app is local-first and currently centered on one vehicle:
+The current app is centered on one vehicle:
+
 - 2009 Toyota Corolla LE 1.8L
 
-For V1, SQLite remains local-file storage. That means the database is one file on disk. In a VM demo, `DATABASE_FILE` should point to a persistent folder so the data survives app restarts.
+The full app architecture is described in `docs/architecture.md`.
 
-The current v1 workflow is built around:
-- imported repair documents
-- symptom tracking
-- repair procedures
-- notes
-- workspace search across documents, symptoms, procedures, and notes
+## Storage
 
-## Main entities
+- Database file: configured by `DATABASE_FILE`
+- Uploaded PDF folder: configured by `UPLOADS_DIR`
+- Default local database path: `server/data/corolla-fix-helper.db`
+- Default local upload path: `server/uploads`
+
+In a Google Compute Engine demo, both paths should point to persistent storage so data survives app restarts.
+
+## Main Tables
 
 ### `vehicles`
-Stores vehicle information.
 
-Current v1 expectation:
-- the app is used for one Corolla, so this table is effectively a single-vehicle anchor
+Stores the single vehicle profile.
 
-Main fields:
+Important fields:
+
 - `id`
-- `year`, `make`, `model`, `trim`, `engine`
+- `year`
+- `make`
+- `model`
+- `trim`
+- `engine`
 - `created_at`
 
+### `app_settings`
+
+Stores reusable Settings values.
+
+Important fields:
+
+- `id`
+- `document_system_defaults`
+- `document_type_defaults`
+- `updated_at`
+
+The app keeps one settings row with `id = 1`.
+
 ### `documents`
-Stores uploaded PDF records and their metadata.
 
-This is the document library used by the Documents, Search, Dashboard, Symptoms, Procedures, and Notes workflows.
+Stores uploaded PDF records and metadata.
 
-Main fields:
+Important fields:
+
 - `id`
 - `vehicle_id`
 - `title`
@@ -53,24 +71,24 @@ Main fields:
 - `created_at`
 - `updated_at`
 
-Current v1 use:
-- upload and store PDFs locally
-- edit metadata
-- track extraction status
-- track page count
-- mark favorites
-- open the stored PDF from the app
+Current use:
 
-The actual uploaded PDF files live in the configured uploads folder. In a VM demo, `UPLOADS_DIR` should also point to persistent storage.
+- Upload and store PDFs locally.
+- Edit metadata.
+- Track extraction status and page count.
+- Mark favorites.
+- Open stored PDFs.
+- Re-run extraction for one saved document.
+- Delete documents and clean up related links.
 
-Important note:
-- favorites are the only saved-document flag supported in the current V1 workflow
-- older local SQLite files may still contain unused `is_bookmarked`, `tags`, and `document_tags` leftovers from earlier experiments, but the current app does not read or write them
+Favorites are the current saved-document flag. Bookmarks and tags are not part of the current V1 workflow.
 
 ### `symptoms`
-Stores repair symptoms or problems the user wants to track.
 
-Main fields:
+Stores problems or observations about the car.
+
+Important fields:
+
 - `id`
 - `vehicle_id`
 - `title`
@@ -85,29 +103,29 @@ Main fields:
 - `created_at`
 - `updated_at`
 
-Current v1 use:
-- create, edit, and delete symptoms
-- organize symptoms by system and status
-- link symptoms to supporting documents
+Current use:
 
-Important note:
-- `severity` and `first_observed_at` exist in the database, but they are not the main focus of the current UI
+- Create, edit, and delete symptoms.
+- Search, filter, and sort symptoms.
+- Link symptoms to documents.
 
 ### `symptom_documents`
-Join table that links symptoms to documents.
 
-Main fields:
+Links symptoms to documents.
+
+Important fields:
+
 - `symptom_id`
 - `document_id`
 
-Current v1 use:
-- one symptom can link to many documents
-- one document can support many symptoms
+One symptom can link to many documents. One document can support many symptoms.
 
 ### `procedures`
-Stores repair procedures, checklists, and step-by-step work notes.
 
-Main fields:
+Stores repair procedures and work notes.
+
+Important fields:
+
 - `id`
 - `vehicle_id`
 - `title`
@@ -123,29 +141,30 @@ Main fields:
 - `created_at`
 - `updated_at`
 
-Current v1 use:
-- create, edit, and delete procedures
-- store tools, parts, safety notes, and steps
-- link procedures to supporting documents
+Current use:
 
-Important note:
-- `status` exists in the schema, but it is not a major part of the current confirmed UI workflow
+- Create, edit, and delete procedures.
+- Store steps, tools, parts, safety notes, difficulty, and confidence.
+- Search, filter, and sort procedures.
+- Link procedures to documents.
 
 ### `procedure_documents`
-Join table that links procedures to documents.
 
-Main fields:
+Links procedures to documents.
+
+Important fields:
+
 - `procedure_id`
 - `document_id`
 
-Current v1 use:
-- one procedure can link to many documents
-- one document can support many procedures
+One procedure can link to many documents. One document can support many procedures.
 
 ### `notes`
-Stores freeform notes for the vehicle.
 
-Main fields:
+Stores freeform notes.
+
+Important fields:
+
 - `id`
 - `vehicle_id`
 - `document_id`
@@ -158,27 +177,56 @@ Main fields:
 - `created_at`
 - `updated_at`
 
-Current v1 use:
-- create, edit, and delete notes
-- store note title and main note content
-- link notes to one document, symptom, or procedure in the current UI
-- return linked record details in the API as `linkedDocument`, `linkedSymptom`, or `linkedProcedure`
+Current use:
 
-Important note:
-- `related_entity_type` stores whether the note is linked to a `document`, `symptom`, `procedure`, or to `none`
-- `related_entity_id` stores the matching record ID when a link is present
-- older note rows may still use `document_id` and `body`; the server includes backfill logic to keep older data usable
+- Create, edit, and delete notes.
+- Organize notes by note type.
+- Link one note to one document, symptom, or procedure.
+- Return linked record details as `linkedDocument`, `linkedSymptom`, or `linkedProcedure`.
 
-## Supporting tables
+Older note rows may still use `document_id` and `body`. The server includes backfill logic to keep older rows usable.
 
-## Search data expectations
+### `document_chunks`
+
+Stores smaller page-aware chunks of extracted PDF text for the "Ask your documents" feature.
+
+Important fields:
+
+- `id`
+- `document_id`
+- `page_number`
+- `chunk_index`
+- `chunk_text`
+- `created_at`
+
+Current use:
+
+- Rebuilt after PDF upload and extraction re-run.
+- Retrieved by `POST /api/ask` before OpenAI answer generation.
+- Used for citations back to document names and page numbers.
+
+The table keeps each document, page, and chunk index unique so re-running extraction can replace old chunks cleanly.
+
+## Search
+
 There is no separate search table.
 
-The current search endpoints use data already stored in the main app tables:
-- `/api/search` uses document metadata, extracted text, and favorite filter state
-- `/api/search/symptoms` uses stored symptom fields
-- `/api/search/procedures` uses stored procedure fields
-- `/api/search/notes` uses stored note fields plus linked record details
+Current search endpoints use existing table data:
 
-Current v1 meaning:
-- Search is a one-page workspace search with separate sections for documents, symptoms, procedures, and notes
+- `/api/search` and `/api/search/documents` search document metadata, notes, extracted text, and favorite state.
+- `/api/search/symptoms` searches symptom fields.
+- `/api/search/procedures` searches procedure fields.
+- `/api/search/notes` searches note fields and linked record details.
+- `/api/ask` retrieves matching `document_chunks` and returns cited document Q&A results.
+
+The current Ask retrieval is keyword-based. It does not use embeddings or a vector database.
+
+## Not In The Current Schema
+
+The current schema does not include:
+
+- user accounts
+- cloud sync tables
+- multi-vehicle UI support beyond the existing vehicle table
+- direct symptom-to-procedure join table
+- vector or embedding tables

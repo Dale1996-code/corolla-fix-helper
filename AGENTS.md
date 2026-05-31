@@ -1,25 +1,42 @@
 # Corolla Fix Helper Agent Notes
 
-Keep repo guidance tied to the commands and flows that are already in use here.
+Keep repo guidance tied to commands and behavior that exist in the current codebase.
 
-## Working commands
+## Working Commands
 
 Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 
-- `npm run install:all` installs root, server, and client dependencies.
-- `npm run dev` starts the full local app.
-- `npm run dev:server` starts only the Express server.
-- `npm run dev:client` starts only the Vite client.
-- `npm run build` runs the current full build flow. The server build step is still a no-op and prints `No server build step needed yet.`
-- `npm run test` is the main root verification command and runs both test suites.
-- `npm run test:server` runs the backend Node test suite.
-- `npm run test:client` runs the frontend Vitest suite.
-- `npm start` starts the server app.
+- `npm run install:all` installs root, server, and client packages.
+- `npm run dev` starts the local backend and frontend together.
+- `npm run dev:server` starts only the Express backend.
+- `npm run dev:client` starts only the Vite frontend.
+- `npm run build` builds the current app. The server build step is still a no-op.
+- `npm run test` runs the backend and frontend test suites.
+- `npm run test:server` runs backend tests with Node's built-in test runner.
+- `npm run test:client` runs frontend tests with Vitest.
+- `npm start` starts the Express server, which can serve `client/dist` after `npm run build`.
 
-## Local workflow checks
+## Local Workflow Checks
 
-- Main dev URLs: frontend `http://localhost:5173`, backend `http://localhost:4000`, health check `http://localhost:4000/api/health`.
+- Frontend dev URL: `http://localhost:5173`
+- Backend URL: `http://localhost:4000`
+- Health check: `http://localhost:4000/api/health`
 - Use `QA_CHECKLIST.md` for manual verification after changes.
-- Current manual QA covers Settings, Documents, Search, Symptoms, Procedures, Notes, build, and tests.
-- Search is a whole-app page with separate sections for documents, symptoms, procedures, and notes.
-- Notes acceptance should include the details panel showing the linked item correctly for document, symptom, or procedure links.
+
+## Current Scope Rules
+
+- The app is local-first for one 2009 Toyota Corolla LE 1.8L.
+- Current storage is SQLite plus local uploaded PDF files.
+- Current search covers documents, symptoms, procedures, and notes in separate Search page sections.
+- Current document Q&A uses uploaded PDF chunks, keyword retrieval, and OpenAI answer generation when `OPENAI_API_KEY` is configured.
+- Current AI support does not include embeddings, a vector database, or general chat outside uploaded documents.
+- Current Google Cloud docs describe an intended deployment path, not proof of an active deployment.
+
+## Useful Docs
+
+- `README.md` is the main entry point.
+- `docs/local-development.md` explains local setup.
+- `docs/environment-variables.md` explains placeholder-only env values.
+- `docs/architecture.md` explains current app structure.
+- `docs/gcp-deployment.md` explains the intended Google Compute Engine path.
+- `docs/archive/` contains old plans, generated snapshots, and superseded deployment notes.
