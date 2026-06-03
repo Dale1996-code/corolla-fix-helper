@@ -1,135 +1,140 @@
-# Corolla Fix Helper - Manual QA Checklist
+# Corolla Fix Helper Manual QA Checklist
 
-Use this checklist after making changes so you can confirm the main v1 flows still work.
+Use this after changes to confirm the main app still works. Manual QA means checking the app by hand in a browser.
 
-## 1) Start the app
-
-Open a terminal in the project folder:
+## 1. Start The App
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
 npm run dev
 ```
 
-Check that:
+Check:
 
-- the frontend opens at `http://localhost:5173`
-- the backend health check works at `http://localhost:4000/api/health`
+- Frontend opens at `http://localhost:5173`.
+- Backend health check works at `http://localhost:4000/api/health`.
+- The sidebar shows Dashboard, Documents, Search, Symptoms, Procedures, Notes, and Settings.
 
-## 2) Check Settings
+## 2. Settings
 
-1. Open the Settings page.
-2. Change one vehicle field such as trim or engine.
+1. Open Settings.
+2. Change one vehicle value, such as trim or engine.
 3. Save the vehicle profile.
+4. Save a simple document default, such as a common system name.
+5. Click **Export backup (.tar.gz)**.
 
-Check that:
+Check:
 
-- you see a success message
-- the updated value stays visible after saving
-- local runtime info is shown as read-only
-- clicking **Export backup (.tar.gz)** downloads a backup file
-- you see the backup success message after export
+- Save messages appear.
+- Runtime values are shown as read-only.
+- Backup export downloads a `.tar.gz` file.
+- No secret values appear in the browser.
 
-## 3) Check Documents
+## 3. Documents
 
-1. Open the Documents page.
-2. Upload a PDF.
+1. Open Documents.
+2. Upload a fake or sample PDF.
 3. Fill in the required metadata.
-4. Open the uploaded PDF from the app.
+4. Open the uploaded PDF from the detail panel.
+5. Click **Re-run extraction**.
+6. Mark the document as a favorite.
+7. Edit document metadata.
 
-Check that:
+Check:
 
-- the upload succeeds
-- the document appears in the list
+- Upload succeeds.
+- The document appears in the list.
+- Extraction status and page count are shown.
+- The PDF opens from the app.
+- Re-run extraction finishes with a clear success or error message.
+- Favorites and metadata changes persist after refresh.
 
-### 3b) Delete a bad document import safely
-1. In Documents, select an uploaded test document.
-2. Click **Delete document** in the details panel.
+## 4. Document Delete Cleanup
+
+Use a test document, not important data.
+
+1. Link the document to a symptom, a procedure, and a note.
+2. Delete the document from Documents.
 3. Confirm the delete prompt.
-4. Verify linked symptom/procedure relationships are removed for that document.
-5. Verify linked notes no longer show that document in note details.
 
-Expected:
-- a clear confirmation appears before delete
-- the document disappears from the list
-- opening the document URL now returns not found
-- no stale document links remain in symptoms, procedures, or notes
-- the detail panel shows the saved metadata
-- the PDF opens successfully
-- the detail panel includes a **Re-run extraction** button
-- clicking **Re-run extraction** updates extraction status/page count and shows a clear success or error message
+Check:
 
-## 4) Check Search
+- The document disappears from the list.
+- The old PDF URL no longer opens.
+- Linked symptom and procedure relationships are removed.
+- Linked notes no longer show a stale document link.
 
-1. Open the Search page.
-2. In the Documents section, search for a keyword from an uploaded document.
-3. Try at least one Documents filter such as system or favorites.
-4. Confirm the same page also shows sections for symptoms, procedures, and notes.
+## 5. Search
 
-Check that:
+1. Open Search.
+2. Search the Documents section for text from an uploaded PDF.
+3. Search the Symptoms, Procedures, and Notes sections.
+4. Try one filter in each section.
 
-- document results appear when the keyword exists
-- document filters narrow the results correctly
-- the Search page also shows separate sections for symptoms, procedures, and notes
+Check:
 
-## 5) Check Symptoms
+- Each Search section has its own controls.
+- Results narrow correctly.
+- Result links open the matching item.
+- Empty states are clear when no result matches.
+
+## 6. Ask Your Documents
+
+Use a fake or sample PDF with text you can safely test.
+
+1. Open Search.
+2. Ask a question that should be answered by text in the uploaded PDF.
+3. Ask a question that the uploaded PDFs cannot answer.
+
+Check:
+
+- If `OPENAI_API_KEY` is configured, the answer uses uploaded document text and shows citations.
+- If `OPENAI_API_KEY` is not configured, a supported question shows an AI-not-configured message.
+- Unsupported questions show a not-enough-information message.
+
+## 7. Symptoms
 
 1. Create a symptom.
-2. Link it to a document if one is available.
-3. Use the search box, a filter, and a sort option.
+2. Link it to a document if one exists.
+3. Use search, filters, and sorting.
+4. Edit the symptom.
+5. Delete a test symptom.
 
-Check that:
+Check:
 
-- the symptom saves successfully
-- the list updates
-- the detail panel follows the selected symptom
-- the search and filters change the visible list correctly
-- the no-results message appears when filters remove everything
+- The list and detail panel update correctly.
+- Linked documents open the correct document page.
+- Counts and empty states make sense.
 
-## 6) Check Procedures
+## 8. Procedures
 
 1. Create a procedure.
-2. If a document is available, link it to the procedure.
-3. Fill in tools, parts, safety notes, or steps.
-4. Save it and open it in the detail panel.
-5. If Settings already has saved common systems, click into the System field in create or edit mode and confirm the suggestions appear.
-6. Use the search box, at least one filter, and a sort option.
-7. If you linked a document, open it from the procedure detail panel.
-8. If you have more than one procedure, apply a filter that hides the currently selected procedure.
+2. Add steps, tools, parts, safety notes, difficulty, and confidence.
+3. Link it to a document if one exists.
+4. Use search, filters, and sorting.
+5. Edit and delete a test procedure.
 
-Check that:
+Check:
 
-- the procedure saves successfully
-- the detail panel shows the new content
-- the linked document appears in the detail panel and opens the correct document page
-- saved system suggestions appear in the System field if they already exist in Settings
-- the list shows the updated procedure count while you browse
-- the search, filters, and sort controls change the visible list correctly
-- the no-results message appears when filters remove everything
-- the `Clear filters` button restores the full list
-- the detail panel switches to a visible procedure instead of staying stuck on a hidden one
+- The saved content appears in the detail panel.
+- Linked documents open correctly.
+- Saved Settings system suggestions appear in create or edit fields.
 
-## 7) Check Notes
+## 9. Notes
 
 1. Create a note.
 2. Pick a note type.
-3. Link it to a document, symptom, or procedure if one is available.
-4. Use the Note type filter, Linked item filter, and Sort control.
-5. Open the saved note in the detail panel.
+3. Link it to a document, symptom, or procedure if one exists.
+4. Use note type filter, linked item filter, and sorting.
+5. Edit and delete a test note.
 
-Check that:
+Check:
 
-- the note saves successfully
-- the note appears in the list
-- the detail panel shows the saved content
-- the list shows the linked item title when the note is linked
-- the note filters and sort controls change the visible list
-- the "Showing X of Y notes" count updates while browsing
-- the detail panel shows the linked item and can open that linked record page
+- The note appears in the list.
+- The detail panel shows the linked item.
+- The linked item opens from the note detail panel.
 
-## 8) Run build and tests
-
-From the project root, run:
+## 10. Build And Tests
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
@@ -137,41 +142,24 @@ npm run build
 npm run test
 ```
 
-Check that:
+Check:
 
-- the build finishes without errors
-- the backend tests pass
-- the frontend tests pass
+- The build finishes without errors.
+- Backend tests pass.
+- Frontend tests pass.
 
-## 9) Production demo smoke test
+## 11. Local Production Smoke Test
 
-Use this before a V1 demo deployment.
-
-On a Google Cloud Compute Engine VM, use Node.js >=24 <25 and configure a persistent data folder. Node 20 is not supported for backend validation because the backend uses `node:sqlite` with `DatabaseSync`. Example environment values:
-
-```bash
-DATABASE_FILE=/opt/corolla-fix-helper-data/corolla-fix-helper.db
-UPLOADS_DIR=/opt/corolla-fix-helper-data/uploads
-MAX_UPLOAD_SIZE_MB=20
-PORT=4000
-```
-
-From the project root, run:
-
-```bash
-npm run install:all
+```powershell
+cd C:\Users\daleb\source\corolla-fix-helper
 npm run build
 npm start
 ```
 
-Check that:
+Check:
 
-- the app opens at `http://localhost:4000`
-- the health check returns OK at `http://localhost:4000/api/health`
-- a frontend route still loads the app after refreshing the browser
-- you can upload a sample PDF
-- you can open that sample PDF from the app
-- you can search for text from that sample PDF after extraction finishes
-- after stopping and restarting the app with the same `DATABASE_FILE` and `UPLOADS_DIR`, the uploaded document record and PDF are still there
+- The app opens at `http://localhost:4000`.
+- `http://localhost:4000/api/health` returns OK.
+- Browser refresh works on a frontend route such as `/documents`.
 
-For a public demo, use sample or fake PDFs only. The app does not have user accounts yet.
+For cloud deployment checks, use `docs/gcp-deployment.md`. No actual deployment is assumed by this checklist.
