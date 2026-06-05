@@ -22,7 +22,7 @@ This audit reviewed every markdown or documentation-style file found in the repo
 | `docs/superpowers/plans/2026-04-20-whole-app-search.md` | ARCHIVE | Historical implementation plan for work now represented in the current code. | Moved to `docs/archive/superpowers/plans/2026-04-20-whole-app-search.md`. |
 | `docs/superpowers/specs/2026-04-20-whole-app-search-design.md` | ARCHIVE | Historical design spec for work now represented in the current code. | Moved to `docs/archive/superpowers/specs/2026-04-20-whole-app-search-design.md`. |
 | `# Corolla Fix Helper - Project Brief.txt` | ARCHIVE | Historical project brief with duplicate content, old source-of-truth links, and references to missing `PRD.md`. | Moved to `docs/archive/project-brief-current-state-checklist.txt`. |
-| `CHANGELOG.md` | ABSENT | Mentioned in the request but not present on this branch. | No file created; release history would need a separate Git-history pass. |
+| `CHANGELOG.md` | KEEP / FIX LINKS | Present on `main` (added in PR #26), but the initial rewrite missed it. It still pointed at `docs/AI_RAG_PLAN.md` and `docs/project-state-2026-05-01.md`, which this rewrite moved to `docs/archive/`. | Stale path references updated to the new `docs/archive/` locations; historical PR links kept. |
 
 ## Clean Current Structure
 
@@ -33,6 +33,7 @@ Current docs are:
 - `ROADMAP.md`
 - `QA_CHECKLIST.md`
 - `DATA_MODEL.md`
+- `CHANGELOG.md`
 - `docs/local-development.md`
 - `docs/environment-variables.md`
 - `docs/architecture.md`
