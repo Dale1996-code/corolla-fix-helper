@@ -29,7 +29,8 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Current storage is SQLite plus local uploaded PDF files.
 - Current search covers documents, symptoms, procedures, and notes in separate Search page sections.
 - Current document Q&A uses uploaded PDF chunks, keyword retrieval, and OpenAI answer generation when `OPENAI_API_KEY` is configured.
-- Current AI support does not include embeddings, a vector database, or general chat outside uploaded documents.
+- Current Repair Planner is a streaming tool-calling agent (`POST /api/repair-plan`, SSE) that plans repairs grounded in uploaded PDFs; it reuses the raw-`fetch` Responses API + dependency-injection conventions and is documented in `docs/repair-planner.md`.
+- Current AI support does not include embeddings, a vector database, or general open-ended chat; both AI features stay grounded in uploaded documents and the supplied input.
 - Current Google Cloud docs describe an intended deployment path, not proof of an active deployment.
 
 ## Useful Docs

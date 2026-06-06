@@ -2,6 +2,7 @@ export const navigationItems = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Documents", to: "/documents" },
   { label: "Search", to: "/search" },
+  { label: "Repair Planner", to: "/repair-planner" },
   { label: "Symptoms", to: "/symptoms" },
   { label: "Procedures", to: "/procedures" },
   { label: "Notes", to: "/notes" },
