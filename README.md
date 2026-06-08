@@ -18,6 +18,7 @@ The current codebase includes:
 - Resumable folder import for many PDFs with duplicate detection, chunk rebuilds, and an image-only report
 - Workspace search with separate sections for documents, symptoms, procedures, and notes
 - "Ask your documents" Q&A that retrieves matching uploaded PDF chunks and uses OpenAI to generate cited answers when configured
+- "Repair Planner" streaming agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts grounded in uploaded PDFs (needs `OPENAI_API_KEY`)
 - Symptoms with create, edit, delete, filters, sorting, and document links
 - Procedures with create, edit, delete, filters, sorting, steps, tools, parts, safety notes, and document links
 - Notes with create, edit, delete, filters, sorting, and links to a document, symptom, or procedure
@@ -33,11 +34,11 @@ The current app does not include:
 - cloud sync
 - multi-vehicle support
 - embeddings or vector search
-- general AI chat outside the uploaded-document Q&A flow
+- general open-ended AI chat (the Ask and Repair Planner features stay grounded in the uploaded documents and the repair brief)
 - automatic restore from a backup archive
 - a verified current cloud deployment from this branch
 
-The document Q&A feature needs `OPENAI_API_KEY` in the server environment. Without that key, the app keeps working and the Ask panel shows that AI is not configured.
+The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. Without that key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.
 
 Use sample or fake PDFs before sharing a public demo. The app does not have access control yet.
 
@@ -60,6 +61,7 @@ For local setup:
 For understanding the app:
 
 - [Architecture](docs/architecture.md)
+- [Repair Planner agent](docs/repair-planner.md)
 - [Current data model](DATA_MODEL.md)
 - [Manual QA checklist](QA_CHECKLIST.md)
 - [Roadmap](ROADMAP.md)

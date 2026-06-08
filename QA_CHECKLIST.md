@@ -13,7 +13,7 @@ Check:
 
 - Frontend opens at `http://localhost:5173`.
 - Backend health check works at `http://localhost:4000/api/health`.
-- The sidebar shows Dashboard, Documents, Search, Symptoms, Procedures, Notes, and Settings.
+- The sidebar shows Dashboard, Documents, Search, Repair Planner, Symptoms, Procedures, Notes, and Settings.
 
 ## 2. Settings
 
@@ -92,7 +92,25 @@ Check:
 - If `OPENAI_API_KEY` is not configured, a supported question shows an AI-not-configured message.
 - Unsupported questions show a not-enough-information message.
 
-## 7. Symptoms
+## 7. Repair Planner
+
+Use a fake or sample PDF so the agent has manuals to cite.
+
+1. Open Repair Planner.
+2. Enter a repair brief, skill level, available tools, and available parts.
+3. Click **Build repair plan**.
+4. Submit with an empty brief to confirm the validation message.
+
+Check:
+
+- The agent activity log shows tool calls and results while it runs.
+- The prioritized plan text streams in progressively.
+- Readiness, owner checklist, extracted tasks, handoff drafts, and sources cards appear when finished.
+- Source cards open the matching document page.
+- If `OPENAI_API_KEY` is not configured, an AI-not-configured banner appears and nothing crashes.
+- See `docs/repair-planner.md` for the full validation checklist and the live key-backed check.
+
+## 8. Symptoms
 
 1. Create a symptom.
 2. Link it to a document if one exists.
@@ -106,7 +124,7 @@ Check:
 - Linked documents open the correct document page.
 - Counts and empty states make sense.
 
-## 8. Procedures
+## 9. Procedures
 
 1. Create a procedure.
 2. Add steps, tools, parts, safety notes, difficulty, and confidence.
@@ -120,7 +138,7 @@ Check:
 - Linked documents open correctly.
 - Saved Settings system suggestions appear in create or edit fields.
 
-## 9. Notes
+## 10. Notes
 
 1. Create a note.
 2. Pick a note type.
@@ -134,7 +152,7 @@ Check:
 - The detail panel shows the linked item.
 - The linked item opens from the note detail panel.
 
-## 10. Build And Tests
+## 11. Build And Tests
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper

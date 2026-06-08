@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { SearchPage } from "./pages/SearchPage";
+import { RepairPlannerPage } from "./pages/RepairPlannerPage";
 import { SymptomsPage } from "./pages/SymptomsPage";
 import { ProceduresPage } from "./pages/ProceduresPage";
 import { NotesPage } from "./pages/NotesPage";
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/repair-planner" element={<RepairPlannerPage />} />
             <Route path="/symptoms" element={<SymptomsPage />} />
             <Route path="/procedures" element={<ProceduresPage />} />
             <Route path="/notes" element={<NotesPage />} />
