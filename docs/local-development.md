@@ -77,15 +77,49 @@ http://localhost:4000/api/health
 ## 6. Build And Test
 
 ```powershell
+npm run lint
+npm run typecheck
 npm run build
 npm run test
 ```
+
+`npm run lint` checks the importer-related server files with ESLint.
+
+`npm run typecheck` checks the changed server JavaScript files with TypeScript `checkJs`. This is intentionally scoped to changed code so older unrelated warnings do not block importer work.
 
 `npm run build` checks that the app can produce a production frontend build.
 
 `npm run test` runs backend and frontend automated tests.
 
-## 7. Run The Built App Locally
+## 7. Bulk Import PDFs
+
+Run this from the repo root:
+
+```powershell
+npm run import -- "C:\path\to\pdfs"
+```
+
+Replace `C:\path\to\pdfs` with the folder that contains the PDFs.
+
+The importer:
+
+- scans the folder and subfolders for `.pdf` files
+- copies readable PDFs into the configured uploads folder
+- stores each document in SQLite
+- rebuilds `document_chunks` for document Q&A
+- skips duplicates by MD5 file hash first and original filename second
+- keeps going when one PDF is corrupt or unreadable
+- prints imported, skipped, failed, and `IMAGE-ONLY` counts
+
+Default imported metadata is:
+
+- system: `Imported Documents`
+- document type: `Repair Manual`
+- source: `Bulk Folder Import`
+
+You can edit document metadata later in the Documents page.
+
+## 8. Run The Built App Locally
 
 ```powershell
 npm run build

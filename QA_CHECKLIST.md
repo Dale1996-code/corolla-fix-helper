@@ -138,17 +138,37 @@ Check:
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
+npm run lint
+npm run typecheck
 npm run build
 npm run test
 ```
 
 Check:
 
+- Lint finishes without errors.
+- Typecheck finishes without errors for the changed server files.
 - The build finishes without errors.
 - Backend tests pass.
 - Frontend tests pass.
 
-## 11. Local Production Smoke Test
+## 11. Bulk Import Smoke Test
+
+Use a small folder with fake or safe PDFs first.
+
+```powershell
+cd C:\Users\daleb\source\corolla-fix-helper
+npm run import -- "C:\path\to\test-pdfs"
+```
+
+Check:
+
+- The report shows imported, skipped, failed, and `IMAGE-ONLY` counts.
+- Running the same command again skips already imported PDFs instead of duplicating them.
+- Imported PDFs appear in the Documents page.
+- Text PDFs create searchable chunks for Ask Your Documents.
+
+## 12. Local Production Smoke Test
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
