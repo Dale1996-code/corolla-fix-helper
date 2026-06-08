@@ -125,6 +125,8 @@ function createTables() {
       page_number INTEGER NOT NULL,
       chunk_index INTEGER NOT NULL,
       chunk_text TEXT NOT NULL,
+      embedding BLOB,
+      embedding_version TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
       UNIQUE (document_id, page_number, chunk_index)
@@ -161,8 +163,13 @@ function createTables() {
   ensureColumn("notes", "note_type", "TEXT NOT NULL DEFAULT 'general'");
   ensureColumn("notes", "related_entity_type", "TEXT NOT NULL DEFAULT 'none'");
   ensureColumn("notes", "related_entity_id", "INTEGER");
+  ensureColumn("document_chunks", "embedding", "BLOB");
+  ensureColumn("document_chunks", "embedding_version", "TEXT");
 
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding_version
+      ON document_chunks (embedding_version);
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_file_md5
       ON documents (file_md5)
       WHERE file_md5 IS NOT NULL AND TRIM(file_md5) <> '';

@@ -2,6 +2,8 @@
 
 Use this guide to run Corolla Fix Helper on your computer.
 
+For the simplest Windows setup with OpenAI key entry, folder import, embedding, build, and app start in one script, use [Getting Started On Windows](getting-started-windows.md).
+
 ## 1. Check Node.js
 
 This repo expects Node.js `>=24 <25`.
@@ -119,7 +121,27 @@ Default imported metadata is:
 
 You can edit document metadata later in the Documents page.
 
-## 8. Run The Built App Locally
+## 8. Embed Document Chunks
+
+If you have `OPENAI_API_KEY` configured and you want Ask to use hybrid retrieval, run this after importing or re-extracting PDFs:
+
+```powershell
+npm run embed:backfill
+```
+
+This sends chunk text to OpenAI's embedding API, stores a Float32 embedding BLOB on each chunk, and skips chunks already stored at the current embedding version.
+
+## 9. Run The Retrieval Eval
+
+Run this from the repo root:
+
+```powershell
+npm run eval:retrieval
+```
+
+This uses a temporary synthetic repair corpus with 2,500 distractor documents and prints keyword-only vs hybrid top-page results.
+
+## 10. Run The Built App Locally
 
 ```powershell
 npm run build

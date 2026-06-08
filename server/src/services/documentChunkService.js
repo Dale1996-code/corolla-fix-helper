@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { db } from "../database.js";
+import { clearChunkEmbeddingCache } from "./chunkEmbeddingService.js";
 import { extractPdfData } from "./pdfService.js";
 
 const DEFAULT_CHUNK_WORD_SIZE = 200;
@@ -145,6 +146,8 @@ export function rebuildDocumentChunksFromPages(
     db.exec("ROLLBACK");
     throw error;
   }
+
+  clearChunkEmbeddingCache();
 
   return {
     documentId: normalizedDocumentId,

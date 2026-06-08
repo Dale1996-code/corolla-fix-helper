@@ -201,15 +201,20 @@ Important fields:
 - `page_number`
 - `chunk_index`
 - `chunk_text`
+- `embedding`
+- `embedding_version`
 - `created_at`
 
 Current use:
 
 - Rebuilt after PDF upload and extraction re-run.
+- Embedded by `npm run embed:backfill` using the active OpenAI embedding config.
 - Retrieved by `POST /api/ask` before OpenAI answer generation.
 - Used for citations back to document names and page numbers.
 
 The table keeps each document, page, and chunk index unique so re-running extraction can replace old chunks cleanly.
+
+`embedding` stores the Float32 embedding as a SQLite BLOB. `embedding_version` stores the active model and dimension pair, for example `text-embedding-3-small@512`. Hybrid retrieval ignores chunks whose `embedding_version` does not match the current config.
 
 ## Search
 
@@ -221,9 +226,9 @@ Current search endpoints use existing table data:
 - `/api/search/symptoms` searches symptom fields.
 - `/api/search/procedures` searches procedure fields.
 - `/api/search/notes` searches note fields and linked record details.
-- `/api/ask` retrieves matching `document_chunks` and returns cited document Q&A results.
+- `/api/ask` retrieves matching `document_chunks` with hybrid keyword+embedding search and returns cited document Q&A results.
 
-The current Ask retrieval is keyword-based. It does not use embeddings or a vector database.
+The current Ask retrieval embeds the question once, cosine-scans an in-memory cache of current chunk embeddings, and fuses that ranking with keyword ranking. It does not use a vector database or SQLite vector extension.
 
 ## Not In The Current Schema
 
@@ -233,4 +238,4 @@ The current schema does not include:
 - cloud sync tables
 - multi-vehicle UI support beyond the existing vehicle table
 - direct symptom-to-procedure join table
-- vector or embedding tables
+- separate vector database or vector-extension tables

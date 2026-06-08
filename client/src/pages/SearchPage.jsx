@@ -253,20 +253,65 @@ function AskCitationCard({ citation }) {
   );
 }
 
-function AskStatePanel({ askState }) {
-  if (askState.status === "answered") {
+function AskRetrievedSnippets({ citations }) {
+  const snippets = citations.filter((citation) => citation.snippet);
+
+  if (!snippets.length) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-900">Retrieved snippets</h3>
+      <div className="space-y-2">
+        {snippets.map((citation) => {
+          const documentName =
+            citation.documentTitle || citation.originalFilename || "Untitled document";
+          const pageLabel = citation.pageNumber
+            ? `page ${citation.pageNumber}`
+            : "page unknown";
+
+          return (
+            <div
+              key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+            >
+              <p className="font-semibold text-slate-900">
+                {documentName}, {pageLabel}
+              </p>
+              <p className="mt-2 leading-6">{citation.snippet}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AskAssistantMessage({ message }) {
+  const citations = Array.isArray(message.citations) ? message.citations : [];
+
+  if (message.status === "answered") {
     return (
       <div className="space-y-4">
         <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
           <p className="font-semibold text-slate-900">Answer</p>
-          <p className="mt-2 leading-6">{askState.answer}</p>
+          <p className="mt-2 whitespace-pre-line leading-6">{message.content}</p>
+          {message.standaloneQuestion &&
+          message.standaloneQuestion !== message.originalQuestion ? (
+            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Searched as: {message.standaloneQuestion}
+            </p>
+          ) : null}
         </section>
 
-        {askState.citations.length ? (
+        <AskRetrievedSnippets citations={citations} />
+
+        {citations.length ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
             <div className="grid gap-3 md:grid-cols-2">
-              {askState.citations.map((citation) => (
+              {citations.map((citation) => (
                 <AskCitationCard
                   key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
                   citation={citation}
@@ -279,47 +324,101 @@ function AskStatePanel({ askState }) {
     );
   }
 
-  if (askState.status === "ai_not_configured") {
+  if (message.status === "ai_not_configured") {
     return (
       <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <p className="font-semibold">AI not configured</p>
-        <p className="mt-2 text-amber-700">{askState.message}</p>
+        <p className="mt-2 text-amber-700">{message.content}</p>
       </section>
     );
   }
 
-  if (askState.status === "not_found") {
+  if (message.status === "not_found") {
     return (
       <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
         <p className="font-semibold text-slate-900">No answer found</p>
-        <p className="mt-2">{askState.message}</p>
+        <p className="mt-2">{message.content}</p>
       </section>
     );
   }
 
-  if (askState.status === "error") {
+  if (message.status === "error") {
     return (
       <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         <p className="font-semibold text-red-800">Could not ask documents</p>
-        <p className="mt-2">{askState.message}</p>
+        <p className="mt-2">{message.content}</p>
       </section>
     );
   }
 
+  return null;
+}
+
+function AskThread({ messages }) {
+  if (!messages.length) {
+    return null;
+  }
+
   return (
-    <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-      {askState.message}
+    <div className="space-y-4">
+      {messages.map((message, index) =>
+        message.role === "user" ? (
+          <section
+            key={`${message.role}-${index}`}
+            className="ml-auto max-w-3xl rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-800"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">
+              You
+            </p>
+            <p className="mt-2 leading-6">{message.content}</p>
+          </section>
+        ) : (
+          <section key={`${message.role}-${index}`} className="max-w-4xl">
+            <AskAssistantMessage message={message} />
+          </section>
+        )
+      )}
+    </div>
+  );
+}
+
+function AskStatusPanel({ status }) {
+  if (!status.message) {
+    return null;
+  }
+
+  const statusClass =
+    status.status === "error"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : "border-dashed border-slate-300 bg-slate-50 text-slate-600";
+
+  return (
+    <section className={`rounded-xl border px-4 py-3 text-sm ${statusClass}`}>
+      {status.message}
     </section>
   );
 }
 
+function buildAskHistory(messages) {
+  return messages
+    .filter(
+      (message) =>
+        (message.role === "user" || message.role === "assistant") &&
+        message.status !== "error" &&
+        message.content
+    )
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+}
+
 function AskDocumentsSection() {
   const [question, setQuestion] = useState("");
+  const [messages, setMessages] = useState([]);
   const [askState, setAskState] = useState({
     status: "empty",
     message: "Type a question about your uploaded documents to begin.",
-    answer: "",
-    citations: [],
   });
 
   async function handleSubmit(event) {
@@ -331,24 +430,28 @@ function AskDocumentsSection() {
       setAskState({
         status: "empty",
         message: "Enter a question before asking.",
-        answer: "",
-        citations: [],
       });
       return;
     }
 
+    const history = buildAskHistory(messages);
+    const userMessage = {
+      role: "user",
+      content: trimmedQuestion,
+    };
+
+    setMessages((currentMessages) => [...currentMessages, userMessage]);
     setAskState({
       status: "loading",
       message: "Asking your documents...",
-      answer: "",
-      citations: [],
     });
+    setQuestion("");
 
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmedQuestion }),
+        body: JSON.stringify({ question: trimmedQuestion, history }),
       });
       const payload = await response.json();
 
@@ -356,18 +459,34 @@ function AskDocumentsSection() {
         throw new Error(payload.error || "Could not answer this question.");
       }
 
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          role: "assistant",
+          status: payload.status || "answered",
+          content: payload.answer || "",
+          originalQuestion: payload.question || trimmedQuestion,
+          standaloneQuestion: payload.standaloneQuestion || payload.question || trimmedQuestion,
+          citations: Array.isArray(payload.citations) ? payload.citations : [],
+        },
+      ]);
       setAskState({
-        status: payload.status || "answered",
-        message: payload.answer || "",
-        answer: payload.answer || "",
-        citations: Array.isArray(payload.citations) ? payload.citations : [],
+        status: "idle",
+        message: "",
       });
     } catch (error) {
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          role: "assistant",
+          status: "error",
+          content: error.message || "Could not answer this question.",
+          citations: [],
+        },
+      ]);
       setAskState({
-        status: "error",
-        message: error.message || "Could not answer this question.",
-        answer: "",
-        citations: [],
+        status: "idle",
+        message: "",
       });
     }
   }
@@ -376,6 +495,10 @@ function AskDocumentsSection() {
 
   return (
     <SectionShell title="Ask your documents">
+      <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+        Verify torque specs and safety steps against the manual before doing repair work.
+      </p>
+
       <form className="space-y-4" onSubmit={handleSubmit}>
         <label className="grid gap-2 text-sm text-slate-700">
           <span className="font-medium text-slate-900">Question</span>
@@ -398,7 +521,8 @@ function AskDocumentsSection() {
         </div>
       </form>
 
-      <AskStatePanel askState={askState} />
+      <AskThread messages={messages} />
+      <AskStatusPanel status={askState} />
     </SectionShell>
   );
 }

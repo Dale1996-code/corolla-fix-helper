@@ -102,7 +102,18 @@ If you see an AI-not-configured message:
 
 1. Stop the backend.
 2. Add `OPENAI_API_KEY=placeholder-openai-key` to `server/.env`, replacing the placeholder with your real key only in that local file.
-3. Keep `OPENAI_MODEL=gpt-4.1-mini` unless you intentionally want another model.
-4. Start the backend again.
+3. Keep `OPENAI_ANSWER_MODEL=gpt-4.1` unless you intentionally want another available 4o/4.1-class answer model.
+4. Keep `OPENAI_EMBEDDING_MODEL=text-embedding-3-small` and `OPENAI_EMBEDDING_DIMENSIONS=512` unless you intentionally rebuild all embeddings with another pair.
+5. Start the backend again.
 
 Do not commit a real OpenAI key. The app can still run without the key, but Ask cannot generate answers.
+
+## Ask Finds No Answer After Importing PDFs
+
+If the PDFs have extractable text but Ask still cannot find matching passages, rebuild embeddings:
+
+```powershell
+npm run embed:backfill
+```
+
+This only embeds chunks that are missing the current embedding version. It does not re-upload PDFs or delete your documents.
