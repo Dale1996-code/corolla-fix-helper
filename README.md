@@ -6,6 +6,8 @@ Corolla Fix Helper is a local-first repair workspace for one vehicle:
 
 Local-first means the app stores its working data on the computer or server that runs it. The current app uses one SQLite database file and one local uploads folder for PDFs.
 
+Storage is still local. AI answers are not offline when `OPENAI_API_KEY` is configured, because answer generation depends on OpenAI service availability and per-query network latency.
+
 ## What Works Now
 
 The current codebase includes:
@@ -13,6 +15,7 @@ The current codebase includes:
 - Dashboard summary cards and recent activity
 - PDF document upload, metadata editing, extraction status, favorites, delete cleanup, and PDF open links
 - Re-run extraction for one saved document
+- Resumable folder import for many PDFs with duplicate detection, chunk rebuilds, and an image-only report
 - Workspace search with separate sections for documents, symptoms, procedures, and notes
 - "Ask your documents" Q&A that retrieves matching uploaded PDF chunks and uses OpenAI to generate cited answers when configured
 - "Repair Planner" streaming agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts grounded in uploaded PDFs (needs `OPENAI_API_KEY`)
@@ -86,9 +89,19 @@ Open:
 To check the app:
 
 ```powershell
+npm run lint
+npm run typecheck
 npm run build
 npm run test
 ```
+
+To bulk import PDFs:
+
+```powershell
+npm run import -- "C:\path\to\pdfs"
+```
+
+The import report shows imported, skipped, failed, and `IMAGE-ONLY` counts. `IMAGE-ONLY` means PDF text extraction found almost no text, which is the signal to check whether OCR is needed before semantic search work.
 
 ## Deployment Note
 

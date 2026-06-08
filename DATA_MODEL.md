@@ -64,6 +64,7 @@ Important fields:
 - `document_type`
 - `source`
 - `notes`
+- `file_md5`
 - `extracted_text`
 - `extraction_status`
 - `page_count`
@@ -79,7 +80,10 @@ Current use:
 - Mark favorites.
 - Open stored PDFs.
 - Re-run extraction for one saved document.
+- Skip duplicate files during bulk import.
 - Delete documents and clean up related links.
+
+`file_md5` stores the MD5 hash of imported PDF bytes. MD5 is used here as a duplicate key for local repair PDFs, not as a security feature.
 
 Favorites are the current saved-document flag. Bookmarks and tags are not part of the current V1 workflow.
 

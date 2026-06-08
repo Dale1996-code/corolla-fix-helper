@@ -42,6 +42,7 @@ function createTables() {
       document_type TEXT NOT NULL,
       source TEXT,
       notes TEXT,
+      file_md5 TEXT,
       extracted_text TEXT,
       extraction_status TEXT NOT NULL DEFAULT 'not_attempted',
       page_count INTEGER,
@@ -139,6 +140,7 @@ function createTables() {
   ensureColumn("documents", "file_type", "TEXT");
   ensureColumn("documents", "subsystem", "TEXT");
   ensureColumn("documents", "source", "TEXT");
+  ensureColumn("documents", "file_md5", "TEXT");
   ensureColumn(
     "documents",
     "extraction_status",
@@ -159,6 +161,12 @@ function createTables() {
   ensureColumn("notes", "note_type", "TEXT NOT NULL DEFAULT 'general'");
   ensureColumn("notes", "related_entity_type", "TEXT NOT NULL DEFAULT 'none'");
   ensureColumn("notes", "related_entity_id", "INTEGER");
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_file_md5
+      ON documents (file_md5)
+      WHERE file_md5 IS NOT NULL AND TRIM(file_md5) <> '';
+  `);
 }
 
 function seedVehicle() {

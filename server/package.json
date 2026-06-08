@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch --watch-path=src src/index.js",
     "start": "node src/index.js",
+    "import": "node src/scripts/importFolder.js",
     "build": "node -e \"console.log('No server build step needed yet.')\"",
     "test": "node --test"
   },
