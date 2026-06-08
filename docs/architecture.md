@@ -17,6 +17,8 @@ The app is local-first:
 - Uploaded PDFs are stored in a local folder.
 - The browser talks to the backend through `/api/...` routes.
 
+Storage remains local-first, but AI-generated document answers are not fully offline when `OPENAI_API_KEY` is configured. In that mode, `/api/ask` depends on OpenAI uptime and network latency.
+
 ## Runtime
 
 The backend uses Node.js `>=24 <25` because it uses Node's built-in `node:sqlite` support.
@@ -71,6 +73,7 @@ Current storage:
 - SQLite database file for records and settings
 - local uploads folder for PDF files
 - `document_chunks` rows for page-aware text chunks used by document Q&A
+- `documents.file_md5` for resumable bulk-import duplicate detection
 - optional backup export as a `.tar.gz` archive
 
 See `DATA_MODEL.md` for table details.
@@ -90,6 +93,18 @@ Current flow:
 If no useful chunks are found, the app returns a "not enough information" answer. If useful chunks are found but no OpenAI key is configured, it returns an "AI is not configured" state.
 
 The current app does not use embeddings or a vector database.
+
+## Bulk PDF Import Path
+
+`server/src/scripts/importFolder.js` imports a folder of PDFs from the command line:
+
+```powershell
+npm run import -- "C:\path\to\pdfs"
+```
+
+It uses the same storage model as document upload: copied PDF files live in the uploads folder, document metadata is saved in `documents`, and chunks are rebuilt through `rebuildDocumentChunksFromPages`.
+
+The importer is resumable. It skips duplicates by MD5 file hash first and original filename second, keeps going after bad files, and reports how many PDFs are image-only so OCR can be treated as a blocker if needed.
 
 ## Deployment Shape
 
