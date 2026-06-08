@@ -54,6 +54,30 @@ http://localhost:4000
 
 Leave the PowerShell window open while using the app. Closing it stops the local server.
 
+## Using The Ask Chatbot
+
+Open `http://localhost:4000`, click **Search**, and use the **Ask** panel at the top.
+
+Good first questions to try:
+
+- `What is the oil drain plug torque spec?`
+- `How do I replace the water pump?` then a follow-up: `What about the torque?`
+- `What is the spark plug gap and torque?`
+- A deliberate miss, such as `What is the torque on the flux capacitor?` It should answer
+  `not in documents` instead of guessing.
+
+Each answer shows the exact text snippet it used and a citation link to the source PDF page.
+
+## Trust The Citations, Not Just The Answer
+
+For the first several answers, open the cited PDF page and confirm the number matches. This
+takes seconds because the snippet is shown right under the answer.
+
+For anything safety-critical (brakes, suspension, airbags), treat the chatbot as a fast
+lookup, then confirm the torque spec against the cited manual page before turning a wrench.
+The app is grounded in your documents and cites its sources, but it is an assistant, not a
+replacement for the manual.
+
 ## Running It Again
 
 Run the same command again:
