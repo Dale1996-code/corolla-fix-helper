@@ -138,7 +138,10 @@ test("SearchPage shows loading state while Ask waits for an answer", async () =>
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: "What is the oil drain plug torque?" }),
+        body: JSON.stringify({
+          question: "What is the oil drain plug torque?",
+          history: [],
+        }),
       })
     );
   });
@@ -294,6 +297,124 @@ test("SearchPage shows an answered Ask response with clickable citation cards", 
   expect(within(citationLink).getByText("Fake Torque Guide")).toBeInTheDocument();
   expect(within(citationLink).getByText("Page 3")).toBeInTheDocument();
   expect(within(citationLink).getByText(citationSnippet)).toBeInTheDocument();
+});
+
+test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up history", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const askBodies = [];
+  const frontSnippet =
+    "Front brake caliper mounting bolt torque is 34 N*m (350 kgf*cm, 25 ft*lbf).";
+  const rearSnippet =
+    "Rear brake caliper mounting bolt torque is 34 N*m (350 kgf*cm, 25 ft*lbf).";
+
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      const body = JSON.parse(options.body);
+      askBodies.push(body);
+
+      if (askBodies.length === 1) {
+        return jsonResponse({
+          question: body.question,
+          standaloneQuestion: "What is the front brake caliper mounting bolt torque?",
+          status: "answered",
+          answer: "The front brake caliper mounting bolt torque is 34 N*m.",
+          citations: [
+            {
+              documentId: 50,
+              documentTitle: "Front Brake Manual",
+              originalFilename: "front-brake-manual.pdf",
+              pageNumber: 4,
+              chunkIndex: 0,
+              snippet: frontSnippet,
+            },
+          ],
+        });
+      }
+
+      return jsonResponse({
+        question: body.question,
+        standaloneQuestion: "What is the rear brake caliper mounting bolt torque?",
+        status: "answered",
+        answer: "The rear brake caliper mounting bolt torque is 34 N*m.",
+        citations: [
+          {
+            documentId: 51,
+            documentTitle: "Rear Brake Manual",
+            originalFilename: "rear-brake-manual.pdf",
+            pageNumber: 7,
+            chunkIndex: 0,
+            snippet: rearSnippet,
+          },
+        ],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  expect(askSection).not.toBeNull();
+  expect(
+    within(askSection).getByText(
+      "Verify torque specs and safety steps against the manual before doing repair work."
+    )
+  ).toBeInTheDocument();
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the front brake caliper mounting bolt torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText(
+      "The front brake caliper mounting bolt torque is 34 N*m."
+    )
+  ).toBeInTheDocument();
+  expect(askBodies[0]).toEqual({
+    question: "What is the front brake caliper mounting bolt torque?",
+    history: [],
+  });
+  expect(within(askSection).getAllByText(frontSnippet).length).toBeGreaterThanOrEqual(1);
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What about the rear ones?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText(
+      "The rear brake caliper mounting bolt torque is 34 N*m."
+    )
+  ).toBeInTheDocument();
+
+  expect(askBodies[1]).toEqual({
+    question: "What about the rear ones?",
+    history: [
+      {
+        role: "user",
+        content: "What is the front brake caliper mounting bolt torque?",
+      },
+      {
+        role: "assistant",
+        content: "The front brake caliper mounting bolt torque is 34 N*m.",
+      },
+    ],
+  });
+  expect(
+    within(askSection).getByText("What about the rear ones?")
+  ).toBeInTheDocument();
+  expect(within(askSection).getAllByText(rearSnippet).length).toBeGreaterThanOrEqual(1);
+  expect(within(askSection).getAllByText("Sources")).toHaveLength(2);
 });
 
 test("SearchPage shows request error state when Ask fails", async () => {

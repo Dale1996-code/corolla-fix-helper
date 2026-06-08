@@ -37,7 +37,10 @@ DATABASE_FILE=./data/corolla-fix-helper.db
 UPLOADS_DIR=./uploads
 MAX_UPLOAD_SIZE_MB=20
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_ANSWER_MODEL=gpt-4.1
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=512
+OPENAI_EMBEDDING_BATCH_SIZE=64
 ```
 
 What each one means:
@@ -50,15 +53,26 @@ What each one means:
 - `UPLOADS_DIR` is where uploaded PDFs are stored.
 - `MAX_UPLOAD_SIZE_MB` is the largest PDF upload size in megabytes.
 - `OPENAI_API_KEY` is the OpenAI API key used by the "Ask your documents" feature.
-- `OPENAI_MODEL` is the OpenAI model name used for generated answers.
+- `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is `gpt-4.1`.
+- `OPENAI_EMBEDDING_MODEL` is the OpenAI model name used to embed document chunks and questions.
+- `OPENAI_EMBEDDING_DIMENSIONS` is the embedding size stored in SQLite. The current value is `512`.
+- `OPENAI_EMBEDDING_BATCH_SIZE` is how many chunks `npm run embed:backfill` sends per embedding request.
 
 Because this file is normally copied to `server/.env`, the relative paths above are relative to the `server/` folder.
 
-`server/src/config.js` reads `OPENAI_API_KEY` and `OPENAI_MODEL`. `server/src/services/aiAnswerService.js` uses them when it calls the OpenAI Responses API.
+`server/src/config.js` reads `OPENAI_API_KEY`, `OPENAI_ANSWER_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE`. It still accepts the older `OPENAI_MODEL` name as a fallback for existing local env files. `server/src/services/aiAnswerService.js` uses the answer model when it calls the OpenAI Responses API. `server/src/services/chunkEmbeddingService.js` uses the embedding model and dimensions when it calls the OpenAI Embeddings API.
 
 Keep `OPENAI_API_KEY` blank in committed examples. Put the real key only in your local `server/.env` file or in the VM/container environment.
 
-If `OPENAI_API_KEY` is not set, the Ask feature still checks uploaded document chunks. When matching chunks exist, `/api/ask` returns `status: "ai_not_configured"` and the UI explains that AI is not configured. When the documents do not contain enough matching information, the app returns a "not enough information" answer instead.
+If `OPENAI_API_KEY` is not set, the Ask feature still checks uploaded document chunks with keyword retrieval. When matching chunks exist, `/api/ask` returns `status: "ai_not_configured"` and the UI explains that AI is not configured. When the documents do not contain enough matching information, the app returns `not in documents` instead.
+
+After importing or re-extracting PDFs with an OpenAI key configured, run:
+
+```powershell
+npm run embed:backfill
+```
+
+This embeds chunks that are missing the active `OPENAI_EMBEDDING_MODEL` and `OPENAI_EMBEDDING_DIMENSIONS` pair, and skips chunks already stored at the current embedding version.
 
 ## Google Compute Engine Values
 
@@ -71,7 +85,10 @@ For the intended Docker-on-VM deployment, pass env values to Docker instead of s
 -e UPLOADS_DIR=/data/uploads
 -e MAX_UPLOAD_SIZE_MB=20
 -e OPENAI_API_KEY=placeholder-openai-key
--e OPENAI_MODEL=gpt-4.1-mini
+-e OPENAI_ANSWER_MODEL=gpt-4.1
+-e OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+-e OPENAI_EMBEDDING_DIMENSIONS=512
+-e OPENAI_EMBEDDING_BATCH_SIZE=64
 ```
 
 The `/data` path should be mounted to a persistent folder on the VM.

@@ -83,14 +83,16 @@ Check:
 Use a fake or sample PDF with text you can safely test.
 
 1. Open Search.
-2. Ask a question that should be answered by text in the uploaded PDF.
-3. Ask a question that the uploaded PDFs cannot answer.
+2. Run `npm run embed:backfill` if `OPENAI_API_KEY` is configured and the PDF was imported or re-extracted.
+3. Ask a question that should be answered by text in the uploaded PDF.
+4. Ask a question that the uploaded PDFs cannot answer.
 
 Check:
 
 - If `OPENAI_API_KEY` is configured, the answer uses uploaded document text and shows citations.
 - If `OPENAI_API_KEY` is not configured, a supported question shows an AI-not-configured message.
 - Unsupported questions show a not-enough-information message.
+- `npm run eval:retrieval` reports keyword wrong, hybrid right for all eval cases.
 
 ## 7. Repair Planner
 

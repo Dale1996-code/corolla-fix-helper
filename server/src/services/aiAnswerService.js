@@ -3,8 +3,64 @@ import { retrieveRelevantChunks } from "./chunkRetrievalService.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.";
-export const NOT_FOUND_MESSAGE =
-  "The uploaded documents do not contain enough information to answer that.";
+export const NOT_FOUND_MESSAGE = "not in documents";
+
+const MAX_HISTORY_MESSAGES = 10;
+const MAX_HISTORY_CONTENT_LENGTH = 1200;
+
+function parseOpenAiOutputText(payload) {
+  const outputText =
+    typeof payload?.output_text === "string"
+      ? payload.output_text
+      : Array.isArray(payload?.output)
+      ? payload.output
+          .flatMap((item) =>
+            Array.isArray(item?.content)
+              ? item.content.map((content) =>
+                  content?.type === "output_text" ? content.text || "" : ""
+                )
+              : []
+          )
+          .join("\n")
+      : "";
+
+  return outputText.trim();
+}
+
+export function normalizeConversationHistory(history) {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  return history
+    .map((message) => {
+      const role = message?.role === "assistant" ? "assistant" : "user";
+      const content =
+        typeof message?.content === "string"
+          ? message.content.replace(/\s+/g, " ").trim()
+          : "";
+
+      return {
+        role,
+        content:
+          content.length > MAX_HISTORY_CONTENT_LENGTH
+            ? content.slice(0, MAX_HISTORY_CONTENT_LENGTH)
+            : content,
+      };
+    })
+    .filter((message) => message.content)
+    .slice(-MAX_HISTORY_MESSAGES);
+}
+
+function buildConversationHistoryText(history) {
+  return history
+    .map((message) => `${message.role === "assistant" ? "Assistant" : "User"}: ${message.content}`)
+    .join("\n");
+}
+
+function isNotFoundAnswer(answerText) {
+  return String(answerText || "").trim().toLowerCase() === NOT_FOUND_MESSAGE;
+}
 
 function buildSnippet(text) {
   const normalized = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
@@ -38,13 +94,62 @@ function buildModelContext(chunks) {
     .join("\n\n");
 }
 
-export async function generateAnswerTextFromOpenAi({ question, chunks }) {
+export async function rewriteQuestionFromOpenAi({ question, history }) {
+  const normalizedQuestion = typeof question === "string" ? question.trim() : "";
+  const normalizedHistory = normalizeConversationHistory(history);
+
+  if (!normalizedQuestion || !normalizedHistory.length) {
+    return normalizedQuestion;
+  }
+
+  const prompt = [
+    "Rewrite the latest user question into one standalone repair-manual search query.",
+    "Use the conversation history only to resolve references like front/rear, left/right, it, them, or the previous part.",
+    "Do not answer the question. Do not add facts that are not in the conversation.",
+    "Return only the rewritten standalone question as one sentence.",
+    "",
+    "Conversation history:",
+    buildConversationHistoryText(normalizedHistory),
+    "",
+    `Latest user question: ${normalizedQuestion}`,
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.openAiApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: config.openAiAnswerModel,
+      input: prompt,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI question rewrite failed (${response.status}): ${errorText}`);
+  }
+
+  const rewrittenQuestion = parseOpenAiOutputText(await response.json())
+    .replace(/^["']|["']$/g, "")
+    .trim();
+
+  return rewrittenQuestion || normalizedQuestion;
+}
+
+export async function generateAnswerTextFromOpenAi({ question, originalQuestion, chunks }) {
   const contextText = buildModelContext(chunks);
   const prompt = [
-    "Answer ONLY using the provided document chunks.",
-    "If the context is not enough, reply exactly:",
+    "Answer ONLY using the provided Toyota Corolla repair-manual chunks.",
+    "Write a thorough, step-by-step repair answer when the chunks support it.",
+    "For torque specs, capacities, dimensions, counts, fluid quantities, and other exact numbers, copy the exact number and unit verbatim from the chunks.",
+    "Put a citation beside each quoted spec or procedure detail in this format: [Document title, page N].",
+    "Never invent a spec, step, tool, warning, or quantity.",
+    "If the chunks do not support the answer, reply exactly:",
     NOT_FOUND_MESSAGE,
     "",
+    `Original user question: ${originalQuestion || question}`,
     `Question: ${question}`,
     "",
     "Context chunks:",
@@ -58,7 +163,7 @@ export async function generateAnswerTextFromOpenAi({ question, chunks }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: config.openAiModel,
+      model: config.openAiAnswerModel,
       input: prompt,
     }),
   });
@@ -68,23 +173,7 @@ export async function generateAnswerTextFromOpenAi({ question, chunks }) {
     throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
   }
 
-  const payload = await response.json();
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
+  return parseOpenAiOutputText(await response.json());
 }
 
 export async function askQuestionUsingDocuments(
@@ -92,17 +181,31 @@ export async function askQuestionUsingDocuments(
   {
     chunkLimit = 8,
     generateAnswerText = generateAnswerTextFromOpenAi,
+    history = [],
     isAiConfigured = Boolean(config.openAiApiKey),
+    retrieveChunks = retrieveRelevantChunks,
+    rewriteQuestion = rewriteQuestionFromOpenAi,
   } = {}
 ) {
   const normalizedQuestion = typeof question === "string" ? question.trim() : "";
+  const normalizedHistory = normalizeConversationHistory(history);
 
   if (!normalizedQuestion) {
     throw new Error("Question is required.");
   }
 
-  const chunks = retrieveRelevantChunks(normalizedQuestion, {
+  const standaloneQuestion =
+    isAiConfigured && normalizedHistory.length
+      ? await rewriteQuestion({
+          question: normalizedQuestion,
+          history: normalizedHistory,
+        })
+      : normalizedQuestion;
+  const retrievalQuestion = standaloneQuestion.trim() || normalizedQuestion;
+
+  const chunks = await retrieveChunks(retrievalQuestion, {
     limit: chunkLimit,
+    mode: isAiConfigured ? "hybrid" : "keyword",
   });
 
   if (!chunks.length) {
@@ -110,17 +213,22 @@ export async function askQuestionUsingDocuments(
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
+      standaloneQuestion: retrievalQuestion,
     };
   }
 
   const bestChunk = chunks[0];
   const minimumChunkTermMatches = Math.max(1, Math.ceil(bestChunk.totalQueryTerms * 0.4));
 
-  if ((bestChunk.chunkMatchedTerms || 0) < minimumChunkTermMatches) {
+  const hasSemanticEvidence =
+    bestChunk.retrievalMode === "hybrid" && Number(bestChunk.semanticScore || 0) >= 0.2;
+
+  if (!hasSemanticEvidence && (bestChunk.chunkMatchedTerms || 0) < minimumChunkTermMatches) {
     return {
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
+      standaloneQuestion: retrievalQuestion,
     };
   }
 
@@ -129,6 +237,7 @@ export async function askQuestionUsingDocuments(
       status: "ai_not_configured",
       answer: AI_NOT_CONFIGURED_MESSAGE,
       citations: [],
+      standaloneQuestion: retrievalQuestion,
     };
   }
 
@@ -139,20 +248,24 @@ export async function askQuestionUsingDocuments(
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
+      standaloneQuestion: retrievalQuestion,
     };
   }
 
   const answerText = await generateAnswerText({
-    question: normalizedQuestion,
+    question: retrievalQuestion,
+    originalQuestion: normalizedQuestion,
+    history: normalizedHistory,
     chunks,
     citations,
   });
 
-  if (!answerText || answerText === NOT_FOUND_MESSAGE) {
+  if (!answerText || isNotFoundAnswer(answerText)) {
     return {
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
+      standaloneQuestion: retrievalQuestion,
     };
   }
 
@@ -160,5 +273,6 @@ export async function askQuestionUsingDocuments(
     status: "answered",
     answer: answerText,
     citations,
+    standaloneQuestion: retrievalQuestion,
   };
 }

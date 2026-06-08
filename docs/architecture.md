@@ -17,7 +17,7 @@ The app is local-first:
 - Uploaded PDFs are stored in a local folder.
 - The browser talks to the backend through `/api/...` routes.
 
-Storage remains local-first, but AI-generated document answers are not fully offline when `OPENAI_API_KEY` is configured. In that mode, `/api/ask` depends on OpenAI uptime and network latency.
+Storage remains local-first, but document Q&A is not fully offline when `OPENAI_API_KEY` is configured. In that mode, `/api/ask` depends on OpenAI uptime and network latency for query embeddings and answer generation.
 
 ## Runtime
 
@@ -72,7 +72,7 @@ Current storage:
 
 - SQLite database file for records and settings
 - local uploads folder for PDF files
-- `document_chunks` rows for page-aware text chunks used by document Q&A
+- `document_chunks` rows for page-aware text chunks and Float32 embedding BLOBs used by document Q&A
 - `documents.file_md5` for resumable bulk-import duplicate detection
 - optional backup export as a `.tar.gz` archive
 
@@ -86,13 +86,14 @@ Current flow:
 
 1. Uploading a PDF or re-running extraction stores extracted page text.
 2. `server/src/services/documentChunkService.js` saves smaller text chunks in the `document_chunks` table.
-3. `server/src/services/chunkRetrievalService.js` does keyword-based retrieval over those chunks.
-4. `server/src/services/aiAnswerService.js` builds citations and, when `OPENAI_API_KEY` is set, calls the OpenAI Responses API.
-5. `server/src/routes/ask.js` exposes this as `POST /api/ask`.
+3. `npm run embed:backfill` stores current OpenAI embeddings on chunks that do not already have the active embedding version.
+4. `server/src/services/chunkRetrievalService.js` embeds the question once, cosine-scans an in-memory chunk embedding cache, and fuses that ranking with keyword ranking.
+5. `server/src/services/aiAnswerService.js` builds citations and, when `OPENAI_API_KEY` is set, calls the OpenAI Responses API.
+6. `server/src/routes/ask.js` exposes this as `POST /api/ask`.
 
-If no useful chunks are found, the app returns a "not enough information" answer. If useful chunks are found but no OpenAI key is configured, it returns an "AI is not configured" state.
+If no useful chunks are found, the app returns `not in documents`. If useful chunks are found but no OpenAI key is configured, it returns an "AI is not configured" state.
 
-The current app does not use embeddings or a vector database.
+The current app uses SQLite-stored embedding BLOBs and an in-memory cosine scan. It does not use a vector database or SQLite vector extension.
 
 ## Bulk PDF Import Path
 
@@ -127,6 +128,6 @@ The current app does not include:
 - cloud sync
 - multi-vehicle UI
 - general AI chat outside uploaded documents
-- embeddings or vector database
+- vector database
 - direct symptom-to-procedure links
 - automatic restore from backup export

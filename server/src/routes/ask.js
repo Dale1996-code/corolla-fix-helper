@@ -6,6 +6,7 @@ export function createAskRouter({ askQuestion = askQuestionUsingDocuments } = {}
 
   router.post("/", async (request, response) => {
     const question = typeof request.body?.question === "string" ? request.body.question.trim() : "";
+    const history = Array.isArray(request.body?.history) ? request.body.history : [];
 
     if (!question) {
       response.status(400).json({
@@ -15,10 +16,11 @@ export function createAskRouter({ askQuestion = askQuestionUsingDocuments } = {}
     }
 
     try {
-      const result = await askQuestion(question);
+      const result = await askQuestion(question, { history });
 
       response.json({
         question,
+        standaloneQuestion: result.standaloneQuestion || question,
         status: result.status,
         answer: result.answer,
         citations: result.citations,

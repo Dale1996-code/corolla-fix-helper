@@ -33,7 +33,7 @@ const {
   NOT_FOUND_MESSAGE,
   askQuestionUsingDocuments,
 } = await import("../src/services/aiAnswerService.js");
-const { retrieveRelevantChunks } = await import("../src/services/chunkRetrievalService.js");
+const { retrieveKeywordChunks } = await import("../src/services/chunkRetrievalService.js");
 const {
   backfillDocumentChunks,
   rebuildDocumentChunksFromPages,
@@ -646,7 +646,7 @@ test("Goal A retrieval returns top matching keyword chunks", () => {
     },
   ]);
 
-  const results = retrieveRelevantChunks(`${uniqueTag} ignition coil resistance`);
+  const results = retrieveKeywordChunks(`${uniqueTag} ignition coil resistance`);
 
   assert.ok(results.length > 0);
   assert.equal(results[0].documentId, documentId);
@@ -676,6 +676,113 @@ test("Goal A POST /api/ask returns graceful AI not configured response when key 
   assert.equal(response.body.status, "ai_not_configured");
   assert.equal(response.body.answer, AI_NOT_CONFIGURED_MESSAGE);
   assert.deepEqual(response.body.citations, []);
+});
+
+test("Goal B POST /api/ask accepts conversation history and returns rewritten query", async () => {
+  const history = [
+    {
+      role: "user",
+      content: "What is the front brake caliper mounting bolt torque?",
+    },
+    {
+      role: "assistant",
+      content:
+        "The front brake caliper mounting bolt torque is 34 N*m according to the front brake manual.",
+    },
+  ];
+  let seenQuestion = "";
+  let seenHistory = [];
+
+  const askApp = createApp({
+    askQuestion: async (question, options = {}) => {
+      seenQuestion = question;
+      seenHistory = options.history;
+
+      return {
+        status: "answered",
+        answer: "The rear brake caliper mounting bolt torque is 34 N*m.",
+        standaloneQuestion: "What is the rear brake caliper mounting bolt torque?",
+        citations: [],
+      };
+    },
+  });
+
+  const response = await request(askApp)
+    .post("/api/ask")
+    .send({ question: "What about the rear ones?", history });
+
+  assert.equal(response.status, 200);
+  assert.equal(seenQuestion, "What about the rear ones?");
+  assert.deepEqual(seenHistory, history);
+  assert.equal(response.body.question, "What about the rear ones?");
+  assert.equal(
+    response.body.standaloneQuestion,
+    "What is the rear brake caliper mounting bolt torque?"
+  );
+  assert.equal(response.body.status, "answered");
+});
+
+test("Goal B ask rewrites follow-up before rerunning retrieval", async () => {
+  const history = [
+    {
+      role: "user",
+      content: "What is the front brake caliper mounting bolt torque?",
+    },
+    {
+      role: "assistant",
+      content:
+        "The front brake caliper mounting bolt torque is 34 N*m according to the front brake manual.",
+    },
+  ];
+  const retrievalQueries = [];
+  const rewrittenQuestion = "What is the rear brake caliper mounting bolt torque?";
+
+  const result = await askQuestionUsingDocuments("What about the rear ones?", {
+    history,
+    isAiConfigured: true,
+    rewriteQuestion: async ({ question, history: rewriteHistory }) => {
+      assert.equal(question, "What about the rear ones?");
+      assert.deepEqual(rewriteHistory, history);
+      return rewrittenQuestion;
+    },
+    retrieveChunks: async (retrievalQuestion, options) => {
+      retrievalQueries.push(retrievalQuestion);
+      assert.equal(options.mode, "hybrid");
+
+      return [
+        {
+          documentId: 77,
+          documentTitle: "Rear Brake Manual",
+          originalFilename: "rear-brake-manual.pdf",
+          pageNumber: 7,
+          chunkIndex: 2,
+          chunkText:
+            "Install the rear brake caliper mounting bolts. Torque: 34 N*m (350 kgf*cm, 25 ft*lbf).",
+          retrievalMode: "hybrid",
+          semanticScore: 0.91,
+          totalQueryTerms: 8,
+          chunkMatchedTerms: 7,
+        },
+      ];
+    },
+    generateAnswerText: async ({ question, originalQuestion, citations }) => {
+      assert.equal(question, rewrittenQuestion);
+      assert.equal(originalQuestion, "What about the rear ones?");
+      assert.equal(citations[0].documentTitle, "Rear Brake Manual");
+
+      return [
+        "The rear brake caliper mounting bolt torque is",
+        '"34 N*m (350 kgf*cm, 25 ft*lbf)" [Rear Brake Manual, page 7].',
+      ].join(" ");
+    },
+  });
+
+  assert.deepEqual(retrievalQueries, [rewrittenQuestion]);
+  assert.equal(result.status, "answered");
+  assert.equal(result.standaloneQuestion, rewrittenQuestion);
+  assert.ok(result.answer.includes("34 N*m"));
+  assert.equal(result.citations[0].pageNumber, 7);
+  assert.ok(result.citations[0].snippet.includes("25 ft*lbf"));
 });
 
 test("Goal A not-found response does not call model", async () => {
@@ -723,6 +830,8 @@ test("Goal A citation matching returns server-built citations from retrieved chu
     askQuestion: (question) =>
       askQuestionUsingDocuments(question, {
         isAiConfigured: true,
+        retrieveChunks: (retrievalQuestion, options) =>
+          retrieveKeywordChunks(retrievalQuestion, options),
         generateAnswerText: async ({ citations }) =>
           `Use citation ${citations[0].pageNumber} for the torque value.`,
       }),
@@ -795,6 +904,8 @@ test("Goal A fake PDF eval set returns expected citation pages and honest not-fo
   for (const evalCase of evalCases) {
     const result = await askQuestionUsingDocuments(evalCase.question, {
       isAiConfigured: true,
+      retrieveChunks: (retrievalQuestion, options) =>
+        retrieveKeywordChunks(retrievalQuestion, options),
       generateAnswerText: async ({ citations }) => {
         modelCallCount += 1;
         return `Answer based on page ${citations[0].pageNumber}.`;
