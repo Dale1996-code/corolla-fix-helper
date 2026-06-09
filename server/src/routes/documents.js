@@ -193,6 +193,8 @@ documentsRouter.post("/upload", async (request, response) => {
   const source = normalizeText(request.body.source);
   const notes = normalizeText(request.body.notes);
 
+  let createdDocumentId = null;
+
   try {
     await fs.writeFile(absoluteFilePath, request.file.buffer);
 
@@ -238,6 +240,7 @@ documentsRouter.post("/upload", async (request, response) => {
       );
 
     const newDocumentId = Number(result.lastInsertRowid);
+    createdDocumentId = newDocumentId;
     rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
 
     const documents = listDocuments();
@@ -252,6 +255,15 @@ documentsRouter.post("/upload", async (request, response) => {
     });
   } catch (error) {
     await fs.rm(absoluteFilePath, { force: true });
+
+    if (createdDocumentId) {
+      try {
+        db.prepare("DELETE FROM document_chunks WHERE document_id = ?").run(createdDocumentId);
+        db.prepare("DELETE FROM documents WHERE id = ?").run(createdDocumentId);
+      } catch {
+        // Best-effort cleanup; surface the original upload error below.
+      }
+    }
 
     response.status(500).json({
       error: error.message || "Could not save the uploaded document.",
