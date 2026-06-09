@@ -43,14 +43,14 @@ function Set-EnvValue {
   }
 
   $found = $false
-  $updatedLines = foreach ($line in $lines) {
+  $updatedLines = @(foreach ($line in $lines) {
     if ($line -match "^$([regex]::Escape($Name))=") {
       $found = $true
       "$Name=$safeValue"
     } else {
       $line
     }
-  }
+  })
 
   if (-not $found) {
     $updatedLines += "$Name=$safeValue"
