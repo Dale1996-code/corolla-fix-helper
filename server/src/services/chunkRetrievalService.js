@@ -182,6 +182,7 @@ function addRankedCandidate(candidates, row, scorePatch) {
     hybridScore: 0,
     matchedTerms: 0,
     chunkMatchedTerms: 0,
+    totalQueryTerms: 0,
     retrievalMode: "hybrid",
   };
 
