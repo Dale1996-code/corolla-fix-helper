@@ -427,7 +427,11 @@ function DocumentsList({
                 <div>
                   <button
                     type="button"
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    disabled={
+                      favoriteUpdateState.documentId === document.id &&
+                      !favoriteUpdateState.error
+                    }
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggleFavorite(document);
