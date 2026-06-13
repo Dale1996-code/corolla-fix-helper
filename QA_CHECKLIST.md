@@ -38,7 +38,9 @@ Check:
 4. Open the uploaded PDF from the detail panel.
 5. Click **Re-run extraction**.
 6. Mark the document as a favorite.
-7. Edit document metadata.
+7. Click **Bookmark** to flag the document.
+8. Edit document metadata and add a few comma separated tags.
+9. Filter the list by Bookmark and by Tag.
 
 Check:
 
@@ -47,7 +49,8 @@ Check:
 - Extraction status and page count are shown.
 - The PDF opens from the app.
 - Re-run extraction finishes with a clear success or error message and refreshes searchable chunks.
-- Favorites and metadata changes persist after refresh.
+- Favorites, bookmarks, tags, and metadata changes persist after refresh.
+- Bookmark and Tag filters narrow the list as expected, and tag chips show on the cards.
 
 ## 4. Document Delete Cleanup
 

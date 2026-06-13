@@ -301,7 +301,7 @@ test("serves the built frontend while keeping API routes separate", async () => 
   assert.equal(healthResponse.body.status, "ok");
 });
 
-test("documents API keeps favorites as the only saved-document flag in V1", async () => {
+test("documents API exposes favorite, bookmark, and tag fields", async () => {
   const response = await request(app).get("/api/documents");
 
   assert.equal(response.status, 200);
@@ -311,8 +311,165 @@ test("documents API keeps favorites as the only saved-document flag in V1", asyn
   const firstDocument = response.body.documents[0];
 
   assert.equal(typeof firstDocument.isFavorite, "boolean");
-  assert.equal("tags" in firstDocument, false);
-  assert.equal("isBookmarked" in firstDocument, false);
+  assert.equal(typeof firstDocument.isBookmarked, "boolean");
+  assert.ok(Array.isArray(firstDocument.tags));
+});
+
+test("seed document is bookmarked and carries starter tags", async () => {
+  const response = await request(app).get("/api/documents");
+
+  const seedDocument = response.body.documents.find(
+    (document) => document.title === "Sample Maintenance Schedule"
+  );
+
+  assert.ok(seedDocument);
+  assert.equal(seedDocument.isBookmarked, true);
+  assert.deepEqual(
+    [...seedDocument.tags].sort(),
+    ["engine", "maintenance", "sample"]
+  );
+});
+
+test("PUT /api/documents/:id updates bookmark flag and replaces tags", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  assert.ok(vehicle);
+
+  const documentId = Number(
+    db
+      .prepare(`
+        INSERT INTO documents (
+          vehicle_id,
+          title,
+          original_filename,
+          system,
+          document_type
+        )
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      .run(vehicle.id, "Tag Edit Target", "tag-edit-target.pdf", "Brakes", "Reference")
+      .lastInsertRowid
+  );
+
+  const firstUpdate = await request(app)
+    .put(`/api/documents/${documentId}`)
+    .send({
+      isBookmarked: true,
+      tags: ["Brakes", "torque-specs", "brakes"],
+    });
+
+  assert.equal(firstUpdate.status, 200);
+  assert.equal(firstUpdate.body.document.isBookmarked, true);
+  // Duplicate "brakes"/"Brakes" collapses to one tag, preserving first spelling.
+  assert.deepEqual(firstUpdate.body.document.tags, ["Brakes", "torque-specs"]);
+
+  const secondUpdate = await request(app)
+    .put(`/api/documents/${documentId}`)
+    .send({ tags: "brakes, calipers" });
+
+  assert.equal(secondUpdate.status, 200);
+  // Bookmark flag is untouched when not included in the body.
+  assert.equal(secondUpdate.body.document.isBookmarked, true);
+  // "brakes" reuses the existing "Brakes" tag, keeping one canonical spelling.
+  assert.deepEqual([...secondUpdate.body.document.tags].sort(), ["Brakes", "calipers"]);
+
+  const cleared = await request(app)
+    .put(`/api/documents/${documentId}`)
+    .send({ tags: [] });
+
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(cleared.body.document.tags, []);
+});
+
+test("search API filters documents by tag and bookmark and matches tag keywords", async () => {
+  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  assert.ok(vehicle);
+
+  const documentId = Number(
+    db
+      .prepare(`
+        INSERT INTO documents (
+          vehicle_id,
+          title,
+          original_filename,
+          system,
+          document_type,
+          is_bookmarked
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        vehicle.id,
+        "Suspension overhaul writeup",
+        "suspension-overhaul.pdf",
+        "Suspension",
+        "Reference",
+        1
+      ).lastInsertRowid
+  );
+
+  await request(app)
+    .put(`/api/documents/${documentId}`)
+    .send({ tags: ["struts", "alignment"] });
+
+  const tagFiltered = await request(app)
+    .get("/api/search/documents")
+    .query({ tag: "struts" });
+
+  assert.equal(tagFiltered.status, 200);
+  assert.ok(tagFiltered.body.results.some((result) => result.id === documentId));
+  assert.ok(
+    tagFiltered.body.results.every((result) =>
+      result.tags.map((tag) => tag.toLowerCase()).includes("struts")
+    )
+  );
+  assert.ok(tagFiltered.body.filters.tags.includes("struts"));
+
+  const bookmarkFiltered = await request(app)
+    .get("/api/search/documents")
+    .query({ bookmarked: "true", tag: "alignment" });
+
+  assert.equal(bookmarkFiltered.status, 200);
+  assert.ok(bookmarkFiltered.body.results.some((result) => result.id === documentId));
+  assert.ok(bookmarkFiltered.body.results.every((result) => result.isBookmarked === true));
+
+  const keywordMatched = await request(app)
+    .get("/api/search/documents")
+    .query({ q: "alignment" });
+
+  assert.equal(keywordMatched.status, 200);
+  assert.ok(keywordMatched.body.results.some((result) => result.id === documentId));
+});
+
+test("POST /api/documents/upload persists the bookmark flag and tags", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Uploaded with bookmark")
+    .field("system", "Brakes")
+    .field("documentType", "Reference")
+    .field("tags", "rotors, pads")
+    .field("isBookmarked", "true")
+    .attach("pdfFile", sourcePdf);
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.document.isBookmarked, true);
+  assert.deepEqual([...response.body.document.tags].sort(), ["pads", "rotors"]);
+});
+
+test("POST /api/documents/upload defaults to not bookmarked when the flag is omitted", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Uploaded without bookmark")
+    .field("system", "Engine")
+    .field("documentType", "Reference")
+    .attach("pdfFile", sourcePdf);
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.document.isBookmarked, false);
+  assert.deepEqual(response.body.document.tags, []);
 });
 
 test("POST /api/documents/:id/extract re-runs extraction, updates status fields, and rebuilds chunks", async () => {

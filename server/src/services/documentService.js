@@ -1,6 +1,7 @@
 import { db } from "../database.js";
+import { getTagsForDocuments, listAllTags } from "./documentTagService.js";
 
-function mapDocumentRow(row) {
+function mapDocumentRow(row, tags = []) {
   return {
     id: row.id,
     title: row.title,
@@ -17,10 +18,17 @@ function mapDocumentRow(row) {
     extractionStatus: row.extraction_status,
     pageCount: row.page_count,
     isFavorite: Boolean(row.is_favorite),
+    isBookmarked: Boolean(row.is_bookmarked),
+    tags,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     vehicleLabel: `${row.year} ${row.make} ${row.model} ${row.trim}`,
   };
+}
+
+function attachTags(rows, mapRow) {
+  const tagsByDocument = getTagsForDocuments(rows.map((row) => row.id));
+  return rows.map((row) => mapRow(row, tagsByDocument.get(row.id) || []));
 }
 
 function getDocumentBaseQuery() {
@@ -41,6 +49,7 @@ function getDocumentBaseQuery() {
       documents.extraction_status,
       documents.page_count,
       documents.is_favorite,
+      documents.is_bookmarked,
       documents.created_at,
       documents.updated_at,
       vehicles.year,
@@ -60,7 +69,7 @@ export function listDocuments() {
     `)
     .all();
 
-  return rows.map((row) => mapDocumentRow(row));
+  return attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
 }
 
 export function getDocumentFilterOptions() {
@@ -87,6 +96,7 @@ export function getDocumentFilterOptions() {
   return {
     systems,
     documentTypes,
+    tags: listAllTags(),
   };
 }
 
@@ -164,8 +174,8 @@ function buildMatchSnippet(row, query) {
   };
 }
 
-function mapSearchResultRow(row, query) {
-  const baseDocument = mapDocumentRow(row);
+function mapSearchResultRow(row, query, tags) {
+  const baseDocument = mapDocumentRow(row, tags);
   const matchSnippet = buildMatchSnippet(row, query);
 
   return {
@@ -181,6 +191,8 @@ export function searchDocuments({
   system = "",
   documentType = "",
   favorite = "",
+  bookmarked = "",
+  tag = "",
   sort = "relevance",
 }) {
   const trimmedQuery = query.trim();
@@ -210,6 +222,16 @@ export function searchDocuments({
           WHEN lower(COALESCE(documents.extracted_text, '')) LIKE ? THEN 100
           ELSE 0
         END
+        + CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM document_tags
+            JOIN tags ON tags.id = document_tags.tag_id
+            WHERE document_tags.document_id = documents.id
+              AND lower(tags.name) LIKE ?
+          ) THEN 250
+          ELSE 0
+        END
       )
     `
     : "0";
@@ -221,6 +243,7 @@ export function searchDocuments({
       loweredQuery,
       searchPattern,
       searchPattern,
+      searchPattern,
       searchPattern
     );
 
@@ -229,9 +252,16 @@ export function searchDocuments({
       OR lower(documents.original_filename) LIKE ?
       OR lower(COALESCE(documents.notes, '')) LIKE ?
       OR lower(COALESCE(documents.extracted_text, '')) LIKE ?
+      OR EXISTS (
+        SELECT 1
+        FROM document_tags
+        JOIN tags ON tags.id = document_tags.tag_id
+        WHERE document_tags.document_id = documents.id
+          AND lower(tags.name) LIKE ?
+      )
     )`);
 
-    params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+    params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
   }
 
   if (system) {
@@ -246,6 +276,23 @@ export function searchDocuments({
 
   if (favorite === "true") {
     whereClauses.push("documents.is_favorite = 1");
+  }
+
+  if (bookmarked === "true") {
+    whereClauses.push("documents.is_bookmarked = 1");
+  }
+
+  const trimmedTag = typeof tag === "string" ? tag.trim() : "";
+
+  if (trimmedTag) {
+    whereClauses.push(`EXISTS (
+      SELECT 1
+      FROM document_tags
+      JOIN tags ON tags.id = document_tags.tag_id
+      WHERE document_tags.document_id = documents.id
+        AND tags.name = ? COLLATE NOCASE
+    )`);
+    params.push(trimmedTag);
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -276,6 +323,7 @@ export function searchDocuments({
         documents.extraction_status,
         documents.page_count,
         documents.is_favorite,
+        documents.is_bookmarked,
         documents.created_at,
         documents.updated_at,
         vehicles.year,
@@ -290,5 +338,7 @@ export function searchDocuments({
     `)
     .all(...params);
 
-  return rows.map((row) => mapSearchResultRow(row, trimmedQuery));
+  return attachTags(rows, (row, tags) =>
+    mapSearchResultRow(row, trimmedQuery, tags)
+  );
 }
