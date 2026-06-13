@@ -45,7 +45,7 @@ function parseSseBuffer(buffer) {
 }
 
 export async function* streamResponsesTurn({
-  model = config.openAiModel,
+  model = config.openAiAnswerModel,
   instructions,
   input,
   tools,

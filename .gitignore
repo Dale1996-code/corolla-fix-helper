@@ -10,4 +10,5 @@ server/uploads/*
 !server/uploads/.gitkeep
 .env
 .DS_Store
+desktop.ini
 *.log

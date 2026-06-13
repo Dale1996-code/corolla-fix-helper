@@ -125,7 +125,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
       const pendingToolCalls = [];
 
       const stream = streamTurn({
-        model: config.openAiModel,
+        model: config.openAiAnswerModel,
         instructions: AGENT_INSTRUCTIONS,
         input: inputItems,
         tools: repairToolSchemas,
