@@ -138,6 +138,16 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
   return rewrittenQuestion || normalizedQuestion;
 }
 
+/**
+ * @param {{
+ *   question: string,
+ *   originalQuestion?: string,
+ *   chunks: any[],
+ *   history?: any[],
+ *   citations?: any[],
+ * }} params
+ * @returns {Promise<string>}
+ */
 export async function generateAnswerTextFromOpenAi({ question, originalQuestion, chunks }) {
   const contextText = buildModelContext(chunks);
   const prompt = [
@@ -194,18 +204,26 @@ export async function askQuestionUsingDocuments(
     throw new Error("Question is required.");
   }
 
-  const standaloneQuestion =
-    isAiConfigured && normalizedHistory.length
-      ? await rewriteQuestion({
-          question: normalizedQuestion,
-          history: normalizedHistory,
-        })
-      : normalizedQuestion;
+  if (!isAiConfigured) {
+    return {
+      status: "ai_not_configured",
+      answer: AI_NOT_CONFIGURED_MESSAGE,
+      citations: [],
+      standaloneQuestion: normalizedQuestion,
+    };
+  }
+
+  const standaloneQuestion = normalizedHistory.length
+    ? await rewriteQuestion({
+        question: normalizedQuestion,
+        history: normalizedHistory,
+      })
+    : normalizedQuestion;
   const retrievalQuestion = standaloneQuestion.trim() || normalizedQuestion;
 
   const chunks = await retrieveChunks(retrievalQuestion, {
     limit: chunkLimit,
-    mode: isAiConfigured ? "hybrid" : "keyword",
+    mode: "hybrid",
   });
 
   if (!chunks.length) {
@@ -227,15 +245,6 @@ export async function askQuestionUsingDocuments(
     return {
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
-      citations: [],
-      standaloneQuestion: retrievalQuestion,
-    };
-  }
-
-  if (!isAiConfigured) {
-    return {
-      status: "ai_not_configured",
-      answer: AI_NOT_CONFIGURED_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
     };

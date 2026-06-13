@@ -15,6 +15,7 @@ export default [
     files: [
       "server/src/initDatabase.js",
       "server/src/scripts/importFolder.js",
+      "server/src/services/aiAnswerService.js",
       "server/test/importFolder.test.js",
     ],
     languageOptions: {
@@ -23,6 +24,7 @@ export default [
       globals: {
         Buffer: "readonly",
         console: "readonly",
+        fetch: "readonly",
         process: "readonly",
       },
     },

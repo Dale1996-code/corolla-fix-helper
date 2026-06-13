@@ -974,6 +974,26 @@ test("Goal A not-found response does not call model", async () => {
   assert.equal(modelCallCount, 0);
 });
 
+test("Goal A ask reports ai_not_configured without a key even when no chunks match", async () => {
+  let retrievalCalls = 0;
+
+  const result = await askQuestionUsingDocuments("anything the documents do not mention", {
+    isAiConfigured: false,
+    retrieveChunks: async () => {
+      retrievalCalls += 1;
+      return [];
+    },
+    generateAnswerText: async () => {
+      throw new Error("model must not be called without a key");
+    },
+  });
+
+  assert.equal(result.status, "ai_not_configured");
+  assert.equal(result.answer, AI_NOT_CONFIGURED_MESSAGE);
+  assert.deepEqual(result.citations, []);
+  assert.equal(retrievalCalls, 0);
+});
+
 test("Goal A citation matching returns server-built citations from retrieved chunks", async () => {
   const uniqueTag = nextUniqueTag("ask-citations");
   const documentId = insertFakeDocument({
