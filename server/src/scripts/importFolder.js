@@ -28,6 +28,10 @@ function isImageOnlyExtraction(extractionResult) {
     return false;
   }
 
+  if (isNoTextStatus(extractionResult.extractionStatus)) {
+    return true;
+  }
+
   return countTextCharacters(extractionResult.extractedText) < IMAGE_ONLY_TEXT_CHARACTER_LIMIT;
 }
 
@@ -93,8 +97,18 @@ function getExistingDocumentByFilename(filename) {
     .get(filename) || null;
 }
 
+function isNoTextStatus(status) {
+  const normalizedStatus = String(status || "");
+
+  return (
+    normalizedStatus === "no_text_found" ||
+    normalizedStatus.startsWith("ocr_unavailable:") ||
+    normalizedStatus.startsWith("ocr_failed:")
+  );
+}
+
 function existingDocumentIsImageOnly(documentRow) {
-  return documentRow?.extraction_status === "no_text_found";
+  return isNoTextStatus(documentRow?.extraction_status);
 }
 
 function buildStoredFilename(originalFilename, fileMd5) {
@@ -221,7 +235,10 @@ async function importSinglePdf(filePath, options, report) {
   const source = normalizeText(options.source, "Bulk Folder Import");
   const subsystem = normalizeText(options.subsystem);
   const notes = normalizeText(options.notes);
-  const extractionStatus = imageOnly ? "no_text_found" : extractionResult.extractionStatus;
+  const extractionStatus =
+    imageOnly && extractionResult.extractionStatus === "completed"
+      ? "no_text_found"
+      : extractionResult.extractionStatus;
 
   try {
     await fs.mkdir(config.uploadsDir, { recursive: true });

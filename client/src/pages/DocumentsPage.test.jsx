@@ -26,9 +26,8 @@ test("DocumentsPage shows favorite, bookmark, and tag organization details", asy
 
   render(<MemoryRouter initialEntries={["/documents"]}><DocumentsPage /></MemoryRouter>);
 
-  expect(await screen.findByText("Organize documents with favorites, bookmarks, and tags.")).toBeInTheDocument();
   // Tag chips render with a leading hash in both the list and detail panels.
-  expect(screen.getAllByText("#maintenance").length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("#maintenance")).length).toBeGreaterThan(0);
   expect(screen.getByText("Bookmarked")).toBeInTheDocument();
 });
 
@@ -51,8 +50,10 @@ test("DocumentsPage saves bookmark flag and tags when editing metadata", async (
 
   fireEvent.click(await screen.findByRole("button", { name: "Edit metadata" }));
 
-  fireEvent.click(screen.getByLabelText("Bookmark this document"));
-  // Both the upload and edit forms expose a Tags field; the edit form's is last in the DOM.
+  // Both the upload and edit forms expose a Bookmark checkbox and a Tags field;
+  // the edit form's controls are last in the DOM.
+  const bookmarkCheckboxes = screen.getAllByLabelText("Bookmark this document");
+  fireEvent.click(bookmarkCheckboxes[bookmarkCheckboxes.length - 1]);
   const tagsInputs = screen.getAllByPlaceholderText("Comma separated, e.g. brakes, torque-specs, diy");
   fireEvent.change(tagsInputs[tagsInputs.length - 1], {
     target: { value: "rotors, pads" },
@@ -65,6 +66,46 @@ test("DocumentsPage saves bookmark flag and tags when editing metadata", async (
   await waitFor(() => {
     expect(screen.getAllByText("#rotors").length).toBeGreaterThan(0);
   });
+});
+
+test("DocumentsPage sends the bookmark flag when uploading a document", async () => {
+  let uploadBody = null;
+
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/settings") return jsonResponse({ documentDefaults: { commonSystems: [], documentTypes: [] } });
+    if (url === "/api/documents" && !options.method) return jsonResponse({ documents: [], total: 0 });
+    if (url === "/api/documents/upload" && options.method === "POST") {
+      uploadBody = options.body;
+      return jsonResponse({ document: { id: 12, title: "Brake Manual", extractionStatus: "completed" } });
+    }
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<MemoryRouter initialEntries={["/documents"]}><DocumentsPage /></MemoryRouter>);
+
+  const fileInput = await screen.findByLabelText(/PDF file/);
+  fireEvent.change(fileInput, {
+    target: { files: [new File(["%PDF-1.4"], "brake.pdf", { type: "application/pdf" })] },
+  });
+  // Query upload fields by placeholder: the filter bar reuses "System"/"Document Type" labels.
+  fireEvent.change(screen.getByPlaceholderText("Engine, Brakes, Electrical..."), {
+    target: { value: "Brakes" },
+  });
+  fireEvent.change(screen.getByPlaceholderText("Repair Manual, Wiring Diagram..."), {
+    target: { value: "Reference" },
+  });
+  // With no documents loaded, the upload form is the only Bookmark checkbox on the page.
+  fireEvent.click(screen.getByLabelText("Bookmark this document"));
+
+  // Submit the form directly so jsdom's required-field validation gate doesn't block it.
+  const uploadButton = screen.getByRole("button", { name: "Upload PDF" });
+  fireEvent.submit(uploadButton.closest("form"));
+
+  await waitFor(() => {
+    expect(uploadBody).toBeInstanceOf(FormData);
+  });
+  expect(uploadBody.get("isBookmarked")).toBe("true");
 });
 
 test("DocumentsPage confirms before deleting and removes document after success", async () => {

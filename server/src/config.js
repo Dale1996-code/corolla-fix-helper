@@ -15,6 +15,14 @@ function readPositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function readBoolean(value, fallback) {
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback;
+  }
+
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
 const openAiEmbeddingModel =
   process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
@@ -38,6 +46,12 @@ export const config = {
     process.env.OPENAI_EMBEDDING_BATCH_SIZE,
     64
   ),
+  ocrEnabled: readBoolean(process.env.OCR_ENABLED, true),
+  ocrMinTextCharacters: readPositiveInteger(process.env.OCR_MIN_TEXT_CHARACTERS, 20),
+  ocrDpi: readPositiveInteger(process.env.OCR_DPI, 300),
+  ocrLanguage: process.env.OCR_LANGUAGE || "eng",
+  ocrTesseractCommand: process.env.OCR_TESSERACT_COMMAND || "tesseract",
+  ocrPdftoppmCommand: process.env.OCR_PDFTOPPM_COMMAND || "pdftoppm",
   clientDistDir: path.join(projectRoot, "client", "dist"),
   databaseFile:
     process.env.DATABASE_FILE ||

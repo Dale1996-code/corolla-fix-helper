@@ -69,7 +69,16 @@ Check:
 - the uploads folder exists and is writable
 - the PDF has extractable text
 
-Some PDFs are scans or images. Those may not produce useful text without OCR, and OCR is not part of the current app.
+Some PDFs are scans or images. The app can OCR low-text pages if Tesseract and Poppler are installed on the machine running the backend.
+
+Check OCR tools:
+
+```powershell
+tesseract --version
+pdftoppm -v
+```
+
+If either command is missing, install the OCR tools or set `OCR_ENABLED=false` in `server\.env`. Text PDFs will still import without OCR. Scanned PDFs will show an extraction status starting with `ocr_unavailable:` until OCR is available.
 
 ## Backup Export Fails
 
@@ -110,7 +119,7 @@ Do not commit a real OpenAI key. The app can still run without the key, but Ask 
 
 ## Ask Finds No Answer After Importing PDFs
 
-If the PDFs have extractable text but Ask still cannot find matching passages, rebuild embeddings:
+If the PDFs have extractable text or OCR text but Ask still cannot find matching passages, rebuild embeddings:
 
 ```powershell
 npm run embed:backfill

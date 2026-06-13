@@ -34,6 +34,22 @@ node -v
 
 The version should start with `v24.`.
 
+If you want scanned or image-only wiring diagrams to become searchable, install the local OCR tools before importing PDFs:
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR -e
+winget install --id oschwartz10612.Poppler -e
+```
+
+Close and reopen PowerShell, then check:
+
+```powershell
+tesseract --version
+pdftoppm -v
+```
+
+OCR means optical character recognition. In this app, Poppler renders a low-text PDF page into an image, and Tesseract reads text from that image.
+
 ## PDF Folder
 
 When the script asks for a PDF folder, paste the full folder path, for example:
@@ -42,7 +58,7 @@ When the script asks for a PDF folder, paste the full folder path, for example:
 C:\Users\daleb\Documents\Corolla repair PDFs
 ```
 
-The importer scans that folder and subfolders for PDF files. It skips duplicate PDFs. Image-only wiring diagrams can still import as `IMAGE-ONLY`, but they are not useful for text Q&A until OCR is added.
+The importer scans that folder and subfolders for PDF files. It skips duplicate PDFs. Image-only wiring diagrams can import as `IMAGE-ONLY`; when OCR tools are installed, low-text pages are OCR-read and saved into the same searchable chunks as normal PDF text.
 
 ## After The Script Starts The App
 

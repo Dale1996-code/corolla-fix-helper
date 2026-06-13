@@ -12,6 +12,7 @@ const emptyUploadForm = {
   source: "",
   notes: "",
   tags: "",
+  isBookmarked: false,
 };
 
 const emptyEditForm = {
@@ -290,6 +291,16 @@ function UploadForm({
           onChange={onTextChange}
           placeholder="Any quick notes about this document"
         />
+
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            name="isBookmarked"
+            checked={form.isBookmarked}
+            onChange={onTextChange}
+          />
+          Bookmark this document
+        </label>
 
         {feedback ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -888,7 +899,8 @@ export function DocumentsPage() {
   const [favoriteFilter, setFavoriteFilter] = useState(requestedFavoriteFilter);
   const requestedBookmarkFilter = normalizeBookmarkFilter(searchParams.get("bookmark"));
   const [bookmarkFilter, setBookmarkFilter] = useState(requestedBookmarkFilter);
-  const [tagFilter, setTagFilter] = useState(searchParams.get("tag") || "all");
+  const requestedTagFilter = searchParams.get("tag") || "all";
+  const [tagFilter, setTagFilter] = useState(requestedTagFilter);
   const [extractionFilter, setExtractionFilter] = useState("all");
 
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
@@ -1123,6 +1135,10 @@ export function DocumentsPage() {
     setBookmarkFilter(requestedBookmarkFilter);
   }, [requestedBookmarkFilter]);
 
+  useEffect(() => {
+    setTagFilter(requestedTagFilter);
+  }, [requestedTagFilter]);
+
   function handleUploadFileChange(event) {
     const nextFile = event.target.files?.[0] || null;
 
@@ -1133,11 +1149,11 @@ export function DocumentsPage() {
   }
 
   function handleUploadTextChange(event) {
-    const { name, value } = event.target;
+    const { name, type, checked, value } = event.target;
 
     setUploadForm((currentForm) => ({
       ...currentForm,
-      [name]: value,
+      [name]: type === "checkbox" ? checked : value,
     }));
   }
 
@@ -1158,6 +1174,7 @@ export function DocumentsPage() {
     formData.append("source", uploadForm.source);
     formData.append("notes", uploadForm.notes);
     formData.append("tags", uploadForm.tags);
+    formData.append("isBookmarked", uploadForm.isBookmarked ? "true" : "false");
 
     try {
       setUploading(true);
@@ -1512,22 +1529,11 @@ export function DocumentsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Ready to Use"
         title="Documents"
         description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites, bookmarks, and tags to keep the most important documents easy to find."
       />
 
       <div className="space-y-6">
-        <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
-          <p className="text-sm font-semibold text-sky-900">
-            Organize documents with favorites, bookmarks, and tags.
-          </p>
-          <p className="mt-1 text-sm text-sky-800">
-            Favorites and bookmarks are independent saved-document flags. Add comma separated tags to
-            group related documents, then filter or search the library by tag.
-          </p>
-        </section>
-
         <UploadForm
           form={uploadForm}
           uploading={uploading}

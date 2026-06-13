@@ -193,6 +193,9 @@ documentsRouter.post("/upload", async (request, response) => {
   const subsystem = normalizeText(request.body.subsystem);
   const source = normalizeText(request.body.source);
   const notes = normalizeText(request.body.notes);
+  // Multipart form fields arrive as strings, so accept "true" (or a real boolean).
+  const isBookmarked =
+    request.body.isBookmarked === "true" || request.body.isBookmarked === true;
 
   let createdDocumentId = null;
 
@@ -219,8 +222,9 @@ documentsRouter.post("/upload", async (request, response) => {
           extraction_status,
           page_count,
           notes,
-          is_favorite
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_favorite,
+          is_bookmarked
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         vehicleId,
@@ -237,7 +241,8 @@ documentsRouter.post("/upload", async (request, response) => {
         extractionResult.extractionStatus,
         extractionResult.pageCount,
         notes,
-        0
+        0,
+        isBookmarked ? 1 : 0
       );
 
     const newDocumentId = Number(result.lastInsertRowid);
@@ -342,6 +347,8 @@ documentsRouter.post("/:id/extract", async (request, response) => {
     extractionResult.pageCount,
     documentId
   );
+
+  rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
 
   const documents = listDocuments();
   const updatedDocument = documents.find((entry) => entry.id === documentId);

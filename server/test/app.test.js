@@ -18,6 +18,7 @@ process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 process.env.PORT = "4100";
 process.env.CLIENT_PORT = "5174";
 process.env.OPENAI_API_KEY = "";
+process.env.OCR_ENABLED = "false";
 
 fs.mkdirSync(testAssetDir, { recursive: true });
 fs.writeFileSync(
@@ -439,7 +440,39 @@ test("search API filters documents by tag and bookmark and matches tag keywords"
   assert.ok(keywordMatched.body.results.some((result) => result.id === documentId));
 });
 
-test("POST /api/documents/:id/extract re-runs extraction and updates status fields", async () => {
+test("POST /api/documents/upload persists the bookmark flag and tags", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Uploaded with bookmark")
+    .field("system", "Brakes")
+    .field("documentType", "Reference")
+    .field("tags", "rotors, pads")
+    .field("isBookmarked", "true")
+    .attach("pdfFile", sourcePdf);
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.document.isBookmarked, true);
+  assert.deepEqual([...response.body.document.tags].sort(), ["pads", "rotors"]);
+});
+
+test("POST /api/documents/upload defaults to not bookmarked when the flag is omitted", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Uploaded without bookmark")
+    .field("system", "Engine")
+    .field("documentType", "Reference")
+    .attach("pdfFile", sourcePdf);
+
+  assert.equal(response.status, 201);
+  assert.equal(response.body.document.isBookmarked, false);
+  assert.deepEqual(response.body.document.tags, []);
+});
+
+test("POST /api/documents/:id/extract re-runs extraction, updates status fields, and rebuilds chunks", async () => {
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
   assert.ok(vehicle);
 
@@ -484,9 +517,14 @@ test("POST /api/documents/:id/extract re-runs extraction and updates status fiel
   assert.equal(response.status, 200);
   assert.equal(response.body.message, "Extraction re-run complete.");
   assert.equal(response.body.document.id, documentId);
-  assert.ok(["completed", "no_text_found"].includes(response.body.document.extractionStatus));
+  assert.ok(
+    response.body.document.extractionStatus.startsWith("completed") ||
+      response.body.document.extractionStatus === "no_text_found" ||
+      response.body.document.extractionStatus.startsWith("ocr_")
+  );
   assert.equal(typeof response.body.document.extractedText, "string");
   assert.equal(typeof response.body.document.pageCount, "number");
+  assert.ok(getChunkRows(documentId).length > 0);
 });
 
 test("POST /api/documents/:id/extract returns 404 when document does not exist", async () => {
