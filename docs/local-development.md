@@ -35,7 +35,36 @@ This installs:
 - backend packages in `server/`
 - frontend packages in `client/`
 
-## 4. Optional Local Settings
+## 4. Optional OCR For Scanned PDFs
+
+OCR means optical character recognition. It turns words inside a scanned page image into searchable text.
+
+For scanned or image-only wiring diagrams on Windows, install Tesseract and Poppler:
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR -e
+winget install --id oschwartz10612.Poppler -e
+```
+
+Then close and reopen PowerShell, and check both commands:
+
+```powershell
+tesseract --version
+pdftoppm -v
+```
+
+If `winget` cannot find those packages, install Tesseract from the UB Mannheim Windows installer and Poppler from the Poppler Windows release zip. Make sure the folders containing `tesseract.exe` and `pdftoppm.exe` are on your Windows `PATH`.
+
+If the commands are installed but not on `PATH`, put the full `.exe` paths in `server\.env`:
+
+```env
+OCR_TESSERACT_COMMAND=C:\Program Files\Tesseract-OCR\tesseract.exe
+OCR_PDFTOPPM_COMMAND=C:\Tools\poppler\Library\bin\pdftoppm.exe
+```
+
+OCR is optional. Text-based PDFs still import without it. Scanned PDFs show an `ocr_unavailable:` extraction status if OCR tools are missing.
+
+## 5. Optional Local Settings
 
 The app has safe default settings. You only need a local env file if you want to change ports, database path, upload path, or upload size.
 
@@ -53,7 +82,7 @@ Copy-Item .env.example server\.env
 
 Do not paste real secrets into docs or committed files. `server\.env` is ignored by Git for local use.
 
-## 5. Start The App
+## 6. Start The App
 
 ```powershell
 npm run dev
@@ -76,7 +105,7 @@ Check the backend at:
 http://localhost:4000/api/health
 ```
 
-## 6. Build And Test
+## 7. Build And Test
 
 ```powershell
 npm run lint
@@ -93,7 +122,7 @@ npm run test
 
 `npm run test` runs backend and frontend automated tests.
 
-## 7. Bulk Import PDFs
+## 8. Bulk Import PDFs
 
 Run this from the repo root:
 
@@ -108,10 +137,11 @@ The importer:
 - scans the folder and subfolders for `.pdf` files
 - copies readable PDFs into the configured uploads folder
 - stores each document in SQLite
-- rebuilds `document_chunks` for document Q&A
+- runs OCR on low-text pages when OCR is enabled and the local tools are installed
+- rebuilds `document_chunks` for document Q&A, including OCR text
 - skips duplicates by MD5 file hash first and original filename second
 - keeps going when one PDF is corrupt or unreadable
-- prints imported, skipped, failed, and `IMAGE-ONLY` counts
+- prints imported, skipped, failed, and `IMAGE-ONLY` counts; `ocr_unavailable:` means the OCR tools were missing
 
 Default imported metadata is:
 
@@ -121,7 +151,7 @@ Default imported metadata is:
 
 You can edit document metadata later in the Documents page.
 
-## 8. Embed Document Chunks
+## 9. Embed Document Chunks
 
 If you have `OPENAI_API_KEY` configured and you want Ask to use hybrid retrieval, run this after importing or re-extracting PDFs:
 
@@ -131,7 +161,7 @@ npm run embed:backfill
 
 This sends chunk text to OpenAI's embedding API, stores a Float32 embedding BLOB on each chunk, and skips chunks already stored at the current embedding version.
 
-## 9. Run The Retrieval Eval
+## 10. Run The Retrieval Eval
 
 Run this from the repo root:
 
@@ -141,7 +171,7 @@ npm run eval:retrieval
 
 This uses a temporary synthetic repair corpus with 2,500 distractor documents and prints keyword-only vs hybrid top-page results.
 
-## 10. Run The Built App Locally
+## 11. Run The Built App Locally
 
 ```powershell
 npm run build

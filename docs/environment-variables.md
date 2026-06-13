@@ -41,6 +41,12 @@ OPENAI_ANSWER_MODEL=gpt-4.1
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIMENSIONS=512
 OPENAI_EMBEDDING_BATCH_SIZE=64
+OCR_ENABLED=true
+OCR_MIN_TEXT_CHARACTERS=20
+OCR_DPI=300
+OCR_LANGUAGE=eng
+OCR_TESSERACT_COMMAND=tesseract
+OCR_PDFTOPPM_COMMAND=pdftoppm
 ```
 
 What each one means:
@@ -57,6 +63,12 @@ What each one means:
 - `OPENAI_EMBEDDING_MODEL` is the OpenAI model name used to embed document chunks and questions.
 - `OPENAI_EMBEDDING_DIMENSIONS` is the embedding size stored in SQLite. The current value is `512`.
 - `OPENAI_EMBEDDING_BATCH_SIZE` is how many chunks `npm run embed:backfill` sends per embedding request.
+- `OCR_ENABLED` turns scanned-PDF OCR on or off. The default is `true`.
+- `OCR_MIN_TEXT_CHARACTERS` is the page text threshold below which OCR is attempted.
+- `OCR_DPI` is the image-rendering resolution used before OCR.
+- `OCR_LANGUAGE` is the Tesseract language code. The default `eng` means English.
+- `OCR_TESSERACT_COMMAND` is the Tesseract command name or full `.exe` path.
+- `OCR_PDFTOPPM_COMMAND` is the Poppler `pdftoppm` command name or full `.exe` path.
 
 Because this file is normally copied to `server/.env`, the relative paths above are relative to the `server/` folder.
 
@@ -74,6 +86,8 @@ npm run embed:backfill
 
 This embeds chunks that are missing the active `OPENAI_EMBEDDING_MODEL` and `OPENAI_EMBEDDING_DIMENSIONS` pair, and skips chunks already stored at the current embedding version.
 
+OCR is local. It does not use OpenAI. When a PDF page has very little normal text, the backend uses Poppler `pdftoppm` to render that page to an image, then uses Tesseract to read text from the image. If either tool is missing, text PDFs still import normally, and scanned PDFs get an extraction status starting with `ocr_unavailable:`.
+
 ## Google Compute Engine Values
 
 For the intended Docker-on-VM deployment, pass env values to Docker instead of storing secrets in the repo:
@@ -89,6 +103,9 @@ For the intended Docker-on-VM deployment, pass env values to Docker instead of s
 -e OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 -e OPENAI_EMBEDDING_DIMENSIONS=512
 -e OPENAI_EMBEDDING_BATCH_SIZE=64
+-e OCR_ENABLED=true
+-e OCR_TESSERACT_COMMAND=tesseract
+-e OCR_PDFTOPPM_COMMAND=pdftoppm
 ```
 
 The `/data` path should be mounted to a persistent folder on the VM.

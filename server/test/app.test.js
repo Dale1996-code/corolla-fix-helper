@@ -18,6 +18,7 @@ process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 process.env.PORT = "4100";
 process.env.CLIENT_PORT = "5174";
 process.env.OPENAI_API_KEY = "";
+process.env.OCR_ENABLED = "false";
 
 fs.mkdirSync(testAssetDir, { recursive: true });
 fs.writeFileSync(
@@ -314,7 +315,7 @@ test("documents API keeps favorites as the only saved-document flag in V1", asyn
   assert.equal("isBookmarked" in firstDocument, false);
 });
 
-test("POST /api/documents/:id/extract re-runs extraction and updates status fields", async () => {
+test("POST /api/documents/:id/extract re-runs extraction, updates status fields, and rebuilds chunks", async () => {
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
   assert.ok(vehicle);
 
@@ -359,9 +360,14 @@ test("POST /api/documents/:id/extract re-runs extraction and updates status fiel
   assert.equal(response.status, 200);
   assert.equal(response.body.message, "Extraction re-run complete.");
   assert.equal(response.body.document.id, documentId);
-  assert.ok(["completed", "no_text_found"].includes(response.body.document.extractionStatus));
+  assert.ok(
+    response.body.document.extractionStatus.startsWith("completed") ||
+      response.body.document.extractionStatus === "no_text_found" ||
+      response.body.document.extractionStatus.startsWith("ocr_")
+  );
   assert.equal(typeof response.body.document.extractedText, "string");
   assert.equal(typeof response.body.document.pageCount, "number");
+  assert.ok(getChunkRows(documentId).length > 0);
 });
 
 test("POST /api/documents/:id/extract returns 404 when document does not exist", async () => {

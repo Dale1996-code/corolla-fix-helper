@@ -46,7 +46,7 @@ Check:
 - The document appears in the list.
 - Extraction status and page count are shown.
 - The PDF opens from the app.
-- Re-run extraction finishes with a clear success or error message.
+- Re-run extraction finishes with a clear success or error message and refreshes searchable chunks.
 - Favorites and metadata changes persist after refresh.
 
 ## 4. Document Delete Cleanup
@@ -186,7 +186,8 @@ Check:
 - The report shows imported, skipped, failed, and `IMAGE-ONLY` counts.
 - Running the same command again skips already imported PDFs instead of duplicating them.
 - Imported PDFs appear in the Documents page.
-- Text PDFs create searchable chunks for Ask Your Documents.
+- Text PDFs and OCR-readable scanned PDFs create searchable chunks for Ask Your Documents.
+- If OCR tools are missing, scanned PDFs show a clear `ocr_unavailable:` extraction status instead of breaking text-PDF imports.
 
 ## 12. Local Production Smoke Test
 

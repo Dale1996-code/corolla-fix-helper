@@ -13,6 +13,7 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-import-test-"));
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 process.env.OPENAI_API_KEY = "";
+process.env.OCR_ENABLED = "false";
 
 const { initializeDatabase } = await import("../src/initDatabase.js");
 const { db } = await import("../src/database.js");
