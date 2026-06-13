@@ -30,6 +30,9 @@ const {
 const { runRepairPlannerAgent, AI_NOT_CONFIGURED_MESSAGE } = await import(
   "../src/services/agent/repairPlannerAgent.js"
 );
+const { streamResponsesTurn } = await import(
+  "../src/services/agent/openAiResponsesClient.js"
+);
 
 after(() => {
   if (typeof db.close === "function") {
@@ -171,6 +174,64 @@ test("search_repair_docs returns citations from the injected retriever", () => {
   assert.equal(result.citations[0].documentId, 7);
   assert.equal(result.citations[0].pageNumber, 4);
   assert.match(result.citations[0].snippet, /25 ft-lb/);
+});
+
+// --- Responses client glue test --------------------------------------------
+
+test("streamResponsesTurn sends a non-empty model string in the request body", async () => {
+  // Regression guard: the agent previously passed `config.openAiModel`, which
+  // does not exist, so `model` was undefined and OpenAI rejected the request
+  // with a 400. The existing tests all inject a mock `streamTurn`, so they
+  // never exercised this glue. Here we drive the real client with an injected
+  // `fetchImpl`, capture the request body, and assert a real model is sent.
+  let capturedBody;
+
+  const fakeFetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+
+    const frame = new TextEncoder().encode(
+      'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+    );
+    let read = false;
+
+    return {
+      ok: true,
+      body: {
+        getReader() {
+          return {
+            read() {
+              if (read) {
+                return Promise.resolve({ value: undefined, done: true });
+              }
+              read = true;
+              return Promise.resolve({ value: frame, done: false });
+            },
+            releaseLock() {},
+          };
+        },
+      },
+    };
+  };
+
+  const events = [];
+  // Intentionally omit `model` so the client falls back to the config default,
+  // which is exactly the path the agent uses.
+  for await (const event of streamResponsesTurn({
+    instructions: "test",
+    input: [{ role: "user", content: "hi" }],
+    tools: [],
+    apiKey: "test-key",
+    fetchImpl: fakeFetch,
+  })) {
+    events.push(event);
+  }
+
+  assert.equal(typeof capturedBody.model, "string");
+  assert.ok(
+    capturedBody.model.length > 0,
+    "expected a non-empty model in the request body"
+  );
+  assert.ok(events.some((event) => event.type === "text_delta"));
 });
 
 // --- Agent loop tests ------------------------------------------------------
