@@ -84,8 +84,8 @@ The app has a current RAG-style document Q&A flow. RAG means retrieval-augmented
 
 Current flow:
 
-1. Uploading a PDF or re-running extraction stores extracted page text.
-2. `server/src/services/documentChunkService.js` saves smaller text chunks in the `document_chunks` table.
+1. Uploading a PDF or re-running extraction stores extracted page text. Pages with very little PDF text are OCR-read when local Tesseract and Poppler commands are available.
+2. `server/src/services/documentChunkService.js` saves smaller text chunks in the `document_chunks` table. OCR text uses the same page-aware chunk flow as normal PDF text.
 3. `npm run embed:backfill` stores current OpenAI embeddings on chunks that do not already have the active embedding version.
 4. `server/src/services/chunkRetrievalService.js` embeds the question once, cosine-scans an in-memory chunk embedding cache, and fuses that ranking with keyword ranking.
 5. `server/src/services/aiAnswerService.js` builds citations and, when `OPENAI_API_KEY` is set, calls the OpenAI Responses API.
@@ -105,7 +105,7 @@ npm run import -- "C:\path\to\pdfs"
 
 It uses the same storage model as document upload: copied PDF files live in the uploads folder, document metadata is saved in `documents`, and chunks are rebuilt through `rebuildDocumentChunksFromPages`.
 
-The importer is resumable. It skips duplicates by MD5 file hash first and original filename second, keeps going after bad files, and reports how many PDFs are image-only so OCR can be treated as a blocker if needed.
+The importer is resumable. It skips duplicates by MD5 file hash first and original filename second, keeps going after bad files, and reports how many PDFs are image-only. If OCR tools are installed, low-text pages can still become searchable chunks; if they are missing, the extraction status starts with `ocr_unavailable:`.
 
 ## Deployment Shape
 

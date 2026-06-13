@@ -338,6 +338,8 @@ documentsRouter.post("/:id/extract", async (request, response) => {
     documentId
   );
 
+  rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+
   const documents = listDocuments();
   const updatedDocument = documents.find((entry) => entry.id === documentId);
 

@@ -15,7 +15,8 @@ The current codebase includes:
 - Dashboard summary cards and recent activity
 - PDF document upload, metadata editing, extraction status, favorites, delete cleanup, and PDF open links
 - Re-run extraction for one saved document
-- Resumable folder import for many PDFs with duplicate detection, chunk rebuilds, and an image-only report
+- Optional local OCR for scanned or image-only PDF pages when Tesseract and Poppler are installed
+- Resumable folder import for many PDFs with duplicate detection, OCR-aware chunk rebuilds, and an image-only report
 - Workspace search with separate sections for documents, symptoms, procedures, and notes
 - "Repair Planner" streaming agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts grounded in uploaded PDFs (needs `OPENAI_API_KEY`)
 - "Ask your documents" Q&A that retrieves matching uploaded PDF chunks with hybrid keyword+embedding search and uses OpenAI to generate cited answers when configured
@@ -37,7 +38,7 @@ The current app does not include:
 - automatic restore from a backup archive
 - a verified current cloud deployment from this branch
 
-The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. After importing or re-extracting PDFs, run `npm run embed:backfill` so existing chunks have current embeddings. Without an OpenAI key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.
+The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. After importing or re-extracting PDFs, run `npm run embed:backfill` so existing chunks, including OCR-created chunks, have current embeddings. Without an OpenAI key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.
 
 Use sample or fake PDFs before sharing a public demo. The app does not have access control yet.
 
@@ -101,7 +102,7 @@ To bulk import PDFs:
 npm run import -- "C:\path\to\pdfs"
 ```
 
-The import report shows imported, skipped, failed, and `IMAGE-ONLY` counts. `IMAGE-ONLY` means PDF text extraction found almost no text, which is the signal to check whether OCR is needed before semantic search work.
+The import report shows imported, skipped, failed, and `IMAGE-ONLY` counts. `IMAGE-ONLY` means PDF text extraction found almost no text. If Tesseract and Poppler are installed, OCR runs on those low-text pages and the OCR text becomes searchable; if they are missing, the document status starts with `ocr_unavailable:`.
 
 ## Deployment Note
 

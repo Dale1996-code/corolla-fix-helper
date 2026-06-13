@@ -77,6 +77,7 @@ Current use:
 - Upload and store PDFs locally.
 - Edit metadata.
 - Track extraction status and page count.
+- Store OCR text in `extracted_text` when low-text PDF pages are OCR-read.
 - Mark favorites.
 - Open stored PDFs.
 - Re-run extraction for one saved document.
@@ -192,7 +193,7 @@ Older note rows may still use `document_id` and `body`. The server includes back
 
 ### `document_chunks`
 
-Stores smaller page-aware chunks of extracted PDF text for the "Ask your documents" feature.
+Stores smaller page-aware chunks of extracted PDF text for the "Ask your documents" feature. OCR-created text uses the same table and keeps the original PDF page number.
 
 Important fields:
 
