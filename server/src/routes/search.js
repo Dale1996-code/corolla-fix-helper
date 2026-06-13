@@ -23,6 +23,8 @@ function sendDocumentSearchResponse(request, response) {
   const system = getQueryValue(request, "system");
   const documentType = getQueryValue(request, "documentType");
   const favorite = getQueryValue(request, "favorite");
+  const bookmarked = getQueryValue(request, "bookmarked");
+  const tag = getQueryValue(request, "tag");
   const sort = getQueryValue(request, "sort", "relevance");
 
   const results = searchDocuments({
@@ -30,6 +32,8 @@ function sendDocumentSearchResponse(request, response) {
     system,
     documentType,
     favorite,
+    bookmarked,
+    tag,
     sort,
   });
 

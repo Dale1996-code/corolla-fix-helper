@@ -11,6 +11,7 @@ const emptyUploadForm = {
   documentType: "",
   source: "",
   notes: "",
+  tags: "",
 };
 
 const emptyEditForm = {
@@ -21,6 +22,8 @@ const emptyEditForm = {
   source: "",
   notes: "",
   isFavorite: false,
+  isBookmarked: false,
+  tags: "",
 };
 
 const emptyDocumentDefaults = {
@@ -102,6 +105,39 @@ function normalizeFavoriteFilter(value) {
   }
 
   return "all";
+}
+
+function normalizeBookmarkFilter(value) {
+  if (value === "bookmarked_only" || value === "not_bookmarked") {
+    return value;
+  }
+
+  return "all";
+}
+
+function getDocumentTags(document) {
+  return Array.isArray(document?.tags) ? document.tags : [];
+}
+
+function TagChips({ tags, size = "sm" }) {
+  if (!tags.length) {
+    return null;
+  }
+
+  const sizeClass = size === "xs" ? "text-[0.65rem] px-1.5 py-0.5" : "text-xs px-2 py-0.5";
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className={`rounded-full bg-sky-100 font-medium text-sky-800 ${sizeClass}`}
+        >
+          #{tag}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function TextField({
@@ -239,6 +275,14 @@ function UploadForm({
           />
         </div>
 
+        <TextField
+          label="Tags"
+          name="tags"
+          value={form.tags}
+          onChange={onTextChange}
+          placeholder="Comma separated, e.g. brakes, torque-specs, diy"
+        />
+
         <TextAreaField
           label="Notes"
           name="notes"
@@ -289,14 +333,19 @@ function ListControls({
   onDocumentTypeFilterChange,
   favoriteFilter,
   onFavoriteFilterChange,
+  bookmarkFilter,
+  onBookmarkFilterChange,
+  tagFilter,
+  onTagFilterChange,
   extractionFilter,
   onExtractionFilterChange,
   systems,
   documentTypes,
+  tags,
 }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Sort</span>
           <select
@@ -352,6 +401,35 @@ function ListControls({
             <option value="all">All</option>
             <option value="favorites_only">Favorites only</option>
             <option value="not_favorites">Not favorites</option>
+          </select>
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Bookmark</span>
+          <select
+            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={bookmarkFilter}
+            onChange={onBookmarkFilterChange}
+          >
+            <option value="all">All</option>
+            <option value="bookmarked_only">Bookmarked only</option>
+            <option value="not_bookmarked">Not bookmarked</option>
+          </select>
+        </label>
+
+        <label className="grid gap-1 text-xs font-medium text-slate-700">
+          <span>Tag</span>
+          <select
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            value={tagFilter}
+            onChange={onTagFilterChange}
+          >
+            <option value="all">All tags</option>
+            {tags.map((tag) => (
+              <option key={tag} value={tag}>
+                #{tag}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -419,8 +497,22 @@ function DocumentsList({
                 onClick={() => onSelectDocument(document.id)}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-900">{document.title}</p>
+                  <p className="flex items-center gap-1.5 font-medium text-slate-900">
+                    <span className="truncate">{document.title}</span>
+                    {document.isBookmarked ? (
+                      <span
+                        title="Bookmarked"
+                        aria-label="Bookmarked"
+                        className="shrink-0 text-amber-500"
+                      >
+                        ★
+                      </span>
+                    ) : null}
+                  </p>
                   <p className="truncate text-xs text-slate-500">{document.originalFilename}</p>
+                  <div className="mt-1">
+                    <TagChips tags={getDocumentTags(document)} size="xs" />
+                  </div>
                 </div>
                 <span className="truncate text-slate-700">{document.system}</span>
                 <span className="truncate text-slate-700">{document.documentType}</span>
@@ -500,17 +592,37 @@ function EditMetadataForm({
         <TextField label="Source" name="source" value={values.source} onChange={onChange} />
       </div>
 
+      <TextField
+        label="Tags"
+        name="tags"
+        value={values.tags}
+        onChange={onChange}
+        placeholder="Comma separated, e.g. brakes, torque-specs, diy"
+      />
+
       <TextAreaField label="Document notes" name="notes" value={values.notes} onChange={onChange} />
 
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          name="isFavorite"
-          checked={values.isFavorite}
-          onChange={onChange}
-        />
-        Mark this document as favorite
-      </label>
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            name="isFavorite"
+            checked={values.isFavorite}
+            onChange={onChange}
+          />
+          Mark this document as favorite
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            name="isBookmarked"
+            checked={values.isBookmarked}
+            onChange={onChange}
+          />
+          Bookmark this document
+        </label>
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <button
@@ -544,6 +656,7 @@ function DocumentDetails({
   editValues,
   saveState,
   extractionRunState,
+  bookmarkUpdateState,
   systemSuggestions,
   documentTypeSuggestions,
   onStartEdit,
@@ -552,6 +665,7 @@ function DocumentDetails({
   onSaveEdit,
   onOpenFile,
   onToggleFavorite,
+  onToggleBookmark,
   onRerunExtraction,
   onDeleteDocument,
 }) {
@@ -587,6 +701,13 @@ function DocumentDetails({
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
           >
             {document.isFavorite ? "Unfavorite" : "Favorite"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleBookmark(document)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            {document.isBookmarked ? "Remove bookmark" : "Bookmark"}
           </button>
           <button
             type="button"
@@ -667,7 +788,39 @@ function DocumentDetails({
         </div>
       ) : null}
 
-      <div className="mt-5">
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-slate-900">Saved flags:</span>
+        <span
+          className={`rounded-full px-2 py-1 text-xs font-semibold ${
+            document.isFavorite ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          {document.isFavorite ? "Favorite" : "Not favorite"}
+        </span>
+        <span
+          className={`rounded-full px-2 py-1 text-xs font-semibold ${
+            document.isBookmarked ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          {document.isBookmarked ? "Bookmarked" : "Not bookmarked"}
+        </span>
+        {bookmarkUpdateState?.documentId === document.id && bookmarkUpdateState?.error ? (
+          <span className="text-xs text-red-700">{bookmarkUpdateState.error}</span>
+        ) : null}
+      </div>
+
+      <div className="mt-4">
+        <h4 className="text-sm font-semibold text-slate-900">Tags</h4>
+        <div className="mt-2">
+          {getDocumentTags(document).length ? (
+            <TagChips tags={getDocumentTags(document)} />
+          ) : (
+            <p className="text-sm text-slate-600">No tags yet.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4">
         <h4 className="text-sm font-semibold text-slate-900">Document notes</h4>
         <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
           {document.notes || "No notes yet."}
@@ -733,6 +886,9 @@ export function DocumentsPage() {
       : null;
   const requestedFavoriteFilter = normalizeFavoriteFilter(searchParams.get("favorite"));
   const [favoriteFilter, setFavoriteFilter] = useState(requestedFavoriteFilter);
+  const requestedBookmarkFilter = normalizeBookmarkFilter(searchParams.get("bookmark"));
+  const [bookmarkFilter, setBookmarkFilter] = useState(requestedBookmarkFilter);
+  const [tagFilter, setTagFilter] = useState(searchParams.get("tag") || "all");
   const [extractionFilter, setExtractionFilter] = useState("all");
 
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
@@ -745,6 +901,10 @@ export function DocumentsPage() {
     error: "",
   });
   const [favoriteUpdateState, setFavoriteUpdateState] = useState({
+    documentId: null,
+    error: "",
+  });
+  const [bookmarkUpdateState, setBookmarkUpdateState] = useState({
     documentId: null,
     error: "",
   });
@@ -765,6 +925,12 @@ export function DocumentsPage() {
     return Array.from(
       new Set(documents.map((document) => document.documentType).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
+  }, [documents]);
+
+  const availableTags = useMemo(() => {
+    return Array.from(
+      new Set(documents.flatMap((document) => getDocumentTags(document)))
+    ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [documents]);
 
   const systemSuggestions = useMemo(() => {
@@ -810,6 +976,23 @@ export function DocumentsPage() {
         return false;
       }
 
+      if (bookmarkFilter === "bookmarked_only" && !document.isBookmarked) {
+        return false;
+      }
+
+      if (bookmarkFilter === "not_bookmarked" && document.isBookmarked) {
+        return false;
+      }
+
+      if (
+        tagFilter !== "all" &&
+        !getDocumentTags(document).some(
+          (tag) => tag.toLowerCase() === tagFilter.toLowerCase()
+        )
+      ) {
+        return false;
+      }
+
       const normalizedExtractionStatus = normalizeExtractionStatus(
         document.extractionStatus
       );
@@ -848,6 +1031,8 @@ export function DocumentsPage() {
     systemFilter,
     documentTypeFilter,
     favoriteFilter,
+    bookmarkFilter,
+    tagFilter,
     extractionFilter,
   ]);
 
@@ -934,6 +1119,10 @@ export function DocumentsPage() {
     setFavoriteFilter(requestedFavoriteFilter);
   }, [requestedFavoriteFilter]);
 
+  useEffect(() => {
+    setBookmarkFilter(requestedBookmarkFilter);
+  }, [requestedBookmarkFilter]);
+
   function handleUploadFileChange(event) {
     const nextFile = event.target.files?.[0] || null;
 
@@ -968,6 +1157,7 @@ export function DocumentsPage() {
     formData.append("documentType", uploadForm.documentType);
     formData.append("source", uploadForm.source);
     formData.append("notes", uploadForm.notes);
+    formData.append("tags", uploadForm.tags);
 
     try {
       setUploading(true);
@@ -1032,6 +1222,8 @@ export function DocumentsPage() {
       source: document.source || "",
       notes: document.notes || "",
       isFavorite: Boolean(document.isFavorite),
+      isBookmarked: Boolean(document.isBookmarked),
+      tags: getDocumentTags(document).join(", "),
     });
     setSaveState({
       documentId: document.id,
@@ -1076,6 +1268,8 @@ export function DocumentsPage() {
       source: editForm.source,
       notes: editForm.notes,
       isFavorite: editForm.isFavorite,
+      isBookmarked: editForm.isBookmarked,
+      tags: editForm.tags,
     };
 
     try {
@@ -1175,6 +1369,56 @@ export function DocumentsPage() {
     }
   }
 
+  async function toggleBookmark(document) {
+    const nextBookmarkValue = !document.isBookmarked;
+
+    try {
+      setBookmarkUpdateState({
+        documentId: document.id,
+        error: "",
+      });
+
+      const response = await fetch(`/api/documents/${document.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ isBookmarked: nextBookmarkValue }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not update bookmark status.");
+      }
+
+      const updatedDocument = payload.document;
+
+      setDocuments((currentDocuments) =>
+        currentDocuments.map((currentDocument) =>
+          currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
+        )
+      );
+
+      if (editingDocumentId === updatedDocument.id) {
+        setEditForm((currentForm) => ({
+          ...currentForm,
+          isBookmarked: updatedDocument.isBookmarked,
+        }));
+      }
+
+      setBookmarkUpdateState({
+        documentId: null,
+        error: "",
+      });
+    } catch (error) {
+      setBookmarkUpdateState({
+        documentId: document.id,
+        error: error.message || "Could not update bookmark status.",
+      });
+    }
+  }
+
   async function handleDeleteDocument(document) {
     const confirmed = window.confirm(
       `Delete "${document.title}"? This removes the document record and uploaded PDF file. Linked symptom/procedure references will be removed and linked notes will be cleared.`
@@ -1270,16 +1514,17 @@ export function DocumentsPage() {
       <PageHeader
         eyebrow="Ready to Use"
         title="Documents"
-        description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites to keep the most important documents easy to find."
+        description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites, bookmarks, and tags to keep the most important documents easy to find."
       />
 
       <div className="space-y-6">
         <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
           <p className="text-sm font-semibold text-sky-900">
-            Favorites are the only saved-document flag in V1.
+            Organize documents with favorites, bookmarks, and tags.
           </p>
           <p className="mt-1 text-sm text-sky-800">
-            Tags and bookmarks are not part of the current document workflow.
+            Favorites and bookmarks are independent saved-document flags. Add comma separated tags to
+            group related documents, then filter or search the library by tag.
           </p>
         </section>
 
@@ -1322,12 +1567,17 @@ export function DocumentsPage() {
                 }
                 favoriteFilter={favoriteFilter}
                 onFavoriteFilterChange={(event) => setFavoriteFilter(event.target.value)}
+                bookmarkFilter={bookmarkFilter}
+                onBookmarkFilterChange={(event) => setBookmarkFilter(event.target.value)}
+                tagFilter={tagFilter}
+                onTagFilterChange={(event) => setTagFilter(event.target.value)}
                 extractionFilter={extractionFilter}
                 onExtractionFilterChange={(event) =>
                   setExtractionFilter(event.target.value)
                 }
                 systems={systems}
                 documentTypes={documentTypes}
+                tags={availableTags}
               />
 
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
@@ -1352,12 +1602,14 @@ export function DocumentsPage() {
                   editValues={editForm}
                   saveState={saveState}
                   extractionRunState={extractionRunState}
+                  bookmarkUpdateState={bookmarkUpdateState}
                   onStartEdit={startEditingDocument}
                   onCancelEdit={cancelEditingDocument}
                   onEditChange={handleEditFormChange}
                   onSaveEdit={handleSaveMetadata}
                   onOpenFile={openDocumentFile}
                   onToggleFavorite={toggleFavorite}
+                  onToggleBookmark={toggleBookmark}
                   onRerunExtraction={rerunExtraction}
                   onDeleteDocument={handleDeleteDocument}
                   systemSuggestions={systemSuggestions}

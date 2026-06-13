@@ -47,9 +47,25 @@ function createTables() {
       extraction_status TEXT NOT NULL DEFAULT 'not_attempted',
       page_count INTEGER,
       is_favorite INTEGER NOT NULL DEFAULT 0,
+      is_bookmarked INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS document_tags (
+      document_id INTEGER NOT NULL,
+      tag_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (document_id, tag_id),
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS symptoms (
@@ -149,6 +165,7 @@ function createTables() {
     "TEXT NOT NULL DEFAULT 'not_attempted'"
   );
   ensureColumn("documents", "page_count", "INTEGER");
+  ensureColumn("documents", "is_bookmarked", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("symptoms", "system", "TEXT");
   ensureColumn("symptoms", "suspected_causes", "TEXT");
   ensureColumn("symptoms", "confidence", "TEXT NOT NULL DEFAULT 'medium'");
@@ -173,6 +190,15 @@ function createTables() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_file_md5
       ON documents (file_md5)
       WHERE file_md5 IS NOT NULL AND TRIM(file_md5) <> '';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name
+      ON tags (name COLLATE NOCASE);
+
+    CREATE INDEX IF NOT EXISTS idx_document_tags_document_id
+      ON document_tags (document_id);
+
+    CREATE INDEX IF NOT EXISTS idx_document_tags_tag_id
+      ON document_tags (tag_id);
   `);
 }
 
@@ -219,8 +245,9 @@ function seedDocument(vehicleId) {
       extracted_text,
       extraction_status,
       page_count,
-      is_favorite
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      is_favorite,
+      is_bookmarked
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = insertDocument.run(
@@ -238,10 +265,36 @@ function seedDocument(vehicleId) {
     "Oil changes every 5,000 miles. Inspect belts, hoses, spark plugs, and engine air filter.",
     "completed",
     1,
+    1,
     1
   );
 
   return result.lastInsertRowid;
+}
+
+function seedDocumentTags(documentId) {
+  const existingLink = db
+    .prepare("SELECT 1 FROM document_tags WHERE document_id = ? LIMIT 1")
+    .get(documentId);
+
+  if (existingLink) {
+    return;
+  }
+
+  const insertTag = db.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)");
+  const findTag = db.prepare("SELECT id FROM tags WHERE name = ? COLLATE NOCASE");
+  const linkTag = db.prepare(
+    "INSERT OR IGNORE INTO document_tags (document_id, tag_id) VALUES (?, ?)"
+  );
+
+  for (const tagName of ["maintenance", "engine", "sample"]) {
+    insertTag.run(tagName);
+    const tag = findTag.get(tagName);
+
+    if (tag) {
+      linkTag.run(documentId, tag.id);
+    }
+  }
 }
 
 function backfillSeedDocument() {
@@ -284,7 +337,8 @@ export function initializeDatabase() {
   createTables();
   ensureAppSettingsRecord();
   const vehicleId = seedVehicle();
-  seedDocument(vehicleId);
+  const seedDocumentId = seedDocument(vehicleId);
+  seedDocumentTags(seedDocumentId);
   backfillSeedDocument();
   backfillNotesData();
 }

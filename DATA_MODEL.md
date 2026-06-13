@@ -69,6 +69,7 @@ Important fields:
 - `extraction_status`
 - `page_count`
 - `is_favorite`
+- `is_bookmarked`
 - `created_at`
 - `updated_at`
 
@@ -78,6 +79,8 @@ Current use:
 - Edit metadata.
 - Track extraction status and page count.
 - Mark favorites.
+- Mark bookmarks.
+- Apply freeform tags.
 - Open stored PDFs.
 - Re-run extraction for one saved document.
 - Skip duplicate files during bulk import.
@@ -85,7 +88,31 @@ Current use:
 
 `file_md5` stores the MD5 hash of imported PDF bytes. MD5 is used here as a duplicate key for local repair PDFs, not as a security feature.
 
-Favorites are the current saved-document flag. Bookmarks and tags are not part of the current V1 workflow.
+Favorites (`is_favorite`) and bookmarks (`is_bookmarked`) are two independent saved-document flags. Tags are stored separately in the `tags` and `document_tags` tables.
+
+### `tags`
+
+Stores the distinct tag names used to label documents.
+
+Important fields:
+
+- `id`
+- `name`
+- `created_at`
+
+Tag names are unique case-insensitively (`idx_tags_name` is a `COLLATE NOCASE` unique index). When a document is tagged, an existing tag with the same name (any casing) is reused, so each tag keeps one canonical spelling. Tags that are no longer linked to any document are pruned automatically.
+
+### `document_tags`
+
+Links documents to tags.
+
+Important fields:
+
+- `document_id`
+- `tag_id`
+- `created_at`
+
+One document can carry many tags. One tag can label many documents. Rows are removed by `ON DELETE CASCADE` when either the document or the tag is deleted.
 
 ### `symptoms`
 
@@ -222,7 +249,7 @@ There is no separate search table.
 
 Current search endpoints use existing table data:
 
-- `/api/search` and `/api/search/documents` search document metadata, notes, extracted text, and favorite state.
+- `/api/search` and `/api/search/documents` search document metadata, notes, extracted text, tags, favorite state, and bookmark state. They also accept `tag` and `bookmarked` filters and return the list of in-use tags under `filters.tags`.
 - `/api/search/symptoms` searches symptom fields.
 - `/api/search/procedures` searches procedure fields.
 - `/api/search/notes` searches note fields and linked record details.

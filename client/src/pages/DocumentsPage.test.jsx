@@ -12,10 +12,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("DocumentsPage explains that favorites are the only saved-document flag in V1", async () => {
+test("DocumentsPage shows favorite, bookmark, and tag organization details", async () => {
   const fetchMock = vi.fn((url) => {
     if (url === "/api/documents") {
-      return jsonResponse({ documents: [{ id: 1, title: "Sample Maintenance Schedule", originalFilename: "sample.pdf", storedFilename: "sample-copy.pdf", system: "Engine", subsystem: "Routine Service", documentType: "Maintenance Schedule", source: "Seed Data", notes: "Sample note", extractionStatus: "completed", pageCount: 1, isFavorite: true, createdAt: "2026-04-15T10:00:00.000Z", updatedAt: "2026-04-17T09:00:00.000Z" }], total: 1 });
+      return jsonResponse({ documents: [{ id: 1, title: "Sample Maintenance Schedule", originalFilename: "sample.pdf", storedFilename: "sample-copy.pdf", system: "Engine", subsystem: "Routine Service", documentType: "Maintenance Schedule", source: "Seed Data", notes: "Sample note", extractionStatus: "completed", pageCount: 1, isFavorite: true, isBookmarked: true, tags: ["maintenance", "engine"], createdAt: "2026-04-15T10:00:00.000Z", updatedAt: "2026-04-17T09:00:00.000Z" }], total: 1 });
     }
     if (url === "/api/settings") {
       return jsonResponse({ documentDefaults: { commonSystems: ["Engine"], documentTypes: ["Maintenance Schedule"] } });
@@ -26,8 +26,45 @@ test("DocumentsPage explains that favorites are the only saved-document flag in 
 
   render(<MemoryRouter initialEntries={["/documents"]}><DocumentsPage /></MemoryRouter>);
 
-  expect(await screen.findByText("Favorites are the only saved-document flag in V1.")).toBeInTheDocument();
-  expect(screen.getByText("Tags and bookmarks are not part of the current document workflow.")).toBeInTheDocument();
+  expect(await screen.findByText("Organize documents with favorites, bookmarks, and tags.")).toBeInTheDocument();
+  // Tag chips render with a leading hash in both the list and detail panels.
+  expect(screen.getAllByText("#maintenance").length).toBeGreaterThan(0);
+  expect(screen.getByText("Bookmarked")).toBeInTheDocument();
+});
+
+test("DocumentsPage saves bookmark flag and tags when editing metadata", async () => {
+  const baseDocument = { id: 5, title: "Brake Job", originalFilename: "brake.pdf", storedFilename: "brake-copy.pdf", system: "Brakes", subsystem: "", documentType: "Procedure", source: "", notes: "", extractionStatus: "completed", pageCount: 3, isFavorite: false, isBookmarked: false, tags: [], createdAt: "2026-04-15T10:00:00.000Z", updatedAt: "2026-04-17T09:00:00.000Z" };
+  let putBody = null;
+
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/settings") return jsonResponse({ documentDefaults: { commonSystems: [], documentTypes: [] } });
+    if (url === "/api/documents" && !options.method) return jsonResponse({ documents: [baseDocument], total: 1 });
+    if (url === "/api/documents/5" && options.method === "PUT") {
+      putBody = JSON.parse(options.body);
+      return jsonResponse({ document: { ...baseDocument, isBookmarked: true, tags: ["rotors", "pads"] } });
+    }
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<MemoryRouter initialEntries={["/documents"]}><DocumentsPage /></MemoryRouter>);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Edit metadata" }));
+
+  fireEvent.click(screen.getByLabelText("Bookmark this document"));
+  // Both the upload and edit forms expose a Tags field; the edit form's is last in the DOM.
+  const tagsInputs = screen.getAllByPlaceholderText("Comma separated, e.g. brakes, torque-specs, diy");
+  fireEvent.change(tagsInputs[tagsInputs.length - 1], {
+    target: { value: "rotors, pads" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save metadata" }));
+
+  await waitFor(() => {
+    expect(putBody).toMatchObject({ isBookmarked: true, tags: "rotors, pads" });
+  });
+  await waitFor(() => {
+    expect(screen.getAllByText("#rotors").length).toBeGreaterThan(0);
+  });
 });
 
 test("DocumentsPage confirms before deleting and removes document after success", async () => {

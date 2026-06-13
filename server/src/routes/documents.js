@@ -5,6 +5,7 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { db } from "../database.js";
 import { listDocuments } from "../services/documentService.js";
+import { pruneOrphanTags, setDocumentTags } from "../services/documentTagService.js";
 import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
 import { extractPdfData } from "../services/pdfService.js";
 import {
@@ -243,6 +244,10 @@ documentsRouter.post("/upload", async (request, response) => {
     createdDocumentId = newDocumentId;
     rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
 
+    if (hasOwnField(request.body, "tags")) {
+      setDocumentTags(newDocumentId, request.body.tags);
+    }
+
     const documents = listDocuments();
     const newDocument = documents.find(
       (document) => document.id === newDocumentId
@@ -398,6 +403,7 @@ documentsRouter.delete("/:id", async (request, response) => {
     `).run(documentId);
 
     db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
+    pruneOrphanTags();
 
     if (absoluteFilePath) {
       await fs.rm(absoluteFilePath, { force: true });
@@ -439,7 +445,8 @@ documentsRouter.put("/:id", (request, response) => {
         document_type,
         source,
         notes,
-        is_favorite
+        is_favorite,
+        is_bookmarked
       FROM documents
       WHERE id = ?
     `)
@@ -474,6 +481,10 @@ documentsRouter.put("/:id", (request, response) => {
     typeof request.body.isFavorite === "boolean"
       ? request.body.isFavorite
       : Boolean(existingDocument.is_favorite);
+  const isBookmarked =
+    typeof request.body.isBookmarked === "boolean"
+      ? request.body.isBookmarked
+      : Boolean(existingDocument.is_bookmarked);
 
   if (!title || !system || !documentType) {
     response.status(400).json({
@@ -492,6 +503,7 @@ documentsRouter.put("/:id", (request, response) => {
       source = ?,
       notes = ?,
       is_favorite = ?,
+      is_bookmarked = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -502,8 +514,13 @@ documentsRouter.put("/:id", (request, response) => {
     source,
     notes,
     isFavorite ? 1 : 0,
+    isBookmarked ? 1 : 0,
     documentId
   );
+
+  if (hasOwnField(request.body, "tags")) {
+    setDocumentTags(documentId, request.body.tags);
+  }
 
   const documents = listDocuments();
   const updatedDocument = documents.find((document) => document.id === documentId);
