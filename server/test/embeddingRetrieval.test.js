@@ -123,6 +123,11 @@ test("database migration adds Float32 embedding storage to document_chunks", () 
 
 test("embedding backfill stores Float32 blobs and skips current-version chunks", async () => {
   const uniqueTag = nextUniqueTag("backfill");
+
+  // The seeded sample document ships with one un-embedded chunk; start from a
+  // clean chunk table so the global backfill count reflects only this test's chunks.
+  db.exec("DELETE FROM document_chunks");
+
   const documentId = insertFakeDocument({
     title: `Embedding backfill ${uniqueTag}`,
     originalFilename: `${uniqueTag}.pdf`,

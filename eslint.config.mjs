@@ -17,6 +17,7 @@ export default [
       "server/src/scripts/importFolder.js",
       "server/src/services/aiAnswerService.js",
       "server/test/importFolder.test.js",
+      "server/test/seedData.test.js",
     ],
     languageOptions: {
       ecmaVersion: 2024,
