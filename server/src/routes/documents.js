@@ -12,6 +12,8 @@ import {
   createStoredFilename,
   deriveTitleFromFilename,
 } from "../utils/sanitizeFilename.js";
+import { hasOwnField, normalizeText } from "../utils/text.js";
+import { parsePositiveInt } from "../utils/http.js";
 
 export const documentsRouter = Router();
 
@@ -59,14 +61,6 @@ function getVehicleId() {
   return vehicle.id;
 }
 
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function hasOwnField(object, fieldName) {
-  return Object.prototype.hasOwnProperty.call(object, fieldName);
-}
-
 documentsRouter.get("/", (_request, response) => {
   const documents = listDocuments();
 
@@ -77,9 +71,9 @@ documentsRouter.get("/", (_request, response) => {
 });
 
 documentsRouter.get("/:id/file", async (request, response) => {
-  const documentId = Number(request.params.id);
+  const documentId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(documentId) || documentId <= 0) {
+  if (documentId === null) {
     response.status(400).json({
       error: "Document ID must be a positive number.",
     });
@@ -282,9 +276,9 @@ documentsRouter.post("/upload", async (request, response) => {
 });
 
 documentsRouter.post("/:id/extract", async (request, response) => {
-  const documentId = Number(request.params.id);
+  const documentId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(documentId) || documentId <= 0) {
+  if (documentId === null) {
     response.status(400).json({
       error: "Document ID must be a positive number.",
     });
@@ -360,9 +354,9 @@ documentsRouter.post("/:id/extract", async (request, response) => {
 });
 
 documentsRouter.delete("/:id", async (request, response) => {
-  const documentId = Number(request.params.id);
+  const documentId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(documentId) || documentId <= 0) {
+  if (documentId === null) {
     response.status(400).json({
       error: "Document ID must be a positive number.",
     });
@@ -433,9 +427,9 @@ documentsRouter.delete("/:id", async (request, response) => {
 });
 
 documentsRouter.put("/:id", (request, response) => {
-  const documentId = Number(request.params.id);
+  const documentId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(documentId) || documentId <= 0) {
+  if (documentId === null) {
     response.status(400).json({
       error: "Document ID must be a positive number.",
     });

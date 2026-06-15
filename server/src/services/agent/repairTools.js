@@ -1,4 +1,5 @@
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
+import { normalizeText } from "../../utils/text.js";
 
 // Deterministic tools the repair-planning agent can call.
 //
@@ -23,10 +24,6 @@ const INTERMEDIATE_TERMS = ["alternator", "starter", "strut", "radiator", "water
 
 const SKILL_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const DIFFICULTY_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function detectSystem(text) {
   const lowered = text.toLowerCase();

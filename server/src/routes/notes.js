@@ -1,18 +1,12 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { hasOwnField, normalizeText } from "../utils/text.js";
+import { parsePositiveInt } from "../utils/http.js";
 
 export const notesRouter = Router();
 
 const allowedNoteTypes = new Set(["general", "observation", "repair_log", "reminder"]);
 const allowedRelatedEntityTypes = new Set(["none", "document", "symptom", "procedure"]);
-
-function hasOwnField(object, fieldName) {
-  return Object.prototype.hasOwnProperty.call(object, fieldName);
-}
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function normalizeNoteType(value) {
   const normalized = normalizeText(value).toLowerCase();
@@ -343,9 +337,9 @@ notesRouter.post("/", (request, response) => {
 });
 
 notesRouter.put("/:id", (request, response) => {
-  const noteId = Number(request.params.id);
+  const noteId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(noteId) || noteId <= 0) {
+  if (noteId === null) {
     response.status(400).json({
       error: "Note ID must be a positive number.",
     });
@@ -492,9 +486,9 @@ notesRouter.put("/:id", (request, response) => {
 });
 
 notesRouter.delete("/:id", (request, response) => {
-  const noteId = Number(request.params.id);
+  const noteId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(noteId) || noteId <= 0) {
+  if (noteId === null) {
     response.status(400).json({
       error: "Note ID must be a positive number.",
     });

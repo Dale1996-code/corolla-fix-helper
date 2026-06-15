@@ -1,8 +1,5 @@
 import { db } from "../database.js";
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
+import { normalizeText } from "../utils/text.js";
 
 function normalizeForSearch(value) {
   return normalizeText(value).toLowerCase();
