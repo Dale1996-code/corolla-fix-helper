@@ -202,9 +202,31 @@ export async function runRepairPlannerAgent(request, options = {}) {
       }
     }
 
-    emit({ type: "done", status: "completed", text: finalText.trim(), artifacts });
-    return { status: "completed", text: finalText.trim(), artifacts };
+    const trimmedFinal = finalText.trim();
+
+    // The loop is bounded by `maxTurns`. With several tasks and sequential tool
+    // calls the model can exhaust that budget before writing the final
+    // narrative, leaving an empty panel. Surface a clear status instead of a
+    // silent blank so the owner knows to narrow the brief.
+    if (!trimmedFinal) {
+      emit({
+        type: "status",
+        message:
+          "The plan was truncated before a written summary — narrow the brief to fewer repairs and try again. The structured checklist and readiness below are still based on what was gathered.",
+      });
+    }
+
+    emit({ type: "done", status: "completed", text: trimmedFinal, artifacts });
+    return { status: "completed", text: trimmedFinal, artifacts };
   } catch (error) {
+    // An AbortError means the client disconnected mid-stream (see the route's
+    // response "close" handling). There is no client left to receive a frame,
+    // so end quietly rather than emitting a user-facing error. Real model and
+    // network failures (4xx/5xx, parse errors) keep surfacing via `error`.
+    if (error?.name === "AbortError") {
+      return { status: "aborted", text: finalText.trim(), artifacts };
+    }
+
     emit({ type: "error", message: error.message || "The repair planner failed." });
     return { status: "error", text: finalText.trim(), artifacts };
   }
