@@ -4,8 +4,12 @@ import multer from "multer";
 import { Router } from "express";
 import { config } from "../config.js";
 import { db } from "../database.js";
-import { listDocuments } from "../services/documentService.js";
-import { pruneOrphanTags, setDocumentTags } from "../services/documentTagService.js";
+import {
+  deleteDocument,
+  listDocuments,
+  resolveStoredFilePath,
+} from "../services/documentService.js";
+import { setDocumentTags } from "../services/documentTagService.js";
 import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
 import { extractPdfData } from "../services/pdfService.js";
 import {
@@ -100,19 +104,16 @@ documentsRouter.get("/:id/file", async (request, response) => {
     return;
   }
 
-  const fileName =
-    document.stored_filename ||
-    path.basename(document.file_path || "");
+  const resolvedFile = resolveStoredFilePath(document);
 
-  if (!fileName) {
+  if (!resolvedFile) {
     response.status(404).json({
       error: "Uploaded file reference is missing for this document.",
     });
     return;
   }
 
-  const safeFileName = path.basename(fileName);
-  const absoluteFilePath = path.join(config.uploadsDir, safeFileName);
+  const { safeFileName, absoluteFilePath } = resolvedFile;
 
   try {
     await fs.access(absoluteFilePath);
@@ -300,19 +301,16 @@ documentsRouter.post("/:id/extract", async (request, response) => {
     return;
   }
 
-  const fileName =
-    existingDocument.stored_filename ||
-    path.basename(existingDocument.file_path || "");
+  const resolvedFile = resolveStoredFilePath(existingDocument);
 
-  if (!fileName) {
+  if (!resolvedFile) {
     response.status(404).json({
       error: "Uploaded file reference is missing for this document.",
     });
     return;
   }
 
-  const safeFileName = path.basename(fileName);
-  const absoluteFilePath = path.join(config.uploadsDir, safeFileName);
+  const { absoluteFilePath } = resolvedFile;
 
   let fileBuffer;
 
@@ -378,46 +376,12 @@ documentsRouter.delete("/:id", async (request, response) => {
     return;
   }
 
-  const linkedCounts = db
-    .prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM symptom_documents WHERE document_id = ?) AS symptom_count,
-        (SELECT COUNT(*) FROM procedure_documents WHERE document_id = ?) AS procedure_count,
-        (SELECT COUNT(*) FROM notes WHERE related_entity_type = 'document' AND related_entity_id = ?) AS note_count
-    `)
-    .get(documentId, documentId, documentId);
-
-  const storedFileName = existingDocument.stored_filename || path.basename(existingDocument.file_path || "");
-  const safeStoredFileName = storedFileName ? path.basename(storedFileName) : "";
-  const absoluteFilePath = safeStoredFileName
-    ? path.join(config.uploadsDir, safeStoredFileName)
-    : null;
-
   try {
-    db.prepare(`
-      UPDATE notes
-      SET related_entity_type = 'none',
-          related_entity_id = NULL,
-          document_id = NULL,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE related_entity_type = 'document' AND related_entity_id = ?
-    `).run(documentId);
-
-    db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
-    pruneOrphanTags();
-
-    if (absoluteFilePath) {
-      await fs.rm(absoluteFilePath, { force: true });
-    }
+    const cleanup = await deleteDocument(existingDocument);
 
     response.json({
       message: "Document deleted.",
-      cleanup: {
-        symptomLinksRemoved: linkedCounts.symptom_count,
-        procedureLinksRemoved: linkedCounts.procedure_count,
-        noteLinksCleared: linkedCounts.note_count,
-        fileRemoved: Boolean(absoluteFilePath),
-      },
+      cleanup,
     });
   } catch (error) {
     response.status(500).json({
