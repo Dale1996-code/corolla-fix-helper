@@ -1,0 +1,57 @@
+{
+  "skill_name": "add-repair-tool",
+  "evals": [
+    {
+      "id": 0,
+      "name": "artifact-tool-maintenance-schedule",
+      "prompt": "Add a new tool to the Repair Planner agent that sorts the extracted tasks into a maintenance schedule: which ones to do now vs. which can safely wait. It should show up as its own card on the Repair Planner page.",
+      "expected_output": "A complete, artifact-producing tool wired across all sites: a deterministic camelCase executor + snake_case JSON schema + registry entry in repairTools.js; a new artifacts key, an accumulation branch, and a summarizeToolResult case in repairPlannerAgent.js; a new line in AGENT_INSTRUCTIONS; a new Card-based panel component rendered in RepairPlannerPage.jsx; a unit test in repairPlanner.test.js; and a new row in the docs/repair-planner.md Tools table.",
+      "expectations": [
+        "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic (no Math.random, no Date/clock, no direct network/db calls)",
+        "Adds a JSON schema entry to the repairToolSchemas array with a snake_case name and additionalProperties:false",
+        "Registers the tool in createToolRegistry mapping the snake_case wire name to the executor",
+        "The snake_case wire name (schema/registry) and the camelCase function name refer to the same tool consistently",
+        "Adds a new key to the artifacts object in repairPlannerAgent.js and an accumulation branch keyed on the snake_case tool name",
+        "Adds a matching case to summarizeToolResult in repairPlannerAgent.js",
+        "Adds a step to AGENT_INSTRUCTIONS telling the model when to call the new tool",
+        "Adds a Card-based panel component in RepairPlannerPage.jsx AND renders it in the artifacts JSX list reading from artifacts?.<key>",
+        "Adds a unit test for the new tool in server/test/repairPlanner.test.js and imports the executor",
+        "Adds a row for the new tool in the Tools table of docs/repair-planner.md",
+        "Introduces no new npm dependencies"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "nonartifact-tool-total-labor",
+      "prompt": "I want to add a repair-planner tool that totals up the estimated labor hours for the whole job so the model can factor it into the plan. It's just for the agent to reason about — it does NOT need its own card in the UI.",
+      "expected_output": "An intermediate (no-artifact) tool: a deterministic executor + schema + registry entry in repairTools.js, an AGENT_INSTRUCTIONS line, a unit test, and a docs row — and correctly NO changes to RepairPlannerPage.jsx and NO artifacts key/accumulation in repairPlannerAgent.js.",
+      "expectations": [
+        "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic",
+        "Adds a JSON schema entry to repairToolSchemas with a snake_case name and additionalProperties:false",
+        "Registers the tool in createToolRegistry under its snake_case wire name",
+        "Does NOT add a UI panel or any edit to client/src/pages/RepairPlannerPage.jsx (the tool is intermediate, so the UI is correctly left untouched)",
+        "Does NOT add an artifacts key or accumulation branch in repairPlannerAgent.js (correctly skipped for a non-artifact tool)",
+        "Adds a step to AGENT_INSTRUCTIONS so the model actually calls the tool",
+        "Adds a unit test for the new tool in server/test/repairPlanner.test.js",
+        "Adds a row for the new tool in the Tools table of docs/repair-planner.md",
+        "Introduces no new npm dependencies"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "di-tool-torque-lookup",
+      "prompt": "Add a tool to the repair planner that looks up the torque spec for a part by searching the owner's uploaded manuals and returns the matching snippets. Make sure it stays testable the way the other tools are.",
+      "expected_output": "A tool that depends on document retrieval and follows the dependency-injection convention: the executor takes a second options arg defaulting to retrieveRelevantChunks, the registry wires { retrieve }, and the test injects a mock retriever. Plus schema, AGENT_INSTRUCTIONS, and docs.",
+      "expectations": [
+        "Adds an exported camelCase executor to repairTools.js whose second argument is an injectable options object defaulting the retriever (e.g. { retrieve = retrieveRelevantChunks } = {})",
+        "Does NOT call retrieveRelevantChunks directly inside the executor body bypassing the injected parameter",
+        "Adds a JSON schema entry to repairToolSchemas with a snake_case name and additionalProperties:false",
+        "Registers the tool in createToolRegistry passing the injected dependency (e.g. (args) => fn(args, { retrieve }))",
+        "Adds a unit test in repairPlanner.test.js that injects a mock retriever instead of hitting the real one (mirrors the search_repair_docs test)",
+        "The executor returns a plain JSON-serializable object and tolerates missing args without throwing",
+        "Adds a step to AGENT_INSTRUCTIONS and a row in the docs/repair-planner.md Tools table",
+        "Introduces no new npm dependencies"
+      ]
+    }
+  ]
+}
