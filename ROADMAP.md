@@ -12,6 +12,7 @@ The current app supports:
 - Documents, including PDF upload, metadata editing, favorites, document delete cleanup, PDF open links, and single-document extraction re-run
 - Search across documents, symptoms, procedures, and notes using separate Search page sections
 - "Ask your documents" Q&A using uploaded PDF chunks, hybrid keyword+embedding retrieval, OpenAI answer generation, and citations
+- Repair Planner, a document-grounded streaming agent that turns a repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts (`POST /api/repair-plan`, Server-Sent Events)
 - Symptoms linked to documents
 - Procedures linked to documents
 - Notes linked to one document, symptom, or procedure
@@ -56,6 +57,14 @@ The first document Q&A version is now partially implemented:
 - The app returns clear no-key and not-enough-information states.
 - Backend and frontend tests cover the main Ask states.
 - `npm run eval:retrieval` proves hybrid retrieval fixes keyword wrong-page cases against a 12-item eval set with 2,500 distractor documents.
+
+A second AI feature, the Repair Planner, is also implemented:
+
+- The Repair Planner page streams a multi-step, tool-calling agent run as it works.
+- `POST /api/repair-plan` responds with Server-Sent Events (`status`, `tool_call`, `text_delta`, `done`).
+- Deterministic tools assemble a prioritized plan, readiness score, owner checklist, handoff drafts, and follow-up questions.
+- It stays grounded in uploaded documents through the same retriever as Ask, so it is not general AI chat.
+- Like Ask, the model client and retriever are injectable, so backend tests run without an API key.
 
 Future AI work should stay small and evidence-based:
 
