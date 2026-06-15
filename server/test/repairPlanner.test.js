@@ -43,7 +43,9 @@ after(() => {
 
 // --- Test helpers ----------------------------------------------------------
 
-const mockRetrieve = () => [
+// The real retrieveRelevantChunks is async; mirror that here so the tools and
+// agent loop are exercised against a Promise-returning retriever.
+const mockRetrieve = async () => [
   {
     documentId: 7,
     pageNumber: 4,
@@ -167,8 +169,12 @@ test("draft_handoff_notes produces three channel-specific drafts", () => {
   assert.match(notes.maintenanceLogEntry, /planned/i);
 });
 
-test("search_repair_docs returns citations from the injected retriever", () => {
-  const result = searchRepairDocs({ query: "brake pad torque" }, { retrieve: mockRetrieve });
+test("search_repair_docs returns citations from the injected retriever", async () => {
+  // Regression guard: searchRepairDocs must await the (async) retriever before
+  // mapping chunks. Previously it called .map() on the returned Promise, which
+  // threw with the real retrieveRelevantChunks and only passed because the mock
+  // retriever was synchronous.
+  const result = await searchRepairDocs({ query: "brake pad torque" }, { retrieve: mockRetrieve });
 
   assert.equal(result.citations.length, 1);
   assert.equal(result.citations[0].documentId, 7);

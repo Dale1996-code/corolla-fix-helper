@@ -146,14 +146,14 @@ function buildSnippet(text) {
   return normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
 }
 
-export function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = retrieveRelevantChunks } = {}) {
+export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = retrieveRelevantChunks } = {}) {
   const normalizedQuery = normalizeText(query);
 
   if (!normalizedQuery) {
     return { query: "", citations: [], context: "" };
   }
 
-  const chunks = retrieve(normalizedQuery, { limit });
+  const chunks = await retrieve(normalizedQuery, { limit });
 
   const citations = chunks.map((chunk) => ({
     documentId: chunk.documentId,

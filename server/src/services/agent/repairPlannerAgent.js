@@ -157,7 +157,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
         if (!executor) {
           result = { error: `Unknown tool: ${toolCall.name}` };
         } else {
-          result = executor(toolCall.arguments || {});
+          result = await executor(toolCall.arguments || {});
         }
 
         // Accumulate structured artifacts for the UI.
