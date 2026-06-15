@@ -207,8 +207,8 @@ symptomsRouter.post("/", (request, response) => {
     return;
   }
 
-  let confidence = "medium";
-  let status = "open";
+  let confidence;
+  let status;
 
   try {
     confidence = normalizeConfidence(request.body.confidence);

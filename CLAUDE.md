@@ -24,7 +24,7 @@ Single test file:
 - Server: `cd server && node --test test/app.test.js`
 - Client: `cd client && npx vitest run src/pages/NotesPage.test.jsx`
 
-Note: `lint` and `typecheck` currently apply only to an allowlist of files (`eslint.config.mjs` and `tsconfig.changed.json` list them — mainly `initDatabase.js` and the import script). A clean run does not mean the rest of the code was checked; consider adding files you touch to those lists.
+Note: `lint` now covers the whole `server/` tree (`eslint.config.mjs`); the client (`client/src`) is not yet linted because it needs a JSX-aware config. `typecheck` still applies only to an allowlist (`tsconfig.changed.json`) — a clean typecheck run does not mean the rest of the code was checked, so consider adding server files you touch to that list.
 
 ## Architecture
 

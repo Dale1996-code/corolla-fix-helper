@@ -13,18 +13,6 @@ const DASHBOARD_LIMITS = {
   recentActivity: 8,
 };
 
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
-}
-
 function getVehicleProfile() {
   const vehicle = db
     .prepare(

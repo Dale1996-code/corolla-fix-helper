@@ -213,8 +213,8 @@ proceduresRouter.post("/", (request, response) => {
     return;
   }
 
-  let difficulty = "intermediate";
-  let confidence = "medium";
+  let difficulty;
+  let confidence;
 
   try {
     difficulty = normalizeDifficulty(request.body.difficulty);

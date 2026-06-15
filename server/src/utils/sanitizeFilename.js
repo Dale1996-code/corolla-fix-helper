@@ -27,6 +27,8 @@ const WINDOWS_RESERVED_NAMES = new Set([
 
 function removeUnsafeCharacters(value) {
   return value
+    // Strip filesystem-unsafe characters, including ASCII control codes.
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")

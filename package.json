@@ -17,7 +17,7 @@
     "embed:backfill": "npm --prefix server run embed:backfill",
     "eval:retrieval": "npm --prefix server run eval:retrieval",
     "eval:answers": "npm --prefix server run eval:answers",
-    "lint": "eslint server/src server/test client/src",
+    "lint": "eslint server",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm --prefix server run test",
     "test:client": "npm --prefix client run test",

@@ -253,9 +253,9 @@ notesRouter.post("/", (request, response) => {
     return;
   }
 
-  let noteType = "general";
-  let relatedEntityType = "none";
-  let relatedEntityId = null;
+  let noteType;
+  let relatedEntityType;
+  let relatedEntityId;
 
   try {
     noteType = normalizeNoteType(request.body.noteType);
