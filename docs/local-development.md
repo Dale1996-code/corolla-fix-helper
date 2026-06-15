@@ -122,6 +122,31 @@ npm run test
 
 `npm run test` runs backend and frontend automated tests.
 
+### Known dependency advisories
+
+`npm run install:all` may print `5 high severity vulnerabilities` for the
+frontend. As of this writing they all come from one source: `esbuild`, pulled
+in through `vite` and `vitest`.
+
+What this means in practice:
+
+- These are **development-only** tools (the local dev server and the test
+  runner). They are **not** part of the production app that gets built into
+  `client/dist` and served to users, so the deployed app is not exposed.
+- The advisories mainly matter if the Vite **dev server** is reachable by an
+  attacker on your network. On a normal local machine using `localhost`, the
+  practical risk is low.
+
+Do **not** run `npm audit fix --force`. The only available fix upgrades Vite to
+a new major version (a breaking change) that can break the build and tests. That
+upgrade should be done deliberately and re-verified, not as an automatic fix.
+
+You can review the current details any time with:
+
+```powershell
+npm --prefix client audit
+```
+
 ## 8. Bulk Import PDFs
 
 Run this from the repo root:
