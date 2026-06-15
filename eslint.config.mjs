@@ -15,7 +15,9 @@ export default [
     files: [
       "server/src/initDatabase.js",
       "server/src/scripts/importFolder.js",
+      "server/src/services/aiAnswerService.js",
       "server/test/importFolder.test.js",
+      "server/test/seedData.test.js",
     ],
     languageOptions: {
       ecmaVersion: 2024,
@@ -23,6 +25,7 @@ export default [
       globals: {
         Buffer: "readonly",
         console: "readonly",
+        fetch: "readonly",
         process: "readonly",
       },
     },

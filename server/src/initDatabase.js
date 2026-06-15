@@ -314,6 +314,35 @@ function backfillSeedDocument() {
   `).run("2009-corolla-maintenance-sample.pdf");
 }
 
+function seedDocumentChunks(documentId) {
+  if (!documentId) {
+    return;
+  }
+
+  const existingChunk = db
+    .prepare("SELECT id FROM document_chunks WHERE document_id = ? LIMIT 1")
+    .get(documentId);
+
+  if (existingChunk) {
+    return;
+  }
+
+  const seedRow = db
+    .prepare("SELECT extracted_text FROM documents WHERE id = ?")
+    .get(documentId);
+  const seedText =
+    typeof seedRow?.extracted_text === "string" ? seedRow.extracted_text.trim() : "";
+
+  if (!seedText) {
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO document_chunks (document_id, page_number, chunk_index, chunk_text)
+    VALUES (?, 1, 0, ?)
+  `).run(documentId, seedText);
+}
+
 function backfillNotesData() {
   db.exec(`
     UPDATE notes
@@ -340,5 +369,6 @@ export function initializeDatabase() {
   const seedDocumentId = seedDocument(vehicleId);
   seedDocumentTags(seedDocumentId);
   backfillSeedDocument();
+  seedDocumentChunks(seedDocumentId);
   backfillNotesData();
 }
