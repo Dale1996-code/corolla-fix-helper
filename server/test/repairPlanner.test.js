@@ -182,6 +182,16 @@ test("search_repair_docs returns citations from the injected retriever", async (
   assert.match(result.citations[0].snippet, /25 ft-lb/);
 });
 
+test("search_repair_docs treats non-array retriever results as no citations", async () => {
+  const result = await searchRepairDocs(
+    { query: "brake pad torque" },
+    { retrieve: async () => null }
+  );
+
+  assert.deepEqual(result.citations, []);
+  assert.equal(result.context, "");
+});
+
 // --- Responses client glue test --------------------------------------------
 
 test("streamResponsesTurn sends a non-empty model string in the request body", async () => {
@@ -267,6 +277,52 @@ test("runRepairPlannerAgent emits tool events and text deltas and assembles arti
   assert.equal(result.artifacts.citations.length, 1);
   assert.ok(result.artifacts.readiness);
   assert.ok(events.some((event) => event.type === "trace"));
+  assert.equal(events.at(-1).type, "done");
+});
+
+test("runRepairPlannerAgent returns a tool error result when one tool throws", async () => {
+  const events = [];
+  let sawToolErrorOutput = false;
+
+  async function* streamTurn({ input }) {
+    const toolOutput = input.find(
+      (item) => item.type === "function_call_output" && item.call_id === "call_search"
+    );
+
+    if (toolOutput) {
+      sawToolErrorOutput = JSON.parse(toolOutput.output).error.includes("database timeout");
+      yield { type: "text_delta", text: "The document search failed, but planning continued." };
+      return;
+    }
+
+    yield {
+      type: "function_call",
+      callId: "call_search",
+      name: "search_repair_docs",
+      arguments: { query: "front brake pad torque" },
+    };
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn,
+      retrieve: async () => {
+        throw new Error("database timeout");
+      },
+      isAiConfigured: true,
+      maxTurns: 2,
+    }
+  );
+
+  const toolResult = events.find((event) => event.type === "tool_result");
+
+  assert.equal(result.status, "completed");
+  assert.ok(toolResult);
+  assert.match(toolResult.summary, /database timeout/);
+  assert.equal(sawToolErrorOutput, true);
+  assert.match(result.text, /planning continued/);
   assert.equal(events.at(-1).type, "done");
 });
 

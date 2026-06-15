@@ -1,0 +1,213 @@
+diff --git a/server/src/services/agent/repairPlannerAgent.js b/server/src/services/agent/repairPlannerAgent.js
+index ff5d95f..29dd84f 100644
+--- a/server/src/services/agent/repairPlannerAgent.js
++++ b/server/src/services/agent/repairPlannerAgent.js
+@@ -13,8 +13,9 @@ const AGENT_INSTRUCTIONS = [
+   "1. Call extract_repair_tasks on the full brief to break it into tasks.",
+   "2. For each task, call search_repair_docs with its keywords to ground steps and torque specs in the owner's uploaded manuals.",
+   "3. Call check_repair_readiness with the tasks, available tools, available parts, and skill level.",
+-  "4. Call build_owner_checklist and draft_handoff_notes to produce the checklist and copy.",
+-  "Then write a concise, prioritized plan as plain text. Cite document facts only from search_repair_docs results; never invent torque specs or capacities.",
++  "4. Call estimate_labor_hours with the tasks to get a time estimate for the whole job.",
++  "5. Call build_owner_checklist and draft_handoff_notes to produce the checklist and copy.",
++  "Then write a concise, prioritized plan as plain text. Use the estimate_labor_hours result to set realistic time expectations (e.g. 'budget about 4 hours' or 'this is a full-weekend job'). Cite document facts only from search_repair_docs results; never invent torque specs or capacities.",
+   "End with a short 'Follow-up questions:' section listing what is missing when key details (symptoms, mileage, tools, parts, budget) are absent.",
+   "Keep the narrative tight and skimmable. The structured checklist, readiness, and notes are shown separately, so do not repeat them verbatim.",
+ ].join("\n");
+@@ -104,6 +105,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
+     readiness: null,
+     checklist: [],
+     handoffNotes: null,
++    laborEstimate: null,
+   };
+ 
+   let inputItems = buildInitialInput({
+@@ -171,6 +173,8 @@ export async function runRepairPlannerAgent(request, options = {}) {
+           artifacts.checklist = result.checklist;
+         } else if (toolCall.name === "draft_handoff_notes") {
+           artifacts.handoffNotes = result;
++        } else if (toolCall.name === "estimate_labor_hours") {
++          artifacts.laborEstimate = result;
+         }
+ 
+         toolSpan.end();
+@@ -220,5 +224,8 @@ function summarizeToolResult(name, result) {
+   if (name === "draft_handoff_notes") {
+     return "Drafted parts list, mechanic handoff, and log entry.";
+   }
++  if (name === "estimate_labor_hours") {
++    return `Estimated ${result.totalHours ?? 0} total labor hour(s) across ${result.breakdown?.length || 0} task(s).`;
++  }
+   return "Done.";
+ }
+diff --git a/server/src/services/agent/repairTools.js b/server/src/services/agent/repairTools.js
+index c1e52f8..222f9c7 100644
+--- a/server/src/services/agent/repairTools.js
++++ b/server/src/services/agent/repairTools.js
+@@ -245,6 +245,55 @@ export function checkRepairReadiness({
+   };
+ }
+ 
++// --- Tool: estimate_labor_hours -------------------------------------------
++
++// Base labor-hour estimates by difficulty tier.  These are rough DIY-bench
++// figures for a home mechanic — not flat-rate shop hours.  The model uses the
++// totals to set expectations in its narrative ("budget a full weekend") and to
++// flag when a job will run longer than a Saturday afternoon.
++const BASE_HOURS_BY_DIFFICULTY = {
++  beginner: 1.0,
++  intermediate: 2.5,
++  advanced: 5.0,
++};
++
++// Per-system adjustments that add time on top of the difficulty base.
++const SYSTEM_HOUR_ADJUSTMENTS = {
++  Transmission: 2.0,
++  Engine: 1.5,
++  Cooling: 0.5,
++  Electrical: 0.5,
++  Suspension: 0.5,
++  Brakes: 0.25,
++  HVAC: 0.25,
++  Fuel: 0.5,
++  General: 0,
++};
++
++export function estimateLaborHours({ tasks = [] } = {}) {
++  if (!tasks.length) {
++    return { totalHours: 0, breakdown: [] };
++  }
++
++  const breakdown = tasks.map((task) => {
++    const base = BASE_HOURS_BY_DIFFICULTY[task.difficulty] ?? BASE_HOURS_BY_DIFFICULTY.beginner;
++    const systemAdj = SYSTEM_HOUR_ADJUSTMENTS[task.system] ?? 0;
++    const hours = Math.round((base + systemAdj) * 10) / 10;
++
++    return {
++      taskId: task.id,
++      task: task.title,
++      system: task.system ?? "General",
++      difficulty: task.difficulty ?? "beginner",
++      estimatedHours: hours,
++    };
++  });
++
++  const totalHours = Math.round(breakdown.reduce((sum, item) => sum + item.estimatedHours, 0) * 10) / 10;
++
++  return { totalHours, breakdown };
++}
++
+ // --- Tool: build_owner_checklist ------------------------------------------
+ 
+ export function buildOwnerChecklist({ tasks = [], skillLevel = "beginner" } = {}) {
+@@ -393,6 +442,24 @@ export const repairToolSchemas = [
+       additionalProperties: false,
+     },
+   },
++  {
++    type: "function",
++    name: "estimate_labor_hours",
++    description:
++      "Total the estimated DIY labor hours for the whole job and break them down per task. Use the result to set time expectations in the plan (e.g., 'budget a full weekend') and to flag multi-day jobs.",
++    parameters: {
++      type: "object",
++      properties: {
++        tasks: {
++          type: "array",
++          items: { type: "object" },
++          description: "Tasks from extract_repair_tasks.",
++        },
++      },
++      required: ["tasks"],
++      additionalProperties: false,
++    },
++  },
+ ];
+ 
+ export function createToolRegistry({ retrieve = retrieveRelevantChunks } = {}) {
+@@ -402,5 +469,6 @@ export function createToolRegistry({ retrieve = retrieveRelevantChunks } = {}) {
+     check_repair_readiness: (args) => checkRepairReadiness(args),
+     build_owner_checklist: (args) => buildOwnerChecklist(args),
+     draft_handoff_notes: (args) => draftHandoffNotes(args),
++    estimate_labor_hours: (args) => estimateLaborHours(args),
+   };
+ }
+diff --git a/server/test/repairPlanner.test.js b/server/test/repairPlanner.test.js
+index 63469b6..03c475a 100644
+--- a/server/test/repairPlanner.test.js
++++ b/server/test/repairPlanner.test.js
+@@ -26,6 +26,7 @@ const {
+   buildOwnerChecklist,
+   draftHandoffNotes,
+   searchRepairDocs,
++  estimateLaborHours,
+ } = await import("../src/services/agent/repairTools.js");
+ const { runRepairPlannerAgent, AI_NOT_CONFIGURED_MESSAGE } = await import(
+   "../src/services/agent/repairPlannerAgent.js"
+@@ -85,6 +86,14 @@ function createMockStreamTurn() {
+           skillLevel: "intermediate",
+         },
+       };
++      yield {
++        type: "function_call",
++        callId: "call_labor",
++        name: "estimate_labor_hours",
++        arguments: {
++          tasks: [{ id: 1, title: "Replace front brake pads", system: "Brakes", difficulty: "intermediate" }],
++        },
++      };
+       return;
+     }
+ 
+@@ -176,6 +185,41 @@ test("search_repair_docs returns citations from the injected retriever", () => {
+   assert.match(result.citations[0].snippet, /25 ft-lb/);
+ });
+ 
++test("estimate_labor_hours totals hours across tasks and returns a per-task breakdown", () => {
++  const tasks = [
++    { id: 1, title: "Replace front brake pads", system: "Brakes", difficulty: "beginner" },
++    { id: 2, title: "Replace alternator", system: "Electrical", difficulty: "intermediate" },
++  ];
++
++  const result = estimateLaborHours({ tasks });
++
++  assert.equal(result.breakdown.length, 2);
++  // beginner Brakes: 1.0 + 0.25 = 1.25
++  assert.equal(result.breakdown[0].estimatedHours, 1.25);
++  assert.equal(result.breakdown[0].taskId, 1);
++  // intermediate Electrical: 2.5 + 0.5 = 3.0
++  assert.equal(result.breakdown[1].estimatedHours, 3.0);
++  assert.equal(result.breakdown[1].taskId, 2);
++  // total: 1.25 + 3.0 = 4.25
++  assert.equal(result.totalHours, 4.25);
++});
++
++test("estimate_labor_hours returns zero totals for an empty task list", () => {
++  const result = estimateLaborHours({ tasks: [] });
++
++  assert.equal(result.totalHours, 0);
++  assert.deepEqual(result.breakdown, []);
++});
++
++test("estimate_labor_hours defaults gracefully when difficulty or system are unknown", () => {
++  const tasks = [{ id: 1, title: "Mystery job", system: "Unknown", difficulty: "unknown" }];
++  const result = estimateLaborHours({ tasks });
++
++  // Unknown difficulty falls back to beginner (1.0), unknown system adjustment is 0.
++  assert.equal(result.breakdown[0].estimatedHours, 1.0);
++  assert.equal(result.totalHours, 1.0);
++});
++
+ // --- Responses client glue test --------------------------------------------
+ 
+ test("streamResponsesTurn sends a non-empty model string in the request body", async () => {
+@@ -260,6 +304,9 @@ test("runRepairPlannerAgent emits tool events and text deltas and assembles arti
+   assert.equal(result.artifacts.tasks.length >= 1, true);
+   assert.equal(result.artifacts.citations.length, 1);
+   assert.ok(result.artifacts.readiness);
++  assert.ok(result.artifacts.laborEstimate, "expected laborEstimate artifact to be populated");
++  assert.equal(typeof result.artifacts.laborEstimate.totalHours, "number");
++  assert.ok(Array.isArray(result.artifacts.laborEstimate.breakdown));
+   assert.ok(events.some((event) => event.type === "trace"));
+   assert.equal(events.at(-1).type, "done");
+ });

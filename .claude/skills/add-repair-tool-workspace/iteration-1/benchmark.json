@@ -1,0 +1,154 @@
+{
+  "metadata": {
+    "skill_name": "add-repair-tool",
+    "skill_path": "C:/Users/daleb/source/corolla-fix-helper/.claude/skills/add-repair-tool",
+    "executor_model": "claude-sonnet-4-6",
+    "analyzer_model": "claude-opus-4-8",
+    "timestamp": "2026-06-13T00:00:00Z",
+    "evals_run": [0, 1, 2],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "eval_name": "artifact-tool-maintenance-schedule",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 1.0, "passed": 11, "failed": 0, "total": 11, "time_seconds": 348.3, "tokens": 70284, "tool_calls": 32, "errors": 0},
+      "expectations": [
+        {"text": "Deterministic camelCase executor", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry entry", "passed": true},
+        {"text": "Consistent naming", "passed": true},
+        {"text": "artifacts key + accumulation branch", "passed": true},
+        {"text": "summarizeToolResult case", "passed": true},
+        {"text": "AGENT_INSTRUCTIONS step", "passed": true},
+        {"text": "UI panel + render", "passed": true},
+        {"text": "Unit test + import", "passed": true},
+        {"text": "Docs Tools-table row", "passed": true},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "eval_name": "artifact-tool-maintenance-schedule",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 1.0, "passed": 11, "failed": 0, "total": 11, "time_seconds": 324.2, "tokens": 75795, "tool_calls": 37, "errors": 0},
+      "expectations": [
+        {"text": "Deterministic camelCase executor", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry entry", "passed": true},
+        {"text": "Consistent naming", "passed": true},
+        {"text": "artifacts key + accumulation branch", "passed": true},
+        {"text": "summarizeToolResult case", "passed": true},
+        {"text": "AGENT_INSTRUCTIONS step", "passed": true},
+        {"text": "UI panel + render", "passed": true},
+        {"text": "Unit test + import (also updated client test)", "passed": true},
+        {"text": "Docs Tools-table row", "passed": true},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": ["Happy-path artifact case: baseline matched the 5 existing tools as a template; skill adds little here."]
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "nonartifact-tool-total-labor",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 1.0, "passed": 9, "failed": 0, "total": 9, "time_seconds": 287.8, "tokens": 55421, "tool_calls": 24, "errors": 0},
+      "expectations": [
+        {"text": "Deterministic executor", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry entry", "passed": true},
+        {"text": "Correctly NO UI panel", "passed": true},
+        {"text": "Correctly NO artifacts key/branch", "passed": true},
+        {"text": "AGENT_INSTRUCTIONS step", "passed": true},
+        {"text": "Unit test", "passed": true},
+        {"text": "Docs Tools-table row", "passed": true},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": ["Correctly applied the conditional (skipped artifact/UI sites)."]
+    },
+    {
+      "eval_id": 1,
+      "eval_name": "nonartifact-tool-total-labor",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 0.7778, "passed": 7, "failed": 2, "total": 9, "time_seconds": 262.1, "tokens": 57164, "tool_calls": 32, "errors": 0},
+      "expectations": [
+        {"text": "Deterministic executor", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry entry", "passed": true},
+        {"text": "Correctly NO UI panel", "passed": true},
+        {"text": "Correctly NO artifacts key/branch", "passed": false},
+        {"text": "AGENT_INSTRUCTIONS step", "passed": true},
+        {"text": "Unit test", "passed": true},
+        {"text": "Docs Tools-table row", "passed": false},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": ["Added an orphan `laborEstimate` artifact (accumulated, never rendered).", "Skipped the docs Tools-table row."]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "di-tool-torque-lookup",
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 1.0, "passed": 8, "failed": 0, "total": 8, "time_seconds": 285.6, "tokens": 68009, "tool_calls": 32, "errors": 0},
+      "expectations": [
+        {"text": "Injectable retriever (2nd options arg default)", "passed": true},
+        {"text": "Does not bypass injected param", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry wires { retrieve }", "passed": true},
+        {"text": "Test injects a mock retriever", "passed": true},
+        {"text": "Plain object + tolerates missing args", "passed": true},
+        {"text": "AGENT_INSTRUCTIONS + docs row", "passed": true},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": ["Also added a UI panel beyond the literal ask (mild scope creep, defensible)."]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "di-tool-torque-lookup",
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {"pass_rate": 1.0, "passed": 8, "failed": 0, "total": 8, "time_seconds": 294.8, "tokens": 69385, "tool_calls": 34, "errors": 0},
+      "expectations": [
+        {"text": "Injectable retriever (2nd options arg default)", "passed": true},
+        {"text": "Does not bypass injected param", "passed": true},
+        {"text": "snake_case schema + additionalProperties:false", "passed": true},
+        {"text": "Registry wires { retrieve }", "passed": true},
+        {"text": "Test injects a mock retriever", "passed": true},
+        {"text": "Plain object + tolerates missing args", "passed": true},
+        {"text": "AGENT_INSTRUCTIONS + docs row", "passed": true},
+        {"text": "No new npm deps", "passed": true}
+      ],
+      "notes": ["DI matched (search_repair_docs is a clear template).", "Orphan torqueSpecs artifact with no UI renderer (not covered by this eval's assertions)."]
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0},
+      "time_seconds": {"mean": 307.2, "stddev": 35.6, "min": 285.6, "max": 348.3},
+      "tokens": {"mean": 64571, "stddev": 8006, "min": 55421, "max": 70284}
+    },
+    "without_skill": {
+      "pass_rate": {"mean": 0.9259, "stddev": 0.1283, "min": 0.7778, "max": 1.0},
+      "time_seconds": {"mean": 293.7, "stddev": 31.1, "min": 262.1, "max": 324.2},
+      "tokens": {"mean": 67448, "stddev": 9465, "min": 57164, "max": 75795}
+    },
+    "delta": {
+      "pass_rate": "+0.07",
+      "time_seconds": "+13.6",
+      "tokens": "-2877"
+    }
+  },
+  "notes": [
+    "Single run per configuration (n=1 per eval) — treat deltas as directional, not statistically robust.",
+    "The skill's value concentrates on the INTERMEDIATE-tool case (eval 1): baseline added an orphan `laborEstimate` artifact (accumulated but never rendered) and skipped the docs row, while the with-skill run correctly skipped the artifact/UI sites and documented the tool. This is the clearest discriminator.",
+    "On the happy-path artifact case (eval 0) and the DI case (eval 2), baseline ~matched the skill — the 5 existing tools and search_repair_docs are strong in-repo templates a capable model imitates without guidance.",
+    "Two baseline runs (eval 1 and eval 2) independently produced ORPHAN artifacts: an artifacts key + accumulation branch with no RepairPlannerPage renderer. An assertion 'every added artifact key is rendered in the page' would discriminate the skill more sharply and is worth adding.",
+    "Token cost: with-skill averaged ~2.9k FEWER output tokens than baseline despite higher pass rate — the explicit recipe reduces exploration. Wall-clock was ~14s higher (reading SKILL.md + worked-example).",
+    "Non-discriminating assertions across all six runs: 'no new npm deps', 'snake_case schema + additionalProperties:false', 'registry entry' — passed everywhere; keep for safety but they don't separate the configurations."
+  ]
+}

@@ -202,6 +202,7 @@ export async function extractPdfData(
     const pages = [];
     const ocrWarnings = [];
     let ocrSucceeded = false;
+    let ocrDisabledDueToMissingTools = false;
 
     for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
       const page = await pdfDocument.getPage(pageNumber);
@@ -214,7 +215,7 @@ export async function extractPdfData(
         .trim();
       let pageText = rawPageText;
 
-      if (shouldRunOcr(pageText) && config.ocrEnabled) {
+      if (shouldRunOcr(pageText) && config.ocrEnabled && !ocrDisabledDueToMissingTools) {
         try {
           const ocrResult = await ocrPage({
             fileBuffer,
@@ -235,6 +236,10 @@ export async function extractPdfData(
           }
         } catch (error) {
           addUniqueWarning(ocrWarnings, formatOcrWarning(error));
+
+          if (isMissingOcrTool(error)) {
+            ocrDisabledDueToMissingTools = true;
+          }
         }
       }
 

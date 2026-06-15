@@ -1,0 +1,260 @@
+diff --git a/client/src/pages/RepairPlannerPage.jsx b/client/src/pages/RepairPlannerPage.jsx
+index d2eee26..9f5f417 100644
+--- a/client/src/pages/RepairPlannerPage.jsx
++++ b/client/src/pages/RepairPlannerPage.jsx
+@@ -227,6 +227,38 @@ function HandoffPanel({ handoffNotes }) {
+   );
+ }
+ 
++function TorqueSpecsPanel({ torqueSpecs }) {
++  if (!torqueSpecs?.length) {
++    return null;
++  }
++
++  return (
++    <Card title="Torque specs">
++      <ul className="space-y-2">
++        {torqueSpecs.map((spec, index) => {
++          const documentName = spec.documentTitle || spec.originalFilename || "Untitled document";
++          const pageLabel = spec.pageNumber ? `Page ${spec.pageNumber}` : "Page unknown";
++
++          return (
++            <li
++              key={`${spec.documentId}-${spec.pageNumber}-${spec.chunkIndex}-${index}`}
++              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
++            >
++              <div className="flex flex-wrap items-center justify-between gap-2">
++                <span className="font-semibold text-slate-900">{spec.part}</span>
++                <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
++                  {documentName} · {pageLabel}
++                </span>
++              </div>
++              <p className="mt-2 leading-6 text-slate-600">{spec.snippet}</p>
++            </li>
++          );
++        })}
++      </ul>
++    </Card>
++  );
++}
++
+ function SourcesPanel({ citations }) {
+   if (!citations?.length) {
+     return null;
+@@ -537,6 +569,7 @@ export function RepairPlannerPage() {
+         <NarrativePanel narrative={run.narrative} />
+         <ReadinessPanel readiness={artifacts?.readiness} />
+         <ChecklistPanel checklist={artifacts?.checklist} />
++        <TorqueSpecsPanel torqueSpecs={artifacts?.torqueSpecs} />
+         <TasksPanel tasks={artifacts?.tasks} />
+         <HandoffPanel handoffNotes={artifacts?.handoffNotes} />
+         <SourcesPanel citations={artifacts?.citations} />
+diff --git a/docs/repair-planner.md b/docs/repair-planner.md
+index dc59a33..cc7dfc9 100644
+--- a/docs/repair-planner.md
++++ b/docs/repair-planner.md
+@@ -47,6 +47,7 @@ artifacts the UI renders never depend on model randomness.
+ | `check_repair_readiness` | Scores tasks against a rubric (tools / parts / skill match / safety) and reports gaps |
+ | `build_owner_checklist` | Produces a prioritized checklist with DIY vs professional-shop assignment |
+ | `draft_handoff_notes` | Drafts channel-specific copy: a parts shopping list, a mechanic handoff, and a maintenance-log entry |
++| `lookup_torque_spec` | Searches the owner's uploaded manuals for the torque specification of a named part or fastener; returns snippets with source citations and accumulates a `torqueSpecs` artifact |
+ 
+ ### Readiness rubric
+ 
+@@ -162,3 +163,4 @@ Tool outputs:
+ - [ ] `search_repair_docs` returns citations only from uploaded PDFs.
+ - [ ] `check_repair_readiness` score matches the rubric table above.
+ - [ ] `draft_handoff_notes` returns all three drafts.
++- [ ] `lookup_torque_spec` returns snippets only from uploaded PDFs and accumulates them in the `torqueSpecs` artifact card.
+diff --git a/server/src/services/agent/repairPlannerAgent.js b/server/src/services/agent/repairPlannerAgent.js
+index ff5d95f..7e849be 100644
+--- a/server/src/services/agent/repairPlannerAgent.js
++++ b/server/src/services/agent/repairPlannerAgent.js
+@@ -14,7 +14,8 @@ const AGENT_INSTRUCTIONS = [
+   "2. For each task, call search_repair_docs with its keywords to ground steps and torque specs in the owner's uploaded manuals.",
+   "3. Call check_repair_readiness with the tasks, available tools, available parts, and skill level.",
+   "4. Call build_owner_checklist and draft_handoff_notes to produce the checklist and copy.",
+-  "Then write a concise, prioritized plan as plain text. Cite document facts only from search_repair_docs results; never invent torque specs or capacities.",
++  "5. For any task that involves tightening a fastener (bolts, plugs, lug nuts, etc.), call lookup_torque_spec with the part name to pull the torque value from the owner's manuals.",
++  "Then write a concise, prioritized plan as plain text. Cite document facts only from search_repair_docs and lookup_torque_spec results; never invent torque specs or capacities.",
+   "End with a short 'Follow-up questions:' section listing what is missing when key details (symptoms, mileage, tools, parts, budget) are absent.",
+   "Keep the narrative tight and skimmable. The structured checklist, readiness, and notes are shown separately, so do not repeat them verbatim.",
+ ].join("\n");
+@@ -104,6 +105,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
+     readiness: null,
+     checklist: [],
+     handoffNotes: null,
++    torqueSpecs: [],
+   };
+ 
+   let inputItems = buildInitialInput({
+@@ -171,6 +173,18 @@ export async function runRepairPlannerAgent(request, options = {}) {
+           artifacts.checklist = result.checklist;
+         } else if (toolCall.name === "draft_handoff_notes") {
+           artifacts.handoffNotes = result;
++        } else if (toolCall.name === "lookup_torque_spec" && Array.isArray(result.snippets)) {
++          // Merge snippets from multiple calls (one call per part).
++          const seen = new Set(
++            artifacts.torqueSpecs.map((s) => `${s.documentId}-${s.pageNumber}-${s.chunkIndex}`)
++          );
++          for (const snippet of result.snippets) {
++            const key = `${snippet.documentId}-${snippet.pageNumber}-${snippet.chunkIndex}`;
++            if (!seen.has(key)) {
++              seen.add(key);
++              artifacts.torqueSpecs.push({ part: result.part, ...snippet });
++            }
++          }
+         }
+ 
+         toolSpan.end();
+@@ -220,5 +234,8 @@ function summarizeToolResult(name, result) {
+   if (name === "draft_handoff_notes") {
+     return "Drafted parts list, mechanic handoff, and log entry.";
+   }
++  if (name === "lookup_torque_spec") {
++    return `Found ${result.snippets?.length || 0} torque spec snippet(s) for "${result.part || ""}".`;
++  }
+   return "Done.";
+ }
+diff --git a/server/src/services/agent/repairTools.js b/server/src/services/agent/repairTools.js
+index c1e52f8..76067bb 100644
+--- a/server/src/services/agent/repairTools.js
++++ b/server/src/services/agent/repairTools.js
+@@ -313,6 +313,40 @@ export function draftHandoffNotes({ tasks = [], vehicle = "the vehicle", partsNe
+   };
+ }
+ 
++// --- Tool: lookup_torque_spec ---------------------------------------------
++
++export function lookupTorqueSpec({ part = "", limit = 5 } = {}, { retrieve = retrieveRelevantChunks } = {}) {
++  const normalizedPart = normalizeText(part);
++
++  if (!normalizedPart) {
++    return { part: "", snippets: [], context: "" };
++  }
++
++  // Build a focused torque-spec query so the retriever surfaces spec tables
++  // rather than general procedure text.
++  const query = `${normalizedPart} torque spec ft-lb nm`;
++
++  const chunks = retrieve(query, { limit });
++
++  const snippets = chunks.map((chunk) => ({
++    documentId: chunk.documentId,
++    documentTitle: chunk.documentTitle,
++    originalFilename: chunk.originalFilename,
++    pageNumber: chunk.pageNumber,
++    chunkIndex: chunk.chunkIndex,
++    snippet: buildSnippet(chunk.chunkText),
++  }));
++
++  const context = chunks
++    .map(
++      (chunk, index) =>
++        `[${index + 1}] ${chunk.documentTitle} (page ${chunk.pageNumber}): ${buildSnippet(chunk.chunkText)}`
++    )
++    .join("\n");
++
++  return { part: normalizedPart, snippets, context };
++}
++
+ // --- Tool registry --------------------------------------------------------
+ 
+ export const repairToolSchemas = [
+@@ -393,6 +427,27 @@ export const repairToolSchemas = [
+       additionalProperties: false,
+     },
+   },
++  {
++    type: "function",
++    name: "lookup_torque_spec",
++    description:
++      "Search the owner's uploaded manuals for the torque specification for a named part or fastener (e.g. 'caliper bracket bolts', 'lug nuts', 'drain plug'). Returns matching snippets with source citations. Call this whenever the repair plan refers to a torque value that should be confirmed from the manuals.",
++    parameters: {
++      type: "object",
++      properties: {
++        part: {
++          type: "string",
++          description: "The part or fastener name to look up (e.g. 'caliper bracket bolts', 'spark plug', 'lug nut').",
++        },
++        limit: {
++          type: "integer",
++          description: "Maximum number of chunks to return (default 5).",
++        },
++      },
++      required: ["part"],
++      additionalProperties: false,
++    },
++  },
+ ];
+ 
+ export function createToolRegistry({ retrieve = retrieveRelevantChunks } = {}) {
+@@ -402,5 +457,6 @@ export function createToolRegistry({ retrieve = retrieveRelevantChunks } = {}) {
+     check_repair_readiness: (args) => checkRepairReadiness(args),
+     build_owner_checklist: (args) => buildOwnerChecklist(args),
+     draft_handoff_notes: (args) => draftHandoffNotes(args),
++    lookup_torque_spec: (args) => lookupTorqueSpec(args, { retrieve }),
+   };
+ }
+diff --git a/server/test/repairPlanner.test.js b/server/test/repairPlanner.test.js
+index 63469b6..82e92a9 100644
+--- a/server/test/repairPlanner.test.js
++++ b/server/test/repairPlanner.test.js
+@@ -26,6 +26,7 @@ const {
+   buildOwnerChecklist,
+   draftHandoffNotes,
+   searchRepairDocs,
++  lookupTorqueSpec,
+ } = await import("../src/services/agent/repairTools.js");
+ const { runRepairPlannerAgent, AI_NOT_CONFIGURED_MESSAGE } = await import(
+   "../src/services/agent/repairPlannerAgent.js"
+@@ -85,6 +86,12 @@ function createMockStreamTurn() {
+           skillLevel: "intermediate",
+         },
+       };
++      yield {
++        type: "function_call",
++        callId: "call_torque",
++        name: "lookup_torque_spec",
++        arguments: { part: "caliper bracket bolts" },
++      };
+       return;
+     }
+ 
+@@ -176,6 +183,26 @@ test("search_repair_docs returns citations from the injected retriever", () => {
+   assert.match(result.citations[0].snippet, /25 ft-lb/);
+ });
+ 
++test("lookup_torque_spec returns snippets from the injected retriever", () => {
++  const result = lookupTorqueSpec({ part: "caliper bracket bolts" }, { retrieve: mockRetrieve });
++
++  assert.equal(result.part, "caliper bracket bolts");
++  assert.equal(result.snippets.length, 1);
++  assert.equal(result.snippets[0].documentId, 7);
++  assert.equal(result.snippets[0].pageNumber, 4);
++  assert.match(result.snippets[0].snippet, /25 ft-lb/);
++  assert.equal(typeof result.context, "string");
++  assert.ok(result.context.length > 0);
++});
++
++test("lookup_torque_spec returns a safe empty shape when part is missing", () => {
++  const result = lookupTorqueSpec({}, { retrieve: mockRetrieve });
++
++  assert.equal(result.part, "");
++  assert.deepEqual(result.snippets, []);
++  assert.equal(result.context, "");
++});
++
+ // --- Responses client glue test --------------------------------------------
+ 
+ test("streamResponsesTurn sends a non-empty model string in the request body", async () => {
+@@ -260,6 +287,9 @@ test("runRepairPlannerAgent emits tool events and text deltas and assembles arti
+   assert.equal(result.artifacts.tasks.length >= 1, true);
+   assert.equal(result.artifacts.citations.length, 1);
+   assert.ok(result.artifacts.readiness);
++  assert.ok(Array.isArray(result.artifacts.torqueSpecs));
++  assert.ok(result.artifacts.torqueSpecs.length >= 1, "expected at least one torque spec snippet");
++  assert.equal(result.artifacts.torqueSpecs[0].part, "caliper bracket bolts");
+   assert.ok(events.some((event) => event.type === "trace"));
+   assert.equal(events.at(-1).type, "done");
+ });

@@ -1,0 +1,18 @@
+{
+  "expectations": [
+    {"text": "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic (no Math.random, no Date/clock, no direct network/db calls)", "passed": true, "evidence": "export function sortMaintenanceSchedule({ tasks = [] } = {}) — pure classification over keywords/difficulty, no randomness or clock."},
+    {"text": "Adds a JSON schema entry to the repairToolSchemas array with a snake_case name and additionalProperties:false", "passed": true, "evidence": "name: \"sort_maintenance_schedule\" with additionalProperties: false in repairToolSchemas."},
+    {"text": "Registers the tool in createToolRegistry mapping the snake_case wire name to the executor", "passed": true, "evidence": "sort_maintenance_schedule: (args) => sortMaintenanceSchedule(args) added to createToolRegistry."},
+    {"text": "The snake_case wire name (schema/registry) and the camelCase function name refer to the same tool consistently", "passed": true, "evidence": "sort_maintenance_schedule <-> sortMaintenanceSchedule used consistently in schema, registry, accumulation branch, and summary."},
+    {"text": "Adds a new key to the artifacts object in repairPlannerAgent.js and an accumulation branch keyed on the snake_case tool name", "passed": true, "evidence": "maintenanceSchedule: null added; else-if on toolCall.name === \"sort_maintenance_schedule\" with Array.isArray(result.doNow/canWait) guards."},
+    {"text": "Adds a matching case to summarizeToolResult in repairPlannerAgent.js", "passed": true, "evidence": "summarizeToolResult returns `Scheduled N task(s) for now, M can wait.`"},
+    {"text": "Adds a step to AGENT_INSTRUCTIONS telling the model when to call the new tool", "passed": true, "evidence": "Added step 5: \"Call sort_maintenance_schedule with the tasks so the owner sees a clear do-now vs can-wait triage.\""},
+    {"text": "Adds a Card-based panel component in RepairPlannerPage.jsx AND renders it in the artifacts JSX list reading from artifacts?.<key>", "passed": true, "evidence": "MaintenanceSchedulePanel (Card, returns null when empty) rendered as <MaintenanceSchedulePanel maintenanceSchedule={artifacts?.maintenanceSchedule} /> between Checklist and Tasks."},
+    {"text": "Adds a unit test for the new tool in server/test/repairPlanner.test.js and imports the executor", "passed": true, "evidence": "Imports sortMaintenanceSchedule; 3 unit tests + agent-loop artifact assertions + mock stream extended."},
+    {"text": "Adds a row for the new tool in the Tools table of docs/repair-planner.md", "passed": true, "evidence": "Tools table row for sort_maintenance_schedule plus validation-checklist updates."},
+    {"text": "Introduces no new npm dependencies", "passed": true, "evidence": "No package.json changes in the diff."}
+  ],
+  "summary": {"passed": 11, "failed": 0, "total": 11, "pass_rate": 1.0},
+  "timing": {"total_duration_seconds": 348.3, "total_tokens": 70284},
+  "eval_feedback": {"overall": "Complete and idiomatic; matched all five edit sites plus tests and docs. Determinism assertion is well-covered."}
+}
