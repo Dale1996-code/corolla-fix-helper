@@ -153,7 +153,8 @@ export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = r
     return { query: "", citations: [], context: "" };
   }
 
-  const chunks = await retrieve(normalizedQuery, { limit });
+  const rawChunks = await retrieve(normalizedQuery, { limit });
+  const chunks = Array.isArray(rawChunks) ? rawChunks : [];
 
   const citations = chunks.map((chunk) => ({
     documentId: chunk.documentId,

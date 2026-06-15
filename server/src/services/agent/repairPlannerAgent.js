@@ -157,7 +157,13 @@ export async function runRepairPlannerAgent(request, options = {}) {
         if (!executor) {
           result = { error: `Unknown tool: ${toolCall.name}` };
         } else {
-          result = await executor(toolCall.arguments || {});
+          try {
+            result = await executor(toolCall.arguments || {});
+          } catch (error) {
+            result = {
+              error: `Tool execution failed: ${error.message || error}`,
+            };
+          }
         }
 
         // Accumulate structured artifacts for the UI.
@@ -205,6 +211,9 @@ export async function runRepairPlannerAgent(request, options = {}) {
 }
 
 function summarizeToolResult(name, result) {
+  if (result?.error) {
+    return result.error;
+  }
   if (name === "extract_repair_tasks") {
     return `Found ${result.tasks?.length || 0} task(s).`;
   }
