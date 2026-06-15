@@ -18,6 +18,7 @@ Run from the repo root:
 - `npm run import -- "/path/to/pdfs"` — resumable bulk PDF import (MD5 duplicate detection, image-only report)
 - `npm run embed:backfill` — embed `document_chunks` missing the current embedding version; run after importing or re-extracting PDFs
 - `npm run eval:retrieval` / `npm run eval:answers` — retrieval and answer-quality evals
+- `npm run restore -- "/path/to/corolla-fix-helper-backup-*.tar.gz"` — restore a backup archive (validate → snapshot → atomic swap → rollback on failure); stop the server first. `npm run backup:drill` proves the round trip. See `docs/backup-restore.md`
 
 Single test file:
 
