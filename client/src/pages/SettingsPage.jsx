@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { requestJson } from "../lib/apiClient";
 
 const emptyVehicleForm = {
   year: "",
@@ -161,12 +162,9 @@ export function SettingsPage() {
         setLoadError("");
         setLoading(true);
 
-        const response = await fetch("/api/settings");
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Could not load settings.");
-        }
+        const payload = await requestJson("/api/settings", {
+          errorMessage: "Could not load settings.",
+        });
 
         const nextDocumentDefaults = {
           commonSystems: payload.documentDefaults?.commonSystems || [],
@@ -223,19 +221,14 @@ export function SettingsPage() {
       setVehicleSaveMessage("");
       setVehicleSaveError("");
 
-      const response = await fetch("/api/settings/vehicle", {
+      const payload = await requestJson("/api/settings/vehicle", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(vehicleForm),
+        errorMessage: "Could not save vehicle settings.",
       });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Could not save vehicle settings.");
-      }
 
       setVehicleForm({
         year: String(payload.vehicle?.year || ""),
@@ -260,7 +253,7 @@ export function SettingsPage() {
       setDefaultsSaveMessage("");
       setDefaultsSaveError("");
 
-      const response = await fetch("/api/settings/document-defaults", {
+      const payload = await requestJson("/api/settings/document-defaults", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -269,13 +262,8 @@ export function SettingsPage() {
           commonSystems: parseLineList(documentDefaultsForm.commonSystemsText),
           documentTypes: parseLineList(documentDefaultsForm.documentTypesText),
         }),
+        errorMessage: "Could not save document defaults.",
       });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Could not save document defaults.");
-      }
 
       const nextDocumentDefaults = {
         commonSystems: payload.documentDefaults?.commonSystems || [],

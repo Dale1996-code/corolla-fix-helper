@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { requestJson } from "../lib/apiClient";
+import { formatDate } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 
 const emptyDashboardData = {
@@ -65,26 +67,6 @@ const quickActions = [
     to: "/notes#create-note",
   },
 ];
-
-function formatDate(value) {
-  if (!value) {
-    return "Not available";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function labelize(value) {
   if (!value) {
@@ -419,12 +401,9 @@ export function DashboardPage() {
         setLoadError("");
         setLoading(true);
 
-        const response = await fetch("/api/dashboard");
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Could not load dashboard data.");
-        }
+        const payload = await requestJson("/api/dashboard", {
+          errorMessage: "Could not load dashboard data.",
+        });
 
         setDashboardData({
           vehicle: payload.vehicle || null,

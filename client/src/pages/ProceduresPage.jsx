@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
 
@@ -16,26 +17,6 @@ const emptyProcedureForm = {
   confidence: "medium",
   linkedDocumentIds: [],
 };
-
-function formatDate(value) {
-  if (!value) {
-    return "Not available";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function labelize(value) {
   if (!value) {
@@ -58,12 +39,6 @@ function getDifficultyBadgeClass(difficulty) {
   }
 
   return "bg-emerald-100 text-emerald-800";
-}
-
-function getSortTimestamp(procedure) {
-  const value = procedure.updatedAt || procedure.createdAt;
-  const time = new Date(value || "").getTime();
-  return Number.isNaN(time) ? 0 : time;
 }
 
 function compareProcedures(firstProcedure, secondProcedure, sortBy) {

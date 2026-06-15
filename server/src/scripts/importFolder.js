@@ -11,13 +11,9 @@ import {
   deriveTitleFromFilename,
   sanitizeFilename,
 } from "../utils/sanitizeFilename.js";
+import { normalizeText } from "../utils/text.js";
 
 const IMAGE_ONLY_TEXT_CHARACTER_LIMIT = 20;
-
-function normalizeText(value, fallback = "") {
-  const text = typeof value === "string" ? value.trim() : "";
-  return text || fallback;
-}
 
 function countTextCharacters(text) {
   return typeof text === "string" ? text.replace(/\s+/g, "").length : 0;

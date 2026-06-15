@@ -949,7 +949,6 @@ test("Goal B ask rewrites follow-up before rerunning retrieval", async () => {
 });
 
 test("Goal A not-found response does not call model", async () => {
-  const uniqueTag = nextUniqueTag("ask-not-found");
   let modelCallCount = 0;
 
   const askApp = createApp({

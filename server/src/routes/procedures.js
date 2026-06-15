@@ -1,18 +1,12 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { hasOwnField, normalizeText } from "../utils/text.js";
+import { parsePositiveInt } from "../utils/http.js";
 
 export const proceduresRouter = Router();
 
 const allowedConfidenceValues = new Set(["low", "medium", "high"]);
 const allowedDifficultyValues = new Set(["beginner", "intermediate", "advanced"]);
-
-function hasOwnField(object, fieldName) {
-  return Object.prototype.hasOwnProperty.call(object, fieldName);
-}
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function normalizeConfidence(value) {
   const normalized = normalizeText(value).toLowerCase();
@@ -219,8 +213,8 @@ proceduresRouter.post("/", (request, response) => {
     return;
   }
 
-  let difficulty = "intermediate";
-  let confidence = "medium";
+  let difficulty;
+  let confidence;
 
   try {
     difficulty = normalizeDifficulty(request.body.difficulty);
@@ -280,9 +274,9 @@ proceduresRouter.post("/", (request, response) => {
 });
 
 proceduresRouter.put("/:id", (request, response) => {
-  const procedureId = Number(request.params.id);
+  const procedureId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(procedureId) || procedureId <= 0) {
+  if (procedureId === null) {
     response.status(400).json({
       error: "Procedure ID must be a positive number.",
     });
@@ -413,9 +407,9 @@ proceduresRouter.put("/:id", (request, response) => {
 });
 
 proceduresRouter.delete("/:id", (request, response) => {
-  const procedureId = Number(request.params.id);
+  const procedureId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(procedureId) || procedureId <= 0) {
+  if (procedureId === null) {
     response.status(400).json({
       error: "Procedure ID must be a positive number.",
     });

@@ -1,5 +1,82 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { config } from "../config.js";
 import { db } from "../database.js";
-import { getTagsForDocuments, listAllTags } from "./documentTagService.js";
+import {
+  getTagsForDocuments,
+  listAllTags,
+  pruneOrphanTags,
+} from "./documentTagService.js";
+
+/**
+ * Resolve the on-disk path for a document's stored file.
+ *
+ * Returns `{ safeFileName, absoluteFilePath }`, or `null` when the document has
+ * no usable filename reference. `path.basename` guards against directory
+ * traversal from the stored value.
+ */
+export function resolveStoredFilePath(document) {
+  const fileName =
+    document.stored_filename || path.basename(document.file_path || "");
+
+  if (!fileName) {
+    return null;
+  }
+
+  const safeFileName = path.basename(fileName);
+
+  return {
+    safeFileName,
+    absoluteFilePath: path.join(config.uploadsDir, safeFileName),
+  };
+}
+
+/**
+ * Delete a document and everything that depends on it.
+ *
+ * Most child rows (chunks, symptom/procedure links, tag links) are removed by
+ * `ON DELETE CASCADE`; the polymorphic note links are not foreign keys, so they
+ * are cleared explicitly here. Returns the cleanup counts the API surfaces.
+ *
+ * `document` must include `id`, `stored_filename`, and `file_path`.
+ */
+export async function deleteDocument(document) {
+  const documentId = document.id;
+
+  const linkedCounts = db
+    .prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM symptom_documents WHERE document_id = ?) AS symptom_count,
+        (SELECT COUNT(*) FROM procedure_documents WHERE document_id = ?) AS procedure_count,
+        (SELECT COUNT(*) FROM notes WHERE related_entity_type = 'document' AND related_entity_id = ?) AS note_count
+    `)
+    .get(documentId, documentId, documentId);
+
+  const resolved = resolveStoredFilePath(document);
+
+  db.prepare(`
+    UPDATE notes
+    SET related_entity_type = 'none',
+        related_entity_id = NULL,
+        document_id = NULL,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE related_entity_type = 'document' AND related_entity_id = ?
+  `).run(documentId);
+
+  db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
+  pruneOrphanTags();
+
+  if (resolved) {
+    await fs.rm(resolved.absoluteFilePath, { force: true });
+  }
+
+  return {
+    symptomLinksRemoved: linkedCounts.symptom_count,
+    procedureLinksRemoved: linkedCounts.procedure_count,
+    noteLinksCleared: linkedCounts.note_count,
+    fileRemoved: Boolean(resolved),
+  };
+}
 
 function mapDocumentRow(row, tags = []) {
   return {

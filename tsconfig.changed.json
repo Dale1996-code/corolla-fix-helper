@@ -17,6 +17,11 @@
     "server/src/services/chunkRetrievalService.js",
     "server/src/services/chunkEmbeddingService.js",
     "server/src/services/documentChunkService.js",
+    "server/src/services/documentService.js",
+    "server/src/services/documentTagService.js",
+    "server/src/utils/http.js",
+    "server/src/utils/sanitizeFilename.js",
+    "server/src/utils/text.js",
     "server/test/importFolder.test.js",
     "server/test/seedData.test.js"
   ]

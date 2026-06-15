@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import request from "supertest";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-repair-planner-"));
 

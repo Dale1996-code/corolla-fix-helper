@@ -12,24 +12,28 @@ export default [
     ],
   },
   {
-    files: [
-      "server/src/initDatabase.js",
-      "server/src/scripts/importFolder.js",
-      "server/src/services/aiAnswerService.js",
-      "server/src/services/chunkRetrievalService.js",
-      "server/src/services/chunkEmbeddingService.js",
-      "server/src/services/documentChunkService.js",
-      "server/test/importFolder.test.js",
-      "server/test/seedData.test.js",
-    ],
+    // Lint the whole server (source, scripts, evals, and tests). Client linting
+    // needs a JSX-aware setup and is handled separately.
+    files: ["server/**/*.js"],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: "module",
       globals: {
+        AbortController: "readonly",
         Buffer: "readonly",
+        clearInterval: "readonly",
+        clearTimeout: "readonly",
         console: "readonly",
         fetch: "readonly",
+        performance: "readonly",
         process: "readonly",
+        setInterval: "readonly",
+        setTimeout: "readonly",
+        structuredClone: "readonly",
+        TextDecoder: "readonly",
+        TextEncoder: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
       },
     },
     rules: {

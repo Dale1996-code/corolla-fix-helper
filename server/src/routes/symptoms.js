@@ -1,18 +1,12 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { hasOwnField, normalizeText } from "../utils/text.js";
+import { parsePositiveInt } from "../utils/http.js";
 
 export const symptomsRouter = Router();
 
 const allowedConfidenceValues = new Set(["low", "medium", "high"]);
 const allowedStatusValues = new Set(["open", "monitoring", "resolved"]);
-
-function hasOwnField(object, fieldName) {
-  return Object.prototype.hasOwnProperty.call(object, fieldName);
-}
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function normalizeConfidence(value) {
   const normalized = normalizeText(value).toLowerCase();
@@ -213,8 +207,8 @@ symptomsRouter.post("/", (request, response) => {
     return;
   }
 
-  let confidence = "medium";
-  let status = "open";
+  let confidence;
+  let status;
 
   try {
     confidence = normalizeConfidence(request.body.confidence);
@@ -270,9 +264,9 @@ symptomsRouter.post("/", (request, response) => {
 });
 
 symptomsRouter.put("/:id", (request, response) => {
-  const symptomId = Number(request.params.id);
+  const symptomId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(symptomId) || symptomId <= 0) {
+  if (symptomId === null) {
     response.status(400).json({
       error: "Symptom ID must be a positive number.",
     });
@@ -391,9 +385,9 @@ symptomsRouter.put("/:id", (request, response) => {
 });
 
 symptomsRouter.delete("/:id", (request, response) => {
-  const symptomId = Number(request.params.id);
+  const symptomId = parsePositiveInt(request.params.id);
 
-  if (!Number.isInteger(symptomId) || symptomId <= 0) {
+  if (symptomId === null) {
     response.status(400).json({
       error: "Symptom ID must be a positive number.",
     });

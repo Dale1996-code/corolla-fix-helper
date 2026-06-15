@@ -10,12 +10,9 @@ import {
   getDocumentDefaults,
   updateDocumentDefaults,
 } from "../services/appSettingsService.js";
+import { normalizeText } from "../utils/text.js";
 
 export const settingsRouter = Router();
-
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function getVehicleRecord() {
   const vehicle = db
