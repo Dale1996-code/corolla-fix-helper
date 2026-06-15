@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { requestJson } from "../lib/apiClient";
 import { formatDate } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 
@@ -400,12 +401,9 @@ export function DashboardPage() {
         setLoadError("");
         setLoading(true);
 
-        const response = await fetch("/api/dashboard");
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload.error || "Could not load dashboard data.");
-        }
+        const payload = await requestJson("/api/dashboard", {
+          errorMessage: "Could not load dashboard data.",
+        });
 
         setDashboardData({
           vehicle: payload.vehicle || null,
