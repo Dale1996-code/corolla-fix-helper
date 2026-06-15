@@ -1,0 +1,18 @@
+{
+  "eval_id": 0,
+  "eval_name": "artifact-tool-maintenance-schedule",
+  "prompt": "Add a new tool to the Repair Planner agent that sorts the extracted tasks into a maintenance schedule: which ones to do now vs. which can safely wait. It should show up as its own card on the Repair Planner page.",
+  "assertions": [
+    "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic (no Math.random, no Date/clock, no direct network/db calls)",
+    "Adds a JSON schema entry to the repairToolSchemas array with a snake_case name and additionalProperties:false",
+    "Registers the tool in createToolRegistry mapping the snake_case wire name to the executor",
+    "The snake_case wire name (schema/registry) and the camelCase function name refer to the same tool consistently",
+    "Adds a new key to the artifacts object in repairPlannerAgent.js and an accumulation branch keyed on the snake_case tool name",
+    "Adds a matching case to summarizeToolResult in repairPlannerAgent.js",
+    "Adds a step to AGENT_INSTRUCTIONS telling the model when to call the new tool",
+    "Adds a Card-based panel component in RepairPlannerPage.jsx AND renders it in the artifacts JSX list reading from artifacts?.<key>",
+    "Adds a unit test for the new tool in server/test/repairPlanner.test.js and imports the executor",
+    "Adds a row for the new tool in the Tools table of docs/repair-planner.md",
+    "Introduces no new npm dependencies"
+  ]
+}

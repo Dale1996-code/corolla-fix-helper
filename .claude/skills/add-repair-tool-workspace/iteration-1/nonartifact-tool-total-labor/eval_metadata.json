@@ -1,0 +1,16 @@
+{
+  "eval_id": 1,
+  "eval_name": "nonartifact-tool-total-labor",
+  "prompt": "I want to add a repair-planner tool that totals up the estimated labor hours for the whole job so the model can factor it into the plan. It's just for the agent to reason about — it does NOT need its own card in the UI.",
+  "assertions": [
+    "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic",
+    "Adds a JSON schema entry to repairToolSchemas with a snake_case name and additionalProperties:false",
+    "Registers the tool in createToolRegistry under its snake_case wire name",
+    "Does NOT add a UI panel or any edit to client/src/pages/RepairPlannerPage.jsx (the tool is intermediate, so the UI is correctly left untouched)",
+    "Does NOT add an artifacts key or accumulation branch in repairPlannerAgent.js (correctly skipped for a non-artifact tool)",
+    "Adds a step to AGENT_INSTRUCTIONS so the model actually calls the tool",
+    "Adds a unit test for the new tool in server/test/repairPlanner.test.js",
+    "Adds a row for the new tool in the Tools table of docs/repair-planner.md",
+    "Introduces no new npm dependencies"
+  ]
+}

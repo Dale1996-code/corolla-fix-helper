@@ -36,17 +36,32 @@ function escapePdfText(text) {
     .replace(/\)/g, "\\)");
 }
 
-function createMinimalPdfBuffer({ pageText = "" } = {}) {
-  const escapedText = escapePdfText(pageText.replace(/\s+/g, " ").trim());
-  const textCommand = escapedText
-    ? `BT\n/F1 12 Tf\n72 720 Td\n(${escapedText}) Tj\nET`
-    : "";
+function createMinimalPdfBuffer({ pageText = "", pageTexts = null } = {}) {
+  const normalizedPageTexts = Array.isArray(pageTexts) ? pageTexts : [pageText];
+  const pageObjects = [];
+  const kids = [];
+  const fontObjectId = 3 + normalizedPageTexts.length * 2;
+
+  normalizedPageTexts.forEach((text, index) => {
+    const pageObjectId = 3 + index * 2;
+    const contentObjectId = pageObjectId + 1;
+    const escapedText = escapePdfText(String(text || "").replace(/\s+/g, " ").trim());
+    const textCommand = escapedText
+      ? `BT\n/F1 12 Tf\n72 720 Td\n(${escapedText}) Tj\nET`
+      : "";
+
+    kids.push(`${pageObjectId} 0 R`);
+    pageObjects.push(
+      `${pageObjectId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>\nendobj\n`,
+      `${contentObjectId} 0 obj\n<< /Length ${Buffer.byteLength(textCommand, "utf8")} >>\nstream\n${textCommand}\nendstream\nendobj\n`
+    );
+  });
+
   const objects = [
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
-    `4 0 obj\n<< /Length ${Buffer.byteLength(textCommand, "utf8")} >>\nstream\n${textCommand}\nendstream\nendobj\n`,
-    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    `2 0 obj\n<< /Type /Pages /Count ${normalizedPageTexts.length} /Kids [${kids.join(" ")}] >>\nendobj\n`,
+    ...pageObjects,
+    `${fontObjectId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
   ];
   const chunks = ["%PDF-1.4\n"];
   const offsets = [0];
@@ -59,7 +74,7 @@ function createMinimalPdfBuffer({ pageText = "" } = {}) {
   }
 
   const xrefOffset = offset;
-  chunks.push("xref\n0 6\n");
+  chunks.push(`xref\n0 ${objects.length + 1}\n`);
   chunks.push("0000000000 65535 f \n");
 
   for (let objectId = 1; objectId <= objects.length; objectId += 1) {
@@ -222,18 +237,22 @@ test("Search and Ask can retrieve OCR-created document text and chunks", async (
 });
 
 test("missing OCR tools produce a clear optional-dependency warning", async () => {
-  const pdfBuffer = createMinimalPdfBuffer();
+  const pdfBuffer = createMinimalPdfBuffer({ pageTexts: ["", ""] });
+  const calls = [];
 
   const result = await extractPdfData(pdfBuffer, {
-    ocrPage: async () => {
+    ocrPage: async ({ pageNumber }) => {
+      calls.push(pageNumber);
       const error = new Error("spawn tesseract ENOENT");
       error.code = "ENOENT";
       throw error;
     },
   });
 
+  assert.deepEqual(calls, [1]);
   assert.match(result.extractionStatus, /^ocr_unavailable:/);
   assert.match(result.extractionStatus, /Tesseract and Poppler/i);
   assert.equal(result.extractedText, "");
+  assert.equal(result.pageCount, 2);
   assert.deepEqual(result.pages, []);
 });

@@ -1,0 +1,16 @@
+{
+  "expectations": [
+    {"text": "Adds an exported camelCase executor function to server/src/services/agent/repairTools.js that is deterministic", "passed": true, "evidence": "export function estimateLaborHours({ tasks = [] } = {}) using base+system lookup tables — deterministic."},
+    {"text": "Adds a JSON schema entry to repairToolSchemas with a snake_case name and additionalProperties:false", "passed": true, "evidence": "name: \"estimate_labor_hours\", additionalProperties: false."},
+    {"text": "Registers the tool in createToolRegistry under its snake_case wire name", "passed": true, "evidence": "estimate_labor_hours: (args) => estimateLaborHours(args)."},
+    {"text": "Does NOT add a UI panel or any edit to client/src/pages/RepairPlannerPage.jsx (the tool is intermediate, so the UI is correctly left untouched)", "passed": true, "evidence": "No client file in the diff — UI correctly untouched."},
+    {"text": "Does NOT add an artifacts key or accumulation branch in repairPlannerAgent.js (correctly skipped for a non-artifact tool)", "passed": false, "evidence": "FAILED: added `laborEstimate: null` to the artifacts object AND an accumulation branch `else if (toolCall.name === \"estimate_labor_hours\") artifacts.laborEstimate = result;`, plus an agent-loop assertion on it. The user said the tool needs no card, so this artifact is accumulated but never rendered anywhere — orphan plumbing."},
+    {"text": "Adds a step to AGENT_INSTRUCTIONS so the model actually calls the tool", "passed": true, "evidence": "Added step 4 and amended the narrative instruction to use the labor estimate for time expectations."},
+    {"text": "Adds a unit test for the new tool in server/test/repairPlanner.test.js", "passed": true, "evidence": "Imports estimateLaborHours; 3 unit tests covering totals, empty, and unknown fallback."},
+    {"text": "Adds a row for the new tool in the Tools table of docs/repair-planner.md", "passed": false, "evidence": "FAILED: docs/repair-planner.md is not in the diff — no Tools-table row was added."},
+    {"text": "Introduces no new npm dependencies", "passed": true, "evidence": "No package.json changes."}
+  ],
+  "summary": {"passed": 7, "failed": 2, "total": 9, "pass_rate": 0.7778},
+  "timing": {"total_duration_seconds": 262.1, "total_tokens": 57164},
+  "eval_feedback": {"overall": "Two misses the skill prevents: (1) added an orphan `laborEstimate` artifact that nothing renders — the with-skill run correctly skipped artifact plumbing for an intermediate tool; (2) skipped the docs Tools-table row. This is the eval where the skill's conditional steps and checklist add the most value."}
+}
