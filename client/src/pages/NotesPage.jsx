@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 
 const emptyNoteForm = {
@@ -10,32 +11,6 @@ const emptyNoteForm = {
   relatedEntityType: "none",
   relatedEntityId: "",
 };
-
-function formatDate(value) {
-  if (!value) {
-    return "Not available";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Not available";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function getSortTimestamp(note) {
-  const dateValue = note.updatedAt || note.createdAt;
-  const time = new Date(dateValue || "").getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
 
 function labelize(value) {
   if (!value) {
