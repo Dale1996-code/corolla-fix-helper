@@ -3,30 +3,30 @@ import { navigationItems } from "../lib/navigation";
 
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 hidden min-h-screen w-72 shrink-0 border-r border-slate-200 bg-white px-5 py-6 lg:block">
-      <div className="mb-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+    <aside className="sticky top-0 hidden min-h-screen w-72 shrink-0 border-r border-slate-300 bg-[#111827] px-5 py-6 text-white lg:flex lg:flex-col">
+      <div className="mb-8 border-b border-white/10 pb-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
           Corolla Fix Helper
         </p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">
+        <h1 className="mt-2 text-2xl font-bold text-white">
           Local Repair Helper
         </h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
+        <p className="mt-3 text-sm leading-6 text-slate-300">
           Documents, symptoms, procedures, and notes for your 2009 Toyota Corolla LE 1.8L.
         </p>
       </div>
 
-      <nav className="space-y-2">
+      <nav className="space-y-1.5">
         {navigationItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
               [
-                "block rounded-xl px-4 py-3 text-sm font-medium transition-colors",
+                "block rounded-lg px-4 py-3 text-sm font-semibold transition-colors",
                 isActive
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-300 hover:bg-white/10 hover:text-white",
               ].join(" ")
             }
           >
@@ -34,6 +34,11 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      <div className="mt-auto rounded-lg border border-white/10 bg-white/5 p-4 text-xs leading-5 text-slate-300">
+        <p className="font-semibold uppercase tracking-[0.18em] text-sky-200">Local workspace</p>
+        <p className="mt-2">SQLite database and uploaded PDFs stay on this machine.</p>
+      </div>
     </aside>
   );
 }

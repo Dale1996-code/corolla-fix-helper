@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  color: #0f172a;
-  background: #f1f5f9;
+  color: #111827;
+  background: #eef2f4;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
@@ -13,4 +13,9 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background: #bae6fd;
+  color: #0f172a;
 }

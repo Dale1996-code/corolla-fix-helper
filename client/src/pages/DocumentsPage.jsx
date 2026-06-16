@@ -107,7 +107,7 @@ function TagChips({ tags, size = "sm" }) {
       {tags.map((tag) => (
         <span
           key={tag}
-          className={`rounded-full bg-sky-100 font-medium text-sky-800 ${sizeClass}`}
+          className={`rounded-full bg-sky-100 font-medium text-sky-900 ring-1 ring-sky-200 ${sizeClass}`}
         >
           #{tag}
         </span>
@@ -132,7 +132,7 @@ function TextField({
         {required ? " *" : ""}
       </span>
       <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
+        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
         name={name}
         value={value}
         onChange={onChange}
@@ -149,7 +149,7 @@ function TextAreaField({ label, name, value, onChange, placeholder = "" }) {
     <label className="grid gap-2 text-sm text-slate-700">
       <span className="font-medium text-slate-900">{label}</span>
       <textarea
-        className="min-h-24 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
+        className="min-h-24 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
         name={name}
         value={value}
         onChange={onChange}
@@ -187,117 +187,127 @@ function UploadForm({
   return (
     <section
       id="document-upload"
-      className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+      className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm"
     >
-      <h3 className="text-lg font-semibold text-slate-900">Import one PDF</h3>
-      <p className="mt-1 text-sm text-slate-600">
-        Upload one document at a time, then review extraction status and fix details if needed.
-      </p>
-      <p className="mt-1 text-xs text-slate-500">
-        Saved suggestions from Settings appear while you type in System and Document Type.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-950">Import PDF</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Upload one document at a time, then review status and fix details if needed
+          </p>
+        </div>
+        <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-900">
+          PDF up to 20 MB
+        </span>
+      </div>
 
-      <form className="mt-4 grid gap-4" onSubmit={onSubmit}>
-        <label className="grid gap-2 text-sm text-slate-700">
-          <span className="font-medium text-slate-900">PDF file *</span>
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={onFileChange}
-            required
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
+      <form className="grid gap-5 p-5" onSubmit={onSubmit}>
+        <div className="grid gap-5 xl:grid-cols-[minmax(16rem,0.75fr)_minmax(0,1.25fr)]">
+          <div className="grid content-start gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <label className="grid gap-2 text-sm text-slate-700">
+              <span className="font-medium text-slate-900">PDF file *</span>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={onFileChange}
+                required
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              />
+            </label>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <TextField
-            label="Title"
-            name="title"
-            value={form.title}
-            onChange={onTextChange}
-            placeholder="Optional manual title"
-          />
-          <TextField
-            label="System"
-            name="system"
-            value={form.system}
-            onChange={onTextChange}
-            required
-            placeholder="Engine, Brakes, Electrical..."
-            listId="upload-system-suggestions"
-          />
-          <TextField
-            label="Subsystem"
-            name="subsystem"
-            value={form.subsystem}
-            onChange={onTextChange}
-            placeholder="Ignition, Cooling..."
-          />
-          <TextField
-            label="Document Type"
-            name="documentType"
-            value={form.documentType}
-            onChange={onTextChange}
-            required
-            placeholder="Repair Manual, Wiring Diagram..."
-            listId="upload-document-type-suggestions"
-          />
-          <TextField
-            label="Source"
-            name="source"
-            value={form.source}
-            onChange={onTextChange}
-            placeholder="Toyota manual, forum download..."
-          />
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                name="isBookmarked"
+                checked={form.isBookmarked}
+                onChange={onTextChange}
+              />
+              Bookmark this document
+            </label>
+          </div>
+
+          <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextField
+                label="Title"
+                name="title"
+                value={form.title}
+                onChange={onTextChange}
+                placeholder="Optional manual title"
+              />
+              <TextField
+                label="System"
+                name="system"
+                value={form.system}
+                onChange={onTextChange}
+                required
+                placeholder="Engine, Brakes, Electrical..."
+                listId="upload-system-suggestions"
+              />
+              <TextField
+                label="Subsystem"
+                name="subsystem"
+                value={form.subsystem}
+                onChange={onTextChange}
+                placeholder="Ignition, Cooling..."
+              />
+              <TextField
+                label="Document Type"
+                name="documentType"
+                value={form.documentType}
+                onChange={onTextChange}
+                required
+                placeholder="Repair Manual, Wiring Diagram..."
+                listId="upload-document-type-suggestions"
+              />
+              <TextField
+                label="Source"
+                name="source"
+                value={form.source}
+                onChange={onTextChange}
+                placeholder="Toyota manual, forum download..."
+              />
+            </div>
+
+            <TextField
+              label="Tags"
+              name="tags"
+              value={form.tags}
+              onChange={onTextChange}
+              placeholder="Comma separated, e.g. brakes, torque-specs, diy"
+            />
+
+            <TextAreaField
+              label="Notes"
+              name="notes"
+              value={form.notes}
+              onChange={onTextChange}
+              placeholder="Any quick notes about this document"
+            />
+          </div>
         </div>
 
-        <TextField
-          label="Tags"
-          name="tags"
-          value={form.tags}
-          onChange={onTextChange}
-          placeholder="Comma separated, e.g. brakes, torque-specs, diy"
-        />
-
-        <TextAreaField
-          label="Notes"
-          name="notes"
-          value={form.notes}
-          onChange={onTextChange}
-          placeholder="Any quick notes about this document"
-        />
-
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            name="isBookmarked"
-            checked={form.isBookmarked}
-            onChange={onTextChange}
-          />
-          Bookmark this document
-        </label>
-
         {feedback ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {feedback}
           </p>
         ) : null}
 
         {error ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
           </p>
         ) : null}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
           <button
             type="submit"
             disabled={uploading}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             {uploading ? "Uploading..." : "Upload PDF"}
           </button>
-          <p className="text-xs text-slate-500">PDF only, up to 20 MB.</p>
+          <p className="text-xs text-slate-500">Suggestions appear from Settings while typing.</p>
         </div>
 
         <SuggestionDatalist id="upload-system-suggestions" options={systemSuggestions} />
@@ -330,12 +340,17 @@ function ListControls({
   tags,
 }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Library controls
+        </h3>
+      </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Sort</span>
           <select
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={sortBy}
             onChange={onSortChange}
           >
@@ -348,7 +363,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>System</span>
           <select
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={systemFilter}
             onChange={onSystemFilterChange}
           >
@@ -364,7 +379,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Document type</span>
           <select
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={documentTypeFilter}
             onChange={onDocumentTypeFilterChange}
           >
@@ -380,7 +395,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Favorite</span>
           <select
-            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={favoriteFilter}
             onChange={onFavoriteFilterChange}
           >
@@ -393,7 +408,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Bookmark</span>
           <select
-            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={bookmarkFilter}
             onChange={onBookmarkFilterChange}
           >
@@ -406,7 +421,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Tag</span>
           <select
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={tagFilter}
             onChange={onTagFilterChange}
           >
@@ -422,7 +437,7 @@ function ListControls({
         <label className="grid gap-1 text-xs font-medium text-slate-700">
           <span>Extraction</span>
           <select
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             value={extractionFilter}
             onChange={onExtractionFilterChange}
           >
@@ -449,11 +464,11 @@ function DocumentsList({
     "grid grid-cols-[minmax(15rem,2.8fr)_minmax(8rem,1.1fr)_minmax(9rem,1.2fr)_minmax(7.25rem,0.9fr)_minmax(9rem,1.1fr)_minmax(9.5rem,1.1fr)] gap-3";
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <div className="min-w-[820px]">
           <div
-            className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
+            className={`${listGridClass} border-b border-slate-800 bg-slate-950 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-200`}
           >
             <span>Title</span>
             <span>System</span>
@@ -477,8 +492,8 @@ function DocumentsList({
             return (
               <div
                 key={document.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm ${
-                  isSelected ? "bg-sky-50" : "hover:bg-slate-50"
+                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm transition-colors ${
+                  isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-slate-50"
                 }`}
                 onClick={() => onSelectDocument(document.id)}
               >
@@ -509,7 +524,7 @@ function DocumentsList({
                       favoriteUpdateState.documentId === document.id &&
                       !favoriteUpdateState.error
                     }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggleFavorite(document);
@@ -550,7 +565,7 @@ function EditMetadataForm({
   documentTypeSuggestions,
 }) {
   return (
-    <form className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4" onSubmit={onSubmit}>
+    <form className="mt-4 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4" onSubmit={onSubmit}>
       <div className="grid gap-4 md:grid-cols-2">
         <TextField label="Title" name="title" value={values.title} onChange={onChange} required />
         <TextField
@@ -614,14 +629,14 @@ function EditMetadataForm({
         <button
           type="submit"
           disabled={saving}
-          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
         >
           {saving ? "Saving..." : "Save metadata"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
         >
           Cancel
         </button>
@@ -657,7 +672,7 @@ function DocumentDetails({
 }) {
   if (!document) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+      <section className="rounded-lg border border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
         Select a document to view details.
       </section>
     );
@@ -666,7 +681,7 @@ function DocumentDetails({
   const extraction = normalizeExtractionStatus(document.extractionStatus);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-lg border border-slate-300 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-xl font-semibold text-slate-900">{document.title}</h3>
@@ -1505,7 +1520,7 @@ export function DocumentsPage() {
     <>
       <PageHeader
         title="Documents"
-        description="Import repair PDFs, check extraction status, sort and filter your library, then use favorites, bookmarks, and tags to keep the most important documents easy to find."
+        description=""
       />
 
       <div className="space-y-6">
@@ -1523,13 +1538,13 @@ export function DocumentsPage() {
 
         <div id="document-library" className="space-y-6">
           {loading ? (
-            <section className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+            <section className="rounded-lg border border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
               Loading documents...
             </section>
           ) : null}
 
           {loadError ? (
-            <section className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
+            <section className="rounded-lg border border-red-200 bg-red-50 p-6 shadow-sm">
               <p className="font-semibold text-red-800">Could not load documents.</p>
               <p className="mt-2 text-sm text-red-700">{loadError}</p>
             </section>
@@ -1561,14 +1576,14 @@ export function DocumentsPage() {
                 tags={availableTags}
               />
 
-              <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+              <section className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
                 Showing{" "}
                 <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
                 of <span className="font-semibold text-slate-900">{documents.length}</span>{" "}
                 documents.
               </section>
 
-              <div className="grid gap-6 xl:grid-cols-2">
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
                 <DocumentsList
                   documents={filteredDocuments}
                   selectedDocumentId={selectedDocumentId}

@@ -11,11 +11,11 @@ import { SettingsPage } from "./pages/SettingsPage";
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto flex min-h-screen max-w-7xl">
+    <div className="min-h-screen bg-[#eef2f4] text-slate-950">
+      <div className="mx-auto flex min-h-screen max-w-[88rem]">
         <Sidebar />
 
-        <main className="flex-1 p-6 lg:p-8">
+        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
           <Routes>
             <Route path="/" element={<Navigate to="/documents" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
