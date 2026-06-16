@@ -14,6 +14,8 @@
     "build:server": "npm --prefix server run build",
     "build:client": "npm --prefix client run build",
     "import": "npm --prefix server run import --",
+    "restore": "npm --prefix server run restore --",
+    "backup:drill": "npm --prefix server run backup:drill",
     "embed:backfill": "npm --prefix server run embed:backfill",
     "eval:retrieval": "npm --prefix server run eval:retrieval",
     "eval:answers": "npm --prefix server run eval:answers",
