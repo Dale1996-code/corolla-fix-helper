@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -30,6 +31,7 @@ const { runRepairPlannerAgent, AI_NOT_CONFIGURED_MESSAGE } = await import(
 const { streamResponsesTurn } = await import(
   "../src/services/agent/openAiResponsesClient.js"
 );
+const { createRepairPlanRouter } = await import("../src/routes/repairPlan.js");
 
 after(() => {
   if (typeof db.close === "function") {
@@ -99,6 +101,50 @@ function parseSse(text) {
     .map((frame) => frame.trim())
     .filter((frame) => frame.startsWith("data:"))
     .map((frame) => JSON.parse(frame.slice(5).trim()));
+}
+
+// Drives the SSE route with fake req/res EventEmitters so disconnect wiring can
+// be exercised deterministically (supertest cannot model a mid-stream abort).
+// The express Router returned by createRepairPlanRouter is itself a callable
+// `(req, res, next)` middleware.
+function invokeRoute(runAgent, body) {
+  const router = createRepairPlanRouter({ runAgent });
+
+  const req = new EventEmitter();
+  req.method = "POST";
+  req.url = "/";
+  req.headers = {};
+  req.body = body;
+
+  const frames = [];
+  const res = new EventEmitter();
+  res.writableFinished = false;
+  res.writeHead = () => res;
+  res.write = (chunk) => {
+    frames.push(String(chunk));
+    return true;
+  };
+
+  let resolveFinished;
+  const finished = new Promise((resolve) => {
+    resolveFinished = resolve;
+  });
+  res.end = () => {
+    if (!res.writableFinished) {
+      res.writableFinished = true;
+      res.emit("finish");
+      res.emit("close");
+    }
+    resolveFinished();
+  };
+
+  router(req, res, (error) => {
+    if (error) {
+      throw error;
+    }
+  });
+
+  return { req, res, frames, finished };
 }
 
 // --- Tool unit tests -------------------------------------------------------
@@ -385,4 +431,157 @@ test("POST /api/repair-plan streams ai_not_configured when no key is configured"
   assert.equal(response.status, 200);
   const events = parseSse(response.text);
   assert.ok(events.some((event) => event.type === "ai_not_configured"));
+});
+
+// --- Disconnect handling regression tests ----------------------------------
+
+test("repair-plan route does not abort the agent when the request body completes", async () => {
+  // Regression guard: the route used to call abortController.abort() on the
+  // request's "close" event, which Node fires as soon as the POST body has been
+  // read — not on disconnect. That cancelled the in-flight OpenAI request and
+  // surfaced as a spurious "This operation was aborted" error.
+  let capturedSignal;
+
+  const runAgent = async (_req, { emit, signal }) => {
+    capturedSignal = signal;
+    // Yield to the event loop so any spurious request "close" abort would land.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    emit({ type: "done", status: "completed", text: "Plan ready.", artifacts: {} });
+  };
+
+  const { req, frames, finished } = invokeRoute(runAgent, { brief: "Front brakes squeak." });
+
+  // Simulate Node emitting the request's "close" once the body is parsed.
+  req.emit("close");
+
+  await finished;
+
+  assert.equal(capturedSignal.aborted, false, "the agent signal must not abort on normal body completion");
+  assert.ok(
+    frames.some((frame) => frame.includes('"type":"done"')),
+    "expected a done frame to reach the client"
+  );
+  assert.ok(
+    !frames.some((frame) => frame.includes('"type":"error"')),
+    "a completed request must not produce an error frame"
+  );
+});
+
+test("repair-plan route aborts the agent on a real client disconnect without an error frame", async () => {
+  let capturedSignal;
+
+  const runAgent = async (_req, { emit, signal }) => {
+    capturedSignal = signal;
+    emit({ type: "status", message: "Analyzing repair brief..." });
+    // Model in flight: resolve only once the client disconnect aborts us.
+    await new Promise((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+  };
+
+  const { res, frames, finished } = invokeRoute(runAgent, { brief: "Front brakes squeak." });
+
+  // Let the handler register its response "close" listener and start the agent.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // The client goes away before the response finished streaming.
+  res.emit("close");
+
+  await finished;
+
+  assert.ok(capturedSignal.aborted, "expected the agent signal to abort on a real disconnect");
+  assert.ok(
+    !frames.some((frame) => frame.includes('"type":"error"')),
+    "a genuine disconnect must not emit a user-facing error frame"
+  );
+});
+
+test("runRepairPlannerAgent treats an AbortError as a quiet client disconnect", async () => {
+  const events = [];
+
+  // eslint-disable-next-line require-yield -- models an abort thrown before any output
+  async function* abortingStreamTurn() {
+    const error = new Error("This operation was aborted");
+    error.name = "AbortError";
+    throw error;
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: abortingStreamTurn,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
+  assert.equal(result.status, "aborted");
+  assert.ok(
+    !events.some((event) => event.type === "error"),
+    "an AbortError must not surface a user-facing error frame"
+  );
+});
+
+test("runRepairPlannerAgent still surfaces real model failures as an error frame", async () => {
+  // The AbortError guard must not swallow genuine OpenAI/network failures.
+  const events = [];
+
+  // eslint-disable-next-line require-yield -- models a model/network failure before any output
+  async function* failingStreamTurn() {
+    throw new Error("OpenAI request failed (500): upstream error");
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: failingStreamTurn,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
+  assert.equal(result.status, "error");
+  const errorEvent = events.find((event) => event.type === "error");
+  assert.ok(errorEvent, "expected an error frame for a real model failure");
+  assert.match(errorEvent.message, /500/);
+});
+
+test("runRepairPlannerAgent emits a truncation status when the loop ends with no narrative", async () => {
+  const events = [];
+
+  // The model only ever asks for a tool and never writes narrative text, so the
+  // turn budget is exhausted with an empty finalText.
+  async function* toolOnlyStreamTurn() {
+    yield {
+      type: "function_call",
+      callId: "call_extract",
+      name: "extract_repair_tasks",
+      arguments: { brief: "Front brakes squeak." },
+    };
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: toolOnlyStreamTurn,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+      maxTurns: 2,
+    }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.text, "");
+  const truncationStatus = events
+    .filter((event) => event.type === "status")
+    .find((event) => /truncated/i.test(event.message));
+  assert.ok(truncationStatus, "expected a truncation status when no narrative was written");
+  assert.equal(events.at(-1).type, "done");
 });

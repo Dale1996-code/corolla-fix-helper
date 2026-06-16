@@ -22,6 +22,8 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `npm run embed:backfill` embeds existing `document_chunks` with the active OpenAI embedding config and skips chunks already at the current embedding version.
 - `npm run eval:retrieval` runs the hybrid retrieval eval and prints keyword-only vs hybrid top-page results.
 - `npm run eval:answers` runs the live answer-quality eval against the real embedded database. It skips when `OPENAI_API_KEY` is not set and fails only verified cases.
+- `npm run restore -- "C:\path\to\corolla-fix-helper-backup-....tar.gz"` restores a backup archive into the configured database file and uploads folder (stop the server first). See `docs/backup-restore.md`.
+- `npm run backup:drill` runs an end-to-end backup + restore round trip on a throwaway temp install with fake data.
 - `npm start` starts the Express server, which can serve `client/dist` after `npm run build`.
 
 ## Local Workflow Checks

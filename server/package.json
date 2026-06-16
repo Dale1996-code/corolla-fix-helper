@@ -7,6 +7,8 @@
     "dev": "node --watch --watch-path=src src/index.js",
     "start": "node src/index.js",
     "import": "node src/scripts/importFolder.js",
+    "restore": "node src/scripts/restoreBackup.js",
+    "backup:drill": "node src/scripts/backupDrill.js",
     "embed:backfill": "node src/scripts/embedBackfill.js",
     "eval:retrieval": "node src/scripts/evalHybridRetrieval.js",
     "eval:answers": "node src/scripts/evalAnswers.js",

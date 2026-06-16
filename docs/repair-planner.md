@@ -78,6 +78,27 @@ one `data: <json>\n\n` frame. Event types:
 Request body: `{ brief, skillLevel, availableTools, availableParts, constraints }`.
 Only `brief` is required.
 
+### Disconnect handling
+
+The agent should be cancelled when the browser actually goes away, but **not**
+when the request body simply finishes being read. The route therefore wires its
+`AbortController` to the **response** stream's `"close"` event (guarded by
+`response.writableFinished`), never to the request's `"close"` — Node fires the
+latter as soon as `express.json()` has consumed the POST body, which would abort
+the in-flight OpenAI request the instant streaming begins and surface a spurious
+`error` frame reading "This operation was aborted". A genuine disconnect aborts
+the OpenAI `fetch`; the resulting `AbortError` is treated as a quiet end (no
+`error` frame), since there is no client left to receive one. Real model/network
+failures (4xx/5xx, stream-parse errors) still surface verbatim through `error`.
+
+### Truncated runs
+
+The loop is bounded by `maxTurns`. If the model spends its whole budget on tool
+calls and never writes a narrative, the run still ends with `done` but emits a
+`status` frame explaining the plan was truncated (narrow the brief) so the UI
+shows guidance instead of a silent blank narrative. The structured artifacts
+gathered so far are still included.
+
 ## Setup
 
 Set the key in the server environment (see `.env.example`):

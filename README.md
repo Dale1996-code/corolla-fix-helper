@@ -24,6 +24,7 @@ The current codebase includes:
 - Procedures with create, edit, delete, filters, sorting, steps, tools, parts, safety notes, and document links
 - Notes with create, edit, delete, filters, sorting, and links to a document, symptom, or procedure
 - Settings for the single vehicle profile, document defaults, runtime info, and backup export
+- Restore from an exported backup with a pre-restore snapshot and rollback on failure (`npm run restore`), plus a `npm run backup:drill` round-trip check — see [docs/backup-restore.md](docs/backup-restore.md)
 - Production serving of the built React app from the Express server
 - A Dockerfile for the intended Google Compute Engine deployment path
 
@@ -35,7 +36,6 @@ The current app does not include:
 - cloud sync
 - multi-vehicle support
 - general open-ended AI chat (the Ask and Repair Planner features stay grounded in the uploaded documents and the repair brief)
-- automatic restore from a backup archive
 - a verified current cloud deployment from this branch
 
 The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. After importing or re-extracting PDFs, run `npm run embed:backfill` so existing chunks, including OCR-created chunks, have current embeddings. Without an OpenAI key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.

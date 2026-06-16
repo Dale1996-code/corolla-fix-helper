@@ -30,9 +30,24 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
       response.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
-    // Stop the agent if the client disconnects mid-stream.
+    // Stop the agent only when the client actually disconnects mid-stream.
+    //
+    // Do NOT wire abort to the *request*'s "close" event: Node emits that as
+    // soon as the request body has been read (right after `express.json()`
+    // parses the POST), which is not a disconnect. Aborting there cancels the
+    // in-flight OpenAI request the moment the SSE response starts streaming,
+    // which surfaces as a spurious "This operation was aborted" error.
+    //
+    // The *response* stream instead stays open for the whole SSE session and
+    // only closes when the client genuinely goes away. Guard on
+    // `writableFinished` so a normal end (we called `response.end()`) never
+    // triggers an abort.
     const abortController = new AbortController();
-    request.on("close", () => abortController.abort());
+    response.on("close", () => {
+      if (!response.writableFinished) {
+        abortController.abort();
+      }
+    });
 
     try {
       await runAgent(
@@ -46,7 +61,13 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
         { emit: send, signal: abortController.signal }
       );
     } catch (error) {
-      send({ type: "error", message: error.message || "The repair planner failed." });
+      // A genuine client disconnect aborts the in-flight request; there is no
+      // longer anyone to receive a frame, so end quietly instead of writing a
+      // user-facing error to a dead socket. Real model/network failures still
+      // surface verbatim.
+      if (error?.name !== "AbortError") {
+        send({ type: "error", message: error.message || "The repair planner failed." });
+      }
     } finally {
       response.end();
     }
