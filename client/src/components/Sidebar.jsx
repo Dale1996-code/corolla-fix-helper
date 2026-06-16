@@ -3,12 +3,12 @@ import { navigationItems } from "../lib/navigation";
 
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 hidden min-h-screen w-72 shrink-0 border-r border-slate-300 bg-[#111827] px-5 py-6 text-white lg:flex lg:flex-col">
+    <aside className="editorial-sidebar sticky top-0 hidden min-h-screen w-72 shrink-0 border-r border-slate-300 px-5 py-6 text-white lg:flex lg:flex-col">
       <div className="mb-8 border-b border-white/10 pb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
           Corolla Fix Helper
         </p>
-        <h1 className="mt-2 text-2xl font-bold text-white">
+        <h1 className="mt-2 font-display text-[2rem] font-bold leading-none text-white">
           Local Repair Helper
         </h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">
@@ -23,10 +23,10 @@ export function Sidebar() {
             to={item.to}
             className={({ isActive }) =>
               [
-                "block rounded-lg px-4 py-3 text-sm font-semibold transition-colors",
+                "block rounded-lg border border-transparent px-4 py-3 text-sm font-semibold transition-colors",
                 isActive
                   ? "bg-white text-slate-950 shadow-sm"
-                  : "text-slate-300 hover:bg-white/10 hover:text-white",
+                  : "text-slate-300 hover:border-white/10 hover:bg-white/10 hover:text-white",
               ].join(" ")
             }
           >
