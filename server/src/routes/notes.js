@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -485,7 +486,7 @@ notesRouter.put("/:id", (request, response) => {
   }
 });
 
-notesRouter.delete("/:id", (request, response) => {
+notesRouter.delete("/:id", async (request, response) => {
   const noteId = parsePositiveInt(request.params.id);
 
   if (noteId === null) {
@@ -511,6 +512,8 @@ notesRouter.delete("/:id", (request, response) => {
       });
       return;
     }
+
+    await deleteAttachmentsForEntity("note", noteId);
 
     response.json({
       message: "Note deleted.",

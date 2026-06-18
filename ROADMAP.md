@@ -16,6 +16,7 @@ The current app supports:
 - Symptoms linked to documents
 - Procedures linked to documents
 - Notes linked to one document, symptom, or procedure
+- Image attachments (JPEG, PNG, WebP) on symptoms, procedures, and notes, with per-entity upload, view, and delete, and cleanup when the owning record is deleted
 - Settings for vehicle profile, document defaults, runtime information, and backup export
 - Restore from an exported backup with archive validation, a pre-restore snapshot, atomic swap, and rollback on failure (`npm run restore`), plus a `npm run backup:drill` round-trip check
 - Root build and test commands

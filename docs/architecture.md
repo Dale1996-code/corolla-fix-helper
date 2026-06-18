@@ -50,6 +50,7 @@ Current route groups:
 - `/api/symptoms` handles symptom records and document links.
 - `/api/procedures` handles procedure records and document links.
 - `/api/notes` handles notes and links to documents, symptoms, or procedures.
+- `/api/attachments` handles image attachments (upload, list, file open, delete) for symptoms, procedures, and notes.
 - `/api/settings` handles vehicle profile, document defaults, runtime info, and backup export.
 
 ## Frontend Pages
@@ -72,9 +73,10 @@ Current storage:
 
 - SQLite database file for records and settings
 - local uploads folder for PDF files
+- image attachments for symptoms, procedures, and notes under `UPLOADS_DIR/attachments/images/` (documents stay PDF-only)
 - `document_chunks` rows for page-aware text chunks and Float32 embedding BLOBs used by document Q&A
 - `documents.file_md5` for resumable bulk-import duplicate detection
-- optional backup export as a `.tar.gz` archive
+- optional backup export as a `.tar.gz` archive (covers the whole uploads tree, including attachment images)
 
 See `DATA_MODEL.md` for table details.
 

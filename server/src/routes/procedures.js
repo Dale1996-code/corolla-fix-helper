@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -406,7 +407,7 @@ proceduresRouter.put("/:id", (request, response) => {
   }
 });
 
-proceduresRouter.delete("/:id", (request, response) => {
+proceduresRouter.delete("/:id", async (request, response) => {
   const procedureId = parsePositiveInt(request.params.id);
 
   if (procedureId === null) {
@@ -432,6 +433,8 @@ proceduresRouter.delete("/:id", (request, response) => {
       });
       return;
     }
+
+    await deleteAttachmentsForEntity("procedure", procedureId);
 
     response.json({
       message: "Procedure deleted.",

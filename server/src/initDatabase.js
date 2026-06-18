@@ -153,6 +153,22 @@ function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_document_chunks_page
       ON document_chunks (page_number);
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER NOT NULL,
+      original_filename TEXT NOT NULL,
+      stored_filename TEXT NOT NULL,
+      file_path TEXT,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER,
+      caption TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_attachments_entity
+      ON attachments (entity_type, entity_id);
   `);
 
   ensureColumn("documents", "file_type", "TEXT");

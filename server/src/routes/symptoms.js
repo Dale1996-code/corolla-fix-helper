@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -384,7 +385,7 @@ symptomsRouter.put("/:id", (request, response) => {
   }
 });
 
-symptomsRouter.delete("/:id", (request, response) => {
+symptomsRouter.delete("/:id", async (request, response) => {
   const symptomId = parsePositiveInt(request.params.id);
 
   if (symptomId === null) {
@@ -410,6 +411,8 @@ symptomsRouter.delete("/:id", (request, response) => {
       });
       return;
     }
+
+    await deleteAttachmentsForEntity("symptom", symptomId);
 
     response.json({
       message: "Symptom deleted.",

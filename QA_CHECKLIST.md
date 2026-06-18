@@ -157,6 +157,30 @@ Check:
 - The detail panel shows the linked item.
 - The linked item opens from the note detail panel.
 
+## 11. Image Attachments
+
+Use test symptoms, procedures, and notes, not important data. Attachments are
+image-only; documents stay PDF-only and are not affected.
+
+1. Open a symptom detail panel and find the **Photos** section.
+2. Upload a JPEG, PNG, or WebP image, optionally with a caption.
+3. Click the thumbnail to open the full image, then click **Remove** to delete it.
+4. Try uploading a non-image file (for example a `.txt` or `.pdf`).
+5. Repeat the upload on a procedure and on a note detail panel.
+6. Attach an image to a test symptom, then delete that symptom.
+
+Check:
+
+- The uploaded image appears as a thumbnail in the Photos section after upload.
+- The thumbnail opens the stored image inline.
+- Remove deletes the image from the panel.
+- A non-image file is rejected with a clear "image" error and nothing is saved.
+- Procedures and notes show the same Photos panel and behavior.
+- Deleting the owning symptom, procedure, or note removes its attachments, and
+  `UPLOADS_DIR/attachments/images/` no longer holds the orphaned files.
+- `npm run backup:drill` still passes and reports that the attachment image came
+  back intact.
+
 ## 11. Build And Tests
 
 ```powershell

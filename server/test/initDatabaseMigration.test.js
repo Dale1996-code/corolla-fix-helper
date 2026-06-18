@@ -45,3 +45,39 @@ test("initializeDatabase migrates legacy document_chunks before indexing embeddi
     indexes.some((index) => index.name === "idx_document_chunks_embedding_version")
   );
 });
+
+test("initializeDatabase creates the attachments table and its entity index", () => {
+  initializeDatabase();
+
+  const attachmentsTable = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attachments'"
+    )
+    .get();
+  assert.ok(attachmentsTable, "attachments table should exist");
+
+  const columnNames = db
+    .prepare("PRAGMA table_info(attachments)")
+    .all()
+    .map((column) => column.name);
+
+  for (const expectedColumn of [
+    "id",
+    "entity_type",
+    "entity_id",
+    "original_filename",
+    "stored_filename",
+    "mime_type",
+  ]) {
+    assert.ok(
+      columnNames.includes(expectedColumn),
+      `attachments table should have a ${expectedColumn} column`
+    );
+  }
+
+  const indexes = db.prepare("PRAGMA index_list(attachments)").all();
+  assert.ok(
+    indexes.some((index) => index.name === "idx_attachments_entity"),
+    "attachments table should have idx_attachments_entity"
+  );
+});

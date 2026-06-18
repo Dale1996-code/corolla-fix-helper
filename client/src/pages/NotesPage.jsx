@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
@@ -708,6 +709,8 @@ function NoteDetails({
             )}
           </div>
         ) : null}
+
+        <AttachmentPanel entityType="note" entityId={note.id} />
       </div>
 
       {isEditing ? (
