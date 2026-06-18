@@ -4,6 +4,7 @@ import cors from "cors";
 import express from "express";
 import { createAskRouter } from "./routes/ask.js";
 import { createRepairPlanRouter } from "./routes/repairPlan.js";
+import { attachmentsRouter } from "./routes/attachments.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { initializeDatabase } from "./initDatabase.js";
@@ -71,6 +72,7 @@ export function createApp(options = {}) {
   app.use("/api/symptoms", symptomsRouter);
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);
+  app.use("/api/attachments", attachmentsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/ask", createAskRouter({ askQuestion }));
   app.use("/api/repair-plan", createRepairPlanRouter({ runAgent: runRepairPlan }));

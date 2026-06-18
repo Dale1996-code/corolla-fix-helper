@@ -12,6 +12,7 @@ The full app architecture is described in `docs/architecture.md`.
 
 - Database file: configured by `DATABASE_FILE`
 - Uploaded PDF folder: configured by `UPLOADS_DIR`
+- Image attachment folder: `UPLOADS_DIR` + `/attachments/images/` (kept inside the uploads tree so backups capture it automatically)
 - Default local database path: `server/data/corolla-fix-helper.db`
 - Default local upload path: `server/uploads`
 
@@ -140,6 +141,7 @@ Current use:
 - Create, edit, and delete symptoms.
 - Search, filter, and sort symptoms.
 - Link symptoms to documents.
+- Attach images (stored in the `attachments` table).
 
 ### `symptom_documents`
 
@@ -179,6 +181,7 @@ Current use:
 - Store steps, tools, parts, safety notes, difficulty, and confidence.
 - Search, filter, and sort procedures.
 - Link procedures to documents.
+- Attach images (stored in the `attachments` table).
 
 ### `procedure_documents`
 
@@ -215,6 +218,7 @@ Current use:
 - Organize notes by note type.
 - Link one note to one document, symptom, or procedure.
 - Return linked record details as `linkedDocument`, `linkedSymptom`, or `linkedProcedure`.
+- Attach images (stored in the `attachments` table).
 
 Older note rows may still use `document_id` and `body`. The server includes backfill logic to keep older rows usable.
 
@@ -243,6 +247,32 @@ Current use:
 The table keeps each document, page, and chunk index unique so re-running extraction can replace old chunks cleanly.
 
 `embedding` stores the Float32 embedding as a SQLite BLOB. `embedding_version` stores the active model and dimension pair, for example `text-embedding-3-small@512`. Hybrid retrieval ignores chunks whose `embedding_version` does not match the current config.
+
+### `attachments`
+
+Stores image attachments for symptoms, procedures, and notes. Documents stay PDF-only and keep their own storage; image attachments are a separate, image-only feature.
+
+Important fields:
+
+- `id`
+- `entity_type` (`symptom`, `procedure`, or `note`)
+- `entity_id`
+- `original_filename`
+- `stored_filename`
+- `file_path`
+- `mime_type` (`image/jpeg`, `image/png`, or `image/webp`)
+- `file_size`
+- `caption`
+- `created_at`
+
+Current use:
+
+- Upload images against a symptom, procedure, or note (`POST /api/attachments`).
+- List the images for one entity (`GET /api/attachments?entityType=...&entityId=...`).
+- Serve a stored image inline (`GET /api/attachments/:id/file`).
+- Delete one image and its file (`DELETE /api/attachments/:id`).
+
+The `(entity_type, entity_id)` pair is polymorphic and is **not** a foreign key (the same approach the note links use), so it is indexed by `idx_attachments_entity`. Because there is no `ON DELETE CASCADE`, the symptom, procedure, and note delete paths call `deleteAttachmentsForEntity(entityType, entityId)` to remove the rows and their stored files. Image files live under `UPLOADS_DIR/attachments/images/`.
 
 ## Search
 

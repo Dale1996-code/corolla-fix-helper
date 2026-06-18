@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -373,13 +374,13 @@ notesRouter.put("/:id", (request, response) => {
     }
 
     const legacyDocumentId =
-      Number.isInteger(existingNote.document_id) && existingNote.document_id > 0
+      Number.isInteger(existingNote.document_id) && Number(existingNote.document_id) > 0
         ? existingNote.document_id
         : null;
     const existingTypeRaw = normalizeText(existingNote.related_entity_type).toLowerCase();
     const existingRelatedEntityType = existingTypeRaw || (legacyDocumentId ? "document" : "none");
     const existingRelatedEntityId =
-      Number.isInteger(existingNote.related_entity_id) && existingNote.related_entity_id > 0
+      Number.isInteger(existingNote.related_entity_id) && Number(existingNote.related_entity_id) > 0
         ? existingNote.related_entity_id
         : legacyDocumentId;
 
@@ -485,7 +486,7 @@ notesRouter.put("/:id", (request, response) => {
   }
 });
 
-notesRouter.delete("/:id", (request, response) => {
+notesRouter.delete("/:id", async (request, response) => {
   const noteId = parsePositiveInt(request.params.id);
 
   if (noteId === null) {
@@ -511,6 +512,8 @@ notesRouter.delete("/:id", (request, response) => {
       });
       return;
     }
+
+    await deleteAttachmentsForEntity("note", noteId);
 
     response.json({
       message: "Note deleted.",

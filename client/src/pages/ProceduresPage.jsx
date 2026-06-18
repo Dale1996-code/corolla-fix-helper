@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
@@ -736,6 +737,8 @@ function ProcedureDetails({
             <p className="mt-2 text-slate-700">No linked documents yet.</p>
           )}
         </div>
+
+        <AttachmentPanel entityType="procedure" entityId={procedure.id} />
       </div>
 
       {isEditing ? (

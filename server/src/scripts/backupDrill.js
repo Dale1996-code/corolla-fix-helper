@@ -30,12 +30,28 @@ const FAKE_PDF_BYTES = Buffer.from(
   "utf8"
 );
 
+// First bytes of a PNG file header; enough to prove the image folder round-trips.
+const FAKE_IMAGE_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x44, 0x52, 0x49, 0x4c, 0x4c,
+]);
+
+// Where attachmentService stores image uploads, relative to the uploads dir.
+const ATTACHMENT_IMAGE_RELPATH = path.join(
+  "attachments",
+  "images",
+  "drill-symptom-photo.png"
+);
+
 function seedFakeData({ databaseFile, uploadsDir }) {
   fs.mkdirSync(path.dirname(databaseFile), { recursive: true });
   fs.mkdirSync(uploadsDir, { recursive: true });
 
   const storedFilename = "drill-brake-guide.pdf";
   fs.writeFileSync(path.join(uploadsDir, storedFilename), FAKE_PDF_BYTES);
+
+  const attachmentImagePath = path.join(uploadsDir, ATTACHMENT_IMAGE_RELPATH);
+  fs.mkdirSync(path.dirname(attachmentImagePath), { recursive: true });
+  fs.writeFileSync(attachmentImagePath, FAKE_IMAGE_BYTES);
 
   const db = new DatabaseSync(databaseFile);
 
@@ -133,8 +149,18 @@ async function runDrill() {
       "restored PDF bytes should match the original"
     );
 
+    const restoredImage = fs.readFileSync(
+      path.join(uploadsDir, ATTACHMENT_IMAGE_RELPATH)
+    );
+    assert.ok(
+      restoredImage.equals(FAKE_IMAGE_BYTES),
+      "restored attachment image bytes should match the original"
+    );
+
     console.log("");
-    console.log("Backup + restore drill PASSED. Data and PDF came back intact.");
+    console.log(
+      "Backup + restore drill PASSED. Data, PDF, and attachment image came back intact."
+    );
   } finally {
     fs.rmSync(drillRoot, { recursive: true, force: true });
   }

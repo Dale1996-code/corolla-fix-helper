@@ -31,3 +31,64 @@ export async function requestJson(url, options = {}) {
 
   return payload;
 }
+
+// ---------------------------------------------------------------------------
+// Attachment helpers
+//
+// Image attachments hang off a symptom, procedure, or note (the entity type +
+// id). Uploads are multipart, so they go through requestJson with a FormData
+// body (fetch sets the multipart boundary itself — do not set Content-Type).
+// ---------------------------------------------------------------------------
+
+/** Inline URL the browser uses to load a stored attachment image. */
+export function attachmentFileUrl(attachmentId) {
+  return `/api/attachments/${attachmentId}/file`;
+}
+
+/** List the attachments for one entity. Returns an array (possibly empty). */
+export async function fetchAttachments(entityType, entityId) {
+  const params = new URLSearchParams({
+    entityType,
+    entityId: String(entityId),
+  });
+
+  const payload = await requestJson(`/api/attachments?${params.toString()}`, {
+    errorMessage: "Could not load attachments.",
+  });
+
+  return Array.isArray(payload.attachments) ? payload.attachments : [];
+}
+
+/** Upload one image for an entity and return the created attachment. */
+export async function uploadAttachment({
+  entityType,
+  entityId,
+  file,
+  caption = "",
+}) {
+  const formData = new FormData();
+  formData.append("entityType", entityType);
+  formData.append("entityId", String(entityId));
+
+  if (caption) {
+    formData.append("caption", caption);
+  }
+
+  formData.append("image", file);
+
+  const payload = await requestJson("/api/attachments", {
+    method: "POST",
+    body: formData,
+    errorMessage: "Could not upload the image.",
+  });
+
+  return payload.attachment;
+}
+
+/** Delete one attachment by id. */
+export async function deleteAttachment(attachmentId) {
+  return requestJson(`/api/attachments/${attachmentId}`, {
+    method: "DELETE",
+    errorMessage: "Could not delete the attachment.",
+  });
+}
