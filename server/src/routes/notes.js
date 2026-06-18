@@ -374,13 +374,13 @@ notesRouter.put("/:id", (request, response) => {
     }
 
     const legacyDocumentId =
-      Number.isInteger(existingNote.document_id) && existingNote.document_id > 0
+      Number.isInteger(existingNote.document_id) && Number(existingNote.document_id) > 0
         ? existingNote.document_id
         : null;
     const existingTypeRaw = normalizeText(existingNote.related_entity_type).toLowerCase();
     const existingRelatedEntityType = existingTypeRaw || (legacyDocumentId ? "document" : "none");
     const existingRelatedEntityId =
-      Number.isInteger(existingNote.related_entity_id) && existingNote.related_entity_id > 0
+      Number.isInteger(existingNote.related_entity_id) && Number(existingNote.related_entity_id) > 0
         ? existingNote.related_entity_id
         : legacyDocumentId;
 
