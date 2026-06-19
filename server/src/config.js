@@ -24,6 +24,8 @@ function readBoolean(value, fallback) {
 }
 
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
+const openAiAnswerModel =
+  process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1";
 const openAiEmbeddingModel =
   process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 const openAiEmbeddingDimensions = readPositiveInteger(
@@ -37,8 +39,10 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
   openAiApiKey: typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY : "",
-  openAiAnswerModel:
-    process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1",
+  openAiAnswerModel,
+  // Vision Ask reuses the answer model unless OPENAI_VISION_MODEL is set, so a
+  // text-only deployment needs no extra configuration.
+  openAiVisionModel: process.env.OPENAI_VISION_MODEL || openAiAnswerModel,
   openAiEmbeddingModel,
   openAiEmbeddingDimensions,
   openAiEmbeddingVersion: `${openAiEmbeddingModel}@${openAiEmbeddingDimensions}`,

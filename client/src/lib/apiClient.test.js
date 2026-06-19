@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { requestJson } from "./apiClient.js";
+import { fetchAllImageAttachments, requestJson } from "./apiClient.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -49,5 +49,31 @@ describe("requestJson", () => {
     await expect(requestJson("/api/thing", { errorMessage: "fallback" })).rejects.toThrow(
       "fallback"
     );
+  });
+});
+
+describe("fetchAllImageAttachments", () => {
+  it("requests the all-attachments endpoint and returns the attachments array", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ attachments: [{ id: 1 }, { id: 2 }], total: 2 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAllImageAttachments();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/attachments/all", {});
+    expect(result).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  it("returns an empty array when the payload has no attachments", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    );
+
+    const result = await fetchAllImageAttachments();
+
+    expect(result).toEqual([]);
   });
 });

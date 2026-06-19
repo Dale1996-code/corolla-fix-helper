@@ -10,6 +10,7 @@ import {
   getAttachmentsImageDir,
   isAllowedEntityType,
   isAllowedImageMimeType,
+  listAllAttachments,
   listAttachments,
 } from "../services/attachmentService.js";
 import { normalizeText } from "../utils/text.js";
@@ -71,6 +72,19 @@ attachmentsRouter.get("/", (request, response) => {
   }
 
   const attachments = listAttachments(entityType, entityId);
+
+  response.json({
+    attachments,
+    total: attachments.length,
+  });
+});
+
+// List every saved image across all entities. Added for Vision Ask, whose
+// picker has no owning symptom/procedure/note, so the entity-scoped `GET /`
+// cannot serve it. A distinct path keeps the existing entity-scoped contract
+// unchanged. Registered before `/:id/file` so the static segment wins.
+attachmentsRouter.get("/all", (_request, response) => {
+  const attachments = listAllAttachments();
 
   response.json({
     attachments,

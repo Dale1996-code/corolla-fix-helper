@@ -270,7 +270,10 @@ Current use:
 - Upload images against a symptom, procedure, or note (`POST /api/attachments`).
 - List the images for one entity (`GET /api/attachments?entityType=...&entityId=...`).
 - Serve a stored image inline (`GET /api/attachments/:id/file`).
+- List every saved image across all entities (`GET /api/attachments/all`), used by the Vision Ask picker on the Search page.
 - Delete one image and its file (`DELETE /api/attachments/:id`).
+
+Vision Ask reuses these saved rows read-only: `POST /api/ask` accepts an optional `attachmentId`, and the server loads that record and its stored file to show the model the photo. Attachment images are never copied into `document_chunks`; documents stay PDF-only and remain the only source of repair facts.
 
 The `(entity_type, entity_id)` pair is polymorphic and is **not** a foreign key (the same approach the note links use), so it is indexed by `idx_attachments_entity`. Because there is no `ON DELETE CASCADE`, the symptom, procedure, and note delete paths call `deleteAttachmentsForEntity(entityType, entityId)` to remove the rows and their stored files. Image files live under `UPLOADS_DIR/attachments/images/`.
 

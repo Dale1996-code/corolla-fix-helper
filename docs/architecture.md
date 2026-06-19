@@ -42,7 +42,7 @@ Current route groups:
 - `/api/health` returns health status.
 - `/api/dashboard` returns dashboard counts and recent activity.
 - `/api/documents` handles document list, upload, file open, metadata edit, extraction re-run, and delete cleanup.
-- `/api/ask` answers uploaded-document questions using retrieved document chunks and OpenAI when configured.
+- `/api/ask` answers uploaded-document questions using retrieved document chunks and OpenAI when configured. It optionally accepts one saved image attachment by `attachmentId` so the model can see a photo, while repair specs, procedures, and steps still come only from PDF chunks (Vision Ask).
 - `/api/search` and `/api/search/documents` search documents.
 - `/api/search/symptoms` searches symptoms.
 - `/api/search/procedures` searches procedures.
@@ -96,6 +96,12 @@ Current flow:
 If no useful chunks are found, the app returns `not in documents`. If useful chunks are found but no OpenAI key is configured, it returns an "AI is not configured" state.
 
 The current app uses SQLite-stored embedding BLOBs and an in-memory cosine scan. It does not use a vector database or SQLite vector extension.
+
+### Optional image in Ask (Vision Ask)
+
+`POST /api/ask` accepts an optional `attachmentId` that points at one already-saved image attachment (the Phase 1 symptom/procedure/note photos). The Search page Ask panel lets the user pick from existing saved attachments; it never uploads a new file and never sends raw or base64 image data from the client. The backend loads that attachment record and its stored file from attachment storage (`server/src/routes/ask.js` `loadAttachmentImageFromStorage`, injectable for tests) and turns it into a `data:` URI.
+
+When an image is present, `aiAnswerService.js` switches only that OpenAI request to the Responses API structured input (`input_text` + `input_image`) and uses `OPENAI_VISION_MODEL` (which defaults to `OPENAI_ANSWER_MODEL`). Everything else is unchanged: retrieval still runs on the text question only, images never enter `document_chunks`, documents stay PDF-only, and the same not-found gate applies. The model may describe what is visible in the photo, but every repair spec, torque value, capacity, tool, step, and warning must still come from the retrieved PDF chunks and stays cited. Without `OPENAI_API_KEY`, Ask degrades to the same "AI not configured" state whether or not an image is attached.
 
 ## Bulk PDF Import Path
 

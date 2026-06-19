@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { attachmentFileUrl, fetchAllImageAttachments } from "../lib/apiClient";
 import { buildEntityLink } from "../lib/navigation";
 
 const defaultDocumentsForm = {
@@ -423,6 +424,34 @@ function AskDocumentsSection() {
     status: "empty",
     message: "Type a question about your uploaded documents to begin.",
   });
+  const [attachments, setAttachments] = useState([]);
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState("");
+
+  // Load the saved images so the user can optionally attach one. Ask only ever
+  // references an already-saved attachment by id; it never uploads here.
+  useEffect(() => {
+    let active = true;
+
+    fetchAllImageAttachments()
+      .then((items) => {
+        if (active) {
+          setAttachments(items);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAttachments([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedAttachment = attachments.find(
+    (attachment) => String(attachment.id) === selectedAttachmentId
+  );
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -450,11 +479,17 @@ function AskDocumentsSection() {
     });
     setQuestion("");
 
+    const requestBody = { question: trimmedQuestion, history };
+
+    if (selectedAttachmentId) {
+      requestBody.attachmentId = Number(selectedAttachmentId);
+    }
+
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmedQuestion, history }),
+        body: JSON.stringify(requestBody),
       });
       const payload = await response.json();
 
@@ -512,6 +547,56 @@ function AskDocumentsSection() {
             placeholder="What is the oil drain plug torque?"
           />
         </label>
+
+        {attachments.length ? (
+          <div className="grid gap-2 text-sm text-slate-700">
+            <label className="grid gap-2">
+              <span className="font-medium text-slate-900">
+                Attach a saved photo (optional)
+              </span>
+              <select
+                className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
+                value={selectedAttachmentId}
+                onChange={(event) => setSelectedAttachmentId(event.target.value)}
+              >
+                <option value="">No photo</option>
+                {attachments.map((attachment) => (
+                  <option key={attachment.id} value={String(attachment.id)}>
+                    {attachment.caption ||
+                      attachment.originalFilename ||
+                      `Attachment ${attachment.id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <p className="text-xs text-slate-500">
+              The photo helps describe what you see. Specs, torque values, and
+              repair steps still come only from your uploaded PDFs.
+            </p>
+
+            {selectedAttachment ? (
+              <div className="flex items-center gap-3">
+                <img
+                  src={attachmentFileUrl(selectedAttachment.id)}
+                  alt={
+                    selectedAttachment.caption ||
+                    selectedAttachment.originalFilename ||
+                    "Selected photo"
+                  }
+                  className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSelectedAttachmentId("")}
+                  className="text-sm font-medium text-red-700 transition hover:text-red-900"
+                >
+                  Remove photo
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap gap-3">
           <button

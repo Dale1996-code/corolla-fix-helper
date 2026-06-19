@@ -111,6 +111,37 @@ export function getAttachmentById(attachmentId) {
   return row ? mapAttachmentRow(row) : null;
 }
 
+/**
+ * List every stored attachment across all entities, newest first.
+ *
+ * The attachments table is image-only by construction (createAttachment rejects
+ * non-image mime types), so this doubles as "all saved images". Vision Ask uses
+ * it to let the user pick an already-saved image without an owning entity.
+ */
+export function listAllAttachments() {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        id,
+        entity_type,
+        entity_id,
+        original_filename,
+        stored_filename,
+        file_path,
+        mime_type,
+        file_size,
+        caption,
+        created_at
+      FROM attachments
+      ORDER BY created_at DESC, id DESC
+    `
+    )
+    .all();
+
+  return rows.map((row) => mapAttachmentRow(row));
+}
+
 export function listAttachments(entityType, entityId) {
   assertEntityType(entityType);
 

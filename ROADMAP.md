@@ -55,6 +55,7 @@ The first document Q&A version is now partially implemented:
 - The Search page has an "Ask your documents" panel.
 - Uploaded and re-extracted PDFs are split into `document_chunks`.
 - `POST /api/ask` accepts a question and returns an answer status, answer text, and citations.
+- Ask can optionally include one already-saved image attachment by `attachmentId` (Vision Ask) so the model can see a photo of the symptom or part. Retrieval still runs on the text question only, images never enter `document_chunks`, documents stay PDF-only, and every spec, torque value, capacity, tool, step, and warning still comes only from retrieved PDF chunks. The vision request uses `OPENAI_VISION_MODEL`, which defaults to the answer model.
 - Retrieval fuses keyword ranking with in-memory cosine search over SQLite-stored embedding BLOBs.
 - The answer service uses OpenAI when `OPENAI_API_KEY` is configured.
 - The app returns clear no-key and not-enough-information states.

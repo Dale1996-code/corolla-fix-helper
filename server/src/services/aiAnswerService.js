@@ -145,17 +145,34 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
  *   chunks: any[],
  *   history?: any[],
  *   citations?: any[],
+ *   image?: string | null,
  * }} params
  * @returns {Promise<string>}
  */
-export async function generateAnswerTextFromOpenAi({ question, originalQuestion, chunks }) {
+export async function generateAnswerTextFromOpenAi({
+  question,
+  originalQuestion,
+  chunks,
+  image = null,
+}) {
   const contextText = buildModelContext(chunks);
-  const prompt = [
+  const promptLines = [
     "Answer ONLY using the provided Toyota Corolla repair-manual chunks.",
     "Write a thorough, step-by-step repair answer when the chunks support it.",
     "For torque specs, capacities, dimensions, counts, fluid quantities, and other exact numbers, copy the exact number and unit verbatim from the chunks.",
     "Put a citation beside each quoted spec or procedure detail in this format: [Document title, page N].",
     "Never invent a spec, step, tool, warning, or quantity.",
+  ];
+
+  if (image) {
+    promptLines.push(
+      "An image from the user is attached. You may briefly describe what is visible in it to acknowledge the photo and to understand the symptom or context the user is showing.",
+      "Do NOT treat the image as a source for any specification, torque value, capacity, fluid quantity, tool, repair step, procedure, or warning. Those repair facts must come only from the repair-manual chunks above and must still be cited.",
+      "If the chunks do not support the requested repair, spec, or procedure answer, reply with the exact not-found reply below even when the image looks related."
+    );
+  }
+
+  promptLines.push(
     "If the chunks do not support the answer, reply exactly:",
     NOT_FOUND_MESSAGE,
     "",
@@ -163,8 +180,24 @@ export async function generateAnswerTextFromOpenAi({ question, originalQuestion,
     `Question: ${question}`,
     "",
     "Context chunks:",
-    contextText,
-  ].join("\n");
+    contextText
+  );
+
+  const prompt = promptLines.join("\n");
+  // Plain-string input keeps the text-only request unchanged; only an attached
+  // image switches to the structured Responses input and the vision model.
+  const model = image ? config.openAiVisionModel : config.openAiAnswerModel;
+  const input = image
+    ? [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: prompt },
+            { type: "input_image", image_url: image },
+          ],
+        },
+      ]
+    : prompt;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -173,8 +206,8 @@ export async function generateAnswerTextFromOpenAi({ question, originalQuestion,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: config.openAiAnswerModel,
-      input: prompt,
+      model,
+      input,
     }),
   });
 
@@ -192,6 +225,7 @@ export async function askQuestionUsingDocuments(
     chunkLimit = 8,
     generateAnswerText = generateAnswerTextFromOpenAi,
     history = [],
+    image = null,
     isAiConfigured = Boolean(config.openAiApiKey),
     retrieveChunks = retrieveRelevantChunks,
     rewriteQuestion = rewriteQuestionFromOpenAi,
@@ -267,6 +301,7 @@ export async function askQuestionUsingDocuments(
     history: normalizedHistory,
     chunks,
     citations,
+    image,
   });
 
   if (!answerText || isNotFoundAnswer(answerText)) {
