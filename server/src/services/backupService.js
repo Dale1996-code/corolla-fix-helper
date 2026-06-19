@@ -20,6 +20,7 @@ import fsDefault from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { resolveTarExecutable } from "./tarExecutable.js";
 
 // First 16 bytes of every SQLite database file (the header string plus its
 // terminating NUL). See https://www.sqlite.org/fileformat2.html#the_database_header
@@ -155,7 +156,7 @@ export function validateExtractedBackup(rootDir, { fs = fsDefault } = {}) {
 
 function runTar(args) {
   return new Promise((resolve, reject) => {
-    const tarProcess = spawn("tar", args);
+    const tarProcess = spawn(resolveTarExecutable(), args, { shell: false });
     let stderr = "";
 
     tarProcess.stderr.on("data", (chunk) => {

@@ -10,6 +10,7 @@ import {
   getDocumentDefaults,
   updateDocumentDefaults,
 } from "../services/appSettingsService.js";
+import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { normalizeText } from "../utils/text.js";
 
 export const settingsRouter = Router();
@@ -105,6 +106,119 @@ async function createBackupStagingDir() {
   return stagingRoot;
 }
 
+export function createBackupExportHandler({
+  spawnProcess = spawn,
+  resolveTar = resolveTarExecutable,
+  createStagingDir = createBackupStagingDir,
+  removeStagingDir = (stagingRoot) => {
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+  },
+  logger = console,
+} = {}) {
+  return async function backupExportHandler(_request, response) {
+    let stagingRoot = "";
+    let tarProcess;
+    let stderr = "";
+    let streamingStarted = false;
+    let settled = false;
+
+    const cleanup = () => {
+      if (stagingRoot) {
+        removeStagingDir(stagingRoot);
+        stagingRoot = "";
+      }
+    };
+
+    const fail = (error, exitCode = null) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+
+      const stderrMessage = stderr.trim();
+      const exitMessage = exitCode === null ? "" : ` with code ${exitCode}`;
+      const detail = stderrMessage || error.message;
+      logger.error(`Backup export tar failed${exitMessage}: ${detail}`);
+
+      if (streamingStarted || response.headersSent) {
+        response.destroy(error);
+        return;
+      }
+
+      response.status(500).json({
+        error: "Could not create backup export archive.",
+      });
+    };
+
+    try {
+      stagingRoot = await createStagingDir();
+      const tarExecutable = resolveTar();
+      const args = [
+        "-czf",
+        "-",
+        "-C",
+        stagingRoot,
+        "database",
+        "uploads",
+      ];
+
+      tarProcess = spawnProcess(tarExecutable, args, { shell: false });
+
+      tarProcess.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      tarProcess.stdout.once("data", (firstChunk) => {
+        if (settled) {
+          return;
+        }
+
+        streamingStarted = true;
+        response.setHeader("Content-Type", "application/gzip");
+        response.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${formatBackupFilename()}"`
+        );
+        response.write(firstChunk);
+        tarProcess.stdout.pipe(response, { end: false });
+      });
+
+      tarProcess.on("error", (error) => {
+        fail(new Error(`tar could not start: ${error.message}`));
+      });
+
+      tarProcess.on("close", (exitCode) => {
+        if (exitCode !== 0) {
+          fail(
+            new Error(
+              `tar exited with code ${exitCode}${
+                stderr.trim() ? `: ${stderr.trim()}` : ""
+              }`
+            ),
+            exitCode
+          );
+          return;
+        }
+
+        if (!streamingStarted) {
+          fail(new Error("tar produced no backup archive data."), exitCode);
+          return;
+        }
+
+        if (!settled) {
+          settled = true;
+          cleanup();
+          response.end();
+        }
+      });
+    } catch (error) {
+      fail(error);
+    }
+  };
+}
+
 settingsRouter.get("/", (_request, response) => {
   try {
     const vehicle = mapVehicleRow(getVehicleRecord());
@@ -122,48 +236,7 @@ settingsRouter.get("/", (_request, response) => {
   }
 });
 
-settingsRouter.get("/backup-export", async (_request, response) => {
-  let stagingRoot = "";
-
-  try {
-    stagingRoot = await createBackupStagingDir();
-
-    response.setHeader("Content-Type", "application/gzip");
-    response.setHeader("Content-Disposition", `attachment; filename="${formatBackupFilename()}"`);
-
-    const tarProcess = spawn("tar", ["-czf", "-", "-C", stagingRoot, "database", "uploads"]);
-
-    tarProcess.stdout.pipe(response);
-
-    tarProcess.on("close", (exitCode) => {
-      fs.rmSync(stagingRoot, { recursive: true, force: true });
-
-      if (exitCode !== 0 && !response.headersSent) {
-        response.status(500).json({
-          error: "Could not create backup export archive.",
-        });
-      }
-    });
-
-    tarProcess.on("error", () => {
-      fs.rmSync(stagingRoot, { recursive: true, force: true });
-
-      if (!response.headersSent) {
-        response.status(500).json({
-          error: "Backup export is unavailable because this system could not run tar.",
-        });
-      }
-    });
-  } catch (error) {
-    if (stagingRoot) {
-      fs.rmSync(stagingRoot, { recursive: true, force: true });
-    }
-
-    response.status(500).json({
-      error: error.message || "Could not export backup.",
-    });
-  }
-});
+settingsRouter.get("/backup-export", createBackupExportHandler());
 
 settingsRouter.put("/document-defaults", (request, response) => {
   try {
