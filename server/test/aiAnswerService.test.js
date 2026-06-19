@@ -1,5 +1,19 @@
 import assert from "node:assert/strict";
-import test, { afterEach } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test, { after, afterEach } from "node:test";
+
+// Isolate the database/uploads to a scratch dir BEFORE importing the service.
+// aiAnswerService -> chunkRetrievalService -> database.js opens
+// config.databaseFile at import time; without this override it would open the
+// shared on-disk dev DB and race other parallel test processes on the WAL
+// pragma ("database is locked").
+const tempRoot = fs.mkdtempSync(
+  path.join(os.tmpdir(), "corolla-fix-helper-ai-answer-")
+);
+process.env.DATABASE_FILE = path.join(tempRoot, "ai-answer.db");
+process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 
 // Distinct answer/vision models let the model-selection assertions tell the two
 // requests apart (when OPENAI_VISION_MODEL is unset they would be identical).
@@ -7,6 +21,7 @@ process.env.OPENAI_API_KEY = "test-key";
 process.env.OPENAI_ANSWER_MODEL = "answer-model-test";
 process.env.OPENAI_VISION_MODEL = "vision-model-test";
 
+const { db } = await import("../src/database.js");
 const { askQuestionUsingDocuments, generateAnswerTextFromOpenAi, NOT_FOUND_MESSAGE } =
   await import("../src/services/aiAnswerService.js");
 
@@ -14,6 +29,14 @@ const realFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+});
+
+after(() => {
+  if (typeof db.close === "function") {
+    db.close();
+  }
+
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
 function stubFetch(outputText = "The oil drain plug torque is 27 ft-lb.") {
