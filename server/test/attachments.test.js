@@ -74,6 +74,20 @@ test("POST /api/attachments stores an image and GET lists it", async () => {
   assert.equal(listResponse.body.attachments[0].id, attachment.id);
 });
 
+test("GET /api/attachments/all lists every saved image across entities", async () => {
+  const symptomId = await createSymptom("All-list symptom");
+  const created = await attachImageToSymptom(symptomId, "all-list.png");
+  const attachmentId = created.body.attachment.id;
+
+  const response = await request(app).get("/api/attachments/all").expect(200);
+
+  assert.ok(Array.isArray(response.body.attachments));
+  assert.equal(response.body.total, response.body.attachments.length);
+
+  const ids = response.body.attachments.map((attachment) => attachment.id);
+  assert.ok(ids.includes(attachmentId));
+});
+
 test("GET /api/attachments/:id/file serves the stored image bytes", async () => {
   const symptomId = await createSymptom("Brake squeal");
   const createResponse = await attachImageToSymptom(symptomId);

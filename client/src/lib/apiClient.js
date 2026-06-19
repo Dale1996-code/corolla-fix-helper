@@ -59,6 +59,18 @@ export async function fetchAttachments(entityType, entityId) {
   return Array.isArray(payload.attachments) ? payload.attachments : [];
 }
 
+/**
+ * List every saved image attachment, newest first. Returns an array (possibly
+ * empty). Vision Ask uses this to let the user pick an already-saved image.
+ */
+export async function fetchAllImageAttachments() {
+  const payload = await requestJson("/api/attachments/all", {
+    errorMessage: "Could not load saved photos.",
+  });
+
+  return Array.isArray(payload.attachments) ? payload.attachments : [];
+}
+
 /** Upload one image for an entity and return the created attachment. */
 export async function uploadAttachment({
   entityType,

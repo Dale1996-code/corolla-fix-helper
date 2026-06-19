@@ -56,12 +56,34 @@ function createEmptySearchFetchMock() {
       );
     }
 
+    if (url === "/api/attachments/all") {
+      return jsonResponse({ attachments: [], total: 0 });
+    }
+
     throw new Error(`Unexpected fetch call: ${url}`);
   });
 }
 
 function createPendingPromise() {
   return new Promise(() => {});
+}
+
+// Wrap the empty-search mock with a populated saved-photo list and an Ask
+// responder so the Vision Ask tests can drive the attachment selector.
+function createFetchMockWithAttachments(attachments, askResponder) {
+  const base = createEmptySearchFetchMock();
+
+  return vi.fn((url, options) => {
+    if (url === "/api/attachments/all") {
+      return jsonResponse({ attachments, total: attachments.length });
+    }
+
+    if (url === "/api/ask") {
+      return askResponder(options);
+    }
+
+    return base(url, options);
+  });
 }
 
 afterEach(() => {
@@ -450,6 +472,186 @@ test("SearchPage shows request error state when Ask fails", async () => {
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });
 
+test("SearchPage Ask panel shows a saved-photo selector from saved attachments", async () => {
+  const attachments = [
+    { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
+  ];
+  const fetchMock = createFetchMockWithAttachments(attachments, () =>
+    createPendingPromise()
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  expect(askSection).not.toBeNull();
+
+  const selector = await within(askSection).findByRole("combobox", {
+    name: /saved photo/i,
+  });
+  expect(selector).toBeInTheDocument();
+  expect(
+    within(askSection).getByRole("option", { name: "Cracked hose" })
+  ).toBeInTheDocument();
+});
+
+test("SearchPage Ask panel shows a thumbnail after selecting a saved photo", async () => {
+  const attachments = [
+    { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
+  ];
+  const fetchMock = createFetchMockWithAttachments(attachments, () =>
+    createPendingPromise()
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  const selector = await within(askSection).findByRole("combobox", {
+    name: /saved photo/i,
+  });
+  fireEvent.change(selector, { target: { value: "7" } });
+
+  const thumb = within(askSection).getByRole("img", { name: /cracked hose/i });
+  expect(thumb).toHaveAttribute("src", "/api/attachments/7/file");
+});
+
+test("SearchPage Ask panel removes the selected photo", async () => {
+  const attachments = [
+    { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
+  ];
+  const fetchMock = createFetchMockWithAttachments(attachments, () =>
+    createPendingPromise()
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  const selector = await within(askSection).findByRole("combobox", {
+    name: /saved photo/i,
+  });
+  fireEvent.change(selector, { target: { value: "7" } });
+  expect(
+    within(askSection).getByRole("img", { name: /cracked hose/i })
+  ).toBeInTheDocument();
+
+  fireEvent.click(within(askSection).getByRole("button", { name: /remove photo/i }));
+
+  expect(
+    within(askSection).queryByRole("img", { name: /cracked hose/i })
+  ).not.toBeInTheDocument();
+  expect(selector.value).toBe("");
+});
+
+test("SearchPage Ask request includes attachmentId when a photo is selected", async () => {
+  const attachments = [
+    { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
+  ];
+  const askBodies = [];
+  const fetchMock = createFetchMockWithAttachments(attachments, (options) => {
+    askBodies.push(JSON.parse(options.body));
+    return jsonResponse({
+      question: "What is wrong with this hose?",
+      status: "answered",
+      answer: "The hose shows wear; confirm the spec in the manual.",
+      citations: [],
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  fireEvent.change(
+    await within(askSection).findByRole("combobox", { name: /saved photo/i }),
+    { target: { value: "7" } }
+  );
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is wrong with this hose?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  await waitFor(() => {
+    expect(askBodies).toHaveLength(1);
+  });
+  expect(askBodies[0]).toEqual({
+    question: "What is wrong with this hose?",
+    history: [],
+    attachmentId: 7,
+  });
+});
+
+test("SearchPage Ask request omits attachmentId when no photo is selected", async () => {
+  const attachments = [
+    { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
+  ];
+  const askBodies = [];
+  const fetchMock = createFetchMockWithAttachments(attachments, (options) => {
+    askBodies.push(JSON.parse(options.body));
+    return jsonResponse({
+      question: "What is the oil drain plug torque?",
+      status: "answered",
+      answer: "The oil drain plug torque is 27 ft-lb.",
+      citations: [],
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  // Wait for the selector to load so we know attachments are present but unused.
+  await within(askSection).findByRole("combobox", { name: /saved photo/i });
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  await waitFor(() => {
+    expect(askBodies).toHaveLength(1);
+  });
+  expect(askBodies[0]).toEqual({
+    question: "What is the oil drain plug torque?",
+    history: [],
+  });
+  expect(askBodies[0]).not.toHaveProperty("attachmentId");
+});
+
 test("SearchPage renders separate search sections for all entity types", async () => {
   const fetchMock = vi.fn((url) => {
     if (url === "/api/search/documents?sort=relevance") {
@@ -494,6 +696,10 @@ test("SearchPage renders separate search sections for all entity types", async (
           relatedEntityTypes: ["symptom"],
         },
       });
+    }
+
+    if (url === "/api/attachments/all") {
+      return jsonResponse({ attachments: [], total: 0 });
     }
 
     throw new Error(`Unexpected fetch call: ${url}`);
@@ -619,6 +825,10 @@ test("SearchPage lets one section search independently", async () => {
           relatedEntityTypes: ["symptom"],
         },
       });
+    }
+
+    if (url === "/api/attachments/all") {
+      return jsonResponse({ attachments: [], total: 0 });
     }
 
     throw new Error(`Unexpected fetch call: ${url}`);

@@ -97,6 +97,24 @@ Check:
 - Unsupported questions show a not-enough-information message.
 - `npm run eval:retrieval` reports keyword wrong, hybrid right for all eval cases.
 
+### Vision Ask (optional saved image)
+
+First save at least one image attachment on a symptom, procedure, or note (see section 11) so the Ask panel has a photo to choose.
+
+1. In the Ask panel, confirm a "saved photo" selector lists your saved attachments.
+2. Select one; confirm its thumbnail appears next to the question input and that "Remove photo" clears it.
+3. With a photo selected, ask a question the PDFs can answer.
+4. With no photo selected, ask the same kind of question (text-only Ask).
+
+Check:
+
+- Text-only Ask is unchanged: leaving the selector on "No photo" sends no `attachmentId` and behaves exactly as before.
+- With a photo selected and `OPENAI_API_KEY` configured, the answer may mention what is visible in the photo, but every spec, torque value, capacity, tool, step, and warning is still drawn from PDF chunks and cited.
+- An unsupported question still returns the not-found message even with a photo attached (the image does not invent an answer).
+- A request whose `attachmentId` is invalid (non-positive) returns a clear 400-style error and never calls the model.
+- A request whose attachment record or image file is missing returns a clear 404-style error and never calls the model.
+- Without `OPENAI_API_KEY`, Ask shows the same AI-not-configured message whether or not a photo is attached.
+
 ## 7. Repair Planner
 
 Use a fake or sample PDF so the agent has manuals to cite.

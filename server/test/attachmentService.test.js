@@ -21,6 +21,7 @@ const {
   deleteAttachment,
   deleteAttachmentsForEntity,
   getAttachmentsImageDir,
+  listAllAttachments,
   listAttachments,
 } = await import("../src/services/attachmentService.js");
 
@@ -124,6 +125,29 @@ test("deleteAttachmentsForEntity clears every row and file for the entity", asyn
   assert.equal(removedCount, 2);
   assert.ok(!fs.existsSync(secondOnDisk));
   assert.equal(listAttachments("note", 40).length, 0);
+});
+
+test("listAllAttachments returns every stored image across entities, newest-first", async () => {
+  const first = await createAttachment(
+    makeImage({ entityType: "symptom", entityId: 500 })
+  );
+  const second = await createAttachment(
+    makeImage({ entityType: "note", entityId: 501 })
+  );
+
+  const all = listAllAttachments();
+  const ids = all.map((attachment) => attachment.id);
+
+  assert.ok(ids.includes(first.id));
+  assert.ok(ids.includes(second.id));
+  // Newest-first: the later-created row sorts ahead of the earlier one.
+  assert.ok(ids.indexOf(second.id) < ids.indexOf(first.id));
+
+  const seenSecond = all.find((attachment) => attachment.id === second.id);
+  assert.equal(seenSecond.entityType, "note");
+  assert.equal(seenSecond.entityId, 501);
+  assert.equal(seenSecond.mimeType, "image/png");
+  assert.equal(seenSecond.originalFilename, "rough-idle.png");
 });
 
 test("createAttachment rejects an unknown entity type", async () => {
