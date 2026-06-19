@@ -1,11 +1,33 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
 
-import {
-  evaluateAnswerCase,
-  isRefusal,
-  summarize,
-} from "../src/evals/answerQualityScoring.js";
+// Isolate to a scratch DB/uploads dir BEFORE importing anything that pulls in
+// database.js (the eval module imports aiAnswerService -> chunkRetrievalService
+// -> database.js, which opens config.databaseFile and runs PRAGMA journal_mode
+// at import time). Without this, the suite would open the real dev DB and race
+// with other un-isolated suites on the WAL pragma under `node --test`.
+const tempRoot = fs.mkdtempSync(
+  path.join(os.tmpdir(), "corolla-fix-helper-answer-quality-")
+);
+
+process.env.DATABASE_FILE = path.join(tempRoot, "answer-quality.db");
+process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+
+const { evaluateAnswerCase, isRefusal, summarize } = await import(
+  "../src/evals/answerQualityScoring.js"
+);
+const { db } = await import("../src/database.js");
+
+after(() => {
+  if (typeof db.close === "function") {
+    db.close();
+  }
+
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
 
 test("answered case passes when the value and a matching citation are present", () => {
   const testCase = {
