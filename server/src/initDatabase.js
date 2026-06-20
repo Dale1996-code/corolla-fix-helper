@@ -119,6 +119,14 @@ function createTables() {
       FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS symptom_procedures (
+      symptom_id INTEGER NOT NULL,
+      procedure_id INTEGER NOT NULL,
+      PRIMARY KEY (symptom_id, procedure_id),
+      FOREIGN KEY (symptom_id) REFERENCES symptoms(id) ON DELETE CASCADE,
+      FOREIGN KEY (procedure_id) REFERENCES procedures(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       vehicle_id INTEGER NOT NULL,

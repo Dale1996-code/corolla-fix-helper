@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fetchAllImageAttachments, requestJson } from "./apiClient.js";
+import {
+  fetchAllImageAttachments,
+  fetchSuggestedProcedures,
+  requestJson,
+  setProcedureSymptoms,
+  setSymptomProcedures,
+} from "./apiClient.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -75,5 +81,50 @@ describe("fetchAllImageAttachments", () => {
     const result = await fetchAllImageAttachments();
 
     expect(result).toEqual([]);
+  });
+});
+
+describe("symptom <-> procedure link helpers", () => {
+  it("setSymptomProcedures PUTs the procedure ids and returns the body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ symptom: { id: 1 } }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await setSymptomProcedures(1, [2, 3]);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/symptoms/1/procedures", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ procedureIds: [2, 3] }),
+    });
+    expect(result).toEqual({ symptom: { id: 1 } });
+  });
+
+  it("setProcedureSymptoms PUTs the symptom ids and returns the body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ procedure: { id: 9 } }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await setProcedureSymptoms(9, [4]);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/procedures/9/symptoms", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symptomIds: [4] }),
+    });
+    expect(result).toEqual({ procedure: { id: 9 } });
+  });
+
+  it("fetchSuggestedProcedures GETs the suggestion endpoint", async () => {
+    const payload = { status: "answered", suggestions: [{ procedureId: 2 }] };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchSuggestedProcedures(1);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/symptoms/1/suggested-procedures", {});
+    expect(result).toEqual(payload);
   });
 });

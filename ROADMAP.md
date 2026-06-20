@@ -15,6 +15,7 @@ The current app supports:
 - Repair Planner, a document-grounded streaming agent that turns a repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts (`POST /api/repair-plan`, Server-Sent Events)
 - Symptoms linked to documents
 - Procedures linked to documents
+- Direct symptom-to-procedure links, managed from either detail view, plus AI-assisted "Suggest fixes" that ranks existing procedures for a symptom and stays grounded in uploaded document chunks (with a deterministic keyword/system fallback that needs no API key)
 - Notes linked to one document, symptom, or procedure
 - Image attachments (JPEG, PNG, WebP) on symptoms, procedures, and notes, with per-entity upload, view, and delete, and cleanup when the owning record is deleted
 - Settings for vehicle profile, document defaults, runtime information, and backup export
@@ -30,7 +31,6 @@ These are not implemented in the current app:
 - User accounts or login
 - Cloud sync
 - Multi-vehicle support
-- Direct symptom-to-procedure links
 - General AI chat outside uploaded documents
 - Current verified deployment from this branch
 
@@ -69,6 +69,13 @@ A second AI feature, the Repair Planner, is also implemented:
 - Deterministic tools assemble a prioritized plan, readiness score, owner checklist, handoff drafts, and follow-up questions.
 - It stays grounded in uploaded documents through the same retriever as Ask, so it is not general AI chat.
 - Like Ask, the model client and retriever are injectable, so backend tests run without an API key.
+
+A third, smaller AI-assisted feature now suggests existing procedures for a symptom:
+
+- `GET /api/symptoms/:id/suggested-procedures` ranks stored procedures for a symptom and links them to retrieved document chunks.
+- It reuses the Ask retriever and stays grounded in uploaded PDFs; it never invents a procedure and only suggests links to procedures that already exist.
+- Without `OPENAI_API_KEY` it degrades to a deterministic keyword/system overlap ranking, so it still returns useful suggestions. With a key, the model ranks the candidates and every suggestion must cite a retrieved chunk, otherwise it falls back to the deterministic ranking.
+- The symptom and procedure detail views can also link the two directly in either direction.
 
 Future AI work should stay small and evidence-based:
 

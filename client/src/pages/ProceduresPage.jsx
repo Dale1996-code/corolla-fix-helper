@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { setProcedureSymptoms } from "../lib/apiClient";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
@@ -601,11 +602,132 @@ function ProcedureEditForm({
   );
 }
 
+// Manual symptom links for one procedure (the mirror of SymptomProcedurePanel).
+function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
+  const linkedSymptoms = procedure.linkedSymptoms || [];
+  const [selectedIds, setSelectedIds] = useState(procedure.linkedSymptomIds || []);
+  const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
+
+  useEffect(() => {
+    setSelectedIds(procedure.linkedSymptomIds || []);
+    setSaveState({ saving: false, message: "", error: "" });
+  }, [procedure.id]);
+
+  function toggleSymptom(symptomId) {
+    setSelectedIds((current) =>
+      current.includes(symptomId)
+        ? current.filter((id) => id !== symptomId)
+        : [...current, symptomId]
+    );
+  }
+
+  async function handleSaveLinks() {
+    try {
+      setSaveState({ saving: true, message: "", error: "" });
+      const payload = await setProcedureSymptoms(procedure.id, selectedIds);
+      onProcedureUpdated(payload.procedure);
+      setSelectedIds(payload.procedure.linkedSymptomIds || []);
+      setSaveState({ saving: false, message: "Linked symptoms saved.", error: "" });
+    } catch (error) {
+      setSaveState({
+        saving: false,
+        message: "",
+        error: error.message || "Could not save linked symptoms.",
+      });
+    }
+  }
+
+  return (
+    <div>
+      <h4 className="font-semibold text-slate-900">Linked symptoms</h4>
+
+      {linkedSymptoms.length ? (
+        <ul className="mt-2 space-y-2">
+          {linkedSymptoms.map((symptom) => (
+            <li
+              key={symptom.id}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700"
+            >
+              <Link
+                className="font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
+                to={buildEntityLink("symptom", symptom.id)}
+                aria-label={`Open symptom ${symptom.title}`}
+              >
+                {symptom.title}
+              </Link>
+              <p className="text-xs text-slate-500">
+                {symptom.system || "No system"} - {labelize(symptom.status)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-slate-700">No linked symptoms yet.</p>
+      )}
+
+      <fieldset className="mt-3 grid gap-2 text-sm text-slate-700">
+        <legend className="font-medium text-slate-900">Link symptoms</legend>
+
+        {symptoms.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            No symptoms available yet. Create one in the Symptoms tab first.
+          </p>
+        ) : (
+          <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+            {symptoms.map((symptom) => (
+              <label
+                key={symptom.id}
+                className="flex items-start gap-2 text-sm text-slate-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(symptom.id)}
+                  disabled={saveState.saving}
+                  onChange={() => toggleSymptom(symptom.id)}
+                />
+                <span>
+                  <span className="font-medium text-slate-900">{symptom.title}</span>
+                  <span className="block text-xs text-slate-500">
+                    {symptom.system || "No system"} - {labelize(symptom.status)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {symptoms.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSaveLinks}
+              disabled={saveState.saving}
+              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+            >
+              {saveState.saving ? "Saving..." : "Save linked symptoms"}
+            </button>
+            {saveState.message ? (
+              <span className="text-sm text-emerald-700">{saveState.message}</span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {saveState.error ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {saveState.error}
+          </p>
+        ) : null}
+      </fieldset>
+    </div>
+  );
+}
+
 function ProcedureDetails({
   procedure,
   isEditing,
   editForm,
   documents,
+  symptoms,
   systemSuggestions,
   saveState,
   deleteState,
@@ -615,6 +737,7 @@ function ProcedureDetails({
   onToggleEditDocument,
   onSaveEdit,
   onDelete,
+  onProcedureUpdated,
 }) {
   if (!procedure) {
     return (
@@ -738,6 +861,12 @@ function ProcedureDetails({
           )}
         </div>
 
+        <ProcedureSymptomPanel
+          procedure={procedure}
+          symptoms={symptoms}
+          onProcedureUpdated={onProcedureUpdated}
+        />
+
         <AttachmentPanel entityType="procedure" entityId={procedure.id} />
       </div>
 
@@ -793,6 +922,7 @@ export function ProceduresPage() {
       : null;
   const [procedures, setProcedures] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [symptoms, setSymptoms] = useState([]);
   const [savedCommonSystems, setSavedCommonSystems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -886,6 +1016,19 @@ export function ProceduresPage() {
     return [...selectedIds, documentId];
   }
 
+  // Keep the list and detail panel in sync after a symptom link change.
+  function handleProcedureUpdated(updatedProcedure) {
+    if (!updatedProcedure) {
+      return;
+    }
+
+    setProcedures((currentProcedures) =>
+      currentProcedures.map((procedure) =>
+        procedure.id === updatedProcedure.id ? updatedProcedure : procedure
+      )
+    );
+  }
+
   async function loadData() {
     try {
       setLoadError("");
@@ -930,6 +1073,21 @@ export function ProceduresPage() {
 
         return nextProcedures[0]?.id || null;
       });
+
+      // Symptoms power the manual link selector; a failure here should not
+      // block the procedure list, so it loads on its own.
+      try {
+        const symptomsResponse = await fetch("/api/symptoms");
+        const symptomsPayload = await symptomsResponse.json();
+
+        if (symptomsResponse.ok) {
+          setSymptoms(
+            Array.isArray(symptomsPayload.symptoms) ? symptomsPayload.symptoms : []
+          );
+        }
+      } catch {
+        setSymptoms([]);
+      }
 
       try {
         const settingsResponse = await fetch("/api/settings");
@@ -1275,6 +1433,7 @@ export function ProceduresPage() {
                   isEditing={editingProcedureId === selectedProcedureId}
                   editForm={editForm}
                   documents={documents}
+                  symptoms={symptoms}
                   systemSuggestions={systemSuggestions}
                   saveState={saveState}
                   deleteState={deleteState}
@@ -1284,6 +1443,7 @@ export function ProceduresPage() {
                   onToggleEditDocument={handleToggleEditDocument}
                   onSaveEdit={handleSaveProcedure}
                   onDelete={handleDeleteProcedure}
+                  onProcedureUpdated={handleProcedureUpdated}
                 />
               </div>
             </>

@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { db } from "../database.js";
 import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
+import {
+  buildProcedureSymptomLinksMap,
+  setProcedureSymptoms,
+} from "../services/symptomProcedureService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -55,6 +59,12 @@ function parseLinkedDocumentIds(value) {
   return Array.from(uniqueIds);
 }
 
+// Symptom-link bodies use the same "array of positive integer ids" shape as the
+// document-link bodies above.
+function parseLinkedSymptomIds(value) {
+  return parseLinkedDocumentIds(value);
+}
+
 function getVehicleId() {
   const vehicle = db
     .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
@@ -67,8 +77,9 @@ function getVehicleId() {
   return vehicle.id;
 }
 
-function mapProcedureRow(row, linksMap) {
-  const linkedDocuments = linksMap.get(row.id) || [];
+function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
+  const linkedDocuments = documentLinksMap.get(row.id) || [];
+  const linkedSymptoms = symptomLinksMap.get(row.id) || [];
 
   return {
     id: row.id,
@@ -85,6 +96,8 @@ function mapProcedureRow(row, linksMap) {
     updatedAt: row.updated_at,
     linkedDocumentIds: linkedDocuments.map((document) => document.id),
     linkedDocuments,
+    linkedSymptomIds: linkedSymptoms.map((symptom) => symptom.id),
+    linkedSymptoms,
   };
 }
 
@@ -126,14 +139,14 @@ function listProceduresForVehicle(vehicleId) {
     `)
     .all(vehicleId);
 
-  const linksMap = new Map();
+  const documentLinksMap = new Map();
 
   for (const linkRow of linkRows) {
-    if (!linksMap.has(linkRow.procedure_id)) {
-      linksMap.set(linkRow.procedure_id, []);
+    if (!documentLinksMap.has(linkRow.procedure_id)) {
+      documentLinksMap.set(linkRow.procedure_id, []);
     }
 
-    linksMap.get(linkRow.procedure_id).push({
+    documentLinksMap.get(linkRow.procedure_id).push({
       id: linkRow.document_id,
       title: linkRow.document_title,
       system: linkRow.document_system || "",
@@ -141,7 +154,11 @@ function listProceduresForVehicle(vehicleId) {
     });
   }
 
-  return procedureRows.map((row) => mapProcedureRow(row, linksMap));
+  const symptomLinksMap = buildProcedureSymptomLinksMap(vehicleId);
+
+  return procedureRows.map((row) =>
+    mapProcedureRow(row, documentLinksMap, symptomLinksMap)
+  );
 }
 
 function getExistingDocumentIds(vehicleId, requestedDocumentIds) {
@@ -193,6 +210,37 @@ proceduresRouter.get("/", (_request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error.message || "Could not load procedures.",
+    });
+  }
+});
+
+proceduresRouter.get("/:id", (request, response) => {
+  const procedureId = parsePositiveInt(request.params.id);
+
+  if (procedureId === null) {
+    response.status(400).json({
+      error: "Procedure ID must be a positive number.",
+    });
+    return;
+  }
+
+  try {
+    const vehicleId = getVehicleId();
+    const procedure = listProceduresForVehicle(vehicleId).find(
+      (candidate) => candidate.id === procedureId
+    );
+
+    if (!procedure) {
+      response.status(404).json({
+        error: "Procedure not found.",
+      });
+      return;
+    }
+
+    response.json({ procedure });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not load procedure.",
     });
   }
 });
@@ -403,6 +451,49 @@ proceduresRouter.put("/:id", (request, response) => {
   } catch (error) {
     response.status(500).json({
       error: error.message || "Could not update procedure.",
+    });
+  }
+});
+
+// Replace the set of symptoms linked to one procedure (manual linking).
+proceduresRouter.put("/:id/symptoms", (request, response) => {
+  const procedureId = parsePositiveInt(request.params.id);
+
+  if (procedureId === null) {
+    response.status(400).json({
+      error: "Procedure ID must be a positive number.",
+    });
+    return;
+  }
+
+  try {
+    const vehicleId = getVehicleId();
+    const existingProcedure = db
+      .prepare("SELECT id FROM procedures WHERE id = ? AND vehicle_id = ?")
+      .get(procedureId, vehicleId);
+
+    if (!existingProcedure) {
+      response.status(404).json({
+        error: "Procedure not found.",
+      });
+      return;
+    }
+
+    const symptomIds = parseLinkedSymptomIds(request.body.symptomIds);
+    setProcedureSymptoms(procedureId, symptomIds);
+
+    const procedures = listProceduresForVehicle(vehicleId);
+    const updatedProcedure = procedures.find(
+      (procedure) => procedure.id === procedureId
+    );
+
+    response.json({
+      message: "Linked symptoms updated.",
+      procedure: updatedProcedure,
+    });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not update linked symptoms.",
     });
   }
 });

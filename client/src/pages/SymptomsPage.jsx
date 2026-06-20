@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import {
+  fetchSuggestedProcedures,
+  setSymptomProcedures,
+} from "../lib/apiClient";
 import { formatDate } from "../lib/formatDate";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
@@ -652,11 +656,283 @@ function SymptomEditForm({
   );
 }
 
+function SuggestionCitations({ citations }) {
+  if (!citations || !citations.length) {
+    return null;
+  }
+
+  return (
+    <ul className="mt-1 space-y-1">
+      {citations.map((citation, index) => (
+        <li key={`${citation.documentId}-${citation.pageNumber}-${index}`} className="text-xs text-slate-500">
+          <span className="font-medium text-slate-600">
+            {citation.documentTitle || "Document"}
+            {citation.pageNumber ? `, page ${citation.pageNumber}` : ""}
+          </span>
+          {citation.snippet ? <span className="block">{citation.snippet}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Manual procedure links plus the "Suggest fixes" helper for one symptom.
+// Keeps its own UI state but pushes the updated symptom back up so the page
+// list and detail panel stay in sync.
+function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
+  const linkedProcedures = symptom.linkedProcedures || [];
+  const [selectedIds, setSelectedIds] = useState(symptom.linkedProcedureIds || []);
+  const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestState, setSuggestState] = useState({
+    loading: false,
+    loaded: false,
+    error: "",
+    status: "",
+    aiConfigured: true,
+  });
+  const [linkingId, setLinkingId] = useState(null);
+
+  // Reset everything when the user selects a different symptom.
+  useEffect(() => {
+    setSelectedIds(symptom.linkedProcedureIds || []);
+    setSaveState({ saving: false, message: "", error: "" });
+    setSuggestions([]);
+    setSuggestState({ loading: false, loaded: false, error: "", status: "", aiConfigured: true });
+  }, [symptom.id]);
+
+  function toggleProcedure(procedureId) {
+    setSelectedIds((current) =>
+      current.includes(procedureId)
+        ? current.filter((id) => id !== procedureId)
+        : [...current, procedureId]
+    );
+  }
+
+  async function handleSaveLinks() {
+    try {
+      setSaveState({ saving: true, message: "", error: "" });
+      const payload = await setSymptomProcedures(symptom.id, selectedIds);
+      onSymptomUpdated(payload.symptom);
+      setSelectedIds(payload.symptom.linkedProcedureIds || []);
+      setSaveState({ saving: false, message: "Linked procedures saved.", error: "" });
+    } catch (error) {
+      setSaveState({
+        saving: false,
+        message: "",
+        error: error.message || "Could not save linked procedures.",
+      });
+    }
+  }
+
+  async function handleSuggest() {
+    try {
+      setSuggestState((current) => ({ ...current, loading: true, error: "" }));
+      const payload = await fetchSuggestedProcedures(symptom.id);
+      setSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+      setSuggestState({
+        loading: false,
+        loaded: true,
+        error: "",
+        status: payload.status || "",
+        aiConfigured: payload.aiConfigured !== false,
+      });
+    } catch (error) {
+      setSuggestions([]);
+      setSuggestState({
+        loading: false,
+        loaded: true,
+        error: error.message || "Could not suggest procedures.",
+        status: "",
+        aiConfigured: true,
+      });
+    }
+  }
+
+  async function handleLinkSuggestion(procedureId) {
+    try {
+      setLinkingId(procedureId);
+      const nextIds = selectedIds.includes(procedureId)
+        ? selectedIds
+        : [...selectedIds, procedureId];
+      const payload = await setSymptomProcedures(symptom.id, nextIds);
+      onSymptomUpdated(payload.symptom);
+      setSelectedIds(payload.symptom.linkedProcedureIds || []);
+      setSuggestions((current) =>
+        current.filter((suggestion) => suggestion.procedureId !== procedureId)
+      );
+    } catch (error) {
+      setSuggestState((current) => ({
+        ...current,
+        error: error.message || "Could not link the suggested procedure.",
+      }));
+    } finally {
+      setLinkingId(null);
+    }
+  }
+
+  return (
+    <div>
+      <h4 className="font-semibold text-slate-900">Linked procedures</h4>
+
+      {linkedProcedures.length ? (
+        <ul className="mt-2 space-y-2">
+          {linkedProcedures.map((procedure) => (
+            <li
+              key={procedure.id}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700"
+            >
+              <Link
+                className="font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
+                to={buildEntityLink("procedure", procedure.id)}
+                aria-label={`Open procedure ${procedure.title}`}
+              >
+                {procedure.title}
+              </Link>
+              <p className="text-xs text-slate-500">
+                {procedure.system || "No system"} - {labelize(procedure.difficulty)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-slate-700">No linked procedures yet.</p>
+      )}
+
+      <fieldset className="mt-3 grid gap-2 text-sm text-slate-700">
+        <legend className="font-medium text-slate-900">Link procedures</legend>
+
+        {procedures.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            No procedures available yet. Create one in the Procedures tab first.
+          </p>
+        ) : (
+          <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+            {procedures.map((procedure) => (
+              <label
+                key={procedure.id}
+                className="flex items-start gap-2 text-sm text-slate-700"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(procedure.id)}
+                  disabled={saveState.saving}
+                  onChange={() => toggleProcedure(procedure.id)}
+                />
+                <span>
+                  <span className="font-medium text-slate-900">{procedure.title}</span>
+                  <span className="block text-xs text-slate-500">
+                    {procedure.system || "No system"} - {labelize(procedure.difficulty)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {procedures.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSaveLinks}
+              disabled={saveState.saving}
+              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+            >
+              {saveState.saving ? "Saving..." : "Save linked procedures"}
+            </button>
+            {saveState.message ? (
+              <span className="text-sm text-emerald-700">{saveState.message}</span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {saveState.error ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {saveState.error}
+          </p>
+        ) : null}
+      </fieldset>
+
+      <div className="mt-4 border-t border-slate-200 pt-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSuggest}
+            disabled={suggestState.loading}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {suggestState.loading ? "Finding fixes..." : "Suggest fixes"}
+          </button>
+          <span className="text-xs text-slate-500">
+            Suggests stored procedures grounded in your uploaded documents.
+          </span>
+        </div>
+
+        {suggestState.error ? (
+          <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {suggestState.error}
+          </p>
+        ) : null}
+
+        {suggestState.loaded && !suggestState.aiConfigured ? (
+          <p className="mt-3 text-xs text-slate-500">
+            AI is not configured, so these are keyword-based matches.
+          </p>
+        ) : null}
+
+        {suggestState.loaded && !suggestState.error && suggestions.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-700">
+            No matching procedures found in your documents yet.
+          </p>
+        ) : null}
+
+        {suggestions.length ? (
+          <ul className="mt-3 space-y-2">
+            {suggestions.map((suggestion) => (
+              <li
+                key={suggestion.procedureId}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <Link
+                      className="font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
+                      to={buildEntityLink("procedure", suggestion.procedureId)}
+                    >
+                      {suggestion.title}
+                    </Link>
+                    <p className="text-xs text-slate-500">
+                      {suggestion.system || "No system"} - {labelize(suggestion.difficulty)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleLinkSuggestion(suggestion.procedureId)}
+                    disabled={linkingId === suggestion.procedureId}
+                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  >
+                    {linkingId === suggestion.procedureId ? "Linking..." : "Link"}
+                  </button>
+                </div>
+                {suggestion.reason ? (
+                  <p className="mt-1 text-xs text-slate-600">{suggestion.reason}</p>
+                ) : null}
+                <SuggestionCitations citations={suggestion.citations} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SymptomDetails({
   symptom,
   isEditing,
   editForm,
   documents,
+  procedures,
   systemSuggestions,
   saveState,
   deleteState,
@@ -666,6 +942,7 @@ function SymptomDetails({
   onToggleEditDocument,
   onSaveEdit,
   onDelete,
+  onSymptomUpdated,
 }) {
   if (!symptom) {
     return (
@@ -779,6 +1056,12 @@ function SymptomDetails({
           )}
         </div>
 
+        <SymptomProcedurePanel
+          symptom={symptom}
+          procedures={procedures}
+          onSymptomUpdated={onSymptomUpdated}
+        />
+
         <AttachmentPanel entityType="symptom" entityId={symptom.id} />
       </div>
 
@@ -832,6 +1115,7 @@ export function SymptomsPage() {
       : null;
   const [symptoms, setSymptoms] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [procedures, setProcedures] = useState([]);
   const [savedCommonSystems, setSavedCommonSystems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -939,6 +1223,19 @@ export function SymptomsPage() {
     return [...selectedIds, documentId];
   }
 
+  // Keep the list and detail panel in sync after a procedure link change.
+  function handleSymptomUpdated(updatedSymptom) {
+    if (!updatedSymptom) {
+      return;
+    }
+
+    setSymptoms((currentSymptoms) =>
+      currentSymptoms.map((symptom) =>
+        symptom.id === updatedSymptom.id ? updatedSymptom : symptom
+      )
+    );
+  }
+
   async function loadData() {
     try {
       setLoadError("");
@@ -983,6 +1280,23 @@ export function SymptomsPage() {
 
         return nextSymptoms[0]?.id || null;
       });
+
+      // Procedures power the manual link selector; a failure here should not
+      // block the symptom list, so it loads on its own.
+      try {
+        const proceduresResponse = await fetch("/api/procedures");
+        const proceduresPayload = await proceduresResponse.json();
+
+        if (proceduresResponse.ok) {
+          setProcedures(
+            Array.isArray(proceduresPayload.procedures)
+              ? proceduresPayload.procedures
+              : []
+          );
+        }
+      } catch {
+        setProcedures([]);
+      }
 
       try {
         const settingsResponse = await fetch("/api/settings");
@@ -1337,6 +1651,7 @@ export function SymptomsPage() {
                   isEditing={editingSymptomId === selectedSymptomId}
                   editForm={editForm}
                   documents={documents}
+                  procedures={procedures}
                   systemSuggestions={systemSuggestions}
                   saveState={saveState}
                   deleteState={deleteState}
@@ -1346,6 +1661,7 @@ export function SymptomsPage() {
                   onToggleEditDocument={handleToggleEditDocument}
                   onSaveEdit={handleSaveSymptom}
                   onDelete={handleDeleteSymptom}
+                  onSymptomUpdated={handleSymptomUpdated}
                 />
               </div>
             </>

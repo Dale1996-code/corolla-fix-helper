@@ -21,6 +21,8 @@
     "server/src/services/documentChunkService.js",
     "server/src/services/documentService.js",
     "server/src/services/documentTagService.js",
+    "server/src/services/procedureSuggestionService.js",
+    "server/src/services/symptomProcedureService.js",
     "server/src/routes/ask.js",
     "server/src/routes/attachments.js",
     "server/src/routes/symptoms.js",
@@ -35,6 +37,9 @@
     "server/test/config.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
+    "server/test/procedureSuggestionService.test.js",
+    "server/test/suggestedProcedures.test.js",
+    "server/test/symptomProcedureLinks.test.js",
     "server/test/seedData.test.js"
   ]
 }
