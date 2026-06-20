@@ -1,5 +1,27 @@
 # Changelog
 
+## Week of 2026-06-15
+
+### Highlights
+
+- Hardened Repair Planner and OCR behavior by handling tool failures, awaiting asynchronous document retrieval, avoiding immediate request aborts, and skipping remaining OCR work when required local tools are missing. See [PR #46](https://github.com/Dale1996-code/corolla-fix-helper/pull/46) and [PR #48](https://github.com/Dale1996-code/corolla-fix-helper/pull/48).
+- Reduced duplicated client and server helpers, expanded lint and typecheck coverage, centralized document cleanup, and isolated test databases that could lock each other in CI. See [PR #47](https://github.com/Dale1996-code/corolla-fix-helper/pull/47) and [PR #54](https://github.com/Dale1996-code/corolla-fix-helper/pull/54).
+- Added backup restore support, a safe restore guide, and an end-to-end backup drill, then made backup exports select the correct native `tar` executable on Windows. See [PR #50](https://github.com/Dale1996-code/corolla-fix-helper/pull/50) and [PR #55](https://github.com/Dale1996-code/corolla-fix-helper/pull/55).
+- Refreshed the app shell and Documents page with an editorial layout, updated navigation, responsive mobile behavior, and bundled fonts. Evidence: commits `7825d33` and `63d8673`.
+- Added saved JPEG, PNG, and WebP attachments for symptoms, procedures, and notes, including attachment cleanup and backup coverage. See [PR #51](https://github.com/Dale1996-code/corolla-fix-helper/pull/51).
+- Extended Ask so a question can optionally include one saved image attachment while document retrieval remains grounded in the text question and uploaded PDFs. See [PR #53](https://github.com/Dale1996-code/corolla-fix-helper/pull/53).
+
+### Key PR Links
+
+- [PR #55: Use the Windows-safe tar helper for backup exports](https://github.com/Dale1996-code/corolla-fix-helper/pull/55)
+- [PR #54: Isolate the answer-quality test database](https://github.com/Dale1996-code/corolla-fix-helper/pull/54)
+- [PR #53: Add optional saved-image Vision Q&A](https://github.com/Dale1996-code/corolla-fix-helper/pull/53)
+- [PR #51: Add image attachments for symptoms, procedures, and notes](https://github.com/Dale1996-code/corolla-fix-helper/pull/51)
+- [PR #50: Add backup restore support, guide, and drill](https://github.com/Dale1996-code/corolla-fix-helper/pull/50)
+- [PR #48: Fix immediate Repair Planner request aborts](https://github.com/Dale1996-code/corolla-fix-helper/pull/48)
+- [PR #47: Reduce duplication and expand check coverage](https://github.com/Dale1996-code/corolla-fix-helper/pull/47)
+- [PR #46: Harden Repair Planner tools and OCR handling](https://github.com/Dale1996-code/corolla-fix-helper/pull/46)
+
 ## Week of 2026-06-08
 
 ### Highlights

@@ -37,9 +37,9 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 ## Repo Shape
 
 - `server/src/app.js` wires the Express API routes and serves `client/dist` when the built frontend exists.
-- `server/src/routes/` contains API route modules for dashboard, documents, search, symptoms, procedures, notes, settings, Ask, and Repair Planner.
-- `server/src/services/` contains document extraction, chunking, retrieval, embedding, search, app settings, and repair-planner agent helpers.
-- `server/src/scripts/` contains repo commands such as folder import, embedding backfill, retrieval eval, and answer eval.
+- `server/src/routes/` contains API route modules for dashboard, documents, search, symptoms, procedures, notes, image attachments, settings, Ask, and Repair Planner.
+- `server/src/services/` contains document extraction, chunking, retrieval, embedding, search, attachments, backup/restore, app settings, and repair-planner agent helpers.
+- `server/src/scripts/` contains repo commands such as folder import, backup drill/restore, embedding backfill, retrieval eval, and answer eval.
 - `client/src/pages/` contains the main React page components and colocated frontend tests.
 - `docs/archive/` is historical context only; do not treat archived plans as current repo truth without checking live files.
 
@@ -50,6 +50,8 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Current search covers documents, symptoms, procedures, and notes in separate Search page sections.
 - Current Repair Planner is a streaming tool-calling agent (`POST /api/repair-plan`, SSE) that plans repairs grounded in uploaded PDFs; it reuses the raw-`fetch` Responses API + dependency-injection conventions and is documented in `docs/repair-planner.md`.
 - Current document Q&A uses uploaded PDF chunks, OpenAI embeddings, hybrid keyword+embedding retrieval, and OpenAI answer generation when `OPENAI_API_KEY` is configured.
+- Symptoms, procedures, and notes can have saved JPEG, PNG, or WebP attachments. Documents remain PDF-only.
+- Ask can optionally include one already-saved image attachment by `attachmentId`. Retrieval still uses only the text question, and repair facts must remain grounded in cited PDF chunks.
 - Current AI support uses in-memory cosine search over SQLite-stored embedding BLOBs. It does not include a vector database or general open-ended chat; both AI features stay grounded in uploaded documents and the supplied input.
 - Current Google Cloud docs describe an intended deployment path, not proof of an active deployment.
 
@@ -58,6 +60,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - If no env override is set, `server/src/config.js` stores SQLite at `server/data/corolla-fix-helper.db` and uploaded PDFs in `server/uploads/`.
 - Local env examples are copied to `server/.env`; relative `DATABASE_FILE` and `UPLOADS_DIR` values are relative to the `server/` process working directory.
 - Uploaded PDFs are stored on disk, while document rows keep a `server/uploads/...` file path. Deleting a document removes the stored file and clears linked notes.
+- Attachment images live under `UPLOADS_DIR/attachments/images/`, with metadata in SQLite. Deleting the owning symptom, procedure, or note also deletes its attachment rows and files.
 - Uploads and the folder importer both rebuild `document_chunks` from extracted page text. Re-running extraction for one document also rebuilds its chunks.
 - PDF text extraction uses `pdfjs-dist`. Optional OCR runs only on low-text pages when `OCR_ENABLED=true`.
 - OCR is local, not OpenAI-based. It needs Poppler `pdftoppm` and Tesseract; missing tools leave text PDFs working but scanned PDFs can show an `ocr_unavailable:` extraction status.
@@ -68,6 +71,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Keep real secrets out of docs and commits. Put local secrets in `server/.env` or deployment environment variables.
 - `OPENAI_API_KEY` enables generated Ask answers, Repair Planner model calls, embedding backfill, and answer-quality evals.
 - `OPENAI_ANSWER_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE` are read by server config. `OPENAI_MODEL` is still accepted as an older fallback for the answer model.
+- `OPENAI_VISION_MODEL` is used only when Ask includes a saved image; when unset, it falls back to `OPENAI_ANSWER_MODEL`.
 - After importing PDFs or re-running extraction with an OpenAI key configured, run `npm run embed:backfill` so new or OCR-created chunks have current embeddings.
 
 ## Deployment And CI Notes
@@ -77,6 +81,8 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - The Docker image does not install Tesseract or Poppler. Do not assume OCR works in a container unless the image or host deployment provides those tools.
 - `docs/gcp-deployment.md` targets one Google Compute Engine VM running the Docker image with `/data` mounted for the SQLite database and uploads.
 - `.github/workflows/ci.yml` runs on push and pull request with Node 24, then runs `npm run install:all`, `npm run lint`, `npm run typecheck`, and `npm run test`.
+- Backup export and restore include the entire uploads tree, so saved attachment images are included. Stop the server before restoring; the restore keeps a pre-restore snapshot beside the database.
+- Backup code uses `server/src/services/tarExecutable.js`. On Windows, reuse this helper instead of spawning bare `tar`, because it deliberately selects the native `%SystemRoot%\System32\tar.exe` rather than whichever tar appears first on `PATH`.
 
 ## Recently Verified Commands
 
@@ -84,6 +90,8 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - 2026-06-12: `npm run lint` passed.
 - 2026-06-12: `npm run typecheck` passed.
 - 2026-06-12: `npm run eval:retrieval` passed with 12 eval cases, 12 keyword-wrong cases fixed by hybrid retrieval, and 0 hybrid-wrong cases.
+- 2026-06-19: backup, settings-export, and tar-resolution tests passed 16 tests.
+- 2026-06-19: `npm run backup:drill` passed and restored fake app data, a PDF, and an attachment image.
 
 ## Useful Docs
 
@@ -91,5 +99,6 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `docs/local-development.md` explains local setup.
 - `docs/environment-variables.md` explains placeholder-only env values.
 - `docs/architecture.md` explains current app structure.
+- `docs/backup-restore.md` explains backup contents, safe restore behavior, and the round-trip drill.
 - `docs/gcp-deployment.md` explains the intended Google Compute Engine path.
 - `docs/archive/` contains old plans, generated snapshots, and superseded deployment notes.
