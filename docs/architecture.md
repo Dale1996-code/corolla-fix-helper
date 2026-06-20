@@ -47,8 +47,8 @@ Current route groups:
 - `/api/search/symptoms` searches symptoms.
 - `/api/search/procedures` searches procedures.
 - `/api/search/notes` searches notes.
-- `/api/symptoms` handles symptom records and document links.
-- `/api/procedures` handles procedure records and document links.
+- `/api/symptoms` handles symptom records, document links, and procedure links. `PUT /api/symptoms/:id/procedures` replaces the linked procedures, and `GET /api/symptoms/:id/suggested-procedures` returns ranked procedure suggestions grounded in retrieved document chunks (AI-assisted when configured, deterministic keyword/system matching otherwise).
+- `/api/procedures` handles procedure records, document links, and symptom links. `PUT /api/procedures/:id/symptoms` replaces the linked symptoms.
 - `/api/notes` handles notes and links to documents, symptoms, or procedures.
 - `/api/attachments` handles image attachments (upload, list, file open, delete) for symptoms, procedures, and notes.
 - `/api/settings` handles vehicle profile, document defaults, runtime info, and backup export.
@@ -103,6 +103,17 @@ The current app uses SQLite-stored embedding BLOBs and an in-memory cosine scan.
 
 When an image is present, `aiAnswerService.js` switches only that OpenAI request to the Responses API structured input (`input_text` + `input_image`) and uses `OPENAI_VISION_MODEL` (which defaults to `OPENAI_ANSWER_MODEL`). Everything else is unchanged: retrieval still runs on the text question only, images never enter `document_chunks`, documents stay PDF-only, and the same not-found gate applies. The model may describe what is visible in the photo, but every repair spec, torque value, capacity, tool, step, and warning must still come from the retrieved PDF chunks and stays cited. Without `OPENAI_API_KEY`, Ask degrades to the same "AI not configured" state whether or not an image is attached.
 
+### Suggested procedures for a symptom
+
+`GET /api/symptoms/:id/suggested-procedures` suggests existing stored procedures for a symptom. It builds one query from the symptom's title, description, suspected causes, and system, then reuses the same retriever as Ask (`retrieveRelevantChunks` in keyword mode, so no API key is required to ground the results).
+
+`server/src/services/procedureSuggestionService.js` holds the logic behind one seam (`suggestProceduresForSymptom`, injectable like the Ask service):
+
+1. Deterministic fallback (default, always available): ranks the candidate procedures by keyword/system overlap between the symptom text, the procedure text, and the retrieved chunk text, and returns short reasons plus the grounding citations. This needs no `OPENAI_API_KEY`.
+2. LLM-assisted (only when a key is configured): the model is handed the symptom summary, the numbered retrieved chunks, and the fixed candidate procedure list, and returns a ranked list of existing procedure ids. Every model suggestion must cite a retrieved chunk; anything malformed, ungrounded, or pointing at an unknown id is dropped, and the route falls back to the deterministic ranking rather than breaking.
+
+The model can only suggest links to procedures that already exist — it never creates a procedure here. Statuses follow the Ask vocabulary (`answered`, `not_found`); the response also carries `aiConfigured` and `mode` so the UI can show whether the matches are AI-assisted or keyword-based. Manual symptom/procedure link reads and writes live in `server/src/services/symptomProcedureService.js` (`setSymptomProcedures`, `setProcedureSymptoms`).
+
 ## Bulk PDF Import Path
 
 `server/src/scripts/importFolder.js` imports a folder of PDFs from the command line:
@@ -137,5 +148,4 @@ The current app does not include:
 - multi-vehicle UI
 - general AI chat outside uploaded documents
 - vector database
-- direct symptom-to-procedure links
 - automatic restore from backup export

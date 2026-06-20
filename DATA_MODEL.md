@@ -141,6 +141,7 @@ Current use:
 - Create, edit, and delete symptoms.
 - Search, filter, and sort symptoms.
 - Link symptoms to documents.
+- Link symptoms to procedures (see `symptom_procedures`).
 - Attach images (stored in the `attachments` table).
 
 ### `symptom_documents`
@@ -181,6 +182,7 @@ Current use:
 - Store steps, tools, parts, safety notes, difficulty, and confidence.
 - Search, filter, and sort procedures.
 - Link procedures to documents.
+- Link procedures to symptoms (see `symptom_procedures`).
 - Attach images (stored in the `attachments` table).
 
 ### `procedure_documents`
@@ -193,6 +195,21 @@ Important fields:
 - `document_id`
 
 One procedure can link to many documents. One document can support many procedures.
+
+### `symptom_procedures`
+
+Links symptoms directly to procedures, in either direction.
+
+Important fields:
+
+- `symptom_id`
+- `procedure_id`
+
+The composite primary key is `(symptom_id, procedure_id)`, and both foreign keys
+use `ON DELETE CASCADE`, so deleting a symptom or a procedure clears its links.
+One symptom can link to many procedures, and one procedure can link to many
+symptoms. The links are managed with `PUT /api/symptoms/:id/procedures` and
+`PUT /api/procedures/:id/symptoms`.
 
 ### `notes`
 
@@ -298,5 +315,4 @@ The current schema does not include:
 - user accounts
 - cloud sync tables
 - multi-vehicle UI support beyond the existing vehicle table
-- direct symptom-to-procedure join table
 - separate vector database or vector-extension tables

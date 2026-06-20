@@ -104,3 +104,38 @@ export async function deleteAttachment(attachmentId) {
     errorMessage: "Could not delete the attachment.",
   });
 }
+
+// ---------------------------------------------------------------------------
+// Symptom <-> procedure links
+//
+// Manual linking replaces the whole set of ids in one call (DELETE-then-INSERT
+// on the server), matching the document-linking style. Both routes return the
+// updated record so the caller can refresh its state.
+// ---------------------------------------------------------------------------
+
+/** Replace the procedures linked to one symptom. Returns the updated symptom. */
+export async function setSymptomProcedures(symptomId, procedureIds) {
+  return requestJson(`/api/symptoms/${symptomId}/procedures`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ procedureIds }),
+    errorMessage: "Could not update linked procedures.",
+  });
+}
+
+/** Replace the symptoms linked to one procedure. Returns the updated procedure. */
+export async function setProcedureSymptoms(procedureId, symptomIds) {
+  return requestJson(`/api/procedures/${procedureId}/symptoms`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symptomIds }),
+    errorMessage: "Could not update linked symptoms.",
+  });
+}
+
+/** Fetch AI-assisted (or deterministic) procedure suggestions for a symptom. */
+export async function fetchSuggestedProcedures(symptomId) {
+  return requestJson(`/api/symptoms/${symptomId}/suggested-procedures`, {
+    errorMessage: "Could not suggest procedures.",
+  });
+}

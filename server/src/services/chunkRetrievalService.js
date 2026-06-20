@@ -10,7 +10,7 @@ import {
 const RECIPROCAL_RANK_K = 60;
 const MINIMUM_SEMANTIC_SCORE = 0.2;
 
-function tokenizeQuestion(question) {
+export function tokenizeQuestion(question) {
   if (typeof question !== "string") {
     return [];
   }
