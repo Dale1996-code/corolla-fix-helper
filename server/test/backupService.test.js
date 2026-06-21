@@ -3,10 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   BackupValidationError,
   SQLITE_HEADER,
+  createBackupArchive,
   restoreBackup,
   validateExtractedBackup,
 } from "../src/services/backupService.js";
@@ -65,6 +67,62 @@ function setupLiveInstall() {
 
   return { databaseFile, uploadsDir, archivePath };
 }
+
+test("createBackupArchive captures rows still held in the WAL sidecar", async () => {
+  const databaseFile = path.join(tempRoot, "live", "data", "app.db");
+  const uploadsDir = path.join(tempRoot, "live", "uploads");
+  fs.mkdirSync(path.dirname(databaseFile), { recursive: true });
+  fs.mkdirSync(uploadsDir, { recursive: true });
+
+  // Open the database exactly as the running server does: WAL mode, with the
+  // connection kept open. Disable auto-checkpoint so the newest committed row
+  // stays in the `-wal` sidecar and never reaches the main `.db` file — the
+  // precise condition under which a raw file copy would lose data.
+  const db = new DatabaseSync(databaseFile);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA wal_autocheckpoint = 0;");
+  db.exec("CREATE TABLE notes (id INTEGER PRIMARY KEY, content TEXT);");
+  db.prepare("INSERT INTO notes (content) VALUES (?)").run("checkpointed note");
+  db.prepare("INSERT INTO notes (content) VALUES (?)").run("wal-only note");
+
+  // Sanity check: the committed row really is absent from the on-disk main
+  // file, so a plain copy of that file would silently drop it.
+  const mainFileBytes = fs.readFileSync(databaseFile, "latin1");
+  assert.ok(
+    !mainFileBytes.includes("wal-only note"),
+    "test setup invalid: WAL row already checkpointed into the main file"
+  );
+
+  // Capture the staged database the archive step would tar up.
+  let stagedDatabaseFile = null;
+  const createArchive = async (stagingDir) => {
+    const databaseDir = path.join(stagingDir, "database");
+    const [name] = fs.readdirSync(databaseDir);
+    stagedDatabaseFile = path.join(tempRoot, "verify.db");
+    fs.copyFileSync(path.join(databaseDir, name), stagedDatabaseFile);
+  };
+
+  await createBackupArchive({
+    databaseFile,
+    uploadsDir,
+    outFile: path.join(tempRoot, "backup.tar.gz"),
+    createArchive,
+    db,
+  });
+
+  db.close();
+
+  // The exported snapshot must contain both the checkpointed row and the
+  // WAL-only row.
+  const exported = new DatabaseSync(stagedDatabaseFile);
+  const rows = exported
+    .prepare("SELECT content FROM notes ORDER BY id")
+    .all()
+    .map((row) => row.content);
+  exported.close();
+
+  assert.deepEqual(rows, ["checkpointed note", "wal-only note"]);
+});
 
 test("validateExtractedBackup accepts a well-formed backup", () => {
   const sourceDir = path.join(tempRoot, "src");

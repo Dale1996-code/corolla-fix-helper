@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { resolveTarExecutable } from "./tarExecutable.js";
+import { snapshotDatabase } from "./databaseSnapshot.js";
 
 // First 16 bytes of every SQLite database file (the header string plus its
 // terminating NUL). See https://www.sqlite.org/fileformat2.html#the_database_header
@@ -211,6 +212,8 @@ export async function createBackupArchive({
   outFile,
   fs = fsDefault,
   createArchive = defaultCreateArchive,
+  snapshot = snapshotDatabase,
+  db = null,
   now = () => new Date(),
 }) {
   if (!fs.existsSync(databaseFile)) {
@@ -229,10 +232,14 @@ export async function createBackupArchive({
     fs.mkdirSync(stagedUploadsDir, { recursive: true });
 
     const databaseFilename = path.basename(databaseFile);
-    fs.copyFileSync(
-      databaseFile,
-      path.join(stagedDatabaseDir, databaseFilename)
-    );
+    // Use a consistent SQLite snapshot rather than a raw file copy so committed
+    // rows that still live in the WAL sidecar are never dropped from the backup.
+    snapshot({
+      sourceFile: databaseFile,
+      destinationFile: path.join(stagedDatabaseDir, databaseFilename),
+      db,
+      fs,
+    });
 
     if (fs.existsSync(uploadsDir)) {
       fs.cpSync(uploadsDir, stagedUploadsDir, { recursive: true });

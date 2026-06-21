@@ -53,7 +53,12 @@ function seedFakeData({ databaseFile, uploadsDir }) {
   fs.mkdirSync(path.dirname(attachmentImagePath), { recursive: true });
   fs.writeFileSync(attachmentImagePath, FAKE_IMAGE_BYTES);
 
+  // Open in WAL mode like the running server, and disable auto-checkpoint so a
+  // freshly committed row stays in the `-wal` sidecar. This exercises the
+  // live-server case: the connection is still open at export time.
   const db = new DatabaseSync(databaseFile);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA wal_autocheckpoint = 0;");
 
   db.exec(`
     CREATE TABLE vehicles (id INTEGER PRIMARY KEY, year INTEGER, make TEXT, model TEXT);
@@ -81,9 +86,10 @@ function seedFakeData({ databaseFile, uploadsDir }) {
   );
 
   const counts = readCounts(db);
-  db.close();
 
-  return { storedFilename, counts };
+  // Hand back the still-open connection so the export runs against a live WAL,
+  // matching how the server exports backups while running.
+  return { storedFilename, counts, db };
 }
 
 function readCounts(db) {
@@ -109,14 +115,24 @@ async function runDrill() {
 
   try {
     console.log("1. Seeding fake data ...");
-    const { storedFilename, counts: seededCounts } = seedFakeData({
+    const {
+      storedFilename,
+      counts: seededCounts,
+      db: liveDb,
+    } = seedFakeData({
       databaseFile,
       uploadsDir,
     });
     console.log(`   seeded ${JSON.stringify(seededCounts)} + 1 PDF`);
 
-    console.log("2. Exporting backup ...");
-    await createBackupArchive({ databaseFile, uploadsDir, outFile: archivePath });
+    console.log("2. Exporting backup (live WAL connection still open) ...");
+    await createBackupArchive({
+      databaseFile,
+      uploadsDir,
+      outFile: archivePath,
+      db: liveDb,
+    });
+    liveDb.close();
     assert.ok(fs.existsSync(archivePath), "backup archive should exist");
 
     console.log("3. Wiping live data ...");
