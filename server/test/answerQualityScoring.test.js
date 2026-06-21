@@ -92,6 +92,51 @@ test("refusal case fails when the chatbot answers anyway", () => {
   assert.equal(evaluateAnswerCase(testCase, result).pass, false);
 });
 
+test("citationSupportsAny passes when a cited snippet contains a required term", () => {
+  const testCase = {
+    id: "torque",
+    category: "torque",
+    verified: false,
+    expect: "answered",
+    mustIncludeAny: [/\b37\s*N/i],
+    citationSupportsAny: [/37\s*N/i],
+  };
+  const result = {
+    status: "answered",
+    answer: "The oil drain plug torque is 37 N·m.",
+    citations: [
+      { documentTitle: "Oil", snippet: "Drain plug tightening specification is 37 N·m." },
+    ],
+  };
+
+  assert.equal(evaluateAnswerCase(testCase, result).pass, true);
+});
+
+test("citationSupportsAny fails when no cited snippet supports the required term", () => {
+  const testCase = {
+    id: "torque",
+    category: "torque",
+    verified: false,
+    expect: "answered",
+    mustIncludeAny: [/\b37\s*N/i],
+    citationSupportsAny: [/37\s*N/i],
+  };
+  const result = {
+    status: "answered",
+    answer: "The oil drain plug torque is 37 N·m.",
+    // The model asserted the value but the cited snippet does not contain it.
+    citations: [{ documentTitle: "Oil", snippet: "Inspect the old washer before reuse." }],
+  };
+
+  const evaluated = evaluateAnswerCase(testCase, result);
+  assert.equal(evaluated.pass, false);
+  assert.ok(
+    evaluated.checks.some(
+      (check) => check.name.includes("cited snippet") && check.pass === false
+    )
+  );
+});
+
 test("multi-turn case checks the rewritten standalone question", () => {
   const testCase = {
     id: "m",

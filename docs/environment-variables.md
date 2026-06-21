@@ -38,6 +38,9 @@ UPLOADS_DIR=./uploads
 MAX_UPLOAD_SIZE_MB=20
 OPENAI_API_KEY=
 OPENAI_ANSWER_MODEL=gpt-4.1
+RERANK_ENABLED=false
+RERANK_CANDIDATE_LIMIT=20
+OPENAI_RERANK_MODEL=
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIMENSIONS=512
 OPENAI_EMBEDDING_BATCH_SIZE=64
@@ -60,6 +63,9 @@ What each one means:
 - `MAX_UPLOAD_SIZE_MB` is the largest PDF upload size in megabytes.
 - `OPENAI_API_KEY` is the OpenAI API key used by the "Ask your documents" feature.
 - `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is `gpt-4.1`.
+- `RERANK_ENABLED` turns the optional Ask reranker on or off. The default is `false`. When `true`, Ask retrieval over-fetches a wider candidate pool and asks the model to reorder it before the final result slice. It needs an API key; with no key, a malformed reply, or any error it silently falls back to the existing hybrid order.
+- `RERANK_CANDIDATE_LIMIT` is how many fused candidates the reranker is allowed to reorder. The default is `20`.
+- `OPENAI_RERANK_MODEL` is the OpenAI model name used by the reranker. Leave blank to reuse `OPENAI_ANSWER_MODEL`.
 - `OPENAI_EMBEDDING_MODEL` is the OpenAI model name used to embed document chunks and questions.
 - `OPENAI_EMBEDDING_DIMENSIONS` is the embedding size stored in SQLite. The current value is `512`.
 - `OPENAI_EMBEDDING_BATCH_SIZE` is how many chunks `npm run embed:backfill` sends per embedding request.

@@ -27,6 +27,17 @@ function citationsMatch(citations, pattern) {
   );
 }
 
+// True when at least one cited snippet text matches the pattern. This is the
+// grounding check: it confirms the cited chunk text actually contains the
+// asserted spec / supporting term, not just that *an* answer mentioned it.
+function citationSnippetSupports(citations, pattern) {
+  if (!Array.isArray(citations)) {
+    return false;
+  }
+
+  return citations.some((citation) => textMatches(citation?.snippet || "", pattern));
+}
+
 export function isRefusal(result) {
   const answer = String(result?.answer || "").trim().toLowerCase();
   return result?.status === "not_found" || answer === NOT_FOUND_MESSAGE.toLowerCase();
@@ -75,6 +86,22 @@ function checkAnswered(result, spec, label) {
       name: `${label}: cites the expected document`,
       pass: citationsMatch(result?.citations, spec.citationDocLike),
       detail: String(spec.citationDocLike),
+    });
+  }
+
+  // Citation grounding: at least one cited snippet must actually contain a
+  // supporting term, so a confidently-worded answer cannot pass on a citation
+  // that does not back it up.
+  if (Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length) {
+    const pass = spec.citationSupportsAny.some((pattern) =>
+      citationSnippetSupports(result?.citations, pattern)
+    );
+    checks.push({
+      name: `${label}: a cited snippet supports the expected value`,
+      pass,
+      detail: pass
+        ? "matched"
+        : `no citation snippet matched [${spec.citationSupportsAny.map(String).join(", ")}]`,
     });
   }
 

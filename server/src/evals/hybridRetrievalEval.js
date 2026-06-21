@@ -350,6 +350,95 @@ function isExpectedTopResult(result, expectedSource) {
   );
 }
 
+/**
+ * Label one hybrid-vs-rerank outcome so an A/B run reads at a glance.
+ *
+ *   both_right    fusion already had it; rerank kept it
+ *   rerank_fixed  fusion got it wrong; rerank moved the right chunk to the top
+ *   rerank_broke  fusion had it right; rerank pushed the right chunk down
+ *   both_wrong    neither put the expected chunk on top
+ */
+export function classifyRerankAb({ fusionCorrect, rerankCorrect }) {
+  if (fusionCorrect && rerankCorrect) {
+    return "both_right";
+  }
+
+  if (!fusionCorrect && rerankCorrect) {
+    return "rerank_fixed";
+  }
+
+  if (fusionCorrect && !rerankCorrect) {
+    return "rerank_broke";
+  }
+
+  return "both_wrong";
+}
+
+/**
+ * A/B the fusion-only retrieval against reranked retrieval on the same corpus.
+ *
+ * The reranker is injectable (`rerank`) so tests pass a deterministic mock and
+ * never need an API key; a local run can pass the real `rerankChunks`. The query
+ * embedding is the same deterministic stub the hybrid eval uses.
+ */
+export async function runRerankAbEval({
+  distractorDocumentCount = 50,
+  rerank,
+  createQueryEmbedding = async (question) =>
+    createDeterministicEvalEmbedding(question, { kind: "query" }),
+} = {}) {
+  const expectedSources = seedEvalCorpus({ distractorDocumentCount });
+  const items = [];
+
+  for (const evalCase of HYBRID_RETRIEVAL_EVAL_CASES) {
+    const expectedSource = expectedSources.get(evalCase.id);
+
+    const fusionResults = await retrieveRelevantChunks(evalCase.question, {
+      limit: 5,
+      mode: "hybrid",
+      createQueryEmbedding,
+      rerankEnabled: false,
+    });
+
+    const rerankedResults = await retrieveRelevantChunks(evalCase.question, {
+      limit: 5,
+      mode: "hybrid",
+      createQueryEmbedding,
+      rerankEnabled: true,
+      rerankCandidateLimit: 20,
+      ...(rerank ? { rerank } : {}),
+    });
+
+    const fusionCorrect = isExpectedTopResult(fusionResults[0] || null, expectedSource);
+    const rerankCorrect = isExpectedTopResult(rerankedResults[0] || null, expectedSource);
+    const label = classifyRerankAb({ fusionCorrect, rerankCorrect });
+
+    items.push({
+      id: evalCase.id,
+      question: evalCase.question,
+      expectedSpec: evalCase.expectedSpec,
+      expectedPage: evalCase.expectedPage,
+      fusionCorrect,
+      rerankCorrect,
+      label,
+      fusionTop: summarizeTopResult(fusionResults[0] || null),
+      rerankTop: summarizeTopResult(rerankedResults[0] || null),
+    });
+  }
+
+  return {
+    summary: {
+      evalCaseCount: HYBRID_RETRIEVAL_EVAL_CASES.length,
+      distractorDocumentCount,
+      bothRight: items.filter((item) => item.label === "both_right").length,
+      rerankFixed: items.filter((item) => item.label === "rerank_fixed").length,
+      rerankBroke: items.filter((item) => item.label === "rerank_broke").length,
+      bothWrong: items.filter((item) => item.label === "both_wrong").length,
+    },
+    items,
+  };
+}
+
 export async function runHybridRetrievalEval({ distractorDocumentCount = 2500 } = {}) {
   const expectedSources = seedEvalCorpus({ distractorDocumentCount });
   const items = [];

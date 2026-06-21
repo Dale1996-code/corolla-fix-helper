@@ -12,16 +12,20 @@
 //                       flip it to verified: true.
 //
 // FIELDS
-//   id              short unique name
-//   question        what to ask
-//   category        "torque" | "capacity" | "procedure" | "refusal" | "behavior"
-//   expect          "answered" or "refused"
-//   mustIncludeAny  answer must contain at least ONE of these (string = contains, /regex/ = matches)
-//   mustIncludeAll  answer must contain ALL of these (optional)
-//   citationDocLike answer must cite a document whose title/filename matches this (optional)
-//   mustCite        require at least one citation (default true for answered cases)
-//   followUp        a second question in the same conversation (tests multi-turn memory).
-//                   standaloneIncludes checks the rewritten follow-up query.
+//   id               short unique name
+//   question         what to ask
+//   category         "torque" | "capacity" | "procedure" | "refusal" | "behavior"
+//   system           vehicle system label (Engine, Brakes, ...) for coverage (optional)
+//   expect           "answered" or "refused"
+//   mustIncludeAny   answer must contain at least ONE of these (string = contains, /regex/ = matches)
+//   mustIncludeAll   answer must contain ALL of these (optional)
+//   citationDocLike  answer must cite a document whose title/filename matches this (optional)
+//   citationSupportsAny  at least one CITED SNIPPET must match one of these — proves the
+//                    cited chunk text actually backs the asserted spec, not just the prose (optional)
+//   mustCite         require at least one citation (default true for answered cases)
+//   image            a data: URI sent with the question to exercise Vision Ask (optional)
+//   followUp         a second question in the same conversation (tests multi-turn memory).
+//                    standaloneIncludes checks the rewritten follow-up query.
 //
 // HOW TO ADD A VERIFIED CASE
 //   1. Ask the question in the app. 2. Confirm the number against the cited PDF page.
@@ -107,6 +111,7 @@ export const answerQualityCases = [
     id: "water-pump-then-torque",
     question: "How do I replace the water pump?",
     category: "behavior",
+    system: "Cooling",
     expect: "answered",
     mustIncludeAny: [/water pump/i],
     followUp: {
@@ -115,6 +120,132 @@ export const answerQualityCases = [
       standaloneIncludes: /water pump/i,
       mustIncludeAny: [/N\b|N·m|Nm|ft/i],
     },
+    verified: false,
+  },
+
+  // ---- TEMPLATES: broader system coverage (verified:false until confirmed) ----
+  // These spread the eval across the major vehicle systems so a retrieval/rerank
+  // change that helps one system but hurts another is visible. Every value is a
+  // common published 2009 Corolla 1.8L (2ZR-FE) figure used ONLY as a starting
+  // point — confirm each against YOUR manual before flipping verified: true.
+  {
+    id: "rear-brake-caliper-torque",
+    question: "What is the rear brake caliper mounting bolt torque?",
+    category: "torque",
+    system: "Brakes",
+    expect: "answered",
+    mustIncludeAny: [/\b34\s*N/i, /\b25\s*ft/i], // CONFIRM against your manual
+    citationSupportsAny: [/\b34\s*N/i, /\b25\s*ft/i],
+    citationDocLike: /brake/i,
+    verified: false,
+  },
+  {
+    id: "brake-fluid-type",
+    question: "What brake fluid type does the car use?",
+    category: "capacity",
+    system: "Brakes",
+    expect: "answered",
+    mustIncludeAny: [/DOT\s*3/i, /DOT\s*4/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "thermostat-opening-temperature",
+    question: "At what temperature does the thermostat start to open?",
+    category: "capacity",
+    system: "Cooling",
+    expect: "answered",
+    mustIncludeAny: [/(80|82|176|180|183)\s*(°|deg|c\b|f\b)/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "charging-system-voltage",
+    question: "What charging voltage should the alternator produce at idle?",
+    category: "capacity",
+    system: "Electrical",
+    expect: "answered",
+    mustIncludeAny: [/1[34]\.[0-9]\s*(v|volt)/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "front-strut-mount-torque",
+    question: "What is the front strut-to-body mounting nut torque?",
+    category: "torque",
+    system: "Suspension",
+    expect: "answered",
+    mustIncludeAny: [/\b29\s*ft/i, /\b39\s*N/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "front-lower-ball-joint-procedure",
+    question: "How do I replace the front lower ball joint?",
+    category: "procedure",
+    system: "Suspension",
+    expect: "answered",
+    mustIncludeAny: [/ball joint/i], // a real procedure should mention this
+    mustIncludeAll: [/control arm|knuckle|steering knuckle/i],
+    verified: false,
+  },
+  {
+    id: "auto-transaxle-fluid-type",
+    question: "Which automatic transaxle fluid is required?",
+    category: "capacity",
+    system: "Transmission",
+    expect: "answered",
+    mustIncludeAny: [/ATF\s*WS/i, /Toyota\s*ATF/i], // CONFIRM against your manual
+    citationSupportsAny: [/ATF\s*WS/i],
+    verified: false,
+  },
+  {
+    id: "fuel-pressure-spec",
+    question: "What is the fuel system pressure specification?",
+    category: "capacity",
+    system: "Fuel",
+    expect: "answered",
+    mustIncludeAny: [/\b\d{2,3}\s*(kpa|psi)/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "ac-refrigerant-type",
+    question: "What air conditioning refrigerant does the system use?",
+    category: "capacity",
+    system: "HVAC",
+    expect: "answered",
+    mustIncludeAny: [/R-?134a/i], // CONFIRM against your manual
+    verified: false,
+  },
+  {
+    id: "cabin-air-filter-procedure",
+    question: "How do I replace the cabin air filter?",
+    category: "procedure",
+    system: "HVAC",
+    expect: "answered",
+    mustIncludeAny: [/cabin/i, /filter/i], // a real procedure should mention these
+    verified: false,
+  },
+  {
+    id: "valve-cover-bolt-torque",
+    question: "What is the cylinder head cover (valve cover) bolt torque?",
+    category: "torque",
+    system: "Engine",
+    expect: "answered",
+    mustIncludeAny: [/\b\d{1,2}\s*N/i, /\bft-?lb/i], // CONFIRM against your manual
+    verified: false,
+  },
+
+  // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
+  // The model may describe the attached photo, but it must STILL refuse a spec
+  // the uploaded PDF chunks do not support — an image is never a source for a
+  // torque/capacity/procedure value. A 1x1 placeholder PNG stands in for a real
+  // photo; the refusal is driven by the not-found gate, not the image content.
+  {
+    id: "vision-refuses-unsupported-spec",
+    question:
+      "Here is a photo of my dashboard. What is the exact torque spec for the part shown in this picture?",
+    category: "refusal",
+    system: "Electrical",
+    expect: "refused",
+    image:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     verified: false,
   },
 ];

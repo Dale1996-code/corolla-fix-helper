@@ -57,10 +57,13 @@ The first document Q&A version is now partially implemented:
 - `POST /api/ask` accepts a question and returns an answer status, answer text, and citations.
 - Ask can optionally include one already-saved image attachment by `attachmentId` (Vision Ask) so the model can see a photo of the symptom or part. Retrieval still runs on the text question only, images never enter `document_chunks`, documents stay PDF-only, and every spec, torque value, capacity, tool, step, and warning still comes only from retrieved PDF chunks. The vision request uses `OPENAI_VISION_MODEL`, which defaults to the answer model.
 - Retrieval fuses keyword ranking with in-memory cosine search over SQLite-stored embedding BLOBs.
+- An optional LLM reranker can reorder the fused candidates before the final result slice. It is **off by default** (`RERANK_ENABLED=false`), bounded by `RERANK_CANDIDATE_LIMIT`, and falls back to the existing hybrid order whenever it is disabled, has no API key, or returns anything malformed — so it never breaks a working Ask request.
 - The answer service uses OpenAI when `OPENAI_API_KEY` is configured.
 - The app returns clear no-key and not-enough-information states.
-- Backend and frontend tests cover the main Ask states.
+- Backend and frontend tests cover the main Ask states, including the reranker's parse/fallback paths.
 - `npm run eval:retrieval` proves hybrid retrieval fixes keyword wrong-page cases against a 12-item eval set with 2,500 distractor documents.
+- `npm run eval:rerank` A/B-compares fusion-only against reranked retrieval (real key optional; a no-key run shows the reranker is a safe no-op).
+- `server/src/evals/answerQualityCases.js` now spans the major systems (engine, brakes, cooling, electrical, suspension, transmission, fuel, HVAC) plus a Vision Ask refusal guard. The new cases are `verified: false` templates until confirmed against the real manuals, so they report but do not gate CI.
 
 A second AI feature, the Repair Planner, is also implemented:
 
@@ -79,6 +82,9 @@ A third, smaller AI-assisted feature now suggests existing procedures for a symp
 
 Future AI work should stay small and evidence-based:
 
+- Confirm the new system-coverage answer templates against the real manuals and flip the good ones to `verified: true`.
+- Measure the reranker on real manuals with a key (`npm run eval:rerank`) before considering turning `RERANK_ENABLED` on by default.
+- A cheaper first-stage tuning pass (term proximity, RRF weights, exact-phrase weighting) was deliberately left alone for now: the hybrid fusion order is pinned by the exact-match retrieval eval, so any change there needs its own eval evidence first.
 - Add real-manual eval cases as the local PDF library grows.
 - Add an admin or maintenance path for rebuilding chunks if the schema changes.
 - Keep real API keys outside Git and document only placeholder env values.

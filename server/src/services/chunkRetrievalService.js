@@ -6,6 +6,7 @@ import {
   loadChunkEmbeddingCache,
   vectorMagnitude,
 } from "./chunkEmbeddingService.js";
+import { rerankChunks } from "./chunkRerankService.js";
 
 const RECIPROCAL_RANK_K = 60;
 const MINIMUM_SEMANTIC_SCORE = 0.2;
@@ -200,7 +201,13 @@ function addRankedCandidate(candidates, row, scorePatch) {
 
 async function retrieveHybridChunks(
   question,
-  { limit = 8, createQueryEmbedding = createOpenAiEmbedding } = {}
+  {
+    limit = 8,
+    createQueryEmbedding = createOpenAiEmbedding,
+    rerankEnabled = config.rerankEnabled,
+    rerankCandidateLimit = config.rerankCandidateLimit,
+    rerank = rerankChunks,
+  } = {}
 ) {
   const terms = tokenizeQuestion(question);
 
@@ -265,7 +272,7 @@ async function retrieveHybridChunks(
     });
   }
 
-  return [...candidates.values()]
+  const fused = [...candidates.values()]
     .filter(
       (candidate) =>
         candidate.keywordScore > 0 || candidate.semanticScore >= MINIMUM_SEMANTIC_SCORE
@@ -284,8 +291,24 @@ async function retrieveHybridChunks(
       }
 
       return compareChunkOrder(left, right);
-    })
-    .slice(0, getSafeLimit(limit));
+    });
+
+  const safeLimit = getSafeLimit(limit);
+
+  // Optional second pass: when reranking is off (the default) this returns the
+  // fusion order unchanged. When on, over-fetch a wider candidate pool, let the
+  // reranker reorder it, then slice to the requested limit. Any reranker failure
+  // is handled inside rerank() by returning the pool untouched, so this never
+  // breaks a working Ask request.
+  if (!rerankEnabled) {
+    return fused.slice(0, safeLimit);
+  }
+
+  const poolSize = Math.max(safeLimit, getSafeLimit(rerankCandidateLimit));
+  const candidatePool = fused.slice(0, poolSize);
+  const reordered = await rerank(question, candidatePool);
+
+  return (Array.isArray(reordered) ? reordered : candidatePool).slice(0, safeLimit);
 }
 
 export async function retrieveRelevantChunks(question, options = {}) {

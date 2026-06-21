@@ -26,7 +26,11 @@ const results = [];
 
 for (const testCase of answerQualityCases) {
   try {
-    const primary = await askQuestionUsingDocuments(testCase.question);
+    // Vision cases attach an image so the run exercises the same not-found gate
+    // with a photo present; text cases pass image: null and are unchanged.
+    const primary = await askQuestionUsingDocuments(testCase.question, {
+      image: testCase.image || null,
+    });
 
     let followUp = null;
     if (testCase.followUp) {
