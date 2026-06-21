@@ -1,5 +1,7 @@
 # Documentation Audit
 
+> Historical record: this completed audit describes the documentation rewrite at that time. It is not a current source of truth, and some files listed below were removed during later cleanup. Start with `README.md` and `docs/archive/README.md` for the current documentation structure.
+
 Audit branch: `docs/rewrite-current-repo-docs`
 
 This audit reviewed every markdown or documentation-style file found in the repo before the rewrite. The goal was to keep useful current docs, rewrite stale main docs, and archive old plans instead of deleting them.
