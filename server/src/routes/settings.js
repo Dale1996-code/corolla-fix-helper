@@ -11,6 +11,7 @@ import {
   updateDocumentDefaults,
 } from "../services/appSettingsService.js";
 import { resolveTarExecutable } from "../services/tarExecutable.js";
+import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import { normalizeText } from "../utils/text.js";
 
 export const settingsRouter = Router();
@@ -97,7 +98,13 @@ async function createBackupStagingDir() {
   fs.mkdirSync(uploadsDir, { recursive: true });
 
   const databaseFilename = path.basename(config.databaseFile) || `backup-${randomUUID()}.db`;
-  fs.copyFileSync(config.databaseFile, path.join(databaseDir, databaseFilename));
+  // Snapshot through SQLite (not a raw copy) so committed rows still in the WAL
+  // sidecar are captured. Use the live connection that owns the WAL.
+  snapshotDatabase({
+    sourceFile: config.databaseFile,
+    destinationFile: path.join(databaseDir, databaseFilename),
+    db,
+  });
 
   if (fs.existsSync(config.uploadsDir)) {
     fs.cpSync(config.uploadsDir, uploadsDir, { recursive: true });
