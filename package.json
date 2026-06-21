@@ -18,6 +18,7 @@
     "backup:drill": "npm --prefix server run backup:drill",
     "embed:backfill": "npm --prefix server run embed:backfill",
     "eval:retrieval": "npm --prefix server run eval:retrieval",
+    "eval:rerank": "npm --prefix server run eval:rerank",
     "eval:answers": "npm --prefix server run eval:answers",
     "lint": "eslint server",
     "test": "npm run test:server && npm run test:client",

@@ -13,6 +13,19 @@ This proves the search step finds the right passage. It runs on its own temporar
 needs no API key. Use it to confirm the hybrid (keyword + meaning) search still beats plain
 keyword search.
 
+### Reranker A/B (optional)
+
+```powershell
+npm run eval:rerank
+```
+
+This compares plain hybrid/fusion retrieval against the optional LLM reranker on the same
+temporary corpus, and labels each case `both_right`, `rerank_fixed` (fusion wrong, rerank
+right), `rerank_broke` (fusion right, rerank wrong), or `both_wrong`. Without an
+`OPENAI_API_KEY` the reranker is a safe no-op (every case stays `both_right`), so it is honest
+to run with no key — set a key locally to see whether reranking actually helps before turning
+`RERANK_ENABLED` on.
+
 ## 2. Answer check (the real quality test)
 
 ```powershell
@@ -29,8 +42,14 @@ your `OPENAI_API_KEY` set (it costs a few cents per full run). For each question
   `not in documents` instead of inventing an answer? This is the most important safety check.
 - **Follow-up questions**: does a vague follow-up ("what about the torque?") get rewritten to
   include what it refers to before searching?
+- **Citation grounding** (optional, `citationSupportsAny`): does at least one cited snippet
+  actually contain the asserted value, so a confidently-worded answer cannot pass on a
+  citation that does not back it up?
 
-It prints a scorecard and **fails if any verified case fails.**
+It prints a scorecard and **fails if any verified case fails.** New template cases (including
+the broader engine/brakes/cooling/electrical/suspension/transmission/fuel/HVAC coverage and a
+Vision Ask refusal guard) stay `verified: false` until you confirm them, so they report but
+never gate the run.
 
 ## The test questions live in one file
 

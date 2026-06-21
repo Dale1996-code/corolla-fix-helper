@@ -14,3 +14,11 @@ test("openAiVisionModel defaults to the answer model when OPENAI_VISION_MODEL is
   assert.equal(config.openAiAnswerModel, "answer-model-under-test");
   assert.equal(config.openAiVisionModel, "answer-model-under-test");
 });
+
+test("reranking is off by default with safe candidate-pool and model defaults", () => {
+  // RERANK_* are unset in this process, so the optional reranker must default
+  // to OFF, a ~20 candidate pool, and reuse the answer model.
+  assert.equal(config.rerankEnabled, false);
+  assert.equal(config.rerankCandidateLimit, 20);
+  assert.equal(config.openAiRerankModel, "answer-model-under-test");
+});

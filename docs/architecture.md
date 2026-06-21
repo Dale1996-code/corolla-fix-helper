@@ -97,6 +97,19 @@ If no useful chunks are found, the app returns `not in documents`. If useful chu
 
 The current app uses SQLite-stored embedding BLOBs and an in-memory cosine scan. It does not use a vector database or SQLite vector extension.
 
+### Optional LLM reranker (off by default)
+
+`server/src/services/chunkRerankService.js` adds an optional second pass over the fused hybrid results. It is **off by default** (`RERANK_ENABLED=false`) and only runs when explicitly enabled with an API key configured.
+
+When enabled, `retrieveHybridChunks` (in `chunkRetrievalService.js`) does the same first-stage keyword + embedding fusion, then:
+
+1. over-fetches a wider candidate pool bounded by `RERANK_CANDIDATE_LIMIT` (default 20),
+2. hands that pool to `rerankChunks`, which sends short, bounded chunk snippets to the OpenAI Responses API (raw `fetch`, `OPENAI_RERANK_MODEL`, defaulting to the answer model) and asks **only** for a reordering of the chunk numbers — it never generates answer content here,
+3. validates the reply defensively (JSON array of known 1-based indexes, no duplicates, no invented numbers), and
+4. slices the reordered pool to the requested limit.
+
+The reranker degrades safely in every failure case — disabled, no API key, malformed reply, unknown ids, or a network error — by returning the original fusion order. A working Ask request never fails just because reranking failed. Like the other AI features, the model client (`generateRanking`) is injectable, so tests run without an API key and make no network calls. `npm run eval:rerank` A/B-compares fusion-only against reranked retrieval on a deterministic corpus.
+
 ### Optional image in Ask (Vision Ask)
 
 `POST /api/ask` accepts an optional `attachmentId` that points at one already-saved image attachment (the Phase 1 symptom/procedure/note photos). The Search page Ask panel lets the user pick from existing saved attachments; it never uploads a new file and never sends raw or base64 image data from the client. The backend loads that attachment record and its stored file from attachment storage (`server/src/routes/ask.js` `loadAttachmentImageFromStorage`, injectable for tests) and turns it into a `data:` URI.

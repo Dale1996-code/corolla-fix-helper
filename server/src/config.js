@@ -26,6 +26,9 @@ function readBoolean(value, fallback) {
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
 const openAiAnswerModel =
   process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1";
+// The optional Ask reranker reuses the answer model unless OPENAI_RERANK_MODEL
+// is set, so enabling it needs no extra model configuration.
+const openAiRerankModel = process.env.OPENAI_RERANK_MODEL || openAiAnswerModel;
 const openAiEmbeddingModel =
   process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 const openAiEmbeddingDimensions = readPositiveInteger(
@@ -43,6 +46,11 @@ export const config = {
   // Vision Ask reuses the answer model unless OPENAI_VISION_MODEL is set, so a
   // text-only deployment needs no extra configuration.
   openAiVisionModel: process.env.OPENAI_VISION_MODEL || openAiAnswerModel,
+  // Optional LLM reranker over hybrid retrieval results. Off by default; when on
+  // it reorders a bounded candidate pool before the final limit slice.
+  rerankEnabled: readBoolean(process.env.RERANK_ENABLED, false),
+  rerankCandidateLimit: readPositiveInteger(process.env.RERANK_CANDIDATE_LIMIT, 20),
+  openAiRerankModel,
   openAiEmbeddingModel,
   openAiEmbeddingDimensions,
   openAiEmbeddingVersion: `${openAiEmbeddingModel}@${openAiEmbeddingDimensions}`,
