@@ -8,6 +8,45 @@ export const NOT_FOUND_MESSAGE = "not in documents";
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_HISTORY_CONTENT_LENGTH = 1200;
 
+export const OPENAI_REQUEST_TIMEOUT_MS = 30_000;
+export const OPENAI_TIMEOUT_MESSAGE =
+  "The AI request took too long and was cancelled. Please try again.";
+
+/**
+ * POST a body to the OpenAI Responses API with a hard timeout.
+ *
+ * An AbortController cancels the request after `timeoutMs`, and a timeout
+ * surfaces a short, user-friendly message instead of a stack trace. `fetchImpl`
+ * is injectable so the timeout path is testable without a real network call.
+ */
+export async function postToOpenAiResponses(
+  body,
+  { fetchImpl = fetch, timeoutMs = OPENAI_REQUEST_TIMEOUT_MS } = {}
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetchImpl("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.openAiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(OPENAI_TIMEOUT_MESSAGE, { cause: error });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function parseOpenAiOutputText(payload) {
   const outputText =
     typeof payload?.output_text === "string"
@@ -114,16 +153,9 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
     `Latest user question: ${normalizedQuestion}`,
   ].join("\n");
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openAiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.openAiAnswerModel,
-      input: prompt,
-    }),
+  const response = await postToOpenAiResponses({
+    model: config.openAiAnswerModel,
+    input: prompt,
   });
 
   if (!response.ok) {
@@ -199,17 +231,7 @@ export async function generateAnswerTextFromOpenAi({
       ]
     : prompt;
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openAiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input,
-    }),
-  });
+  const response = await postToOpenAiResponses({ model, input });
 
   if (!response.ok) {
     const errorText = await response.text();

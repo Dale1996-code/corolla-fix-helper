@@ -1,5 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
 import { db } from "./database.js";
+import { config } from "./config.js";
 import { ensureAppSettingsRecord } from "./services/appSettingsService.js";
+
+// Filename of the optional demo document, stored under config.uploadsDir.
+const SEED_DOCUMENT_STORED_FILENAME = "sample-maintenance-schedule.pdf";
 
 function ensureColumn(tableName, columnName, columnDefinition) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -227,9 +233,12 @@ function createTables() {
 }
 
 function seedVehicle() {
+  // One-vehicle workspace: only insert when no vehicle exists at all. Matching
+  // on the original year/make/model/trim would insert a second hidden row once
+  // the user edits their vehicle details in Settings.
   const existingVehicle = db
-    .prepare("SELECT id FROM vehicles WHERE year = ? AND make = ? AND model = ? AND trim = ?")
-    .get(2009, "Toyota", "Corolla", "LE");
+    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
+    .get();
 
   if (existingVehicle) {
     return existingVehicle.id;
@@ -386,13 +395,70 @@ function backfillNotesData() {
   `);
 }
 
-export function initializeDatabase() {
-  createTables();
-  ensureAppSettingsRecord();
-  const vehicleId = seedVehicle();
+// Write a minimal but structurally valid PDF for the demo document so it points
+// at a real file on disk instead of a dangling reference.
+function ensureSeedDocumentFile() {
+  fs.mkdirSync(config.uploadsDir, { recursive: true });
+
+  const target = path.join(config.uploadsDir, SEED_DOCUMENT_STORED_FILENAME);
+
+  if (fs.existsSync(target)) {
+    return;
+  }
+
+  const minimalPdf = [
+    "%PDF-1.4",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj",
+    "trailer<</Root 1 0 R>>",
+    "%%EOF",
+    "",
+  ].join("\n");
+
+  fs.writeFileSync(target, minimalPdf, "latin1");
+}
+
+// Whether to seed the optional demo/sample workspace data. Off unless SEED_DEMO
+// is explicitly truthy, so a real workspace stays empty until the user adds
+// their own documents. `npm run demo:seed` sets this for a one-off load.
+function shouldSeedDemoData() {
+  const value = process.env.SEED_DEMO;
+
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
+/**
+ * Seed the demo/sample document, its tags, and its retrievable chunks.
+ *
+ * Kept out of the default startup path and exposed for the explicit
+ * `npm run demo:seed` script (see src/scripts/demoSeed.js).
+ */
+export function seedDemoData() {
+  const existingVehicle = db
+    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
+    .get();
+  const vehicleId = existingVehicle ? existingVehicle.id : seedVehicle();
+
+  ensureSeedDocumentFile();
   const seedDocumentId = seedDocument(vehicleId);
   seedDocumentTags(seedDocumentId);
   backfillSeedDocument();
   seedDocumentChunks(seedDocumentId);
+}
+
+export function initializeDatabase() {
+  createTables();
+  ensureAppSettingsRecord();
+  seedVehicle();
+
+  if (shouldSeedDemoData()) {
+    seedDemoData();
+  }
+
   backfillNotesData();
 }

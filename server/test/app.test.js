@@ -19,6 +19,8 @@ process.env.PORT = "4100";
 process.env.CLIENT_PORT = "5174";
 process.env.OPENAI_API_KEY = "";
 process.env.OCR_ENABLED = "false";
+// These tests exercise the demo/sample document, which is now opt-in.
+process.env.SEED_DEMO = "true";
 
 fs.mkdirSync(testAssetDir, { recursive: true });
 fs.writeFileSync(

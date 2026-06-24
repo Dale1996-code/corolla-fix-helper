@@ -207,22 +207,32 @@ function getExistingDocumentIds(vehicleId, requestedDocumentIds) {
     .map((row) => row.id);
 }
 
-function replaceSymptomDocumentLinks(symptomId, vehicleId, requestedDocumentIds) {
-  db.prepare("DELETE FROM symptom_documents WHERE symptom_id = ?").run(symptomId);
+// Replace a symptom's document links atomically: the DELETE and the re-INSERTs
+// run in one transaction so a mid-replacement failure rolls back and leaves the
+// original links intact (never a half-cleared set). Exported for testing.
+export function replaceSymptomDocumentLinks(symptomId, vehicleId, requestedDocumentIds) {
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
 
-  const validDocumentIds = getExistingDocumentIds(vehicleId, requestedDocumentIds);
+  try {
+    db.prepare("DELETE FROM symptom_documents WHERE symptom_id = ?").run(symptomId);
 
-  if (!validDocumentIds.length) {
-    return;
-  }
+    const validDocumentIds = getExistingDocumentIds(vehicleId, requestedDocumentIds);
 
-  const insertLink = db.prepare(`
-    INSERT INTO symptom_documents (symptom_id, document_id)
-    VALUES (?, ?)
-  `);
+    if (validDocumentIds.length) {
+      const insertLink = db.prepare(`
+        INSERT INTO symptom_documents (symptom_id, document_id)
+        VALUES (?, ?)
+      `);
 
-  for (const documentId of validDocumentIds) {
-    insertLink.run(symptomId, documentId);
+      for (const documentId of validDocumentIds) {
+        insertLink.run(symptomId, documentId);
+      }
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 

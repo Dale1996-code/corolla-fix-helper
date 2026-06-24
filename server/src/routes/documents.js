@@ -5,6 +5,7 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { db } from "../database.js";
 import {
+  countDocuments,
   deleteDocument,
   listDocuments,
   resolveStoredFilePath,
@@ -65,13 +66,23 @@ function getVehicleId() {
   return vehicle.id;
 }
 
-documentsRouter.get("/", (_request, response) => {
-  const documents = listDocuments();
+documentsRouter.get("/", (request, response) => {
+  const total = countDocuments();
 
-  response.json({
-    documents,
-    total: documents.length,
-  });
+  // Backward compatible: with no `limit` query, return every document (the
+  // current Documents page relies on this). When `limit` is supplied, page
+  // through with a sane cap so a huge library cannot be pulled at once.
+  if (request.query.limit === undefined) {
+    const documents = listDocuments();
+    response.json({ documents, total });
+    return;
+  }
+
+  const limit = Math.min(200, parsePositiveInt(request.query.limit) || 50);
+  const offset = parsePositiveInt(request.query.offset) || 0;
+  const documents = listDocuments({ limit, offset });
+
+  response.json({ documents, total, limit, offset });
 });
 
 documentsRouter.get("/:id/file", async (request, response) => {

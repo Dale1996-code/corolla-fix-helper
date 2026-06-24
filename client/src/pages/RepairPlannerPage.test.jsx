@@ -142,6 +142,24 @@ test("RepairPlannerPage streams agent activity, plan text, and structured artifa
   expect(within(sourceLink).getByText("torque caliper bolts to 25 ft-lb")).toBeInTheDocument();
 });
 
+test("RepairPlannerPage shows a preparation-guidance safety disclaimer with readiness", async () => {
+  const fetchMock = vi.fn(() => streamResponse(completedRun));
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPage();
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Repair brief" }), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Build repair plan" }));
+
+  expect(
+    await screen.findByText(
+      "Steps are preparation guidance, not verified repair instructions."
+    )
+  ).toBeInTheDocument();
+});
+
 test("RepairPlannerPage shows the AI-not-configured message from the stream", async () => {
   const fetchMock = vi.fn(() =>
     streamResponse([

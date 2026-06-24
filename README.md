@@ -38,9 +38,11 @@ The current app does not include:
 - general open-ended AI chat (the Ask and Repair Planner features stay grounded in the uploaded documents and the repair brief)
 - a verified current cloud deployment from this branch
 
-The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. After importing or re-extracting PDFs, run `npm run embed:backfill` so existing chunks, including OCR-created chunks, have current embeddings. Without an OpenAI key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.
+The document Q&A and Repair Planner features need `OPENAI_API_KEY` in the server environment. Newly uploaded PDFs are searchable by keyword right away — no extra step needed. For the best results, run `npm run embed:backfill` after importing or re-extracting PDFs so chunks (including OCR-created ones) also get semantic, embedding-based ranking. Without an OpenAI key, the app keeps working and both features show that AI is not configured. See [docs/repair-planner.md](docs/repair-planner.md) for how the agent, its tools, and the streaming API route work, plus the validation checklist.
 
 Use sample or fake PDFs before sharing a public demo. The app does not have access control yet.
+
+> ⚠️ **Do not expose this app on a public URL without putting HTTPS and authentication in front of it.** There is no login, so anyone who can reach it can read your data and spend your OpenAI budget. The AI endpoints are rate-limited (20 requests/minute) as a basic safeguard, but that is not a substitute for authentication. The Ask feature sends your question and relevant excerpts from your uploaded PDFs (plus any photo you attach) to OpenAI to generate an answer.
 
 ## Tech Stack
 

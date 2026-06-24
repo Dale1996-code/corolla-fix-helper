@@ -105,7 +105,7 @@ Set the key in the server environment (see `.env.example`):
 
 ```
 OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_ANSWER_MODEL=gpt-4.1-mini
 ```
 
 `gpt-4.1-mini` is a current, non-deprecated model on the Responses API and is a

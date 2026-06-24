@@ -4,6 +4,7 @@ import cors from "cors";
 import express from "express";
 import { createAskRouter } from "./routes/ask.js";
 import { createRepairPlanRouter } from "./routes/repairPlan.js";
+import { createRateLimiter } from "./middleware/rateLimit.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
@@ -57,6 +58,13 @@ export function createApp(options = {}) {
   const { askQuestion, runRepairPlan } = options;
   const clientDistDir = options.clientDistDir || config.clientDistDir;
 
+  // Cap how often the AI endpoints can be hit so an exposed instance cannot burn
+  // the OpenAI budget. A shared limiter can be injected for tests; otherwise each
+  // AI endpoint gets its own 20-requests-per-minute window.
+  const askLimiter = options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
+  const repairPlanLimiter =
+    options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
+
   app.use(
     cors({
       origin: config.corsOrigin,
@@ -74,8 +82,12 @@ export function createApp(options = {}) {
   app.use("/api/notes", notesRouter);
   app.use("/api/attachments", attachmentsRouter);
   app.use("/api/settings", settingsRouter);
-  app.use("/api/ask", createAskRouter({ askQuestion }));
-  app.use("/api/repair-plan", createRepairPlanRouter({ runAgent: runRepairPlan }));
+  app.use("/api/ask", askLimiter, createAskRouter({ askQuestion }));
+  app.use(
+    "/api/repair-plan",
+    repairPlanLimiter,
+    createRepairPlanRouter({ runAgent: runRepairPlan })
+  );
 
   addFrontendRoutes(app, clientDistDir);
 

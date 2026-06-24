@@ -9,6 +9,9 @@ import {
 } from "../services/attachmentService.js";
 import { parsePositiveInt } from "../utils/http.js";
 
+// Cap the question length so a giant payload cannot be forwarded to OpenAI.
+export const MAX_QUESTION_LENGTH = 2000;
+
 function attachmentError(status, message) {
   const error = new Error(message);
   /** @type {any} */ (error).status = status;
@@ -86,6 +89,13 @@ export function createAskRouter({
     if (!question) {
       response.status(400).json({
         error: "Question is required.",
+      });
+      return;
+    }
+
+    if (question.length > MAX_QUESTION_LENGTH) {
+      response.status(400).json({
+        error: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.`,
       });
       return;
     }

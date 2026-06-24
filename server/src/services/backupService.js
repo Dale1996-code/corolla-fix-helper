@@ -20,6 +20,7 @@ import fsDefault from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { resolveTarExecutable } from "./tarExecutable.js";
 import { snapshotDatabase } from "./databaseSnapshot.js";
 
@@ -47,25 +48,67 @@ function timestampSlug(date) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
-function looksLikeSqliteFile(filePath, fs) {
-  let handle;
+// Tables every Corolla Fix Helper workspace database must contain. A file that
+// opens as SQLite but lacks these is not a real backup of this app and must be
+// rejected before it can replace the live data.
+export const REQUIRED_BACKUP_TABLES = ["documents", "symptoms", "procedures"];
+
+/**
+ * Deeply validate a SQLite database file.
+ *
+ * A 16-byte header check is not enough: any file beginning with the SQLite
+ * magic string would pass. Instead, open the database read-only, run SQLite's
+ * own `PRAGMA quick_check` integrity scan, and confirm the application's
+ * required tables exist. Throws BackupValidationError on any failure.
+ */
+function assertValidApplicationDatabase(databaseFile) {
+  let connection;
 
   try {
-    handle = fs.openSync(filePath, "r");
-    const header = Buffer.alloc(SQLITE_HEADER.length);
-    const bytesRead = fs.readSync(handle, header, 0, header.length, 0);
-
-    if (bytesRead < header.length) {
-      return false;
-    }
-
-    return header.toString("latin1") === SQLITE_HEADER;
+    connection = new DatabaseSync(databaseFile, { readOnly: true });
   } catch {
-    return false;
-  } finally {
-    if (handle !== undefined) {
-      fs.closeSync(handle);
+    throw new BackupValidationError(
+      "Backup database file is not a valid SQLite database."
+    );
+  }
+
+  try {
+    let integrity;
+
+    try {
+      integrity = connection.prepare("PRAGMA quick_check").get();
+    } catch {
+      throw new BackupValidationError(
+        "Backup database file is not a valid SQLite database."
+      );
     }
+
+    const status = integrity ? integrity.quick_check : null;
+
+    if (status !== "ok") {
+      throw new BackupValidationError(
+        `Backup database failed its integrity check: ${status ?? "unknown"}.`
+      );
+    }
+
+    const tableNames = new Set(
+      connection
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((row) => row.name)
+    );
+
+    const missing = REQUIRED_BACKUP_TABLES.filter(
+      (table) => !tableNames.has(table)
+    );
+
+    if (missing.length > 0) {
+      throw new BackupValidationError(
+        `Backup database is missing required tables: ${missing.join(", ")}.`
+      );
+    }
+  } finally {
+    connection.close();
   }
 }
 
@@ -123,8 +166,9 @@ function readManifest(rootDir, fs) {
 /**
  * Validate an already-extracted backup directory.
  *
- * Throws BackupValidationError when the structure, database header, or manifest
- * version is wrong. Returns the resolved paths and parsed manifest on success.
+ * Throws BackupValidationError when the structure is wrong, the database fails
+ * its integrity check, a required table is missing, or the manifest version is
+ * unsupported. Returns the resolved paths and parsed manifest on success.
  */
 export function validateExtractedBackup(rootDir, { fs = fsDefault } = {}) {
   const databaseDir = path.join(rootDir, BACKUP_DATABASE_DIRNAME);
@@ -144,11 +188,7 @@ export function validateExtractedBackup(rootDir, { fs = fsDefault } = {}) {
 
   const databaseFile = findDatabaseFile(databaseDir, fs);
 
-  if (!looksLikeSqliteFile(databaseFile, fs)) {
-    throw new BackupValidationError(
-      "Backup database file is not a valid SQLite database."
-    );
-  }
+  assertValidApplicationDatabase(databaseFile);
 
   const manifest = readManifest(rootDir, fs);
 

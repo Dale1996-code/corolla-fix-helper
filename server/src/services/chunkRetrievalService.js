@@ -165,6 +165,35 @@ export function retrieveKeywordChunks(question, { limit = 8 } = {}) {
   return scored.slice(0, getSafeLimit(limit));
 }
 
+// Keyword candidates for hybrid retrieval. Includes chunks that are either not
+// embedded yet (embedding IS NULL) or embedded at the current version, so newly
+// uploaded PDFs are findable by keyword before embed:backfill runs. Chunks with
+// a stale embedding version are excluded so they are not silently resurfaced.
+function retrieveKeywordCandidates(terms) {
+  const rows = db
+    .prepare(`
+      SELECT
+        document_chunks.id,
+        document_chunks.document_id,
+        document_chunks.page_number,
+        document_chunks.chunk_index,
+        document_chunks.chunk_text,
+        documents.title,
+        documents.original_filename,
+        documents.system
+      FROM document_chunks
+      JOIN documents ON documents.id = document_chunks.document_id
+      WHERE document_chunks.embedding IS NULL
+         OR document_chunks.embedding_version = ?
+    `)
+    .all(config.openAiEmbeddingVersion);
+
+  return rows
+    .map((row) => normalizeKeywordResult(row, terms))
+    .filter((result) => result.keywordScore > 0)
+    .sort(compareKeywordResults);
+}
+
 function assertQueryEmbedding(queryEmbedding) {
   if (!queryEmbedding || queryEmbedding.length !== config.openAiEmbeddingDimensions) {
     throw new Error(
@@ -217,37 +246,39 @@ async function retrieveHybridChunks(
 
   const cacheRows = loadChunkEmbeddingCache();
 
-  if (!cacheRows.length) {
-    return [];
+  // Semantic ranking only runs when there are usable (current-version)
+  // embeddings. With none yet, retrieval falls back to keyword-only results
+  // instead of returning nothing, and the embedding API is never called.
+  let vectorRanked = [];
+  if (cacheRows.length) {
+    const queryEmbedding = await createQueryEmbedding(question);
+    assertQueryEmbedding(queryEmbedding);
+
+    const queryMagnitude = vectorMagnitude(queryEmbedding);
+    vectorRanked = cacheRows
+      .map((row) => ({
+        ...row,
+        semanticScore: cosineSimilarity(
+          queryEmbedding,
+          queryMagnitude,
+          row.embedding,
+          row.embeddingMagnitude
+        ),
+      }))
+      .filter((row) => row.semanticScore > 0)
+      .sort((left, right) => {
+        if (right.semanticScore !== left.semanticScore) {
+          return right.semanticScore - left.semanticScore;
+        }
+
+        return compareChunkOrder(left, right);
+      });
   }
 
-  const queryEmbedding = await createQueryEmbedding(question);
-  assertQueryEmbedding(queryEmbedding);
-
-  const queryMagnitude = vectorMagnitude(queryEmbedding);
-  const vectorRanked = cacheRows
-    .map((row) => ({
-      ...row,
-      semanticScore: cosineSimilarity(
-        queryEmbedding,
-        queryMagnitude,
-        row.embedding,
-        row.embeddingMagnitude
-      ),
-    }))
-    .filter((row) => row.semanticScore > 0)
-    .sort((left, right) => {
-      if (right.semanticScore !== left.semanticScore) {
-        return right.semanticScore - left.semanticScore;
-      }
-
-      return compareChunkOrder(left, right);
-    });
-
-  const keywordRanked = cacheRows
-    .map((row) => normalizeKeywordResult(row, terms))
-    .filter((result) => result.keywordScore > 0)
-    .sort(compareKeywordResults);
+  // Keyword candidates include unembedded chunks, so newly uploaded PDFs are
+  // findable immediately. Semantic matches still outrank keyword-only chunks
+  // through the reciprocal-rank fusion below.
+  const keywordRanked = retrieveKeywordCandidates(terms);
 
   const candidates = new Map();
 

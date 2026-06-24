@@ -199,7 +199,7 @@ Check:
 - `npm run backup:drill` still passes and reports that the attachment image came
   back intact.
 
-## 11. Build And Tests
+## 12. Build And Tests
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
@@ -217,7 +217,7 @@ Check:
 - Backend tests pass.
 - Frontend tests pass.
 
-## 11. Bulk Import Smoke Test
+## 13. Bulk Import Smoke Test
 
 Use a small folder with fake or safe PDFs first.
 
@@ -234,7 +234,7 @@ Check:
 - Text PDFs and OCR-readable scanned PDFs create searchable chunks for Ask Your Documents.
 - If OCR tools are missing, scanned PDFs show a clear `ocr_unavailable:` extraction status instead of breaking text-PDF imports.
 
-## 12. Local Production Smoke Test
+## 14. Local Production Smoke Test
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper

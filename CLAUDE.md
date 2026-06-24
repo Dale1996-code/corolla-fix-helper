@@ -25,7 +25,7 @@ Single test file:
 - Server: `cd server && node --test test/app.test.js`
 - Client: `cd client && npx vitest run src/pages/NotesPage.test.jsx`
 
-Note: `lint` now covers the whole `server/` tree (`eslint.config.mjs`); the client (`client/src`) is not yet linted because it needs a JSX-aware config. `typecheck` still applies only to an allowlist (`tsconfig.changed.json`) — a clean typecheck run does not mean the rest of the code was checked, so consider adding server files you touch to that list.
+Note: `lint` now covers the whole `server/` tree (`eslint.config.mjs`) and `client/src` (`client/eslint.config.mjs`, a JSX-aware flat config); the root `lint` script runs both. `typecheck` still applies only to an allowlist (`tsconfig.changed.json`) — a clean typecheck run does not mean the rest of the code was checked, so consider adding server files you touch to that list.
 
 ## Architecture
 

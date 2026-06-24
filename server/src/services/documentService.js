@@ -54,20 +54,53 @@ export async function deleteDocument(document) {
 
   const resolved = resolveStoredFilePath(document);
 
-  db.prepare(`
-    UPDATE notes
-    SET related_entity_type = 'none',
-        related_entity_id = NULL,
-        document_id = NULL,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE related_entity_type = 'document' AND related_entity_id = ?
-  `).run(documentId);
-
-  db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
-  pruneOrphanTags();
-
+  // Move the stored PDF aside before touching the database so the row delete and
+  // file removal are all-or-nothing: if the DB work fails we restore the file,
+  // and we only remove it for good once the row is committed gone.
+  let movedAside = null;
   if (resolved) {
-    await fs.rm(resolved.absoluteFilePath, { force: true });
+    const trashPath = `${resolved.absoluteFilePath}.trash-${documentId}-${process.pid}`;
+
+    try {
+      await fs.rename(resolved.absoluteFilePath, trashPath);
+      movedAside = trashPath;
+    } catch (error) {
+      // Nothing to move if the file is already gone; rethrow anything else.
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    db.exec("BEGIN IMMEDIATE TRANSACTION");
+
+    db.prepare(`
+      UPDATE notes
+      SET related_entity_type = 'none',
+          related_entity_id = NULL,
+          document_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE related_entity_type = 'document' AND related_entity_id = ?
+    `).run(documentId);
+
+    db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
+    pruneOrphanTags();
+
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+
+    // Restore the file we moved aside so the row and its PDF stay consistent.
+    if (movedAside) {
+      await fs.rename(movedAside, resolved.absoluteFilePath);
+    }
+
+    throw error;
+  }
+
+  if (movedAside) {
+    await fs.rm(movedAside, { force: true });
   }
 
   return {
@@ -138,13 +171,29 @@ function getDocumentBaseQuery() {
   `;
 }
 
-export function listDocuments() {
+export function countDocuments() {
+  return Number(
+    db.prepare("SELECT COUNT(*) AS count FROM documents").get().count
+  );
+}
+
+/**
+ * List documents, newest first.
+ *
+ * With no options every document is returned (backward compatible). Pass a
+ * positive `limit` (and optional `offset`) to page through large libraries.
+ */
+export function listDocuments({ limit = null, offset = 0 } = {}) {
+  const hasLimit = Number.isInteger(limit) && limit > 0;
+  const safeOffset = Number.isInteger(offset) && offset > 0 ? offset : 0;
+
   const rows = db
     .prepare(`
       ${getDocumentBaseQuery()}
       ORDER BY documents.created_at DESC, documents.id DESC
+      ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
     `)
-    .all();
+    .all(...(hasLimit ? [limit, safeOffset] : []));
 
   return attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
 }
