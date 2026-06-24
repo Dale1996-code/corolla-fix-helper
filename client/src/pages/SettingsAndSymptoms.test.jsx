@@ -142,17 +142,21 @@ test("SettingsPage loads settings and saves vehicle changes", async () => {
     documentTypes: ["Repair Manual", "Wiring Diagram", "Inspection"],
   });
 
-  const createObjectURLSpy = vi
-    .spyOn(URL, "createObjectURL")
-    .mockReturnValue("blob:backup-url");
-  const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  // The backup now streams straight from the endpoint via a temporary <a>,
+  // instead of buffering the whole archive into a Blob.
+  let clickedHref = null;
+  const clickSpy = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function clickImpl() {
+      clickedHref = this.getAttribute("href");
+    });
 
   fireEvent.click(screen.getByRole("button", { name: "Export backup (.tar.gz)" }));
 
-  expect(await screen.findByText(/Backup exported\./i)).toBeInTheDocument();
-  expect(createObjectURLSpy).toHaveBeenCalled();
-  expect(revokeObjectURLSpy).toHaveBeenCalled();
+  expect(await screen.findByText(/Backup download started\./i)).toBeInTheDocument();
+  expect(clickedHref).toBe("/api/settings/backup-export");
 
+  clickSpy.mockRestore();
 });
 
 test("SymptomsPage supports search, filters, sorting, and empty filtered states", async () => {

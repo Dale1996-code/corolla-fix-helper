@@ -152,7 +152,6 @@ export function SettingsPage() {
 
   const [runtime, setRuntime] = useState(null);
   const [backupExport, setBackupExport] = useState(emptyBackupExport);
-  const [exportingBackup, setExportingBackup] = useState(false);
   const [backupExportMessage, setBackupExportMessage] = useState("");
   const [backupExportError, setBackupExportError] = useState("");
 
@@ -283,39 +282,22 @@ export function SettingsPage() {
     }
   }
 
-  async function handleBackupExport() {
-    try {
-      setExportingBackup(true);
-      setBackupExportMessage("");
-      setBackupExportError("");
+  function handleBackupExport() {
+    // Stream the download straight from the endpoint via a temporary <a> tag.
+    // The server sends Content-Disposition: attachment, so the browser saves the
+    // file directly instead of us buffering the whole archive in memory as a Blob.
+    setBackupExportError("");
 
-      const response = await fetch("/api/settings/backup-export");
+    const link = document.createElement("a");
+    link.href = "/api/settings/backup-export";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-      if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || "Could not export backup.");
-      }
-
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const contentDisposition = response.headers.get("content-disposition") || "";
-      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
-      const filename = filenameMatch?.[1] || "corolla-fix-helper-backup.tar.gz";
-
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
-
-      setBackupExportMessage("Backup exported. Save the downloaded .tar.gz file somewhere safe on your computer.");
-    } catch (error) {
-      setBackupExportError(error.message || "Could not export backup.");
-    } finally {
-      setExportingBackup(false);
-    }
+    setBackupExportMessage(
+      "Backup download started. Save the .tar.gz file somewhere safe on your computer."
+    );
   }
 
   return (
@@ -536,10 +518,9 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={handleBackupExport}
-                    disabled={exportingBackup}
                     className="rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-amber-300"
                   >
-                    {exportingBackup ? "Exporting..." : "Export backup (.tar.gz)"}
+                    Export backup (.tar.gz)
                   </button>
                   {backupExportMessage ? (
                     <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
