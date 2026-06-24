@@ -64,8 +64,11 @@ Current pages:
 - Procedures
 - Notes
 - Settings
+- Repair Planner
 
 The Search page is one page with separate sections plus an "Ask your documents" panel. The Ask panel calls `/api/ask`.
+
+The Repair Planner page turns a free-text repair brief into a streamed, prioritized plan — extracted tasks, a readiness score, an owner checklist, and handoff drafts — grounded in the uploaded PDFs. It calls `/api/repair-plan` (Server-Sent Events).
 
 ## Storage Model
 

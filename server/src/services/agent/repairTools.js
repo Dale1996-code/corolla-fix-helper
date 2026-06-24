@@ -25,6 +25,40 @@ const INTERMEDIATE_TERMS = ["alternator", "starter", "strut", "radiator", "water
 const SKILL_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const DIFFICULTY_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 
+// Work that can injure a beginner (or others on the road) if done wrong. A task
+// touching any of these is "safety critical": it cannot be marked Ready and is
+// recommended to a shop, unless the owner explicitly acknowledges the risk.
+const SAFETY_CRITICAL_KEYWORDS = [
+  "brake",
+  "rotor",
+  "caliper",
+  "master cylinder",
+  "fuel",
+  "injector",
+  "gas tank",
+  "electrical",
+  "wiring",
+  "battery",
+  "alternator",
+  "starter",
+  "lift",
+  "lifting",
+  "jack",
+  "suspension",
+  "strut",
+  "shock",
+  "control arm",
+  "ball joint",
+  "spring",
+  "airbag",
+  "steering",
+];
+
+function isSafetyCriticalTask(task) {
+  const haystack = `${task?.title || ""} ${task?.system || ""}`.toLowerCase();
+  return SAFETY_CRITICAL_KEYWORDS.some((keyword) => haystack.includes(keyword));
+}
+
 function detectSystem(text) {
   const lowered = text.toLowerCase();
 
@@ -181,6 +215,7 @@ export function checkRepairReadiness({
   availableTools = "",
   availableParts = "",
   skillLevel = "beginner",
+  ackSafety = false,
 } = {}) {
   const normalizedSkill = SKILL_RANK[skillLevel] ? skillLevel : "beginner";
   const skillRank = SKILL_RANK[normalizedSkill];
@@ -190,6 +225,9 @@ export function checkRepairReadiness({
   const safetyFlaggedTasks = tasks.filter(
     (task) => Array.isArray(task.safetyFlags) && task.safetyFlags.length > 0
   );
+  const safetyCriticalTasks = tasks.filter((task) => isSafetyCriticalTask(task));
+  const hasSafetyCritical = safetyCriticalTasks.length > 0;
+  const safetyAcknowledged = ackSafety === true;
   const overSkillTasks = tasks.filter(
     (task) => (DIFFICULTY_RANK[task.difficulty] || 1) > skillRank
   );
@@ -205,9 +243,11 @@ export function checkRepairReadiness({
     },
     {
       id: "safety_reviewed",
-      label: "Safety-critical steps identified",
+      label: "Safety-critical work acknowledged",
       points: 20,
-      met: safetyFlaggedTasks.length === 0 || tasks.length > 0,
+      // Only earned when there is no safety-critical work, or the owner has
+      // explicitly acknowledged the risk. Listing tools/parts does not count.
+      met: !hasSafetyCritical || safetyAcknowledged,
     },
   ];
 
@@ -225,11 +265,22 @@ export function checkRepairReadiness({
       `"${task.title}" is rated ${task.difficulty} but skill level is ${normalizedSkill}. Consider a shop or extra prep.`
     );
   }
+  if (hasSafetyCritical && !safetyAcknowledged) {
+    gaps.push(
+      "Safety-critical work detected (e.g. brakes, fuel, electrical, lifting, or suspension). Treat the steps as preparation only and have a professional confirm the repair."
+    );
+  }
 
   let level = "not_ready";
   if (score >= 80) {
     level = "ready";
   } else if (score >= 50) {
+    level = "almost_ready";
+  }
+
+  // Never report "ready" for unacknowledged safety-critical work, regardless of
+  // the numeric score, so a beginner is not nudged into an unsafe DIY repair.
+  if (hasSafetyCritical && !safetyAcknowledged && level === "ready") {
     level = "almost_ready";
   }
 
@@ -239,30 +290,51 @@ export function checkRepairReadiness({
     skillLevel: normalizedSkill,
     rubric,
     gaps,
+    safetyCritical: hasSafetyCritical,
+    safetyAcknowledged: hasSafetyCritical ? safetyAcknowledged : true,
     safetyFlags: [...new Set(safetyFlaggedTasks.flatMap((task) => task.safetyFlags))],
   };
 }
 
 // --- Tool: build_owner_checklist ------------------------------------------
 
-export function buildOwnerChecklist({ tasks = [], skillLevel = "beginner" } = {}) {
+export function buildOwnerChecklist({
+  tasks = [],
+  skillLevel = "beginner",
+  ackSafety = false,
+} = {}) {
   const skillRank = SKILL_RANK[skillLevel] || 1;
+  const safetyAcknowledged = ackSafety === true;
 
   const checklist = tasks.map((task) => {
     const difficultyRank = DIFFICULTY_RANK[task.difficulty] || 1;
-    const owner = difficultyRank > skillRank ? "Professional shop" : "DIY";
+    const safetyCritical = isSafetyCriticalTask(task);
+
+    // Safety-critical work is recommended to a shop unless the owner explicitly
+    // accepts the risk; otherwise fall back to the skill-vs-difficulty split.
+    let owner;
+    if (safetyCritical && !safetyAcknowledged) {
+      owner = "Shop Recommended";
+    } else {
+      owner = difficultyRank > skillRank ? "Professional shop" : "DIY";
+    }
 
     return {
       taskId: task.id,
       task: task.title,
       system: task.system,
       owner,
+      safetyCritical,
       priority: difficultyRank,
+      // Generic placeholders, not verified repair instructions — labeled so a
+      // beginner does not mistake them for a real procedure.
       steps: [
-        "Review source procedure and torque specs from cited documents",
-        "Gather required parts and tools",
-        owner === "DIY" ? "Perform the repair following safety notes" : "Schedule and hand off to the shop",
-        "Verify the fix and log the result",
+        "Placeholder: review the source procedure and torque specs from the cited documents",
+        "Placeholder: gather the required parts and tools",
+        owner === "DIY"
+          ? "Placeholder: perform the repair following all safety notes"
+          : "Placeholder: schedule and hand off to a professional shop",
+        "Placeholder: verify the fix and log the result",
       ],
       done: false,
     };
@@ -355,6 +427,11 @@ export const repairToolSchemas = [
         availableTools: { type: "string" },
         availableParts: { type: "string" },
         skillLevel: { type: "string", enum: ["beginner", "intermediate", "advanced"] },
+        ackSafety: {
+          type: "boolean",
+          description:
+            "Set true only when the owner has explicitly acknowledged the risk of safety-critical work (brakes, fuel, electrical, lifting, suspension). Required before such work can be marked Ready.",
+        },
       },
       required: ["tasks"],
       additionalProperties: false,
@@ -364,12 +441,17 @@ export const repairToolSchemas = [
     type: "function",
     name: "build_owner_checklist",
     description:
-      "Turn tasks into a prioritized owner checklist with DIY vs professional-shop assignment and step placeholders.",
+      "Turn tasks into a prioritized owner checklist with DIY vs professional-shop assignment and step placeholders. Safety-critical work is recommended to a shop unless ackSafety is true.",
     parameters: {
       type: "object",
       properties: {
         tasks: { type: "array", items: { type: "object" } },
         skillLevel: { type: "string", enum: ["beginner", "intermediate", "advanced"] },
+        ackSafety: {
+          type: "boolean",
+          description:
+            "Set true only when the owner has explicitly acknowledged the risk of safety-critical work. Otherwise safety-critical tasks are labeled Shop Recommended.",
+        },
       },
       required: ["tasks"],
       additionalProperties: false,

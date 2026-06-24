@@ -179,22 +179,32 @@ function getExistingDocumentIds(vehicleId, requestedDocumentIds) {
     .map((row) => row.id);
 }
 
-function replaceProcedureDocumentLinks(procedureId, vehicleId, requestedDocumentIds) {
-  db.prepare("DELETE FROM procedure_documents WHERE procedure_id = ?").run(procedureId);
+// Replace a procedure's document links atomically: the DELETE and the
+// re-INSERTs run in one transaction so a mid-replacement failure rolls back and
+// leaves the original links intact (never a half-cleared set). Exported for testing.
+export function replaceProcedureDocumentLinks(procedureId, vehicleId, requestedDocumentIds) {
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
 
-  const validDocumentIds = getExistingDocumentIds(vehicleId, requestedDocumentIds);
+  try {
+    db.prepare("DELETE FROM procedure_documents WHERE procedure_id = ?").run(procedureId);
 
-  if (!validDocumentIds.length) {
-    return;
-  }
+    const validDocumentIds = getExistingDocumentIds(vehicleId, requestedDocumentIds);
 
-  const insertLink = db.prepare(`
-    INSERT INTO procedure_documents (procedure_id, document_id)
-    VALUES (?, ?)
-  `);
+    if (validDocumentIds.length) {
+      const insertLink = db.prepare(`
+        INSERT INTO procedure_documents (procedure_id, document_id)
+        VALUES (?, ?)
+      `);
 
-  for (const documentId of validDocumentIds) {
-    insertLink.run(procedureId, documentId);
+      for (const documentId of validDocumentIds) {
+        insertLink.run(procedureId, documentId);
+      }
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 

@@ -126,6 +126,26 @@ test("SearchPage shows the Ask panel empty state above document search", async (
   );
 });
 
+test("SearchPage discloses that the question and PDF excerpts are sent to OpenAI", async () => {
+  const fetchMock = createEmptySearchFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askHeading = await screen.findByRole("heading", {
+    name: "Ask your documents",
+  });
+  const askSection = askHeading.closest("section");
+
+  expect(
+    within(askSection).getByText(/sent to\s+OpenAI to generate an answer/i)
+  ).toBeInTheDocument();
+});
+
 test("SearchPage shows loading state while Ask waits for an answer", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const fetchMock = vi.fn((url, options) => {

@@ -28,11 +28,27 @@ function fakeSqliteFile(filePath, payload) {
   fs.writeFileSync(filePath, Buffer.from(`${SQLITE_HEADER}${payload}`, "latin1"));
 }
 
+// Create a genuinely valid workspace database: a real SQLite file containing
+// the required application tables, plus a marker row carrying `payload` so the
+// existing byte-content assertions (e.g. /RESTORED-DB/) still match the file.
+function realSqliteFile(filePath, payload) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const db = new DatabaseSync(filePath);
+  db.exec(`
+    CREATE TABLE documents (id INTEGER PRIMARY KEY);
+    CREATE TABLE symptoms (id INTEGER PRIMARY KEY);
+    CREATE TABLE procedures (id INTEGER PRIMARY KEY);
+    CREATE TABLE backup_marker (label TEXT);
+  `);
+  db.prepare("INSERT INTO backup_marker (label) VALUES (?)").run(payload);
+  db.close();
+}
+
 // Lay out a valid extracted-backup directory: database/<name>.db + uploads/.
 function writeBackupSource(rootDir, { dbPayload, uploadFiles, manifest }) {
   const databaseDir = path.join(rootDir, "database");
   const uploadsDir = path.join(rootDir, "uploads");
-  fakeSqliteFile(path.join(databaseDir, "corolla-fix-helper.db"), dbPayload);
+  realSqliteFile(path.join(databaseDir, "corolla-fix-helper.db"), dbPayload);
   fs.mkdirSync(uploadsDir, { recursive: true });
 
   for (const [name, contents] of Object.entries(uploadFiles || {})) {
@@ -149,6 +165,36 @@ test("validateExtractedBackup rejects a non-SQLite database file", () => {
     () => validateExtractedBackup(sourceDir),
     BackupValidationError
   );
+});
+
+test("validateExtractedBackup rejects a header-valid but corrupt database", () => {
+  const sourceDir = path.join(tempRoot, "src");
+  const databaseDir = path.join(sourceDir, "database");
+  fs.mkdirSync(databaseDir, { recursive: true });
+  // Starts with the real SQLite magic header (so the old 16-byte check would
+  // accept it) but the rest of the file is garbage, not a real database.
+  fs.writeFileSync(
+    path.join(databaseDir, "app.db"),
+    Buffer.from(`${SQLITE_HEADER}this is not a real database body`, "latin1")
+  );
+  fs.mkdirSync(path.join(sourceDir, "uploads"), { recursive: true });
+
+  assert.throws(() => validateExtractedBackup(sourceDir), BackupValidationError);
+});
+
+test("validateExtractedBackup rejects a database missing required tables", () => {
+  const sourceDir = path.join(tempRoot, "src");
+  const databaseDir = path.join(sourceDir, "database");
+  fs.mkdirSync(databaseDir, { recursive: true });
+  // A structurally valid SQLite database, but without the application tables a
+  // real Corolla Fix Helper backup must contain.
+  const databaseFile = path.join(databaseDir, "app.db");
+  const db = new DatabaseSync(databaseFile);
+  db.exec("CREATE TABLE unrelated (id INTEGER PRIMARY KEY);");
+  db.close();
+  fs.mkdirSync(path.join(sourceDir, "uploads"), { recursive: true });
+
+  assert.throws(() => validateExtractedBackup(sourceDir), BackupValidationError);
 });
 
 test("validateExtractedBackup rejects a missing uploads directory", () => {

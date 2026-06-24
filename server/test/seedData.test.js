@@ -8,6 +8,8 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-seed-
 
 process.env.DATABASE_FILE = path.join(tempRoot, "seed.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+// This suite is specifically about the demo/sample seed, which is now opt-in.
+process.env.SEED_DEMO = "true";
 
 const { db } = await import("../src/database.js");
 const { initializeDatabase } = await import("../src/initDatabase.js");

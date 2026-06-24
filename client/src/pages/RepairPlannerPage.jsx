@@ -105,6 +105,10 @@ function ReadinessPanel({ readiness }) {
         </span>
       </div>
 
+      <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+        Steps are preparation guidance, not verified repair instructions.
+      </p>
+
       <ul className="space-y-2">
         {readiness.rubric.map((item) => (
           <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">

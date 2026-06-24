@@ -537,6 +537,11 @@ function AskDocumentsSection() {
         Verify torque specs and safety steps against the manual before doing repair work.
       </p>
 
+      <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+        Your question and relevant excerpts from your uploaded PDFs are sent to
+        OpenAI to generate an answer. Photos you attach are also included.
+      </p>
+
       <form className="space-y-4" onSubmit={handleSubmit}>
         <label className="grid gap-2 text-sm text-slate-700">
           <span className="font-medium text-slate-900">Question</span>

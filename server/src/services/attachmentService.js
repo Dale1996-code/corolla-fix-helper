@@ -252,12 +252,37 @@ export async function deleteAttachment(attachmentId) {
     return null;
   }
 
-  db.prepare("DELETE FROM attachments WHERE id = ?").run(attachmentId);
-
   const resolved = resolveAttachmentPath(existing.storedFilename);
 
+  // Move the file aside before deleting the row so the two stay consistent: if
+  // the DB delete fails we restore the file, and only remove it for good once
+  // the row is gone.
+  let movedAside = null;
   if (resolved) {
-    await fs.rm(resolved.absoluteFilePath, { force: true });
+    const trashPath = `${resolved.absoluteFilePath}.trash-${attachmentId}-${process.pid}`;
+
+    try {
+      await fs.rename(resolved.absoluteFilePath, trashPath);
+      movedAside = trashPath;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    db.prepare("DELETE FROM attachments WHERE id = ?").run(attachmentId);
+  } catch (error) {
+    if (movedAside) {
+      await fs.rename(movedAside, resolved.absoluteFilePath);
+    }
+
+    throw error;
+  }
+
+  if (movedAside) {
+    await fs.rm(movedAside, { force: true });
   }
 
   return existing;

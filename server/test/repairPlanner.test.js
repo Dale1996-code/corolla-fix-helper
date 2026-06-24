@@ -200,6 +200,84 @@ test("build_owner_checklist assigns DIY vs shop by difficulty and prioritizes", 
   assert.ok(checklist[0].steps.length >= 3);
 });
 
+// --- Safety guardrail tests ------------------------------------------------
+
+test("safety-critical work cannot be marked Ready + DIY without acknowledgment", () => {
+  const tasks = [
+    {
+      id: 1,
+      title: "Replace front brake pads and rotors",
+      system: "Brakes",
+      difficulty: "beginner",
+      safetyFlags: ["Brake work affects stopping safety."],
+    },
+  ];
+
+  const readiness = checkRepairReadiness({
+    tasks,
+    availableTools: "socket set, torque wrench",
+    availableParts: "brake pads, rotors",
+    skillLevel: "beginner",
+  });
+
+  const { checklist } = buildOwnerChecklist({ tasks, skillLevel: "beginner" });
+
+  // Even with tools, parts, and a matching skill level, brake work must not be
+  // presented as Ready + DIY unless the owner explicitly accepts the risk.
+  assert.equal(readiness.safetyCritical, true);
+  assert.notEqual(readiness.level, "ready");
+  assert.equal(checklist[0].owner, "Shop Recommended");
+});
+
+test("acknowledging safety-critical work unlocks Ready + DIY", () => {
+  const tasks = [
+    {
+      id: 1,
+      title: "Replace front brake pads",
+      system: "Brakes",
+      difficulty: "beginner",
+      safetyFlags: ["Brake work affects stopping safety."],
+    },
+  ];
+
+  const readiness = checkRepairReadiness({
+    tasks,
+    availableTools: "socket set, torque wrench",
+    availableParts: "brake pads",
+    skillLevel: "beginner",
+    ackSafety: true,
+  });
+
+  const { checklist } = buildOwnerChecklist({
+    tasks,
+    skillLevel: "beginner",
+    ackSafety: true,
+  });
+
+  assert.equal(readiness.level, "ready");
+  assert.equal(checklist[0].owner, "DIY");
+});
+
+test("listing tools and parts alone does not award the safety sub-score", () => {
+  const readiness = checkRepairReadiness({
+    tasks: [
+      {
+        id: 1,
+        title: "Bleed the brakes",
+        system: "Brakes",
+        difficulty: "beginner",
+        safetyFlags: ["Brake work affects stopping safety."],
+      },
+    ],
+    availableTools: "wrench, bleeder kit",
+    availableParts: "brake fluid",
+    skillLevel: "beginner",
+  });
+
+  const safetyItem = readiness.rubric.find((item) => item.id === "safety_reviewed");
+  assert.equal(safetyItem.met, false);
+});
+
 test("draft_handoff_notes produces three channel-specific drafts", () => {
   const notes = draftHandoffNotes({
     tasks: [{ id: 1, title: "Replace brake pads", system: "Brakes" }],
