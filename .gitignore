@@ -12,3 +12,9 @@ server/uploads/*
 .DS_Store
 desktop.ini
 *.log
+
+# Generated Claude skill eval/benchmark output and MCP snapshots (not app code).
+# The real skill source under .claude/skills/<name>/ stays tracked; only the
+# generated *-workspace eval runs and Playwright MCP snapshots are excluded.
+.claude/skills/*-workspace/
+.playwright-mcp/

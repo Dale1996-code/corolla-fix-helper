@@ -3,6 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
+import {
+  getDocumentTags,
+  normalizeExtractionStatus,
+} from "../components/documents/documentDisplay";
+import { TagChips } from "../components/documents/TagChips";
+import { ListControls } from "../components/documents/ListControls";
+import { DocumentsList } from "../components/documents/DocumentsList";
 
 const emptyUploadForm = {
   pdfFile: null,
@@ -33,48 +40,6 @@ const emptyDocumentDefaults = {
   documentTypes: [],
 };
 
-function normalizeExtractionStatus(status) {
-  const value = typeof status === "string" ? status : "";
-
-  if (!value || value === "not_attempted") {
-    return {
-      key: "not_attempted",
-      label: "Not attempted",
-      className: "bg-slate-100 text-slate-700",
-    };
-  }
-
-  if (value === "completed") {
-    return {
-      key: "completed",
-      label: "Completed",
-      className: "bg-emerald-100 text-emerald-800",
-    };
-  }
-
-  if (value === "no_text_found") {
-    return {
-      key: "no_text_found",
-      label: "No text found",
-      className: "bg-amber-100 text-amber-800",
-    };
-  }
-
-  if (value.startsWith("failed")) {
-    return {
-      key: "failed",
-      label: "Failed",
-      className: "bg-red-100 text-red-800",
-    };
-  }
-
-  return {
-    key: "other",
-    label: value,
-    className: "bg-slate-100 text-slate-700",
-  };
-}
-
 function normalizeFavoriteFilter(value) {
   if (value === "favorites_only" || value === "not_favorites") {
     return value;
@@ -89,31 +54,6 @@ function normalizeBookmarkFilter(value) {
   }
 
   return "all";
-}
-
-function getDocumentTags(document) {
-  return Array.isArray(document?.tags) ? document.tags : [];
-}
-
-function TagChips({ tags, size = "sm" }) {
-  if (!tags.length) {
-    return null;
-  }
-
-  const sizeClass = size === "xs" ? "text-[0.65rem] px-1.5 py-0.5" : "text-xs px-2 py-0.5";
-
-  return (
-    <div className="flex flex-wrap gap-1">
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          className={`rounded-full bg-sky-100 font-medium text-sky-900 ring-1 ring-sky-200 ${sizeClass}`}
-        >
-          #{tag}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function TextField({
@@ -316,241 +256,6 @@ function UploadForm({
           options={documentTypeSuggestions}
         />
       </form>
-    </section>
-  );
-}
-
-function ListControls({
-  sortBy,
-  onSortChange,
-  systemFilter,
-  onSystemFilterChange,
-  documentTypeFilter,
-  onDocumentTypeFilterChange,
-  favoriteFilter,
-  onFavoriteFilterChange,
-  bookmarkFilter,
-  onBookmarkFilterChange,
-  tagFilter,
-  onTagFilterChange,
-  extractionFilter,
-  onExtractionFilterChange,
-  systems,
-  documentTypes,
-  tags,
-}) {
-  return (
-    <section className="rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Library controls
-        </h3>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Sort</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={sortBy}
-            onChange={onSortChange}
-          >
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-            <option value="title_asc">Title A-Z</option>
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>System</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={systemFilter}
-            onChange={onSystemFilterChange}
-          >
-            <option value="all">All systems</option>
-            {systems.map((system) => (
-              <option key={system} value={system}>
-                {system}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Document type</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={documentTypeFilter}
-            onChange={onDocumentTypeFilterChange}
-          >
-            <option value="all">All types</option>
-            {documentTypes.map((documentType) => (
-              <option key={documentType} value={documentType}>
-                {documentType}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Favorite</span>
-          <select
-            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={favoriteFilter}
-            onChange={onFavoriteFilterChange}
-          >
-            <option value="all">All</option>
-            <option value="favorites_only">Favorites only</option>
-            <option value="not_favorites">Not favorites</option>
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Bookmark</span>
-          <select
-            className="min-w-[10.5rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={bookmarkFilter}
-            onChange={onBookmarkFilterChange}
-          >
-            <option value="all">All</option>
-            <option value="bookmarked_only">Bookmarked only</option>
-            <option value="not_bookmarked">Not bookmarked</option>
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Tag</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={tagFilter}
-            onChange={onTagFilterChange}
-          >
-            <option value="all">All tags</option>
-            {tags.map((tag) => (
-              <option key={tag} value={tag}>
-                #{tag}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Extraction</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={extractionFilter}
-            onChange={onExtractionFilterChange}
-          >
-            <option value="all">All</option>
-            <option value="completed">Completed</option>
-            <option value="no_text_found">No text found</option>
-            <option value="failed">Failed</option>
-            <option value="not_attempted">Not attempted</option>
-          </select>
-        </label>
-      </div>
-    </section>
-  );
-}
-
-function DocumentsList({
-  documents,
-  selectedDocumentId,
-  onSelectDocument,
-  onToggleFavorite,
-  favoriteUpdateState,
-}) {
-  const listGridClass =
-    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(8rem,1.1fr)_minmax(9rem,1.2fr)_minmax(7.25rem,0.9fr)_minmax(9rem,1.1fr)_minmax(9.5rem,1.1fr)] gap-3";
-
-  return (
-    <section className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
-      <div className="overflow-x-auto">
-        <div className="min-w-[820px]">
-          <div
-            className={`${listGridClass} border-b border-slate-800 bg-slate-950 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-200`}
-          >
-            <span>Title</span>
-            <span>System</span>
-            <span>Type</span>
-            <span>Favorite</span>
-            <span>Extraction</span>
-            <span>Updated</span>
-          </div>
-
-          {documents.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-600">
-              No documents match these filters.
-            </div>
-          ) : null}
-
-          {documents.map((document) => {
-            const extraction = normalizeExtractionStatus(document.extractionStatus);
-            const isSelected = selectedDocumentId === document.id;
-            const favoriteLabel = document.isFavorite ? "Yes" : "No";
-
-            return (
-              <div
-                key={document.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm transition-colors ${
-                  isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-slate-50"
-                }`}
-                onClick={() => onSelectDocument(document.id)}
-              >
-                <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 font-medium text-slate-900">
-                    <span className="truncate">{document.title}</span>
-                    {document.isBookmarked ? (
-                      <span
-                        title="Bookmarked"
-                        aria-label="Bookmarked"
-                        className="shrink-0 text-amber-500"
-                      >
-                        ★
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">{document.originalFilename}</p>
-                  <div className="mt-1">
-                    <TagChips tags={getDocumentTags(document)} size="xs" />
-                  </div>
-                </div>
-                <span className="truncate text-slate-700">{document.system}</span>
-                <span className="truncate text-slate-700">{document.documentType}</span>
-                <div>
-                  <button
-                    type="button"
-                    disabled={
-                      favoriteUpdateState.documentId === document.id &&
-                      !favoriteUpdateState.error
-                    }
-                    className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleFavorite(document);
-                    }}
-                  >
-                    {favoriteLabel}
-                  </button>
-                  {favoriteUpdateState.documentId === document.id && favoriteUpdateState.error ? (
-                    <p className="mt-1 text-xs text-red-700">Failed</p>
-                  ) : null}
-                </div>
-                <div>
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs font-semibold ${extraction.className}`}
-                  >
-                    {extraction.label}
-                  </span>
-                </div>
-                <span className="truncate text-xs text-slate-600">
-                  {formatDate(document.updatedAt || document.createdAt)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
     </section>
   );
 }
@@ -893,6 +598,7 @@ export function DocumentsPage() {
   const [tagFilter, setTagFilter] = useState(requestedTagFilter);
   const [extractionFilter, setExtractionFilter] = useState("all");
 
+  const [page, setPage] = useState(1);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [editingDocumentId, setEditingDocumentId] = useState(null);
   const [editForm, setEditForm] = useState(emptyEditForm);
@@ -1029,6 +735,31 @@ export function DocumentsPage() {
     return nextDocuments;
   }, [
     documents,
+    sortBy,
+    systemFilter,
+    documentTypeFilter,
+    favoriteFilter,
+    bookmarkFilter,
+    tagFilter,
+    extractionFilter,
+  ]);
+
+  // Show the documents in fixed-size pages so a large library stays scannable.
+  const DOCUMENTS_PER_PAGE = 25;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredDocuments.length / DOCUMENTS_PER_PAGE)
+  );
+  const currentPage = Math.min(page, totalPages);
+  const pagedDocuments = useMemo(() => {
+    const start = (currentPage - 1) * DOCUMENTS_PER_PAGE;
+    return filteredDocuments.slice(start, start + DOCUMENTS_PER_PAGE);
+  }, [filteredDocuments, currentPage]);
+
+  // Reset to the first page whenever the filtered set changes underneath us.
+  useEffect(() => {
+    setPage(1);
+  }, [
     sortBy,
     systemFilter,
     documentTypeFilter,
@@ -1576,16 +1307,43 @@ export function DocumentsPage() {
                 tags={availableTags}
               />
 
-              <section className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                Showing{" "}
-                <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
-                of <span className="font-semibold text-slate-900">{documents.length}</span>{" "}
-                documents.
+              <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+                <span>
+                  Showing{" "}
+                  <span className="font-semibold text-slate-900">{pagedDocuments.length}</span>{" "}
+                  of <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
+                  matching ({documents.length} total).
+                </span>
+
+                {totalPages > 1 ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                      disabled={currentPage <= 1}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-xs text-slate-600">
+                      Page <span className="font-semibold text-slate-900">{currentPage}</span> of{" "}
+                      <span className="font-semibold text-slate-900">{totalPages}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                    </button>
+                  </span>
+                ) : null}
               </section>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
                 <DocumentsList
-                  documents={filteredDocuments}
+                  documents={pagedDocuments}
                   selectedDocumentId={selectedDocumentId}
                   onSelectDocument={handleSelectDocument}
                   onToggleFavorite={toggleFavorite}

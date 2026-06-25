@@ -104,6 +104,34 @@ test("listDocuments paginates with limit/offset while countDocuments counts all"
   assert.ok(secondPage.every((doc) => !firstIds.has(doc.id)));
 });
 
+test("listDocuments flags documents whose chunks still need embeddings", () => {
+  db.exec("DELETE FROM document_chunks");
+  db.exec("DELETE FROM documents");
+
+  const pendingId = insertNamedDocument("pending-embed");
+  const readyId = insertNamedDocument("ready-embed");
+
+  // Pending: a chunk with no embedding yet.
+  db.prepare(`
+    INSERT INTO document_chunks (document_id, page_number, chunk_index, chunk_text)
+    VALUES (?, 1, 0, ?)
+  `).run(pendingId, "oil filter 2009 Corolla");
+
+  // Ready: a chunk already embedded at the current version.
+  db.prepare(`
+    INSERT INTO document_chunks
+      (document_id, page_number, chunk_index, chunk_text, embedding, embedding_version)
+    VALUES (?, 1, 0, ?, ?, ?)
+  `).run(readyId, "spark plug gap", Buffer.from([1, 2, 3, 4]), config.openAiEmbeddingVersion);
+
+  const documents = listDocuments();
+  const pending = documents.find((doc) => doc.id === pendingId);
+  const ready = documents.find((doc) => doc.id === readyId);
+
+  assert.equal(pending.embeddingPending, true);
+  assert.equal(ready.embeddingPending, false);
+});
+
 test("deleteDocument rolls back note unlinking and restores the file when the delete fails", async () => {
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
 

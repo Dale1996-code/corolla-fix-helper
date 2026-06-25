@@ -71,3 +71,23 @@ test("demo seeding creates a sample document whose file exists on disk", () => {
     );
   }
 });
+
+test("schema migrations are recorded once and not re-applied on repeated init", () => {
+  initializeDatabase();
+  initializeDatabase();
+
+  const migrations = db
+    .prepare("SELECT name FROM schema_migrations ORDER BY id")
+    .all()
+    .map((row) => row.name);
+
+  assert.ok(
+    migrations.includes("001_initial_schema"),
+    "the initial schema migration should be recorded"
+  );
+  // Re-running init must not duplicate the migration row.
+  assert.equal(
+    migrations.filter((name) => name === "001_initial_schema").length,
+    1
+  );
+});
