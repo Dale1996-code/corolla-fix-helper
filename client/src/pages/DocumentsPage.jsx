@@ -598,6 +598,7 @@ export function DocumentsPage() {
   const [tagFilter, setTagFilter] = useState(requestedTagFilter);
   const [extractionFilter, setExtractionFilter] = useState("all");
 
+  const [page, setPage] = useState(1);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [editingDocumentId, setEditingDocumentId] = useState(null);
   const [editForm, setEditForm] = useState(emptyEditForm);
@@ -734,6 +735,31 @@ export function DocumentsPage() {
     return nextDocuments;
   }, [
     documents,
+    sortBy,
+    systemFilter,
+    documentTypeFilter,
+    favoriteFilter,
+    bookmarkFilter,
+    tagFilter,
+    extractionFilter,
+  ]);
+
+  // Show the documents in fixed-size pages so a large library stays scannable.
+  const DOCUMENTS_PER_PAGE = 25;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredDocuments.length / DOCUMENTS_PER_PAGE)
+  );
+  const currentPage = Math.min(page, totalPages);
+  const pagedDocuments = useMemo(() => {
+    const start = (currentPage - 1) * DOCUMENTS_PER_PAGE;
+    return filteredDocuments.slice(start, start + DOCUMENTS_PER_PAGE);
+  }, [filteredDocuments, currentPage]);
+
+  // Reset to the first page whenever the filtered set changes underneath us.
+  useEffect(() => {
+    setPage(1);
+  }, [
     sortBy,
     systemFilter,
     documentTypeFilter,
@@ -1281,16 +1307,43 @@ export function DocumentsPage() {
                 tags={availableTags}
               />
 
-              <section className="rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                Showing{" "}
-                <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
-                of <span className="font-semibold text-slate-900">{documents.length}</span>{" "}
-                documents.
+              <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+                <span>
+                  Showing{" "}
+                  <span className="font-semibold text-slate-900">{pagedDocuments.length}</span>{" "}
+                  of <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
+                  matching ({documents.length} total).
+                </span>
+
+                {totalPages > 1 ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                      disabled={currentPage <= 1}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-xs text-slate-600">
+                      Page <span className="font-semibold text-slate-900">{currentPage}</span> of{" "}
+                      <span className="font-semibold text-slate-900">{totalPages}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                      disabled={currentPage >= totalPages}
+                    >
+                      Next
+                    </button>
+                  </span>
+                ) : null}
               </section>
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
                 <DocumentsList
-                  documents={filteredDocuments}
+                  documents={pagedDocuments}
                   selectedDocumentId={selectedDocumentId}
                   onSelectDocument={handleSelectDocument}
                   onToggleFavorite={toggleFavorite}

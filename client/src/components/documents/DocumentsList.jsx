@@ -60,6 +60,14 @@ export function DocumentsList({
                     ) : null}
                   </p>
                   <p className="truncate text-xs text-slate-500">{document.originalFilename}</p>
+                  {document.embeddingPending ? (
+                    <p
+                      className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                      title="This document is searchable by keyword now. Run npm run embed:backfill to add semantic ranking."
+                    >
+                      Embedding pending
+                    </p>
+                  ) : null}
                   <div className="mt-1">
                     <TagChips tags={getDocumentTags(document)} size="xs" />
                   </div>

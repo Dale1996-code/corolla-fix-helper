@@ -177,6 +177,22 @@ export function countDocuments() {
   );
 }
 
+// Document ids that have at least one chunk not embedded at the current version
+// (never embedded, or embedded under an older model/dimension). Used to show an
+// "embedding pending" hint: such documents are still findable by keyword, but
+// have not yet gained semantic ranking.
+function getPendingEmbeddingDocumentIds() {
+  const rows = db
+    .prepare(`
+      SELECT DISTINCT document_id
+      FROM document_chunks
+      WHERE COALESCE(embedding_version, '') <> ?
+    `)
+    .all(config.openAiEmbeddingVersion);
+
+  return new Set(rows.map((row) => row.document_id));
+}
+
 /**
  * List documents, newest first.
  *
@@ -195,7 +211,13 @@ export function listDocuments({ limit = null, offset = 0 } = {}) {
     `)
     .all(...(hasLimit ? [limit, safeOffset] : []));
 
-  return attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
+  const documents = attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
+  const pendingIds = getPendingEmbeddingDocumentIds();
+
+  return documents.map((document) => ({
+    ...document,
+    embeddingPending: pendingIds.has(document.id),
+  }));
 }
 
 export function getDocumentFilterOptions() {
