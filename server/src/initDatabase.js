@@ -451,8 +451,56 @@ export function seedDemoData() {
   seedDocumentChunks(seedDocumentId);
 }
 
+// --- Schema migrations -----------------------------------------------------
+//
+// A small version table records which numbered migrations have run, so future
+// schema changes can be added as new numbered steps instead of ad hoc edits.
+// Existing installs are safe: the initial schema is idempotent (CREATE TABLE IF
+// NOT EXISTS + ensureColumn), so recording it as "001" the first time after this
+// change never drops or rewrites data.
+
+function ensureSchemaMigrationsTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
+function hasMigrationRun(name) {
+  return Boolean(
+    db.prepare("SELECT 1 FROM schema_migrations WHERE name = ?").get(name)
+  );
+}
+
+/**
+ * Run a numbered migration exactly once. The migration body and the bookkeeping
+ * insert share one transaction, so a failure rolls back without recording a
+ * half-applied migration.
+ */
+function runMigration(name, migrate) {
+  if (hasMigrationRun(name)) {
+    return;
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+
+  try {
+    migrate();
+    db.prepare("INSERT INTO schema_migrations (name) VALUES (?)").run(name);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function initializeDatabase() {
-  createTables();
+  ensureSchemaMigrationsTable();
+  runMigration("001_initial_schema", createTables);
+
   ensureAppSettingsRecord();
   seedVehicle();
 

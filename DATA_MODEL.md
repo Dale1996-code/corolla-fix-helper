@@ -308,6 +308,12 @@ Current search endpoints use existing table data:
 
 The current Ask retrieval embeds the question once, cosine-scans an in-memory cache of current chunk embeddings, and fuses that ranking with keyword ranking. It does not use a vector database or SQLite vector extension.
 
+## Schema Migrations
+
+Schema changes are tracked in a `schema_migrations` table (`id`, `name`, `applied_at`). On startup `initDatabase.js` ensures that table exists, then runs each numbered migration exactly once via `runMigration(name, fn)` — the migration body and its bookkeeping insert share one transaction, so a failure rolls back without recording a half-applied migration.
+
+Convention: name migrations `NNN_short_description` in increasing order, starting at `001_initial_schema` (which wraps the original `CREATE TABLE` / `ensureColumn` setup). To change the schema, add a new numbered migration rather than editing an applied one. The initial schema is idempotent, so existing databases simply record `001` on their first startup after this was introduced — no data is dropped or rewritten.
+
 ## Not In The Current Schema
 
 The current schema does not include:
