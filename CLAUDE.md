@@ -16,8 +16,9 @@ Run from the repo root:
 - `npm run lint` / `npm run typecheck` / `npm run build` — checks; the server build step is a no-op
 - `npm start` — production-style: Express serves `client/dist` after `npm run build`
 - `npm run import -- "/path/to/pdfs"` — resumable bulk PDF import (MD5 duplicate detection, image-only report)
+- `npm run demo:seed` — load the optional sample PDF + chunks. **Normal startup seeds nothing — the workspace is empty by default** (or set `SEED_DEMO`)
 - `npm run embed:backfill` — embed `document_chunks` missing the current embedding version; run after importing or re-extracting PDFs
-- `npm run eval:retrieval` / `npm run eval:answers` — retrieval and answer-quality evals
+- `npm run eval:retrieval` / `npm run eval:rerank` / `npm run eval:answers` — retrieval, reranker A/B, and answer-quality evals
 - `npm run restore -- "/path/to/corolla-fix-helper-backup-*.tar.gz"` — restore a backup archive (validate → snapshot → atomic swap → rollback on failure); stop the server first. `npm run backup:drill` proves the round trip. See `docs/backup-restore.md`
 
 Single test file:
@@ -48,7 +49,14 @@ Both stay grounded in uploaded PDFs and degrade gracefully to an "AI not configu
 
 ### Storage
 
-Everything lives in one SQLite file (`server/data/` by default) plus `server/uploads/` for PDF files — both configurable via `DATABASE_FILE` / `UPLOADS_DIR`. Document deletes must clean up related rows (`symptom_documents`, `procedure_documents`, `document_chunks`, note links) and the stored file.
+Everything lives in one SQLite file (`server/data/` by default) plus `server/uploads/` for PDF files — both configurable via `DATABASE_FILE` / `UPLOADS_DIR`. Document deletes must clean up related rows (`symptom_documents`, `procedure_documents`, `document_chunks`, note links) and the stored file. Schema changes go in `src/initDatabase.js` as a new **numbered migration** (tracked in `schema_migrations`) — never edit an already-applied one. Backups snapshot the DB via `databaseSnapshot.js` (`VACUUM INTO`, not a raw file copy) so WAL-resident rows are captured.
+
+### Conventions & gotchas
+
+- **Rate limiting:** `/api/ask` and `/api/repair-plan` share an in-memory 20-req/min limiter (`middleware/rateLimit.js`) to cap accidental OpenAI spend — it is not authentication.
+- **Env-gated optional AI:** local OCR (`OCR_ENABLED`, runs only on low-text PDF pages, needs Poppler `pdftoppm` + Tesseract) and a second-pass Ask reranker (`RERANK_ENABLED`, off by default, must fall back to the hybrid order on any failure).
+- **UI vs route:** the `/search` route is branded **"Ask AI"** in the UI (nav item + page heading); the route path itself is unchanged.
+- **Windows:** use `services/tarExecutable.js` (resolves the native `%SystemRoot%\System32\tar.exe`) for any tar work — never spawn bare `tar`. Vite/Vitest/build can fail in a sandbox with an esbuild `Access is denied` error; rerun outside the sandbox before treating it as a real failure.
 
 ## Docs worth knowing
 

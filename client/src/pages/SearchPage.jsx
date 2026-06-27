@@ -1084,7 +1084,7 @@ export function SearchPage() {
     <>
       <PageHeader
         eyebrow="Working Feature"
-        title="Search"
+        title="Ask AI"
         description="Search documents, symptoms, procedures, and notes from one page while keeping each search area separate and easy to understand."
       />
 

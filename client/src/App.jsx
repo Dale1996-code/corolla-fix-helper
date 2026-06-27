@@ -13,9 +13,14 @@ import { navigationItems } from "./lib/navigation";
 function MobileNav() {
   return (
     <header className="border-b border-slate-300 bg-white/90 px-4 py-4 lg:hidden">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
-        Corolla Fix Helper
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+          Corolla Fix Helper
+        </p>
+        <span className="font-display text-sm font-bold tracking-tight text-sky-900">
+          DaleTech
+        </span>
+      </div>
       <nav className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Primary navigation">
         {navigationItems.map((item) => (
           <NavLink
