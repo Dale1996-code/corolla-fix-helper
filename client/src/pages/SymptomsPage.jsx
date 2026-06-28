@@ -446,14 +446,6 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
   });
   const [linkingId, setLinkingId] = useState(null);
 
-  // Reset everything when the user selects a different symptom.
-  useEffect(() => {
-    setSelectedIds(symptom.linkedProcedureIds || []);
-    setSaveState({ saving: false, message: "", error: "" });
-    setSuggestions([]);
-    setSuggestState({ loading: false, loaded: false, error: "", status: "", aiConfigured: true });
-  }, [symptom.id]);
-
   function toggleProcedure(procedureId) {
     setSelectedIds((current) =>
       current.includes(procedureId)
@@ -810,6 +802,7 @@ function SymptomDetails({
         </div>
 
         <SymptomProcedurePanel
+          key={symptom.id}
           symptom={symptom}
           procedures={procedures}
           onSymptomUpdated={onSymptomUpdated}
@@ -1326,7 +1319,6 @@ export function SymptomsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Symptoms"
         description="Track issues you observe on your Corolla, add your confidence level, and link each symptom to the documents that help you diagnose it."
       />
