@@ -14,7 +14,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `npm run build:server` runs the server build placeholder.
 - `npm run build:client` builds the Vite frontend.
 - `npm run lint` runs ESLint over `server/src`, `server/test`, and `client/src`.
-- `npm run typecheck` runs the scoped TypeScript check in `tsconfig.changed.json`.
+- `npm run typecheck` type-checks the whole `server/src` tree (plus a curated set of tests) via `tsconfig.json`. It runs with `checkJs` and several strict-family flags, but full `strict` (`strictNullChecks`/`noImplicitAny`) is still off, so a clean run is broad coverage, not exhaustive null/any safety.
 - `npm run test` runs the backend and frontend test suites.
 - `npm run test:server` runs backend tests with Node's built-in test runner.
 - `npm run test:client` runs frontend tests with Vitest.
@@ -87,11 +87,12 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 
 ## Deployment And CI Notes
 
-- `Dockerfile` uses Node 24, builds the client, prunes server dev dependencies, and runs `node server/src/index.js` in the runtime image.
+- `Dockerfile` uses Node 24, builds the client, prunes server dev dependencies, installs the OCR tools (`poppler-utils` + `tesseract-ocr`) in the runtime image, and runs `node server/src/index.js`.
 - `.dockerignore` excludes `server/data`, `server/uploads`, `.env`, and nested env files, so database files, uploaded PDFs, and secrets are not copied into the image.
-- The Docker image does not install Tesseract or Poppler. Do not assume OCR works in a container unless the image or host deployment provides those tools.
+- The Docker runtime image installs Tesseract and Poppler, so OCR of scanned PDFs works in a container out of the box (matching the default `OCR_ENABLED=true`). Set `OCR_ENABLED=false` to skip OCR.
 - `docs/gcp-deployment.md` targets one Google Compute Engine VM running the Docker image with `/data` mounted for the SQLite database and uploads.
-- `.github/workflows/ci.yml` runs on push and pull request with Node 24, then runs `npm run install:all`, `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build`.
+- `.github/workflows/ci.yml` runs on push and pull request with Node 24, then runs `npm run install:all`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, and `npm run smoke`.
+- `npm run smoke` (`server/src/scripts/smokeTest.js`) is a post-build production smoke test: it boots the real Express app against a throwaway DB/uploads dir and makes live HTTP requests to confirm the built frontend is served and the core API routes respond. Run it after `npm run build`.
 - Backup export and restore include the entire uploads tree, so saved attachment images are included. Stop the server before restoring; the restore keeps a pre-restore snapshot beside the database.
 - Backup export and archive creation use `server/src/services/databaseSnapshot.js` (`VACUUM INTO`) instead of raw `.db` copies so committed rows still in SQLite's WAL sidecar are included.
 - Backup code uses `server/src/services/tarExecutable.js`. On Windows, reuse this helper instead of spawning bare `tar`, because it deliberately selects the native `%SystemRoot%\System32\tar.exe` rather than whichever tar appears first on `PATH`.

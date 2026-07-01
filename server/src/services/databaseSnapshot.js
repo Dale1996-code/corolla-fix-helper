@@ -28,6 +28,13 @@ function escapeSqlitePath(filePath) {
  *
  * `VACUUM INTO` requires the destination not to exist, so any stale file at
  * `destinationFile` is removed first.
+ *
+ * @param {{
+ *   sourceFile?: string,
+ *   destinationFile?: string,
+ *   db?: import("node:sqlite").DatabaseSync | null,
+ *   fs?: typeof import("node:fs"),
+ * }} [options]
  */
 export function snapshotDatabase({
   sourceFile,

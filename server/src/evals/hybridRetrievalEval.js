@@ -237,6 +237,10 @@ function makeEmptyVector() {
   return new Float32Array(config.openAiEmbeddingDimensions);
 }
 
+/**
+ * @param {string} text
+ * @param {{ kind?: string }} [options]
+ */
 export function createDeterministicEvalEmbedding(text, { kind } = {}) {
   const normalizedText = String(text || "").toLowerCase();
   const vector = makeEmptyVector();
@@ -380,6 +384,13 @@ export function classifyRerankAb({ fusionCorrect, rerankCorrect }) {
  * The reranker is injectable (`rerank`) so tests pass a deterministic mock and
  * never need an API key; a local run can pass the real `rerankChunks`. The query
  * embedding is the same deterministic stub the hybrid eval uses.
+ */
+/**
+ * @param {{
+ *   distractorDocumentCount?: number,
+ *   rerank?: (...args: any[]) => any,
+ *   createQueryEmbedding?: (question: string) => Promise<Float32Array>,
+ * }} [options]
  */
 export async function runRerankAbEval({
   distractorDocumentCount = 50,

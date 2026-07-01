@@ -106,6 +106,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
     handoffNotes: null,
   };
 
+  /** @type {any[]} */
   let inputItems = buildInitialInput({
     brief,
     vehicle,

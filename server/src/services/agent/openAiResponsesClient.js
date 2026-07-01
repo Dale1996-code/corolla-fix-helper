@@ -44,6 +44,17 @@ function parseSseBuffer(buffer) {
   return { events, rest: working };
 }
 
+/**
+ * @param {{
+ *   model?: string,
+ *   instructions?: string,
+ *   input?: any,
+ *   tools?: any,
+ *   apiKey?: string,
+ *   signal?: AbortSignal,
+ *   fetchImpl?: typeof fetch,
+ * }} [options]
+ */
 export async function* streamResponsesTurn({
   model = config.openAiAnswerModel,
   instructions,
