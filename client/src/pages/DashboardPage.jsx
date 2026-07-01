@@ -107,9 +107,6 @@ function QuickActions({ vehicle }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold text-slate-900">Quick actions</h3>
-          <p className="mt-1 text-sm text-slate-600">
-            Jump straight into the next useful task.
-          </p>
         </div>
 
         <p className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -446,7 +443,7 @@ export function DashboardPage() {
       <PageHeader
         eyebrow="Workspace"
         title="Dashboard"
-        description="See favorites, recent work, and active repair items at a glance so you can open the next thing you need without hunting through the app."
+        description="See favorites, recent work, and active repair items at a glance."
       />
 
       <div className="space-y-6">
@@ -469,7 +466,7 @@ export function DashboardPage() {
               <SummaryCard
                 label="Documents"
                 value={dashboardData.summary.totalDocuments}
-                helperText="Imported repair files in your library."
+                helperText="My Library"
               />
               <SummaryCard
                 label="Favorites"
@@ -480,11 +477,6 @@ export function DashboardPage() {
                 label="Symptoms"
                 value={dashboardData.summary.totalSymptoms}
                 helperText="Saved symptom records for this Corolla."
-              />
-              <SummaryCard
-                label="Active Symptoms"
-                value={dashboardData.summary.activeSymptoms}
-                helperText="Open or monitoring issues right now."
               />
               <SummaryCard
                 label="Procedures"

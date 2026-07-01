@@ -1,4 +1,9 @@
-export function PageHeader({ eyebrow, title, description }) {
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  titleSizeClassName = "text-[2.1rem] lg:text-[2.55rem]",
+}) {
   return (
     <header className="mb-8 border-b border-slate-300/70 pb-6">
       {eyebrow ? (
@@ -6,7 +11,9 @@ export function PageHeader({ eyebrow, title, description }) {
           {eyebrow}
         </p>
       ) : null}
-      <h2 className="mt-2 text-[2.1rem] font-bold leading-none tracking-tight text-slate-950 lg:text-[2.55rem]">
+      <h2
+        className={`mt-2 ${titleSizeClassName} font-bold leading-none tracking-tight text-slate-950`}
+      >
         {title}
       </h2>
       {description ? (

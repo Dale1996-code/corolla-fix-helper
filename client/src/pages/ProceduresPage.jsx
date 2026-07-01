@@ -1161,7 +1161,6 @@ export function ProceduresPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Procedures"
         description="Track repair procedures for your Corolla, including tools, parts, safety notes, and steps, then link each procedure to helpful documents."
       />

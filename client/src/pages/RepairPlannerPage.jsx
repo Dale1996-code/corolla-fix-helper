@@ -446,9 +446,8 @@ export function RepairPlannerPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Repair Planner"
-        description="Turn a rough repair brief into a prioritized plan grounded in your uploaded manuals. The agent extracts tasks, checks readiness against a rubric, builds an owner checklist, and drafts handoff copy while streaming its progress."
+        description="Turn a rough repair brief into a prioritized plan grounded in your uploaded manuals."
       />
 
       <div className="space-y-6">

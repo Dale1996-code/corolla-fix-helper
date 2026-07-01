@@ -1188,7 +1188,6 @@ export function NotesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Notes"
         description="Save practical notes for your Corolla work, then optionally link each note to one document, symptom, or procedure in the current Notes page."
       />
