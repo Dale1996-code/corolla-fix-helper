@@ -10,6 +10,7 @@
     "demo:seed": "node src/scripts/demoSeed.js",
     "restore": "node src/scripts/restoreBackup.js",
     "backup:drill": "node src/scripts/backupDrill.js",
+    "smoke": "node src/scripts/smokeTest.js",
     "embed:backfill": "node src/scripts/embedBackfill.js",
     "eval:retrieval": "node src/scripts/evalHybridRetrieval.js",
     "eval:rerank": "node src/scripts/evalRerankAb.js",

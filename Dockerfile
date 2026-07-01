@@ -23,6 +23,14 @@ RUN npm prune --omit=dev --prefix server
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 
+# OCR defaults to on (OCR_ENABLED=true). The backend shells out to Poppler
+# (pdftoppm) and Tesseract to read scanned / image-only PDF pages, so install
+# both here; without them, scanned PDFs would import with an `ocr_unavailable:`
+# status. Text PDFs never need these. Set OCR_ENABLED=false to skip OCR anyway.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     PORT=4000
 

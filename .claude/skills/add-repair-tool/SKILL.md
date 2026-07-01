@@ -177,10 +177,10 @@ npm --prefix server test     # tools, agent loop, SSE route
 npm --prefix client test     # only needed if you touched the page
 ```
 
-Note: `repairTools.js`, `repairPlannerAgent.js`, and the page are **not** in the
-lint/typecheck allowlist (`eslint.config.mjs`, `tsconfig.changed.json`), so a clean
-`npm run lint` / `npm run typecheck` does not cover them. The test suites are your real
-safety net here. Consider adding the files you touched to those allowlists.
+Note: `npm run lint` covers the whole `server/` tree and `npm run typecheck`
+(`tsconfig.json`) covers the whole `server/src` tree, so `repairTools.js` and
+`repairPlannerAgent.js` are both checked. Typecheck still runs with full `strict`
+off, so the test suites remain your real safety net for logic and null/any bugs.
 
 ## Full worked example
 

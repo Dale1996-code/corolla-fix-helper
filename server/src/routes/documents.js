@@ -136,7 +136,7 @@ documentsRouter.get("/:id/file", async (request, response) => {
   }
 
   const originalFileName = document.original_filename || safeFileName;
-  const encodedOriginalName = encodeURIComponent(originalFileName);
+  const encodedOriginalName = encodeURIComponent(String(originalFileName));
 
   response.setHeader("Content-Type", document.file_type || "application/pdf");
   response.setHeader(
@@ -267,7 +267,7 @@ documentsRouter.post("/upload", async (request, response) => {
     response.status(201).json({
       message: `Uploaded ${originalFilename} successfully.`,
       document: newDocument,
-      totalDocuments: rows.total + 1,
+      totalDocuments: Number(rows.total) + 1,
     });
   } catch (error) {
     await fs.rm(absoluteFilePath, { force: true });
