@@ -137,34 +137,50 @@ async function runSmokeTest() {
     path.join(os.tmpdir(), "corolla-fix-helper-smoke-")
   );
 
-  // Point the app at a throwaway database + uploads and force the graceful
-  // no-key path. These must be set before app.js (and config.js) are imported.
-  process.env.DATABASE_FILE = path.join(smokeRoot, "data", "smoke.db");
-  process.env.UPLOADS_DIR = path.join(smokeRoot, "uploads");
-  process.env.OPENAI_API_KEY = "";
-  process.env.OCR_ENABLED = "false";
-  process.env.SEED_DEMO = "";
-  process.env.PORT = "0";
-
-  const clientDistIndex = path.join(projectRoot, "client", "dist", "index.html");
-  const frontendBuilt = fs.existsSync(clientDistIndex);
-
-  if (!frontendBuilt) {
-    console.warn(
-      "Warning: client/dist/index.html not found. Run `npm run build` first " +
-        "for a full production smoke test; checking the API fallback instead."
-    );
-  }
-
-  const { createApp } = await import("../app.js");
-  const { db } = await import("../database.js");
-
-  const app = createApp();
-  const server = await new Promise((resolve) => {
-    const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
-  });
+  // Declared out here so the `finally` block can still clean up if startup
+  // (the imports, createApp, or listen) throws before they are assigned.
+  let server;
+  let db;
 
   try {
+    // Point the app at a throwaway database + uploads and force the graceful
+    // no-key path. These must be set before app.js (and config.js) are imported.
+    process.env.DATABASE_FILE = path.join(smokeRoot, "data", "smoke.db");
+    process.env.UPLOADS_DIR = path.join(smokeRoot, "uploads");
+    process.env.OPENAI_API_KEY = "";
+    process.env.OCR_ENABLED = "false";
+    process.env.SEED_DEMO = "";
+    process.env.PORT = "0";
+
+    // Make the throwaway folders ourselves instead of relying on another
+    // module's import-time side effect to create them.
+    fs.mkdirSync(path.dirname(process.env.DATABASE_FILE), { recursive: true });
+    fs.mkdirSync(process.env.UPLOADS_DIR, { recursive: true });
+
+    const clientDistIndex = path.join(projectRoot, "client", "dist", "index.html");
+    const frontendBuilt = fs.existsSync(clientDistIndex);
+
+    if (!frontendBuilt) {
+      console.warn(
+        "Warning: client/dist/index.html not found. Run `npm run build` first " +
+          "for a full production smoke test; checking the API fallback instead."
+      );
+    }
+
+    const { createApp } = await import("../app.js");
+    ({ db } = await import("../database.js"));
+
+    const app = createApp();
+    server = await new Promise((resolve, reject) => {
+      const listener = app.listen(0, "127.0.0.1", () => {
+        listener.off("error", reject);
+        resolve(listener);
+      });
+      // Without this, a bind failure would hang the promise (and the CLI)
+      // forever instead of failing the smoke test.
+      listener.once("error", reject);
+    });
+
     const address = server.address();
     const baseUrl = `http://127.0.0.1:${address.port}`;
     console.log(`Smoke testing the built app at ${baseUrl} ...`);
@@ -185,9 +201,17 @@ async function runSmokeTest() {
         (frontendBuilt ? " (built frontend served)." : " (API-only fallback).")
     );
   } finally {
-    await new Promise((resolve) => server.close(() => resolve()));
+    if (server) {
+      // Node's global fetch keeps sockets alive in a pool; drop them first so
+      // server.close() does not wait on idle keep-alive connections.
+      if (typeof server.closeAllConnections === "function") {
+        server.closeAllConnections();
+      }
 
-    if (typeof db.close === "function") {
+      await new Promise((resolve) => server.close(() => resolve()));
+    }
+
+    if (db && typeof db.close === "function") {
       db.close();
     }
 
