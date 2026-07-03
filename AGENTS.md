@@ -115,6 +115,9 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 ## Useful Docs
 
 - `README.md` is the main entry point.
+- `docs/onboarding.md` is the new-developer guide with a file walkthrough and first-day checklist.
+- `docs/api.md` is the endpoint reference for every `/api` route.
+- `docs/runbook.md` covers operational procedures: start/stop, health checks, and failure recovery.
 - `docs/local-development.md` explains local setup.
 - `docs/environment-variables.md` explains placeholder-only env values.
 - `docs/architecture.md` explains current app structure.
