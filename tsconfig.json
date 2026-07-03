@@ -28,6 +28,7 @@
     "server/test/chunkRerankRetrieval.test.js",
     "server/test/answerQualityCases.test.js",
     "server/test/attachmentService.test.js",
+    "server/test/attachments.test.js",
     "server/test/config.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
