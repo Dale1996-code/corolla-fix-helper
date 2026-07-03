@@ -15,7 +15,7 @@ Storage is local, but the AI features are not offline: when `OPENAI_API_KEY` is 
 - **Documents** — upload PDFs, edit metadata, tag, favorite, bookmark, open the stored file, re-run text extraction, and delete with full cleanup
 - **Bulk import** — resumable folder import for many PDFs with MD5 duplicate detection and an image-only report (`npm run import`)
 - **OCR (optional)** — scanned or image-only PDF pages become searchable text when local Tesseract and Poppler are installed
-- **Search** — one page with separate result sections for documents, symptoms, procedures, and notes
+- **Ask AI / Search** — one page (labelled "Ask AI" in the sidebar, route `/search`) with the Ask panel plus separate keyword-search sections for documents, symptoms, procedures, and notes
 - **Ask your documents** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, OpenAI-generated answers with citations, and a deliberate `not in documents` refusal when your PDFs don't contain the answer. Can optionally include one saved photo (Vision Ask).
 - **Repair Planner** — a streaming tool-calling agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts, grounded in your PDFs
 - **Symptoms, Procedures, Notes** — create/edit/delete with filters and sorting; link them to documents and to each other; attach photos (JPEG/PNG/WebP)
@@ -96,9 +96,11 @@ Run from the repo root:
 | `npm run dev:server` / `npm run dev:client` | Just one side |
 | `npm run test` | Both test suites (`test:server`, `test:client` for one) |
 | `npm run lint` | ESLint over `server/` and `client/src` |
-| `npm run typecheck` | Scoped TypeScript `checkJs` (see note below) |
+| `npm run typecheck` | TypeScript `checkJs` over the whole `server/src` tree (`tsconfig.json`) |
 | `npm run build` | Production frontend build (server build is a no-op) |
 | `npm start` | Production-style: Express serves `client/dist` on `:4000` |
+| `npm run smoke` | Boot the built app on throwaway data and check the frontend + core API routes respond (run after `npm run build`) |
+| `npm run demo:seed` | Load the optional sample maintenance PDF (normal startup seeds nothing) |
 | `npm run import -- "C:\path\to\pdfs"` | Bulk PDF import with duplicate detection |
 | `npm run embed:backfill` | Embed chunks missing the current embedding version — run after importing or re-extracting PDFs |
 | `npm run eval:retrieval` / `npm run eval:answers` | Retrieval and answer-quality evals ([docs/quality-testing.md](docs/quality-testing.md)) |
@@ -153,7 +155,7 @@ cd client; npx vitest run src/pages/NotesPage.test.jsx
 
 All tests run **without an OpenAI key** — every AI-touching module accepts an injected mock (see the dependency-injection convention in [docs/architecture.md](docs/architecture.md)). After code changes, also walk [QA_CHECKLIST.md](QA_CHECKLIST.md) for manual verification, and use [docs/quality-testing.md](docs/quality-testing.md) to check answer quality.
 
-CI (`.github/workflows/ci.yml`) runs `install:all`, `lint`, `typecheck`, and `test` on every push and pull request with Node 24.
+CI (`.github/workflows/ci.yml`) runs `install:all`, `lint`, `typecheck`, `test`, `build`, and the production `smoke` test on every push and pull request with Node 24.
 
 ## Basic Troubleshooting
 
@@ -205,9 +207,9 @@ Planning:
 - **Routes stay thin; logic goes in `server/src/services/`.**
 - **Deleting a document must clean up everything:** `symptom_documents`, `procedure_documents`, `document_chunks`, note links, and the stored file.
 - **Schema changes are numbered migrations** in `server/src/initDatabase.js` — add a new one, never edit an applied one ([DATA_MODEL.md](DATA_MODEL.md)).
-- **Typecheck is scoped.** `npm run typecheck` only checks the allowlist in `tsconfig.changed.json` — a clean run does not mean all code was checked. Consider adding server files you touch to that list.
+- **Typecheck is broad but not exhaustive.** `npm run typecheck` covers the whole `server/src` tree plus a curated set of tests via `tsconfig.json` (`checkJs` with several strict-family flags), but full `strict` (`strictNullChecks`/`noImplicitAny`) is still off — a clean run is broad coverage, not complete null/any safety.
 - **Before opening a PR:** `npm run lint && npm run typecheck && npm run test`, then the relevant parts of [QA_CHECKLIST.md](QA_CHECKLIST.md).
 
 ## Deployment Note
 
-The intended Google Cloud path is a Google Compute Engine VM running the Docker image from this repo, with persistent storage mounted for the SQLite database and uploaded PDFs. This branch does not claim the app is currently deployed. Follow [docs/gcp-deployment.md](docs/gcp-deployment.md) only when you intentionally want to create cloud resources. Note the Docker image does not include the OCR tools (Tesseract/Poppler).
+The intended Google Cloud path is a Google Compute Engine VM running the Docker image from this repo, with persistent storage mounted for the SQLite database and uploaded PDFs. This branch does not claim the app is currently deployed. Follow [docs/gcp-deployment.md](docs/gcp-deployment.md) only when you intentionally want to create cloud resources. The Docker image installs the OCR tools (`poppler-utils`, `tesseract-ocr`), so scanned-PDF OCR works in containers too.

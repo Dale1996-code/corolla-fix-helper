@@ -69,7 +69,7 @@ curl.exe http://localhost:4000/api/dashboard
 # expect: JSON with vehicle, summary counts, recent activity
 ```
 
-Is the frontend up (dev mode)? Open `http://localhost:5173` — the sidebar should list Dashboard, Documents, Search, Repair Planner, Symptoms, Procedures, Notes, Settings.
+Is the frontend up (dev mode)? Open `http://localhost:5173` — the sidebar should list Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Settings.
 
 Which database/uploads is the app actually using? Open **Settings → runtime info** in the UI, or:
 
@@ -78,7 +78,14 @@ curl.exe http://localhost:4000/api/settings
 # runtime.databaseFile and runtime.uploadsDir show the live paths
 ```
 
-Are the AI features configured? Ask something in the Search page Ask panel — `"status":"ai_not_configured"` in the response means no key reached the server process.
+Are the AI features configured? Ask something in the Ask AI page's Ask panel — `"status":"ai_not_configured"` in the response means no key reached the server process.
+
+Full production-style check in one command (boots the built app on throwaway data, verifies the frontend and core API routes, never touches real data):
+
+```powershell
+npm run build
+npm run smoke
+```
 
 ## Where the Logs Are
 
@@ -132,7 +139,7 @@ When reporting or debugging a failure, capture the terminal output around the ti
 
    Install them ([local-development.md](local-development.md) §4) or point `OCR_TESSERACT_COMMAND` / `OCR_PDFTOPPM_COMMAND` in `server\.env` at the full `.exe` paths. Then re-run extraction.
 3. If OCR is installed but not wanted, set `OCR_ENABLED=false` — text PDFs are unaffected.
-4. Remember: OCR runs on the machine running the **backend**. In Docker, the default image has no OCR tools.
+4. Remember: OCR runs on the machine running the **backend**. The Docker image installs `poppler-utils` and `tesseract-ocr`, so containers are covered; only bare-metal installs need the tools added by hand.
 
 ### Ask / RAG answering fails
 

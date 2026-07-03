@@ -116,11 +116,13 @@ Add a **new** numbered migration in `server/src/initDatabase.js` (`NNN_short_des
    npm run lint
    npm run typecheck
    npm run test
+   npm run build
+   npm run smoke
    ```
 
-   Note: `typecheck` only checks the allowlist in `tsconfig.changed.json` — consider adding server files you touched.
+   Note: `typecheck` covers the whole `server/src` tree via `tsconfig.json` (`checkJs` + several strict-family flags), but full `strict` is off — a clean run is broad, not exhaustive. `smoke` boots the built app on throwaway data and checks it actually serves.
 4. Manually verify with the relevant sections of [QA_CHECKLIST.md](../QA_CHECKLIST.md); for retrieval/answer changes also run the evals ([quality-testing.md](quality-testing.md)).
-5. Open a PR; CI (`.github/workflows/ci.yml`) re-runs lint + typecheck + tests on Node 24.
+5. Open a PR; CI (`.github/workflows/ci.yml`) re-runs lint + typecheck + tests + build + smoke on Node 24.
 
 **Testing with real data:** never point experiments at your real database/uploads. Override `DATABASE_FILE` and `UPLOADS_DIR` to scratch paths in the environment when trying anything destructive.
 
@@ -141,7 +143,7 @@ Add a **new** numbered migration in `server/src/initDatabase.js` (`NNN_short_des
 - [ ] `npm run install:all` completes
 - [ ] `npm run dev` — app opens at `http://localhost:5173`, health check OK at `http://localhost:4000/api/health`
 - [ ] Upload one PDF on the Documents page; open its stored file; check its extraction status
-- [ ] Run a keyword search on the Search page
+- [ ] Run a keyword search on the Ask AI page (route `/search` — the page holds both the Ask panel and the search sections)
 - [ ] `npm run lint && npm run typecheck && npm run test` all pass
 - [ ] Read [architecture.md](architecture.md) (with the diagrams)
 - [ ] Skim [api.md](api.md) and [DATA_MODEL.md](../DATA_MODEL.md)

@@ -51,7 +51,7 @@ In a production-style run:
 
 React 19 + React Router 7 + Tailwind CSS 4. The pattern is simple and repeated:
 
-- One page component per feature under `client/src/pages/` (Dashboard, Documents, Search, Repair Planner, Symptoms, Procedures, Notes, Settings). Routes are wired in `client/src/App.jsx`.
+- One page component per feature under `client/src/pages/` (Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Settings). Routes are wired in `client/src/App.jsx`. Note the "Ask AI" page keeps its historical `/search` route and `SearchPage.jsx` filename — it holds the Ask panel plus the keyword-search sections.
 - Shared presentational pieces under `client/src/components/` (e.g. `documents/DocumentsList.jsx`, `search/ResultCards.jsx`).
 - `client/src/lib/apiClient.js` is a thin `fetch` wrapper (`requestJson`) plus helpers for attachments and symptom↔procedure links.
 - Tests are co-located next to the code (`*.test.jsx`, Vitest + jsdom + Testing Library).
@@ -120,7 +120,7 @@ RAG means retrieval-augmented generation: the server *retrieves* relevant docume
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (Search page Ask panel)
+    participant B as Browser (Ask AI page)
     participant R as routes/ask.js
     participant Ret as chunkRetrievalService.js
     participant AI as aiAnswerService.js
@@ -234,16 +234,16 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 - **Embeddings as a separate manual step (`embed:backfill`) instead of embedding at upload time.** Uploads stay fast and never fail because OpenAI is down; keyword search works immediately. The cost: semantic ranking is missing until you run the backfill (the Documents page shows an embedding-pending indicator).
 - **Refusal over guessing.** Ask answers `not in documents` when retrieval finds nothing useful. For torque specs and safety-critical repair facts, a wrong confident answer is worse than no answer.
 - **Deterministic agent tools.** The Repair Planner's tools are plain functions, so the structured artifacts the UI renders never depend on model randomness — only the narrative text does.
-- **Scoped typecheck.** `tsconfig.changed.json` type-checks an allowlist of files so older code doesn't block new work. Trade-off: a green `typecheck` does not cover the whole repo.
+- **Pragmatic typecheck.** `tsconfig.json` runs `checkJs` over the whole `server/src` tree (plus a curated set of tests) with several strict-family flags, but full `strict` (`strictNullChecks`/`noImplicitAny`) stays off so plain-JS code isn't drowned in annotations. Trade-off: a green `typecheck` is broad coverage, not exhaustive null/any safety.
 
 ## Known Risks and Weak Spots
 
 Documented honestly so they don't surprise anyone:
 
 - **No authentication.** Anyone who can reach the server can read all data, upload/delete documents, and spend the OpenAI budget. The 20 req/min rate limiter on `/api/ask` and `/api/repair-plan` limits the burn rate but is not access control. Never expose the app publicly without HTTPS + auth in front.
-- **Typecheck coverage is partial** (allowlist only, see above). Lint covers the whole `server/` tree and `client/src`.
+- **Typecheck is not fully strict** (see the trade-off above) — it catches shape and typo errors across `server/src` but not every null/any hazard. Lint covers the whole `server/` tree and `client/src`.
 - **The embedding cache and retrieval scan are in-memory and linear.** Fine at this scale; a 100× larger corpus would need re-thinking (and is out of scope).
-- **OCR depends on host tools.** The Docker image does not install Tesseract/Poppler, so scanned-PDF OCR silently degrades (`ocr_unavailable:` status) in a container unless the image is extended.
+- **OCR depends on external tools.** Locally, Tesseract/Poppler must be installed on the machine running the backend or scanned-PDF OCR silently degrades (`ocr_unavailable:` status). The Docker image installs `poppler-utils` and `tesseract-ocr`, so containers are covered.
 - **Restore requires a stopped server.** The running app holds a live SQLite connection; restore replaces the file on disk. The restore CLI is fail-closed (validate → snapshot → atomic swap → rollback), but it can't protect against restoring while the server is writing.
 - **`file_md5` is a duplicate-detection key, not a security control.** MD5 collisions are not a realistic concern for personal PDFs, but don't reuse it as an integrity guarantee.
 - **Known dev-dependency advisories** (esbuild via Vite/Vitest) affect the local dev server only, not the built app. Do not run `npm audit fix --force` — it force-upgrades Vite across a major version. See [local-development.md](local-development.md).
@@ -253,7 +253,7 @@ Documented honestly so they don't surprise anyone:
 
 The intended Google Cloud path:
 
-1. Build the Docker image (`Dockerfile`: Node 24 build stage → slim runtime, client built into the image, server dev deps pruned).
+1. Build the Docker image (`Dockerfile`: Node 24 build stage → slim runtime with the OCR tools installed, client built into the image, server dev deps pruned).
 2. Push to Google Artifact Registry.
 3. Run on one Google Compute Engine VM.
 4. Mount a persistent VM folder into the container at `/data` for `DATABASE_FILE` and `UPLOADS_DIR`.
