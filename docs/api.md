@@ -15,7 +15,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 
   `400` invalid input · `404` not found · `415` wrong media type (attachments) · `429` rate limited · `500` server failure.
 - **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` are each limited to **20 requests/minute** (in-house limiter, `server/src/middleware/rateLimit.js`). Everything else is unlimited.
-- PowerShell examples use `curl.exe` (the real curl, not the PowerShell alias).
+- **PowerShell examples:** plain `GET`/download requests use `curl.exe` (the real curl, not the PowerShell alias). Requests with a **JSON body** use `Invoke-RestMethod` instead. This is deliberate: passing inline JSON to `curl.exe` is mangled by Windows PowerShell 5.1's parser — it strips the double quotes before curl ever sees them (a literal, a `$variable`, and `ConvertTo-Json` output all break the same way), so the server receives invalid JSON and returns `400`. `Invoke-RestMethod` hands its `-Body` to the request in-process, so the JSON survives intact in both Windows PowerShell 5.1 and PowerShell 7. Multipart uploads (`-F`) still use `curl.exe`; if a field value contains spaces, run those from PowerShell 7 or a POSIX shell to avoid the same 5.1 quoting issue.
 
 ## Quick Endpoint List
 
@@ -139,9 +139,9 @@ Re-runs extraction on the stored file and rebuilds its chunks. Returns `{ "messa
 JSON body; only fields you send are changed, but `title`, `system`, and `documentType` must remain non-empty. `isFavorite` / `isBookmarked` are real booleans here (unlike upload). Sending `tags` replaces the document's tag set.
 
 ```powershell
-curl.exe -X PUT http://localhost:4000/api/documents/12 `
-  -H "Content-Type: application/json" `
-  -d '{"isFavorite": true, "tags": ["torque-specs", "front-end"]}'
+$body = @{ isFavorite = $true; tags = @("torque-specs", "front-end") } | ConvertTo-Json
+Invoke-RestMethod -Method Put -Uri http://localhost:4000/api/documents/12 `
+  -ContentType "application/json" -Body $body
 ```
 
 ### `DELETE /api/documents/:id`
@@ -184,9 +184,9 @@ curl.exe "http://localhost:4000/api/search/documents?q=caliper&system=Brakes"
 | `attachmentId` | – | id of one **already-saved** image attachment (Vision Ask) — never raw image data |
 
 ```powershell
-curl.exe -X POST http://localhost:4000/api/ask `
-  -H "Content-Type: application/json" `
-  -d '{"question": "What is the oil drain plug torque spec?"}'
+$body = @{ question = "What is the oil drain plug torque spec?" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/ask `
+  -ContentType "application/json" -Body $body
 ```
 
 Response:
@@ -223,12 +223,15 @@ Attachment-specific errors: `400` bad id, `404` unknown/missing file, `415` not 
 | `skillLevel`, `availableTools`, `availableParts`, `constraints` | – | strings feeding the readiness rubric |
 
 ```powershell
-curl.exe -N -X POST http://localhost:4000/api/repair-plan `
-  -H "Content-Type: application/json" `
-  -d '{"brief": "Front brakes squeak when stopping. Replace the pads this weekend.", "skillLevel": "beginner"}'
+$body = @{
+  brief = "Front brakes squeak when stopping. Replace the pads this weekend."
+  skillLevel = "beginner"
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-plan `
+  -ContentType "application/json" -Body $body
 ```
 
-The response is `text/event-stream`; each frame is `data: <json>\n\n` with a `type` of `status`, `tool_call`, `tool_result`, `text_delta`, `trace`, `ai_not_configured`, `error`, or `done` (the `done` frame carries the assembled `artifacts`). Full protocol, tool list, and readiness rubric: [repair-planner.md](repair-planner.md).
+The response is `text/event-stream`; each frame is `data: <json>\n\n` with a `type` of `status`, `tool_call`, `tool_result`, `text_delta`, `trace`, `ai_not_configured`, `error`, or `done` (the `done` frame carries the assembled `artifacts`). `Invoke-RestMethod` waits for the stream to finish and returns the concatenated `data:` frames as text — to watch frames arrive live, run the equivalent `curl.exe -N` from a POSIX shell (Bash/WSL). Full protocol, tool list, and readiness rubric: [repair-planner.md](repair-planner.md).
 
 ---
 
@@ -247,9 +250,9 @@ Allowed values — `confidence`: `low` | `medium` (default) | `high`; `status`: 
 | `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments |
 
 ```powershell
-curl.exe -X POST http://localhost:4000/api/symptoms `
-  -H "Content-Type: application/json" `
-  -d '{"title": "Squeak when braking", "system": "Brakes", "status": "open"}'
+$body = @{ title = "Squeak when braking"; system = "Brakes"; status = "open" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/symptoms `
+  -ContentType "application/json" -Body $body
 ```
 
 ---
