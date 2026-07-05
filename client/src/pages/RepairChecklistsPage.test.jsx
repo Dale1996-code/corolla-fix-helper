@@ -100,3 +100,70 @@ test("RepairChecklistsPage lists a checklist, shows its status and items, and ch
     ).toBeChecked();
   });
 });
+
+test("clears a checklist's saved-status banner when a different checklist is selected", async () => {
+  const checklistA = {
+    id: 1,
+    title: "Front brake job",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-01T09:00:00.000Z",
+    items: [],
+    itemCount: 0,
+    doneItemCount: 0,
+  };
+  const checklistB = {
+    id: 2,
+    title: "Oil change",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-02T08:00:00.000Z",
+    updatedAt: "2026-05-02T09:00:00.000Z",
+    items: [],
+    itemCount: 0,
+    doneItemCount: 0,
+  };
+  const updatedA = { ...checklistA, status: "done", updatedAt: "2026-05-01T10:00:00.000Z" };
+
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/repair-checklists" && (!options.method || options.method === "GET")) {
+      return jsonResponse({ checklists: [checklistA, checklistB], total: 2 });
+    }
+
+    if (url === "/api/repair-checklists/1" && options.method === "PUT") {
+      return jsonResponse({ message: "Checklist updated.", checklist: updatedA });
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/repair-checklists"]}>
+      <RepairChecklistsPage />
+    </MemoryRouter>
+  );
+
+  // Checklist A is auto-selected. Open its edit form and save it successfully.
+  await screen.findByRole("heading", { name: "Front brake job" });
+  fireEvent.click(screen.getByRole("button", { name: "Edit checklist" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  // The success banner shows for checklist A.
+  expect(await screen.findByText("Changes saved.")).toBeInTheDocument();
+
+  // Switch to checklist B by clicking its row in the list.
+  fireEvent.click(screen.getByText("Oil change"));
+
+  // The details panel now shows B...
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: "Oil change" })).toBeInTheDocument();
+  });
+
+  // ...and A's "Changes saved." banner must not carry over to B.
+  expect(screen.queryByText("Changes saved.")).not.toBeInTheDocument();
+});
