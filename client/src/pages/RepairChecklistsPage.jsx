@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { formatDate } from "../lib/formatDate";
 
@@ -567,6 +567,9 @@ export function RepairChecklistsPage() {
   const [itemError, setItemError] = useState("");
   const [editingItemId, setEditingItemId] = useState(null);
   const [editingItemText, setEditingItemText] = useState("");
+  // Synchronous re-entrancy guard for item mutations (see runItemAction). A ref,
+  // not state, so a rapid second event in the same render sees the flag.
+  const itemActionInFlight = useRef(false);
 
   const selectedChecklist = useMemo(() => {
     if (!selectedChecklistId) {
@@ -764,16 +767,29 @@ export function RepairChecklistsPage() {
   // --- Item actions (all return the full, refreshed checklist) -------------
 
   async function runItemAction(url, options) {
-    setItemError("");
-
-    const response = await fetch(url, options);
-    const payload = await response.json();
-
-    if (!response.ok) {
-      throw new Error(payload.error || "Could not update checklist item.");
+    // Ignore overlapping item mutations (e.g. a double-click on a checkbox or a
+    // double-Enter on the add-item form) so a second request cannot fire before
+    // the first response updates state — which would send a duplicate write or a
+    // toggle computed from a stale value.
+    if (itemActionInFlight.current) {
+      return;
     }
 
-    applyChecklistUpdate(payload.checklist);
+    itemActionInFlight.current = true;
+    setItemError("");
+
+    try {
+      const response = await fetch(url, options);
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not update checklist item.");
+      }
+
+      applyChecklistUpdate(payload.checklist);
+    } finally {
+      itemActionInFlight.current = false;
+    }
   }
 
   async function handleAddItem(event) {
@@ -909,6 +925,10 @@ export function RepairChecklistsPage() {
     cancelEditingItem();
     setItemError("");
     setNewItemText("");
+    // Clear per-checklist status banners so a "Changes saved." message or a delete
+    // error from the previously selected checklist is not shown under this one.
+    setSaveState({ saving: false, message: "", error: "" });
+    setDeleteState({ deletingId: null, error: "" });
   }
 
   return (
