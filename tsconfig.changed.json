@@ -29,6 +29,7 @@
     "server/src/routes/symptoms.js",
     "server/src/routes/procedures.js",
     "server/src/routes/notes.js",
+    "server/src/routes/repairChecklists.js",
     "server/src/utils/http.js",
     "server/src/utils/sanitizeFilename.js",
     "server/src/utils/text.js",

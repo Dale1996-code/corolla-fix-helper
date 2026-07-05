@@ -7,6 +7,7 @@ import { RepairPlannerPage } from "./pages/RepairPlannerPage";
 import { SymptomsPage } from "./pages/SymptomsPage";
 import { ProceduresPage } from "./pages/ProceduresPage";
 import { NotesPage } from "./pages/NotesPage";
+import { RepairChecklistsPage } from "./pages/RepairChecklistsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { navigationItems } from "./lib/navigation";
 
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="/symptoms" element={<SymptomsPage />} />
             <Route path="/procedures" element={<ProceduresPage />} />
             <Route path="/notes" element={<NotesPage />} />
+            <Route path="/repair-checklists" element={<RepairChecklistsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>

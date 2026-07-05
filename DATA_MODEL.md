@@ -239,6 +239,45 @@ Current use:
 
 Older note rows may still use `document_id` and `body`. The server includes backfill logic to keep older rows usable.
 
+### `repair_checklists`
+
+Stores repair checklists: a titled, status-tracked list of steps for a job. Added by migration `002_repair_checklists`.
+
+Important fields:
+
+- `id`
+- `vehicle_id`
+- `title`
+- `status` (`planned`, `in_progress`, `blocked`, or `done`; the UI shows `in_progress` as "In progress")
+- `description`
+- `notes`
+- `created_at`
+- `updated_at`
+
+Current use:
+
+- Create, edit, and delete checklists (`/api/repair-checklists`).
+- Change a checklist's status.
+- `updated_at` is bumped when the checklist's own fields change and when its items change (add, check off, edit, delete, reorder), so the list stays ordered by recent activity.
+
+Checklists are standalone in v1: there is no linking to symptoms, procedures, notes, or documents, and no image attachments.
+
+### `repair_checklist_items`
+
+Stores the ordered steps that belong to one checklist.
+
+Important fields:
+
+- `id`
+- `checklist_id`
+- `text`
+- `is_done` (`0` or `1`)
+- `sort_order`
+- `created_at`
+- `updated_at`
+
+New items are appended at `MAX(sort_order) + 1`. Reordering swaps a row's `sort_order` with its neighbor (the `Up`/`Down` buttons) inside a transaction. The `checklist_id` foreign key uses `ON DELETE CASCADE`, so deleting a checklist removes its items. Items are indexed by `idx_repair_checklist_items_checklist`.
+
 ### `document_chunks`
 
 Stores smaller page-aware chunks of extracted PDF text for the "Ask your documents" feature. OCR-created text uses the same table and keeps the original PDF page number.
@@ -313,6 +352,11 @@ The current Ask retrieval embeds the question once, cosine-scans an in-memory ca
 Schema changes are tracked in a `schema_migrations` table (`id`, `name`, `applied_at`). On startup `initDatabase.js` ensures that table exists, then runs each numbered migration exactly once via `runMigration(name, fn)` — the migration body and its bookkeeping insert share one transaction, so a failure rolls back without recording a half-applied migration.
 
 Convention: name migrations `NNN_short_description` in increasing order, starting at `001_initial_schema` (which wraps the original `CREATE TABLE` / `ensureColumn` setup). To change the schema, add a new numbered migration rather than editing an applied one. The initial schema is idempotent, so existing databases simply record `001` on their first startup after this was introduced — no data is dropped or rewritten.
+
+Applied migrations:
+
+- `001_initial_schema` — original tables, columns, and indexes.
+- `002_repair_checklists` — adds the `repair_checklists` and `repair_checklist_items` tables.
 
 ## Not In The Current Schema
 

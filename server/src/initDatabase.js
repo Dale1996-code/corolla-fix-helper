@@ -232,6 +232,39 @@ function createTables() {
   `);
 }
 
+// Migration 002: additive Repair Checklists feature. Two vehicle-scoped tables
+// that stand on their own — no changes to existing tables. Items cascade-delete
+// with their parent checklist (foreign keys are enabled in database.js).
+function createRepairChecklistsTables() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS repair_checklists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'planned',
+      description TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS repair_checklist_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      checklist_id INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      is_done INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (checklist_id) REFERENCES repair_checklists(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_repair_checklist_items_checklist
+      ON repair_checklist_items (checklist_id);
+  `);
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -500,6 +533,7 @@ function runMigration(name, migrate) {
 export function initializeDatabase() {
   ensureSchemaMigrationsTable();
   runMigration("001_initial_schema", createTables);
+  runMigration("002_repair_checklists", createRepairChecklistsTables);
 
   ensureAppSettingsRecord();
   seedVehicle();

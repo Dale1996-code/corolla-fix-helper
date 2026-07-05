@@ -6,6 +6,7 @@ export const navigationItems = [
   { label: "Symptoms", to: "/symptoms" },
   { label: "Procedures", to: "/procedures" },
   { label: "Notes", to: "/notes" },
+  { label: "Checklists", to: "/repair-checklists" },
   { label: "Settings", to: "/settings" },
 ];
 
