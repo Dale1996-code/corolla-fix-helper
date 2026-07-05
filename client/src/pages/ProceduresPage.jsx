@@ -413,11 +413,6 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
   const [selectedIds, setSelectedIds] = useState(procedure.linkedSymptomIds || []);
   const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
 
-  useEffect(() => {
-    setSelectedIds(procedure.linkedSymptomIds || []);
-    setSaveState({ saving: false, message: "", error: "" });
-  }, [procedure.id]);
-
   function toggleSymptom(symptomId) {
     setSelectedIds((current) =>
       current.includes(symptomId)
@@ -667,6 +662,7 @@ function ProcedureDetails({
         </div>
 
         <ProcedureSymptomPanel
+          key={procedure.id}
           procedure={procedure}
           symptoms={symptoms}
           onProcedureUpdated={onProcedureUpdated}

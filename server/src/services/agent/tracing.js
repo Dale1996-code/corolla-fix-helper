@@ -12,6 +12,14 @@ function now() {
     : Date.now();
 }
 
+/**
+ * @param {{ enabled?: boolean, onSpan?: (span: {
+ *   id: number,
+ *   name: string,
+ *   durationMs: number | null,
+ *   attributes: Record<string, any>,
+ * }) => void }} [options]
+ */
 export function createTracer({ enabled = process.env.AGENT_TRACE === "1", onSpan } = {}) {
   const spans = [];
   let counter = 0;

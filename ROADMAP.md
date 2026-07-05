@@ -38,13 +38,25 @@ These are not implemented in the current app:
 
 Recommended next steps:
 
-1. Add a small production smoke test that checks the built app and main routes.
-2. Harden the Google Compute Engine deployment path with access control and HTTPS before sharing a public URL.
-3. Keep docs updated whenever a feature changes, especially deployment and storage behavior.
+1. Harden the Google Compute Engine deployment path with access control and HTTPS before sharing a public URL.
+2. Keep docs updated whenever a feature changes, especially deployment and storage behavior.
+3. Tighten type checking further — `tsconfig.json` now covers the whole `server/src` tree, so the next step is chipping away at `strictNullChecks` (and eventually `noImplicitAny`) rather than broadening coverage.
 
 Done: the backup/restore loop is now closed — restore from an exported backup
 (`npm run restore`), a backup + restore drill with fake data
 (`npm run backup:drill`), and a restore guide (`docs/backup-restore.md`).
+
+Done: a production smoke test (`npm run smoke`,
+`server/src/scripts/smokeTest.js`) boots the built app and checks the main
+pages and API routes; it runs in CI after `npm run build`.
+
+Done: type checking now covers the whole `server/src` tree (`tsconfig.json`)
+under `checkJs` plus several strict-family flags, instead of a small file
+allowlist. Full `strict` stays off for now to avoid a large untyped-JS backlog.
+
+Done: the Docker runtime image installs Poppler + Tesseract, so OCR of scanned
+PDFs works in a container out of the box (matching the default
+`OCR_ENABLED=true`).
 
 ## Current RAG Status And Next AI Work
 

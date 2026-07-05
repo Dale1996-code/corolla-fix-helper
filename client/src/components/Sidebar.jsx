@@ -5,9 +5,14 @@ export function Sidebar() {
   return (
     <aside className="editorial-sidebar sticky top-0 hidden min-h-screen w-72 shrink-0 border-r border-slate-300 px-5 py-6 text-white lg:flex lg:flex-col">
       <div className="mb-8 border-b border-white/10 pb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
-          Corolla Fix Helper
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
+            Corolla Fix Helper
+          </p>
+          <span className="font-display text-sm font-bold tracking-tight text-white">
+            DaleTech
+          </span>
+        </div>
         <h1 className="mt-2 font-display text-[2rem] font-bold leading-none text-white">
           Local Repair Helper
         </h1>

@@ -1083,8 +1083,8 @@ export function SearchPage() {
   return (
     <>
       <PageHeader
-        title="Search"
-        titleSizeClassName="text-[2.4125rem] lg:text-[2.55rem]"
+        eyebrow="Working Feature"
+        title="Ask AI"
         description="Search documents, symptoms, procedures, and notes from one page while keeping each search area separate and easy to understand."
       />
 

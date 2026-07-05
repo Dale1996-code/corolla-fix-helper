@@ -92,7 +92,7 @@ npm run embed:backfill
 
 This embeds chunks that are missing the active `OPENAI_EMBEDDING_MODEL` and `OPENAI_EMBEDDING_DIMENSIONS` pair, and skips chunks already stored at the current embedding version.
 
-OCR is local. It does not use OpenAI. When a PDF page has very little normal text, the backend uses Poppler `pdftoppm` to render that page to an image, then uses Tesseract to read text from the image. If either tool is missing, text PDFs still import normally, and scanned PDFs get an extraction status starting with `ocr_unavailable:`.
+OCR is local. It does not use OpenAI. When a PDF page has very little normal text, the backend uses Poppler `pdftoppm` to render that page to an image, then uses Tesseract to read text from the image. If either tool is missing, text PDFs still import normally, and scanned PDFs get an extraction status starting with `ocr_unavailable:`. The Docker runtime image installs both tools, so OCR works in a container by default; you only need to install them yourself for non-Docker (for example local Windows) setups.
 
 ## Google Compute Engine Values
 

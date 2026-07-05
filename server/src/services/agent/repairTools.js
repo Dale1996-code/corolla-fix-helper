@@ -138,6 +138,9 @@ function splitBriefIntoFragments(brief) {
 
 // --- Tool: extract_repair_tasks -------------------------------------------
 
+/**
+ * @param {{ brief?: string }} [args]
+ */
 export function extractRepairTasks({ brief } = {}) {
   const normalizedBrief = normalizeText(brief);
 
@@ -177,6 +180,10 @@ function buildSnippet(text) {
   return normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
 }
 
+/**
+ * @param {{ query?: string, limit?: number }} [args]
+ * @param {{ retrieve?: typeof retrieveRelevantChunks }} [deps]
+ */
 export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = retrieveRelevantChunks } = {}) {
   const normalizedQuery = normalizeText(query);
 

@@ -17,6 +17,7 @@
     "demo:seed": "npm --prefix server run demo:seed",
     "restore": "npm --prefix server run restore --",
     "backup:drill": "npm --prefix server run backup:drill",
+    "smoke": "npm --prefix server run smoke",
     "embed:backfill": "npm --prefix server run embed:backfill",
     "eval:retrieval": "npm --prefix server run eval:retrieval",
     "eval:rerank": "npm --prefix server run eval:rerank",
@@ -25,7 +26,7 @@
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm --prefix server run test",
     "test:client": "npm --prefix client run test",
-    "typecheck": "tsc --project tsconfig.changed.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
     "start": "npm --prefix server run start",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client"
   },

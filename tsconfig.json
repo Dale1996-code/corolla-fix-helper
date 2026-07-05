@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+
+    // strictNullChecks / noImplicitAny would each add a large backlog of
+    // findings against this untyped-JS codebase, so full `strict` stays off for
+    // now. Everything below is a strict-family flag that the whole server/src
+    // tree already passes, so it is real added protection at zero backlog.
+    "strict": false,
+    "noImplicitThis": true,
+    "strictBindCallApply": true,
+    "alwaysStrict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["server/src/**/*.js"],
+  "files": [
+    "server/test/aiAnswerService.test.js",
+    "server/test/ask.test.js",
+    "server/test/chunkRerankService.test.js",
+    "server/test/chunkRerankRetrieval.test.js",
+    "server/test/answerQualityCases.test.js",
+    "server/test/attachmentService.test.js",
+    "server/test/attachments.test.js",
+    "server/test/config.test.js",
+    "server/test/importFolder.test.js",
+    "server/test/initDatabaseMigration.test.js",
+    "server/test/procedureSuggestionService.test.js",
+    "server/test/suggestedProcedures.test.js",
+    "server/test/symptomProcedureLinks.test.js",
+    "server/test/seedData.test.js"
+  ]
+}

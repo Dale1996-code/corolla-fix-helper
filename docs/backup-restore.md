@@ -2,7 +2,8 @@
 
 Corolla Fix Helper keeps everything local: one SQLite database file
 (`DATABASE_FILE`, default `server/data/corolla-fix-helper.db`) and one uploads
-folder of PDFs (`UPLOADS_DIR`, default `server/uploads/`). A backup captures
+folder of uploaded PDFs and saved attachment images (`UPLOADS_DIR`, default
+`server/uploads/`). A backup captures
 both, and restore puts both back. An export you cannot restore is not a real
 backup, so the two halves are documented together here.
 
@@ -13,7 +14,7 @@ A backup is a single gzipped tar archive named
 
 ```
 database/<name>.db   the SQLite database file
-uploads/...          a copy of every uploaded PDF
+uploads/...          a copy of every uploaded PDF and attachment image
 manifest.json        format version + creation time (added by the CLI/drill;
                      older archives from Settings omit it and still restore)
 ```

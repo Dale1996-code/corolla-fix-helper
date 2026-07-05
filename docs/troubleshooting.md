@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Use this when local setup, tests, or a demo run fails.
+Use this when local setup, tests, or a demo run fails. For step-by-step operational procedures (start/stop, health checks, recovery), see the [runbook](runbook.md).
 
 ## Node Version Is Wrong
 
