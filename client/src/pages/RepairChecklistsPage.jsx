@@ -338,11 +338,12 @@ function ChecklistItems({
 
       <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={onAddItem}>
         <input
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:bg-slate-100"
           value={newItemText}
           onChange={(event) => onNewItemTextChange(event.target.value)}
           placeholder="Add a checklist item"
           aria-label="New item text"
+          disabled={addingItem}
         />
         <button
           type="submit"
@@ -570,6 +571,7 @@ export function RepairChecklistsPage() {
   // Synchronous re-entrancy guard for item mutations (see runItemAction). A ref,
   // not state, so a rapid second event in the same render sees the flag.
   const itemActionInFlight = useRef(false);
+  const creatingInFlight = useRef(false);
 
   const selectedChecklist = useMemo(() => {
     if (!selectedChecklistId) {
@@ -630,12 +632,17 @@ export function RepairChecklistsPage() {
   async function handleCreateChecklist(event) {
     event.preventDefault();
 
+    if (creatingInFlight.current) {
+      return;
+    }
+
     if (!createForm.title.trim()) {
       setCreateError("Title is required.");
       return;
     }
 
     try {
+      creatingInFlight.current = true;
       setCreating(true);
       setCreateError("");
       setCreateMessage("");
@@ -662,6 +669,7 @@ export function RepairChecklistsPage() {
     } catch (error) {
       setCreateError(error.message || "Could not create checklist.");
     } finally {
+      creatingInFlight.current = false;
       setCreating(false);
     }
   }
@@ -770,9 +778,10 @@ export function RepairChecklistsPage() {
     // Ignore overlapping item mutations (e.g. a double-click on a checkbox or a
     // double-Enter on the add-item form) so a second request cannot fire before
     // the first response updates state — which would send a duplicate write or a
-    // toggle computed from a stale value.
+    // toggle computed from a stale value. Returns whether the request actually ran
+    // so callers do not clear inputs / close edit forms for an ignored one.
     if (itemActionInFlight.current) {
-      return;
+      return false;
     }
 
     itemActionInFlight.current = true;
@@ -787,6 +796,7 @@ export function RepairChecklistsPage() {
       }
 
       applyChecklistUpdate(payload.checklist);
+      return true;
     } finally {
       itemActionInFlight.current = false;
     }
@@ -806,12 +816,14 @@ export function RepairChecklistsPage() {
 
     try {
       setAddingItem(true);
-      await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items`, {
+      const added = await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: newItemText }),
       });
-      setNewItemText("");
+      if (added) {
+        setNewItemText("");
+      }
     } catch (error) {
       setItemError(error.message || "Could not add checklist item.");
     } finally {
@@ -857,12 +869,14 @@ export function RepairChecklistsPage() {
     }
 
     try {
-      await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items/${item.id}`, {
+      const saved = await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items/${item.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: editingItemText }),
       });
-      cancelEditingItem();
+      if (saved) {
+        cancelEditingItem();
+      }
     } catch (error) {
       setItemError(error.message || "Could not update checklist item.");
     }
@@ -890,11 +904,11 @@ export function RepairChecklistsPage() {
     }
 
     try {
-      await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items/${item.id}`, {
+      const deleted = await runItemAction(`/api/repair-checklists/${selectedChecklist.id}/items/${item.id}`, {
         method: "DELETE",
       });
 
-      if (editingItemId === item.id) {
+      if (deleted && editingItemId === item.id) {
         cancelEditingItem();
       }
     } catch (error) {
@@ -923,11 +937,13 @@ export function RepairChecklistsPage() {
   function handleSelectChecklist(checklistId) {
     setSelectedChecklistId(checklistId);
     cancelEditingItem();
+    // Cancel any in-progress checklist edit so its form/state does not leak across
+    // checklists; cancelEditingChecklist also clears the saveState banner.
+    cancelEditingChecklist();
     setItemError("");
     setNewItemText("");
-    // Clear per-checklist status banners so a "Changes saved." message or a delete
-    // error from the previously selected checklist is not shown under this one.
-    setSaveState({ saving: false, message: "", error: "" });
+    // Clear the delete error too, so a status banner from the previously selected
+    // checklist is not shown under this one.
     setDeleteState({ deletingId: null, error: "" });
   }
 
