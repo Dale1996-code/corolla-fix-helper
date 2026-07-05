@@ -84,10 +84,14 @@ test("DocumentsPage sends the bookmark flag when uploading a document", async ()
 
   render(<MemoryRouter initialEntries={["/documents"]}><DocumentsPage /></MemoryRouter>);
 
+  // The import panel is collapsed by default; open it before filling fields.
+  fireEvent.click(await screen.findByRole("button", { name: /Import PDF/i }));
+
   const fileInput = await screen.findByLabelText(/PDF file/);
   fireEvent.change(fileInput, {
     target: { files: [new File(["%PDF-1.4"], "brake.pdf", { type: "application/pdf" })] },
   });
+  expect(screen.getByText("brake.pdf")).toBeInTheDocument();
   // Query upload fields by placeholder: the filter bar reuses "System"/"Document Type" labels.
   fireEvent.change(screen.getByPlaceholderText("Engine, Brakes, Electrical..."), {
     target: { value: "Brakes" },

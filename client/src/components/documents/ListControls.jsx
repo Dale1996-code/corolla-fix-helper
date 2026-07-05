@@ -11,8 +11,6 @@ export function ListControls({
   onBookmarkFilterChange,
   tagFilter,
   onTagFilterChange,
-  extractionFilter,
-  onExtractionFilterChange,
   systems,
   documentTypes,
   tags,
@@ -112,20 +110,6 @@ export function ListControls({
           </select>
         </label>
 
-        <label className="grid gap-1 text-xs font-medium text-slate-700">
-          <span>Extraction</span>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={extractionFilter}
-            onChange={onExtractionFilterChange}
-          >
-            <option value="all">All</option>
-            <option value="completed">Completed</option>
-            <option value="no_text_found">No text found</option>
-            <option value="failed">Failed</option>
-            <option value="not_attempted">Not attempted</option>
-          </select>
-        </label>
       </div>
     </section>
   );

@@ -118,6 +118,8 @@ function UploadForm({
   uploading,
   feedback,
   error,
+  isOpen,
+  onToggleOpen,
   systemSuggestions,
   documentTypeSuggestions,
   onFileChange,
@@ -129,31 +131,73 @@ function UploadForm({
       id="document-upload"
       className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <button
+        type="button"
+        onClick={onToggleOpen}
+        aria-expanded={isOpen}
+        aria-controls="document-upload-panel"
+        className={`flex w-full flex-wrap items-center justify-between gap-3 bg-slate-50 px-5 py-4 text-left transition hover:bg-slate-100 ${
+          isOpen ? "border-b border-slate-200" : ""
+        }`}
+      >
         <div>
           <h3 className="text-lg font-semibold text-slate-950">Import PDF</h3>
           <p className="mt-1 text-sm text-slate-600">
             Upload one document at a time, then review status and fix details if needed
           </p>
         </div>
-        <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-900">
-          PDF up to 20 MB
+        <span className="flex items-center gap-3">
+          <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-900">
+            PDF up to 20 MB
+          </span>
+          <svg
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+            className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${
+              isOpen ? "rotate-180" : ""
+            }`}
+          >
+            <path
+              fillRule="evenodd"
+              d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.06l3.71-3.83a.75.75 0 1 1 1.08 1.04l-4.25 4.39a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z"
+              clipRule="evenodd"
+            />
+          </svg>
         </span>
-      </div>
+      </button>
 
-      <form className="grid gap-5 p-5" onSubmit={onSubmit}>
-        <div className="grid gap-5 xl:grid-cols-[minmax(16rem,0.75fr)_minmax(0,1.25fr)]">
-          <div className="grid content-start gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <label className="grid gap-2 text-sm text-slate-700">
-              <span className="font-medium text-slate-900">PDF file *</span>
+      {isOpen ? (
+        <form id="document-upload-panel" className="grid gap-5 p-5" onSubmit={onSubmit}>
+          <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex sm:items-center sm:justify-between">
+            <div className="grid gap-2 text-sm text-slate-700">
+              <label className="font-medium text-slate-900" htmlFor="document-upload-file">
+                PDF file *
+              </label>
               <input
+                id="document-upload-file"
                 type="file"
                 accept="application/pdf,.pdf"
                 onChange={onFileChange}
                 required
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                className="peer sr-only"
               />
-            </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label
+                  htmlFor="document-upload-file"
+                  className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-100 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-sky-500"
+                >
+                  Choose PDF
+                </label>
+                {form.pdfFile ? (
+                  <span className="min-w-0 truncate text-sm text-slate-600">
+                    {form.pdfFile.name}
+                  </span>
+                ) : (
+                  <span className="text-sm text-slate-500">No file chosen</span>
+                )}
+              </div>
+            </div>
 
             <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
               <input
@@ -166,96 +210,94 @@ function UploadForm({
             </label>
           </div>
 
-          <div className="grid gap-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField
-                label="Title"
-                name="title"
-                value={form.title}
-                onChange={onTextChange}
-                placeholder="Optional manual title"
-              />
-              <TextField
-                label="System"
-                name="system"
-                value={form.system}
-                onChange={onTextChange}
-                required
-                placeholder="Engine, Brakes, Electrical..."
-                listId="upload-system-suggestions"
-              />
-              <TextField
-                label="Subsystem"
-                name="subsystem"
-                value={form.subsystem}
-                onChange={onTextChange}
-                placeholder="Ignition, Cooling..."
-              />
-              <TextField
-                label="Document Type"
-                name="documentType"
-                value={form.documentType}
-                onChange={onTextChange}
-                required
-                placeholder="Repair Manual, Wiring Diagram..."
-                listId="upload-document-type-suggestions"
-              />
-              <TextField
-                label="Source"
-                name="source"
-                value={form.source}
-                onChange={onTextChange}
-                placeholder="Toyota manual, forum download..."
-              />
-            </div>
-
+          <div className="grid gap-4 md:grid-cols-2">
             <TextField
-              label="Tags"
-              name="tags"
-              value={form.tags}
+              label="Title"
+              name="title"
+              value={form.title}
               onChange={onTextChange}
-              placeholder="Comma separated, e.g. brakes, torque-specs, diy"
+              placeholder="Optional manual title"
             />
-
-            <TextAreaField
-              label="Notes"
-              name="notes"
-              value={form.notes}
+            <TextField
+              label="System"
+              name="system"
+              value={form.system}
               onChange={onTextChange}
-              placeholder="Any quick notes about this document"
+              required
+              placeholder="Engine, Brakes, Electrical..."
+              listId="upload-system-suggestions"
+            />
+            <TextField
+              label="Subsystem"
+              name="subsystem"
+              value={form.subsystem}
+              onChange={onTextChange}
+              placeholder="Ignition, Cooling..."
+            />
+            <TextField
+              label="Document Type"
+              name="documentType"
+              value={form.documentType}
+              onChange={onTextChange}
+              required
+              placeholder="Repair Manual, Wiring Diagram..."
+              listId="upload-document-type-suggestions"
+            />
+            <TextField
+              label="Source"
+              name="source"
+              value={form.source}
+              onChange={onTextChange}
+              placeholder="Toyota manual, forum download..."
             />
           </div>
-        </div>
 
-        {feedback ? (
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {feedback}
-          </p>
-        ) : null}
+          <TextField
+            label="Tags"
+            name="tags"
+            value={form.tags}
+            onChange={onTextChange}
+            placeholder="Comma separated, e.g. brakes, torque-specs, diy"
+          />
 
-        {error ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        ) : null}
+          <TextAreaField
+            label="Notes"
+            name="notes"
+            value={form.notes}
+            onChange={onTextChange}
+            placeholder="Any quick notes about this document"
+          />
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
-          <button
-            type="submit"
-            disabled={uploading}
-            className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {uploading ? "Uploading..." : "Upload PDF"}
-          </button>
-          <p className="text-xs text-slate-500">Suggestions appear from Settings while typing.</p>
-        </div>
+          {feedback ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              {feedback}
+            </p>
+          ) : null}
 
-        <SuggestionDatalist id="upload-system-suggestions" options={systemSuggestions} />
-        <SuggestionDatalist
-          id="upload-document-type-suggestions"
-          options={documentTypeSuggestions}
-        />
-      </form>
+          {error ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+            <button
+              type="submit"
+              disabled={uploading}
+              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {uploading ? "Uploading..." : "Upload PDF"}
+            </button>
+            <p className="text-xs text-slate-500">Suggestions appear from Settings while typing.</p>
+          </div>
+
+          <SuggestionDatalist id="upload-system-suggestions" options={systemSuggestions} />
+          <SuggestionDatalist
+            id="upload-document-type-suggestions"
+            options={documentTypeSuggestions}
+          />
+        </form>
+      ) : null}
     </section>
   );
 }
@@ -581,6 +623,12 @@ export function DocumentsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadFeedback, setUploadFeedback] = useState("");
   const [uploadError, setUploadError] = useState("");
+  // Import is collapsed by default so the library (the reason to visit this
+  // page) is visible immediately; open it when arriving via the dashboard's
+  // "#document-upload" quick action.
+  const [isUploadOpen, setIsUploadOpen] = useState(
+    () => typeof window !== "undefined" && window.location.hash === "#document-upload"
+  );
 
   const [sortBy, setSortBy] = useState("newest");
   const [systemFilter, setSystemFilter] = useState("all");
@@ -596,7 +644,6 @@ export function DocumentsPage() {
   const [bookmarkFilter, setBookmarkFilter] = useState(requestedBookmarkFilter);
   const requestedTagFilter = searchParams.get("tag") || "all";
   const [tagFilter, setTagFilter] = useState(requestedTagFilter);
-  const [extractionFilter, setExtractionFilter] = useState("all");
 
   const [page, setPage] = useState(1);
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
@@ -701,17 +748,6 @@ export function DocumentsPage() {
         return false;
       }
 
-      const normalizedExtractionStatus = normalizeExtractionStatus(
-        document.extractionStatus
-      );
-
-      if (
-        extractionFilter !== "all" &&
-        normalizedExtractionStatus.key !== extractionFilter
-      ) {
-        return false;
-      }
-
       return true;
     });
 
@@ -741,7 +777,6 @@ export function DocumentsPage() {
     favoriteFilter,
     bookmarkFilter,
     tagFilter,
-    extractionFilter,
   ]);
 
   // Show the documents in fixed-size pages so a large library stays scannable.
@@ -766,7 +801,6 @@ export function DocumentsPage() {
     favoriteFilter,
     bookmarkFilter,
     tagFilter,
-    extractionFilter,
   ]);
 
   async function loadDocuments() {
@@ -1260,6 +1294,8 @@ export function DocumentsPage() {
           uploading={uploading}
           feedback={uploadFeedback}
           error={uploadError}
+          isOpen={isUploadOpen}
+          onToggleOpen={() => setIsUploadOpen((open) => !open)}
           systemSuggestions={systemSuggestions}
           documentTypeSuggestions={documentTypeSuggestions}
           onFileChange={handleUploadFileChange}
@@ -1298,10 +1334,6 @@ export function DocumentsPage() {
                 onBookmarkFilterChange={(event) => setBookmarkFilter(event.target.value)}
                 tagFilter={tagFilter}
                 onTagFilterChange={(event) => setTagFilter(event.target.value)}
-                extractionFilter={extractionFilter}
-                onExtractionFilterChange={(event) =>
-                  setExtractionFilter(event.target.value)
-                }
                 systems={systems}
                 documentTypes={documentTypes}
                 tags={availableTags}

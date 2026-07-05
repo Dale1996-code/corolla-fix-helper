@@ -202,7 +202,7 @@ function SymptomCreateForm({
       id="create-symptom"
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
     >
-      <h3 className="text-lg font-semibold text-slate-900">Create symptom</h3>
+      <h3 className="text-lg font-semibold text-slate-900">new symptom</h3>
       <p className="mt-1 text-sm text-slate-600">
         Save what you observed and link it to useful documents.
       </p>
