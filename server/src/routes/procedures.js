@@ -7,7 +7,7 @@ import {
 } from "../services/symptomProcedureService.js";
 import { getVehicleId } from "../services/vehicleService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt } from "../utils/http.js";
+import { parsePositiveInt, parsePositiveIntArray } from "../utils/http.js";
 
 export const proceduresRouter = Router();
 
@@ -40,30 +40,6 @@ function normalizeDifficulty(value) {
   }
 
   return normalized;
-}
-
-function parseLinkedDocumentIds(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const uniqueIds = new Set();
-
-  for (const item of value) {
-    const id = Number(item);
-
-    if (Number.isInteger(id) && id > 0) {
-      uniqueIds.add(id);
-    }
-  }
-
-  return Array.from(uniqueIds);
-}
-
-// Symptom-link bodies use the same "array of positive integer ids" shape as the
-// document-link bodies above.
-function parseLinkedSymptomIds(value) {
-  return parseLinkedDocumentIds(value);
 }
 
 function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
@@ -252,7 +228,7 @@ proceduresRouter.post("/", (request, response) => {
   const safetyNotes = normalizeText(request.body.safetyNotes);
   const steps = normalizeText(request.body.steps);
   const notes = normalizeText(request.body.notes);
-  const linkedDocumentIds = parseLinkedDocumentIds(request.body.linkedDocumentIds);
+  const linkedDocumentIds = parsePositiveIntArray(request.body.linkedDocumentIds);
 
   if (!title) {
     response.status(400).json({
@@ -436,7 +412,7 @@ proceduresRouter.put("/:id", (request, response) => {
     );
 
     if (hasOwnField(request.body, "linkedDocumentIds")) {
-      const linkedDocumentIds = parseLinkedDocumentIds(request.body.linkedDocumentIds);
+      const linkedDocumentIds = parsePositiveIntArray(request.body.linkedDocumentIds);
       replaceProcedureDocumentLinks(procedureId, vehicleId, linkedDocumentIds);
     }
 
@@ -478,7 +454,7 @@ proceduresRouter.put("/:id/symptoms", (request, response) => {
       return;
     }
 
-    const symptomIds = parseLinkedSymptomIds(request.body.symptomIds);
+    const symptomIds = parsePositiveIntArray(request.body.symptomIds);
     setProcedureSymptoms(procedureId, symptomIds);
 
     const procedures = listProceduresForVehicle(vehicleId);

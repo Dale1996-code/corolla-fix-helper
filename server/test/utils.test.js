@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeText, hasOwnField } from "../src/utils/text.js";
-import { parsePositiveInt } from "../src/utils/http.js";
+import { parsePositiveInt, parsePositiveIntArray } from "../src/utils/http.js";
 
 test("normalizeText trims strings and returns empty string for non-strings", () => {
   assert.equal(normalizeText("  hello  "), "hello");
@@ -33,4 +33,26 @@ test("parsePositiveInt accepts positive integers and rejects everything else", (
   assert.equal(parsePositiveInt("abc"), null);
   assert.equal(parsePositiveInt(""), null);
   assert.equal(parsePositiveInt(undefined), null);
+});
+
+test("parsePositiveIntArray returns an empty list for non-array input", () => {
+  assert.deepEqual(parsePositiveIntArray(undefined), []);
+  assert.deepEqual(parsePositiveIntArray(null), []);
+  assert.deepEqual(parsePositiveIntArray("1,2,3"), []);
+  assert.deepEqual(parsePositiveIntArray(5), []);
+  assert.deepEqual(parsePositiveIntArray({ 0: 1 }), []);
+  assert.deepEqual(parsePositiveIntArray([]), []);
+});
+
+test("parsePositiveIntArray keeps positive integers and coerces numeric strings", () => {
+  assert.deepEqual(parsePositiveIntArray([1, 2, 3]), [1, 2, 3]);
+  assert.deepEqual(parsePositiveIntArray(["4", "5"]), [4, 5]);
+});
+
+test("parsePositiveIntArray drops zero, negative, fractional, and non-numeric items", () => {
+  assert.deepEqual(parsePositiveIntArray([0, -1, 2.5, "abc", null, undefined, "3"]), [3]);
+});
+
+test("parsePositiveIntArray removes duplicates while preserving first-seen order", () => {
+  assert.deepEqual(parsePositiveIntArray([3, 1, 3, 2, "1"]), [3, 1, 2]);
 });
