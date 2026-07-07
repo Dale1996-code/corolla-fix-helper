@@ -46,11 +46,13 @@ Both stay grounded in uploaded PDFs and degrade gracefully to an "AI not configu
 
 1. **Ask your documents** (`POST /api/ask`): RAG flow. PDF upload/extraction → `documentChunkService.js` writes page-aware chunks to `document_chunks` → `embed:backfill` stores Float32 embedding BLOBs (versioned as `model@dimensions`; mismatched versions are ignored at query time) → `chunkRetrievalService.js` embeds the question, cosine-scans an in-memory embedding cache, and fuses with keyword ranking → `aiAnswerService.js` builds citations and calls OpenAI.
 
-2. **Repair Planner** (`POST /api/repair-plan`, SSE streaming): a hand-rolled tool-calling agent loop in `server/src/services/agent/` (`repairPlannerAgent.js` loop, `repairTools.js` deterministic tools + JSON schemas, `openAiResponsesClient.js` streaming client). Events stream to `RepairPlannerPage.jsx` as `data: <json>` frames (`status`, `tool_call`, `text_delta`, `done`, etc.). `docs/repair-planner.md` documents the event protocol, readiness rubric, and how to add tools.
+2. **Repair Planner** (`POST /api/repair-plan`, SSE streaming): a hand-rolled tool-calling agent loop in `server/src/services/agent/` (`repairPlannerAgent.js` loop, `repairTools.js` deterministic tools + JSON schemas, `openAiResponsesClient.js` streaming client, `tracing.js`). Events stream to `RepairPlannerPage.jsx` as `data: <json>` frames (`status`, `tool_call`, `text_delta`, `done`, etc.). `docs/repair-planner.md` documents the event protocol, readiness rubric, and how to add tools.
+
+Ask can optionally attach **one already-saved image** by `attachmentId` (`OPENAI_VISION_MODEL`, falls back to `OPENAI_ANSWER_MODEL`). Retrieval still runs on the text question only, and repair facts must stay grounded in cited PDF chunks — the image is context, not a source.
 
 ### Storage
 
-Everything lives in one SQLite file (`server/data/` by default) plus `server/uploads/` for PDF files — both configurable via `DATABASE_FILE` / `UPLOADS_DIR`. Document deletes must clean up related rows (`symptom_documents`, `procedure_documents`, `document_chunks`, note links) and the stored file. Schema changes go in `src/initDatabase.js` as a new **numbered migration** (tracked in `schema_migrations`) — never edit an already-applied one. Backups snapshot the DB via `databaseSnapshot.js` (`VACUUM INTO`, not a raw file copy) so WAL-resident rows are captured.
+Everything lives in one SQLite file (`server/data/` by default) plus `server/uploads/` for uploaded files — both configurable via `DATABASE_FILE` / `UPLOADS_DIR`. Documents are PDF-only; symptoms, procedures, and notes can additionally carry JPEG/PNG/WebP **image attachments** (route `attachments.js`, `attachmentService.js`) stored under `UPLOADS_DIR/attachments/images/` with metadata in SQLite. Deletes cascade to both rows and files: deleting a document cleans up related rows (`symptom_documents`, `procedure_documents`, `document_chunks`, note links) and the stored PDF; deleting an owning symptom/procedure/note removes its attachment rows and image files. Schema changes go in `src/initDatabase.js` as a new **numbered migration** (tracked in `schema_migrations`) — never edit an already-applied one. Backups snapshot the DB via `databaseSnapshot.js` (`VACUUM INTO`, not a raw file copy) so WAL-resident rows are captured, and include the whole uploads tree so attachment images are backed up too.
 
 ### Conventions & gotchas
 
@@ -61,7 +63,10 @@ Everything lives in one SQLite file (`server/data/` by default) plus `server/upl
 
 ## Docs worth knowing
 
+- `AGENTS.md` — the most detailed running log of conventions, env vars, and recently-verified commands; check it first when this file is thin on a topic
+- `docs/architecture.md` — current app structure; `docs/api.md` — per-route `/api` endpoint reference; `docs/onboarding.md` — new-developer walkthrough
 - `QA_CHECKLIST.md` — manual verification steps after changes
 - `docs/repair-planner.md` — agent internals + validation checklist
+- `docs/backup-restore.md` — backup contents + safe restore; `docs/runbook.md` — start/stop, health checks, recovery
 - `docs/archive/` — superseded plans; don't treat as current
 - Cloud docs (`docs/gcp-deployment.md`) describe an *intended* GCE deployment, not a live one
