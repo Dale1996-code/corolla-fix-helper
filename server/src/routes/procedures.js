@@ -5,6 +5,7 @@ import {
   buildProcedureSymptomLinksMap,
   setProcedureSymptoms,
 } from "../services/symptomProcedureService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -63,18 +64,6 @@ function parseLinkedDocumentIds(value) {
 // document-link bodies above.
 function parseLinkedSymptomIds(value) {
   return parseLinkedDocumentIds(value);
-}
-
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
 }
 
 function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {

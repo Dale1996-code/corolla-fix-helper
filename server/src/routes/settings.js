@@ -12,32 +12,10 @@ import {
 } from "../services/appSettingsService.js";
 import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
+import { getVehicle } from "../services/vehicleService.js";
 import { normalizeText } from "../utils/text.js";
 
 export const settingsRouter = Router();
-
-function getVehicleRecord() {
-  const vehicle = db
-    .prepare(`
-      SELECT
-        id,
-        year,
-        make,
-        model,
-        trim,
-        engine
-      FROM vehicles
-      ORDER BY id ASC
-      LIMIT 1
-    `)
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle;
-}
 
 function mapVehicleRow(row) {
   return {
@@ -228,7 +206,7 @@ export function createBackupExportHandler({
 
 settingsRouter.get("/", (_request, response) => {
   try {
-    const vehicle = mapVehicleRow(getVehicleRecord());
+    const vehicle = mapVehicleRow(getVehicle());
 
     response.json({
       vehicle,
@@ -265,7 +243,7 @@ settingsRouter.put("/document-defaults", (request, response) => {
 
 settingsRouter.put("/vehicle", (request, response) => {
   try {
-    const existingVehicle = getVehicleRecord();
+    const existingVehicle = getVehicle();
     const year = normalizeYear(request.body.year);
     const make = normalizeText(request.body.make);
     const model = normalizeText(request.body.model);
@@ -297,7 +275,7 @@ settingsRouter.put("/vehicle", (request, response) => {
       WHERE id = ?
     `).run(year, make, model, trim, engine, existingVehicle.id);
 
-    const updatedVehicle = mapVehicleRow(getVehicleRecord());
+    const updatedVehicle = mapVehicleRow(getVehicle());
 
     response.json({
       message: "Vehicle settings updated.",

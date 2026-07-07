@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "../database.js";
 import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -49,18 +50,6 @@ function normalizeRelatedEntityId(value) {
   }
 
   return id;
-}
-
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
 }
 
 function getDocumentForVehicle(vehicleId, documentId) {

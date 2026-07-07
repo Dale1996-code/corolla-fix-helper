@@ -8,6 +8,7 @@ import {
   retrieveKeywordChunks,
   retrieveRelevantChunks,
 } from "../services/chunkRetrievalService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import { config } from "../config.js";
 
 const EVAL_SOURCE = "Hybrid Retrieval Eval";
@@ -160,7 +161,7 @@ export const HYBRID_RETRIEVAL_EVAL_CASES = [
 ];
 
 function insertEvalDocument({ title, originalFilename, pageCount }) {
-  const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
+  const vehicleId = getVehicleId();
 
   const result = db
     .prepare(`
@@ -181,7 +182,7 @@ function insertEvalDocument({ title, originalFilename, pageCount }) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
-      vehicle.id,
+      vehicleId,
       title,
       originalFilename,
       originalFilename,
