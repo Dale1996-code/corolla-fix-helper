@@ -37,8 +37,13 @@ function removeUnsafeCharacters(value) {
 }
 
 export function sanitizeFilename(filename) {
-  const extension = path.extname(filename || "").toLowerCase();
-  const baseName = path.basename(filename || "document", extension);
+  // Strip the extension using its ORIGINAL case so `path.basename` can actually
+  // match and remove it, but return it lower-cased. Passing an already
+  // lower-cased extension here would fail to strip an upper-case suffix (e.g.
+  // ".PDF"), leaving the original extension AND appending a lower-cased copy.
+  const rawExtension = path.extname(filename || "");
+  const extension = rawExtension.toLowerCase();
+  const baseName = path.basename(filename || "document", rawExtension);
   let safeBaseName = removeUnsafeCharacters(baseName);
 
   if (!safeBaseName) {
