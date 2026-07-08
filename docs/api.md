@@ -39,6 +39,8 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `GET/POST /api/procedures`, `GET/PUT/DELETE /api/procedures/:id` | Procedure CRUD |
 | `PUT /api/procedures/:id/symptoms` | Replace a procedure's linked symptoms |
 | `GET/POST /api/notes`, `PUT/DELETE /api/notes/:id` | Note CRUD |
+| `GET/POST /api/repair-checklists`, `GET/PUT/DELETE /api/repair-checklists/:id` | Repair checklist CRUD |
+| `POST /api/repair-checklists/:id/items`, `PUT/DELETE .../items/:itemId`, `POST .../items/:itemId/move` | Checklist item add / edit / delete / reorder |
 | `GET/POST /api/attachments`, `GET /api/attachments/all`, `GET /api/attachments/:id/file`, `DELETE /api/attachments/:id` | Image attachments |
 | `GET /api/settings`, `PUT /api/settings/vehicle`, `PUT /api/settings/document-defaults` | Settings |
 | `GET /api/settings/backup-export` | Download a `.tar.gz` backup |
@@ -287,6 +289,34 @@ A note links to **at most one** related record.
 
 ---
 
+## Repair Checklists
+
+Plan a repair as a list of steps you can check off. Each checklist belongs to the single vehicle and holds ordered items (the individual steps).
+
+Allowed values — `status`: `planned` (default) | `in_progress` | `blocked` | `done`. A move takes `direction`: `up` | `down`.
+
+Every write returns the **whole** checklist — its own fields plus `items`, `itemCount`, and `doneItemCount` — so the UI can re-render after any change without a second fetch. Editing, adding, deleting, or moving an item also bumps the parent checklist's `updatedAt`, which is why the list is ordered newest-activity-first.
+
+| Endpoint | Notes |
+| --- | --- |
+| `GET /api/repair-checklists` | `{ "checklists": [...], "total": n }`, most recently updated first |
+| `GET /api/repair-checklists/:id` | `{ "checklist": {...} }` |
+| `POST /api/repair-checklists` | body: `title` (required), `status`, `description`, `notes`. `201` → `{ "message", "checklist" }` |
+| `PUT /api/repair-checklists/:id` | same fields; partial update |
+| `DELETE /api/repair-checklists/:id` | deletes the checklist; its items cascade away |
+| `POST /api/repair-checklists/:id/items` | body: `text` (required). Appends an item to the end → `201 { "message", "checklist" }` |
+| `PUT /api/repair-checklists/:id/items/:itemId` | body: `text` and/or `isDone` (boolean); partial update |
+| `DELETE /api/repair-checklists/:id/items/:itemId` | removes one item |
+| `POST /api/repair-checklists/:id/items/:itemId/move` | body `{ "direction": "up" }` — swaps the item with its neighbor. At the top/bottom of the list it is a no-op, not an error. |
+
+```powershell
+$body = @{ title = "Front brake job"; status = "in_progress" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-checklists `
+  -ContentType "application/json" -Body $body
+```
+
+---
+
 ## Attachments (images on symptoms/procedures/notes)
 
 JPEG, PNG, or WebP only. Size capped by `MAX_UPLOAD_SIZE_MB`. Documents stay PDF-only — attachments are a separate image feature and never enter search chunks.
@@ -337,4 +367,4 @@ Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire upload
 
 ## Keeping This Document Honest
 
-This reference was written against the route files on 2026-07-02. When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
+This reference was written against the route files on 2026-07-02 and last updated 2026-07-07 (Repair Checklists). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
