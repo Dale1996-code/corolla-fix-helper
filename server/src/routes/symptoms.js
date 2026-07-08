@@ -6,8 +6,9 @@ import {
   setSymptomProcedures,
 } from "../services/symptomProcedureService.js";
 import { suggestProceduresForSymptom } from "../services/procedureSuggestionService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt } from "../utils/http.js";
+import { parsePositiveInt, parsePositiveIntArray } from "../utils/http.js";
 
 const allowedConfidenceValues = new Set(["low", "medium", "high"]);
 const allowedStatusValues = new Set(["open", "monitoring", "resolved"]);
@@ -38,42 +39,6 @@ function normalizeStatus(value) {
   }
 
   return normalized;
-}
-
-function parseLinkedDocumentIds(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const uniqueIds = new Set();
-
-  for (const item of value) {
-    const id = Number(item);
-
-    if (Number.isInteger(id) && id > 0) {
-      uniqueIds.add(id);
-    }
-  }
-
-  return Array.from(uniqueIds);
-}
-
-// Procedure-link bodies use the same "array of positive integer ids" shape as
-// the document-link bodies above.
-function parseLinkedProcedureIds(value) {
-  return parseLinkedDocumentIds(value);
-}
-
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
 }
 
 function mapSymptomRow(row, documentLinksMap, procedureLinksMap) {
@@ -294,7 +259,7 @@ export function createSymptomsRouter({
     const system = normalizeText(request.body.system);
     const suspectedCauses = normalizeText(request.body.suspectedCauses);
     const notes = normalizeText(request.body.notes);
-    const linkedDocumentIds = parseLinkedDocumentIds(request.body.linkedDocumentIds);
+    const linkedDocumentIds = parsePositiveIntArray(request.body.linkedDocumentIds);
 
     if (!title) {
       response.status(400).json({
@@ -462,7 +427,7 @@ export function createSymptomsRouter({
       );
 
       if (hasOwnField(request.body, "linkedDocumentIds")) {
-        const linkedDocumentIds = parseLinkedDocumentIds(request.body.linkedDocumentIds);
+        const linkedDocumentIds = parsePositiveIntArray(request.body.linkedDocumentIds);
         replaceSymptomDocumentLinks(symptomId, vehicleId, linkedDocumentIds);
       }
 
@@ -504,7 +469,7 @@ export function createSymptomsRouter({
         return;
       }
 
-      const procedureIds = parseLinkedProcedureIds(request.body.procedureIds);
+      const procedureIds = parsePositiveIntArray(request.body.procedureIds);
       setSymptomProcedures(symptomId, procedureIds);
 
       const symptoms = listSymptomsForVehicle(vehicleId);

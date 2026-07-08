@@ -13,6 +13,7 @@ import {
 import { setDocumentTags } from "../services/documentTagService.js";
 import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
 import { extractPdfData } from "../services/pdfService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import {
   createStoredFilename,
   deriveTitleFromFilename,
@@ -52,18 +53,6 @@ function runUploadMiddleware(request, response) {
       resolve();
     });
   });
-}
-
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
 }
 
 documentsRouter.get("/", (request, response) => {

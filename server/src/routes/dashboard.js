@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../database.js";
+import { getVehicle } from "../services/vehicleService.js";
 
 export const dashboardRouter = Router();
 
@@ -14,26 +15,7 @@ const DASHBOARD_LIMITS = {
 };
 
 function getVehicleProfile() {
-  const vehicle = db
-    .prepare(
-      `
-      SELECT
-        id,
-        year,
-        make,
-        model,
-        trim,
-        engine
-      FROM vehicles
-      ORDER BY id ASC
-      LIMIT 1
-    `
-    )
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
+  const vehicle = getVehicle();
 
   return {
     id: vehicle.id,

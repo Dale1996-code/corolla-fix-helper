@@ -7,6 +7,7 @@ import { db } from "../database.js";
 import { initializeDatabase } from "../initDatabase.js";
 import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
 import { extractPdfData } from "../services/pdfService.js";
+import { getVehicleId } from "../services/vehicleService.js";
 import {
   deriveTitleFromFilename,
   sanitizeFilename,
@@ -33,18 +34,6 @@ function isImageOnlyExtraction(extractionResult) {
 
 function md5Hex(buffer) {
   return crypto.createHash("md5").update(buffer).digest("hex");
-}
-
-function getVehicleId() {
-  const vehicle = db
-    .prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1")
-    .get();
-
-  if (!vehicle) {
-    throw new Error("No vehicle record exists yet.");
-  }
-
-  return vehicle.id;
 }
 
 async function findPdfFiles(directoryPath) {
