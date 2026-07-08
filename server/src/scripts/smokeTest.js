@@ -98,6 +98,39 @@ async function runChecks(baseUrl, { frontendBuilt }) {
     assert.ok(Array.isArray(body.results), "expected results array");
   });
 
+  await check(
+    "POST + GET /api/repair-checklists round-trips a checklist",
+    async () => {
+      const created = await requestJson(baseUrl, "/api/repair-checklists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Smoke test checklist" }),
+      });
+      assert.equal(created.status, 201);
+
+      const checklistId = created.body.checklist.id;
+      assert.ok(checklistId > 0, "expected a new checklist id");
+
+      const list = await requestJson(baseUrl, "/api/repair-checklists");
+      assert.equal(list.status, 200);
+      assert.ok(
+        Array.isArray(list.body.checklists),
+        "expected a checklists array"
+      );
+      assert.ok(
+        list.body.checklists.some((entry) => entry.id === checklistId),
+        "expected the new checklist to appear in the list"
+      );
+
+      const fetched = await requestJson(
+        baseUrl,
+        `/api/repair-checklists/${checklistId}`
+      );
+      assert.equal(fetched.status, 200);
+      assert.equal(fetched.body.checklist.title, "Smoke test checklist");
+    }
+  );
+
   await check("POST /api/ask degrades gracefully without a key", async () => {
     const { status, body } = await requestJson(baseUrl, "/api/ask", {
       method: "POST",
