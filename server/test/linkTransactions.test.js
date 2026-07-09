@@ -13,7 +13,7 @@ process.env.OPENAI_API_KEY = "";
 const { db } = await import("../src/database.js");
 const { initializeDatabase } = await import("../src/initDatabase.js");
 const { replaceSymptomDocumentLinks } = await import("../src/services/symptomService.js");
-const { replaceProcedureDocumentLinks } = await import("../src/routes/procedures.js");
+const { replaceProcedureDocumentLinks } = await import("../src/services/procedureService.js");
 
 initializeDatabase();
 

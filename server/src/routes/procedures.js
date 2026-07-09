@@ -1,182 +1,27 @@
 import { Router } from "express";
-import { db } from "../database.js";
 import { deleteAttachmentsForEntity } from "../services/attachmentService.js";
-import {
-  buildProcedureSymptomLinksMap,
-  setProcedureSymptoms,
-} from "../services/symptomProcedureService.js";
+import { setProcedureSymptoms } from "../services/symptomProcedureService.js";
 import { getVehicleId } from "../services/vehicleService.js";
+import {
+  createProcedure,
+  deleteProcedure,
+  getProcedure,
+  getProcedureRecord,
+  listProcedures,
+  normalizeConfidence,
+  normalizeDifficulty,
+  replaceProcedureDocumentLinks,
+  updateProcedureFields,
+} from "../services/procedureService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt, parsePositiveIntArray } from "../utils/http.js";
 
 export const proceduresRouter = Router();
 
-const allowedConfidenceValues = new Set(["low", "medium", "high"]);
-const allowedDifficultyValues = new Set(["beginner", "intermediate", "advanced"]);
-
-function normalizeConfidence(value) {
-  const normalized = normalizeText(value).toLowerCase();
-
-  if (!normalized) {
-    return "medium";
-  }
-
-  if (!allowedConfidenceValues.has(normalized)) {
-    throw new Error("Confidence must be low, medium, or high.");
-  }
-
-  return normalized;
-}
-
-function normalizeDifficulty(value) {
-  const normalized = normalizeText(value).toLowerCase();
-
-  if (!normalized) {
-    return "intermediate";
-  }
-
-  if (!allowedDifficultyValues.has(normalized)) {
-    throw new Error("Difficulty must be beginner, intermediate, or advanced.");
-  }
-
-  return normalized;
-}
-
-function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
-  const linkedDocuments = documentLinksMap.get(row.id) || [];
-  const linkedSymptoms = symptomLinksMap.get(row.id) || [];
-
-  return {
-    id: row.id,
-    title: row.title,
-    system: row.system || "",
-    difficulty: row.difficulty || "intermediate",
-    toolsNeeded: row.tools_needed || "",
-    partsNeeded: row.parts_needed || "",
-    safetyNotes: row.safety_notes || "",
-    steps: row.steps || "",
-    notes: row.notes || "",
-    confidence: row.confidence || "medium",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    linkedDocumentIds: linkedDocuments.map((document) => document.id),
-    linkedDocuments,
-    linkedSymptomIds: linkedSymptoms.map((symptom) => symptom.id),
-    linkedSymptoms,
-  };
-}
-
-function listProceduresForVehicle(vehicleId) {
-  const procedureRows = db
-    .prepare(`
-      SELECT
-        id,
-        title,
-        system,
-        difficulty,
-        tools_needed,
-        parts_needed,
-        safety_notes,
-        steps,
-        notes,
-        confidence,
-        created_at,
-        updated_at
-      FROM procedures
-      WHERE vehicle_id = ?
-      ORDER BY updated_at DESC, id DESC
-    `)
-    .all(vehicleId);
-
-  const linkRows = db
-    .prepare(`
-      SELECT
-        procedure_documents.procedure_id,
-        documents.id AS document_id,
-        documents.title AS document_title,
-        documents.system AS document_system,
-        documents.document_type AS document_type
-      FROM procedure_documents
-      JOIN procedures ON procedures.id = procedure_documents.procedure_id
-      JOIN documents ON documents.id = procedure_documents.document_id
-      WHERE procedures.vehicle_id = ?
-      ORDER BY documents.title COLLATE NOCASE ASC
-    `)
-    .all(vehicleId);
-
-  const documentLinksMap = new Map();
-
-  for (const linkRow of linkRows) {
-    if (!documentLinksMap.has(linkRow.procedure_id)) {
-      documentLinksMap.set(linkRow.procedure_id, []);
-    }
-
-    documentLinksMap.get(linkRow.procedure_id).push({
-      id: linkRow.document_id,
-      title: linkRow.document_title,
-      system: linkRow.document_system || "",
-      documentType: linkRow.document_type || "",
-    });
-  }
-
-  const symptomLinksMap = buildProcedureSymptomLinksMap(vehicleId);
-
-  return procedureRows.map((row) =>
-    mapProcedureRow(row, documentLinksMap, symptomLinksMap)
-  );
-}
-
-function getExistingDocumentIds(vehicleId, requestedDocumentIds) {
-  if (!requestedDocumentIds.length) {
-    return [];
-  }
-
-  const placeholders = requestedDocumentIds.map(() => "?").join(", ");
-
-  return db
-    .prepare(`
-      SELECT id
-      FROM documents
-      WHERE vehicle_id = ?
-      AND id IN (${placeholders})
-    `)
-    .all(vehicleId, ...requestedDocumentIds)
-    .map((row) => row.id);
-}
-
-// Replace a procedure's document links atomically: the DELETE and the
-// re-INSERTs run in one transaction so a mid-replacement failure rolls back and
-// leaves the original links intact (never a half-cleared set). Exported for testing.
-export function replaceProcedureDocumentLinks(procedureId, vehicleId, requestedDocumentIds) {
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-
-  try {
-    db.prepare("DELETE FROM procedure_documents WHERE procedure_id = ?").run(procedureId);
-
-    const validDocumentIds = getExistingDocumentIds(vehicleId, requestedDocumentIds);
-
-    if (validDocumentIds.length) {
-      const insertLink = db.prepare(`
-        INSERT INTO procedure_documents (procedure_id, document_id)
-        VALUES (?, ?)
-      `);
-
-      for (const documentId of validDocumentIds) {
-        insertLink.run(procedureId, documentId);
-      }
-    }
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
 proceduresRouter.get("/", (_request, response) => {
   try {
     const vehicleId = getVehicleId();
-    const procedures = listProceduresForVehicle(vehicleId);
+    const procedures = listProcedures(vehicleId);
 
     response.json({
       procedures,
@@ -201,9 +46,7 @@ proceduresRouter.get("/:id", (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
-    const procedure = listProceduresForVehicle(vehicleId).find(
-      (candidate) => candidate.id === procedureId
-    );
+    const procedure = getProcedure(vehicleId, procedureId);
 
     if (!procedure) {
       response.status(404).json({
@@ -252,39 +95,18 @@ proceduresRouter.post("/", (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
-    const insertResult = db
-      .prepare(`
-        INSERT INTO procedures (
-          vehicle_id,
-          title,
-          system,
-          difficulty,
-          tools_needed,
-          parts_needed,
-          safety_notes,
-          steps,
-          notes,
-          confidence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        vehicleId,
-        title,
-        system,
-        difficulty,
-        toolsNeeded,
-        partsNeeded,
-        safetyNotes,
-        steps,
-        notes,
-        confidence
-      );
-
-    const procedureId = Number(insertResult.lastInsertRowid);
-    replaceProcedureDocumentLinks(procedureId, vehicleId, linkedDocumentIds);
-
-    const procedures = listProceduresForVehicle(vehicleId);
-    const createdProcedure = procedures.find((procedure) => procedure.id === procedureId);
+    const createdProcedure = createProcedure(vehicleId, {
+      title,
+      system,
+      difficulty,
+      toolsNeeded,
+      partsNeeded,
+      safetyNotes,
+      steps,
+      notes,
+      confidence,
+      linkedDocumentIds,
+    });
 
     response.status(201).json({
       message: "Procedure created.",
@@ -309,24 +131,7 @@ proceduresRouter.put("/:id", (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
-    const existingProcedure = db
-      .prepare(`
-        SELECT
-          id,
-          title,
-          system,
-          difficulty,
-          tools_needed,
-          parts_needed,
-          safety_notes,
-          steps,
-          notes,
-          confidence
-        FROM procedures
-        WHERE id = ?
-        AND vehicle_id = ?
-      `)
-      .get(procedureId, vehicleId);
+    const existingProcedure = getProcedureRecord(vehicleId, procedureId);
 
     if (!existingProcedure) {
       response.status(404).json({
@@ -382,22 +187,7 @@ proceduresRouter.put("/:id", (request, response) => {
       return;
     }
 
-    db.prepare(`
-      UPDATE procedures
-      SET
-        title = ?,
-        system = ?,
-        difficulty = ?,
-        tools_needed = ?,
-        parts_needed = ?,
-        safety_notes = ?,
-        steps = ?,
-        notes = ?,
-        confidence = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-      AND vehicle_id = ?
-    `).run(
+    updateProcedureFields(vehicleId, procedureId, {
       title,
       system,
       difficulty,
@@ -407,17 +197,14 @@ proceduresRouter.put("/:id", (request, response) => {
       steps,
       notes,
       confidence,
-      procedureId,
-      vehicleId
-    );
+    });
 
     if (hasOwnField(request.body, "linkedDocumentIds")) {
       const linkedDocumentIds = parsePositiveIntArray(request.body.linkedDocumentIds);
       replaceProcedureDocumentLinks(procedureId, vehicleId, linkedDocumentIds);
     }
 
-    const procedures = listProceduresForVehicle(vehicleId);
-    const updatedProcedure = procedures.find((procedure) => procedure.id === procedureId);
+    const updatedProcedure = getProcedure(vehicleId, procedureId);
 
     response.json({
       message: "Procedure updated.",
@@ -443,9 +230,7 @@ proceduresRouter.put("/:id/symptoms", (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
-    const existingProcedure = db
-      .prepare("SELECT id FROM procedures WHERE id = ? AND vehicle_id = ?")
-      .get(procedureId, vehicleId);
+    const existingProcedure = getProcedureRecord(vehicleId, procedureId);
 
     if (!existingProcedure) {
       response.status(404).json({
@@ -457,10 +242,7 @@ proceduresRouter.put("/:id/symptoms", (request, response) => {
     const symptomIds = parsePositiveIntArray(request.body.symptomIds);
     setProcedureSymptoms(procedureId, symptomIds);
 
-    const procedures = listProceduresForVehicle(vehicleId);
-    const updatedProcedure = procedures.find(
-      (procedure) => procedure.id === procedureId
-    );
+    const updatedProcedure = getProcedure(vehicleId, procedureId);
 
     response.json({
       message: "Linked symptoms updated.",
@@ -485,15 +267,9 @@ proceduresRouter.delete("/:id", async (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
-    const deleteResult = db
-      .prepare(`
-        DELETE FROM procedures
-        WHERE id = ?
-        AND vehicle_id = ?
-      `)
-      .run(procedureId, vehicleId);
+    const removed = deleteProcedure(vehicleId, procedureId);
 
-    if (deleteResult.changes === 0) {
+    if (removed === 0) {
       response.status(404).json({
         error: "Procedure not found.",
       });

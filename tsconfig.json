@@ -32,6 +32,7 @@
     "server/test/config.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
+    "server/test/procedureService.test.js",
     "server/test/procedureSuggestionService.test.js",
     "server/test/sanitizeFilename.test.js",
     "server/test/searchService.test.js",
