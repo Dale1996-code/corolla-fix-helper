@@ -95,6 +95,25 @@ test("a vision case guards that an image cannot unlock an unsupported spec", () 
   );
 });
 
+test("golden repair topics are covered by eval cases", () => {
+  const hasQuestion = (pattern) =>
+    answerQualityCases.some((testCase) => pattern.test(testCase.question || ""));
+
+  assert.ok(hasQuestion(/P0301/i), "no P0301 cylinder-1 misfire case");
+  assert.ok(hasQuestion(/coolant|radiator/i), "no coolant/radiator case");
+  assert.ok(hasQuestion(/squeal/i), "no startup-squeal case");
+  assert.ok(hasQuestion(/\bbelt\b/i), "no drive/alternator belt case");
+  assert.ok(hasQuestion(/turbo/i), "no unsupported turbo refusal case");
+
+  // The citation-support golden case anchors to a source we already confirmed
+  // (the oil-drain-plug torque), so its expected snippet can be trusted.
+  const citationCase = answerQualityCases.find(
+    (testCase) =>
+      /citation/i.test(testCase.id) && Array.isArray(testCase.citationSupportsAny)
+  );
+  assert.ok(citationCase, "no citation-support golden case");
+});
+
 test("failing unverified template cases never gate the result", () => {
   // Simulate a CI run where every template case fails but the verified cases
   // pass: the gate (allVerifiedPass) must stay green.
