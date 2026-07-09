@@ -90,6 +90,29 @@ test("no-image answer sends plain-string Responses input and uses the answer mod
   assert.ok(calls[0].body.input.includes("Oil drain plug torque is 27 ft-lb."));
 });
 
+test("answer prompt asks for beginner-safe document-grounded structure", async () => {
+  const calls = stubFetch();
+
+  await generateAnswerTextFromOpenAi({
+    question: "What should I check for a P0301 cylinder 1 misfire?",
+    chunks: [sampleChunk],
+  });
+
+  const prompt = calls[0].body.input;
+
+  assert.ok(prompt.includes("Write for a beginner DIY mechanic"));
+  assert.ok(
+    prompt.includes(
+      "Clearly separate document-supported facts from general safety reminders"
+    )
+  );
+  assert.ok(
+    prompt.includes(
+      "If a safety reminder is not stated in the chunks, label it as general safety guidance"
+    )
+  );
+});
+
 test("image answer sends structured Responses input and uses the vision model", async () => {
   const calls = stubFetch();
 
