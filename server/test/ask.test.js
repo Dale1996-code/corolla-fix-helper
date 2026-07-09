@@ -97,6 +97,40 @@ test("POST /api/ask without attachmentId keeps old behavior and sends image=null
   assert.deepEqual(seen.history, []);
 });
 
+test("POST /api/ask includes metrics when the router has includeMetrics on", async () => {
+  const app = makeApp({
+    includeMetrics: true,
+    askQuestion: async (question) => ({
+      ...answeredResult(question),
+      metrics: { retrievalMs: 5, answerMs: 10, totalMs: 20, chunkCount: 2 },
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.ok(response.body.metrics, "expected metrics in the response");
+  assert.equal(response.body.metrics.chunkCount, 2);
+});
+
+test("POST /api/ask omits metrics by default even if the service returns them", async () => {
+  const app = makeApp({
+    askQuestion: async (question) => ({
+      ...answeredResult(question),
+      metrics: { retrievalMs: 5, answerMs: 10, totalMs: 20, chunkCount: 2 },
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.ok(!("metrics" in response.body), "metrics must be absent unless the dev flag is on");
+});
+
 test("POST /api/ask with an invalid attachmentId returns 400 and never calls the answerer", async () => {
   let askCalls = 0;
   const app = makeApp({
