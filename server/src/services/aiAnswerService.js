@@ -133,6 +133,61 @@ function buildModelContext(chunks) {
     .join("\n\n");
 }
 
+/**
+ * Build a log-safe metrics summary for one Ask request.
+ *
+ * Only counts, durations, sizes, and numeric IDs are included — never chunk
+ * text, document titles, filenames, or citation snippets — so the result is
+ * safe to log or return behind a dev flag without exposing private document
+ * content. `contextChars` approximates the model context size from chunk text
+ * lengths (never the text itself); `approxContextTokens` is a rough chars/4
+ * estimate.
+ *
+ * @param {{
+ *   chunks?: any[],
+ *   citations?: any[],
+ *   retrievalMs?: number,
+ *   rewriteMs?: number,
+ *   answerMs?: number,
+ *   totalMs?: number,
+ * }} [params]
+ */
+export function buildAskMetrics({
+  chunks = [],
+  citations = [],
+  retrievalMs = 0,
+  rewriteMs = 0,
+  answerMs = 0,
+  totalMs = 0,
+} = {}) {
+  const roundMs = (value) => Math.round(Number(value) || 0);
+  const contextChars = chunks.reduce(
+    (sum, chunk) => sum + (typeof chunk?.chunkText === "string" ? chunk.chunkText.length : 0),
+    0
+  );
+  const bestChunk = chunks[0] || null;
+
+  return {
+    retrievalMs: roundMs(retrievalMs),
+    rewriteMs: roundMs(rewriteMs),
+    answerMs: roundMs(answerMs),
+    totalMs: roundMs(totalMs),
+    chunkCount: chunks.length,
+    citationCount: citations.length,
+    contextChars,
+    approxContextTokens: Math.ceil(contextChars / 4),
+    topSemanticScore:
+      bestChunk && typeof bestChunk.semanticScore === "number" ? bestChunk.semanticScore : null,
+    retrievalMode:
+      bestChunk && typeof bestChunk.retrievalMode === "string" ? bestChunk.retrievalMode : null,
+    chunkRefs: chunks.map((chunk) => ({
+      documentId: chunk?.documentId ?? null,
+      pageNumber: chunk?.pageNumber ?? null,
+      chunkIndex: chunk?.chunkIndex ?? null,
+    })),
+  };
+}
+
 export async function rewriteQuestionFromOpenAi({ question, history }) {
   const normalizedQuestion = typeof question === "string" ? question.trim() : "";
   const normalizedHistory = normalizeConversationHistory(history);
@@ -190,7 +245,10 @@ export async function generateAnswerTextFromOpenAi({
   const contextText = buildModelContext(chunks);
   const promptLines = [
     "Answer ONLY using the provided Toyota Corolla repair-manual chunks.",
+    "Write for a beginner DIY mechanic: use plain English, short steps, and cautious wording.",
     "Write a thorough, step-by-step repair answer when the chunks support it.",
+    "Clearly separate document-supported facts from general safety reminders.",
+    "If a safety reminder is not stated in the chunks, label it as general safety guidance.",
     "For torque specs, capacities, dimensions, counts, fluid quantities, and other exact numbers, copy the exact number and unit verbatim from the chunks.",
     "Put a citation beside each quoted spec or procedure detail in this format: [Document title, page N].",
     "Never invent a spec, step, tool, warning, or quantity.",
@@ -248,11 +306,37 @@ export async function askQuestionUsingDocuments(
     generateAnswerText = generateAnswerTextFromOpenAi,
     history = [],
     image = null,
+    includeMetrics = config.askDebugMetrics,
     isAiConfigured = Boolean(config.openAiApiKey),
     retrieveChunks = retrieveRelevantChunks,
     rewriteQuestion = rewriteQuestionFromOpenAi,
   } = {}
 ) {
+  // Stage timings and the collected chunks/citations feed the optional metrics
+  // summary. finalize() attaches metrics only when includeMetrics is on, so the
+  // default return shape (and logs) stay exactly as before.
+  const startedAt = performance.now();
+  let retrievalMs = 0;
+  let rewriteMs = 0;
+  let answerMs = 0;
+  let retrievedChunks = [];
+  let builtCitations = [];
+
+  const finalize = (result) =>
+    includeMetrics
+      ? {
+          ...result,
+          metrics: buildAskMetrics({
+            chunks: retrievedChunks,
+            citations: builtCitations,
+            retrievalMs,
+            rewriteMs,
+            answerMs,
+            totalMs: performance.now() - startedAt,
+          }),
+        }
+      : result;
+
   const normalizedQuestion = typeof question === "string" ? question.trim() : "";
   const normalizedHistory = normalizeConversationHistory(history);
 
@@ -261,34 +345,40 @@ export async function askQuestionUsingDocuments(
   }
 
   if (!isAiConfigured) {
-    return {
+    return finalize({
       status: "ai_not_configured",
       answer: AI_NOT_CONFIGURED_MESSAGE,
       citations: [],
       standaloneQuestion: normalizedQuestion,
-    };
+    });
   }
 
-  const standaloneQuestion = normalizedHistory.length
-    ? await rewriteQuestion({
-        question: normalizedQuestion,
-        history: normalizedHistory,
-      })
-    : normalizedQuestion;
+  let standaloneQuestion = normalizedQuestion;
+  if (normalizedHistory.length) {
+    const rewriteStart = performance.now();
+    standaloneQuestion = await rewriteQuestion({
+      question: normalizedQuestion,
+      history: normalizedHistory,
+    });
+    rewriteMs = performance.now() - rewriteStart;
+  }
   const retrievalQuestion = standaloneQuestion.trim() || normalizedQuestion;
 
-  const chunks = await retrieveChunks(retrievalQuestion, {
+  const retrievalStart = performance.now();
+  retrievedChunks = await retrieveChunks(retrievalQuestion, {
     limit: chunkLimit,
     mode: "hybrid",
   });
+  retrievalMs = performance.now() - retrievalStart;
+  const chunks = retrievedChunks;
 
   if (!chunks.length) {
-    return {
+    return finalize({
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
-    };
+    });
   }
 
   const bestChunk = chunks[0];
@@ -298,25 +388,27 @@ export async function askQuestionUsingDocuments(
     bestChunk.retrievalMode === "hybrid" && Number(bestChunk.semanticScore || 0) >= 0.2;
 
   if (!hasSemanticEvidence && (bestChunk.chunkMatchedTerms || 0) < minimumChunkTermMatches) {
-    return {
+    return finalize({
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
-    };
+    });
   }
 
   const citations = buildCitationsFromChunks(chunks);
+  builtCitations = citations;
 
   if (!citations.length) {
-    return {
+    return finalize({
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
-    };
+    });
   }
 
+  const answerStart = performance.now();
   const answerText = await generateAnswerText({
     question: retrievalQuestion,
     originalQuestion: normalizedQuestion,
@@ -325,20 +417,21 @@ export async function askQuestionUsingDocuments(
     citations,
     image,
   });
+  answerMs = performance.now() - answerStart;
 
   if (!answerText || isNotFoundAnswer(answerText)) {
-    return {
+    return finalize({
       status: "not_found",
       answer: NOT_FOUND_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
-    };
+    });
   }
 
-  return {
+  return finalize({
     status: "answered",
     answer: answerText,
     citations,
     standaloneQuestion: retrievalQuestion,
-  };
+  });
 }

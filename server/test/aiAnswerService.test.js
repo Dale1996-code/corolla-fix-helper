@@ -22,8 +22,12 @@ process.env.OPENAI_ANSWER_MODEL = "answer-model-test";
 process.env.OPENAI_VISION_MODEL = "vision-model-test";
 
 const { db } = await import("../src/database.js");
-const { askQuestionUsingDocuments, generateAnswerTextFromOpenAi, NOT_FOUND_MESSAGE } =
-  await import("../src/services/aiAnswerService.js");
+const {
+  askQuestionUsingDocuments,
+  buildAskMetrics,
+  generateAnswerTextFromOpenAi,
+  NOT_FOUND_MESSAGE,
+} = await import("../src/services/aiAnswerService.js");
 
 const realFetch = globalThis.fetch;
 
@@ -88,6 +92,29 @@ test("no-image answer sends plain-string Responses input and uses the answer mod
   assert.equal(calls[0].body.model, "answer-model-test");
   assert.equal(typeof calls[0].body.input, "string");
   assert.ok(calls[0].body.input.includes("Oil drain plug torque is 27 ft-lb."));
+});
+
+test("answer prompt asks for beginner-safe document-grounded structure", async () => {
+  const calls = stubFetch();
+
+  await generateAnswerTextFromOpenAi({
+    question: "What should I check for a P0301 cylinder 1 misfire?",
+    chunks: [sampleChunk],
+  });
+
+  const prompt = calls[0].body.input;
+
+  assert.ok(prompt.includes("Write for a beginner DIY mechanic"));
+  assert.ok(
+    prompt.includes(
+      "Clearly separate document-supported facts from general safety reminders"
+    )
+  );
+  assert.ok(
+    prompt.includes(
+      "If a safety reminder is not stated in the chunks, label it as general safety guidance"
+    )
+  );
 });
 
 test("image answer sends structured Responses input and uses the vision model", async () => {
@@ -162,6 +189,76 @@ test("an attached image does not bypass the not-found gate when no chunks match"
   assert.equal(modelCalls, 0);
   assert.equal(result.status, "not_found");
   assert.equal(result.answer, NOT_FOUND_MESSAGE);
+});
+
+test("buildAskMetrics reports sizes and timings without leaking document text", () => {
+  const chunks = [
+    {
+      documentId: 7,
+      documentTitle: "Secret Engine Manual Title",
+      originalFilename: "confidential-engine-manual.pdf",
+      pageNumber: 3,
+      chunkIndex: 0,
+      chunkText: "Oil drain plug torque is 27 ft-lb per the shop manual.",
+      semanticScore: 0.83,
+      retrievalMode: "hybrid",
+    },
+  ];
+
+  const metrics = buildAskMetrics({
+    chunks,
+    citations: [{ snippet: "Oil drain plug torque is 27 ft-lb per the shop manual." }],
+    retrievalMs: 12.6,
+    rewriteMs: 0,
+    answerMs: 40.2,
+    totalMs: 55.9,
+  });
+
+  assert.equal(metrics.chunkCount, 1);
+  assert.equal(metrics.citationCount, 1);
+  assert.equal(metrics.contextChars, chunks[0].chunkText.length);
+  assert.equal(metrics.approxContextTokens, Math.ceil(chunks[0].chunkText.length / 4));
+  assert.equal(typeof metrics.retrievalMs, "number");
+  assert.equal(typeof metrics.answerMs, "number");
+  assert.equal(typeof metrics.totalMs, "number");
+  assert.equal(metrics.retrievalMode, "hybrid");
+  assert.equal(metrics.topSemanticScore, 0.83);
+  assert.deepEqual(metrics.chunkRefs, [{ documentId: 7, pageNumber: 3, chunkIndex: 0 }]);
+
+  // The whole point: metrics must be safe to log. No chunk text, document title,
+  // filename, or citation snippet may appear anywhere in the serialized object.
+  const serialized = JSON.stringify(metrics);
+  assert.ok(!serialized.includes("Oil drain plug torque"), "leaked chunk text");
+  assert.ok(!serialized.includes("Secret Engine Manual Title"), "leaked document title");
+  assert.ok(!serialized.includes("confidential-engine-manual.pdf"), "leaked filename");
+});
+
+test("askQuestionUsingDocuments attaches metrics when includeMetrics is on", async () => {
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    includeMetrics: true,
+    retrieveChunks: async () => [strongChunk(), strongChunk({ chunkIndex: 1 })],
+    generateAnswerText: async () => "The oil drain plug torque is 27 ft-lb.",
+  });
+
+  assert.equal(result.status, "answered");
+  assert.ok(result.metrics, "expected metrics on the result");
+  assert.equal(result.metrics.chunkCount, 2);
+  assert.equal(result.metrics.citationCount, 2);
+  assert.equal(typeof result.metrics.retrievalMs, "number");
+  assert.equal(typeof result.metrics.answerMs, "number");
+  assert.equal(typeof result.metrics.totalMs, "number");
+});
+
+test("askQuestionUsingDocuments omits metrics by default (response shape unchanged)", async () => {
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    retrieveChunks: async () => [strongChunk()],
+    generateAnswerText: async () => "The oil drain plug torque is 27 ft-lb.",
+  });
+
+  assert.equal(result.status, "answered");
+  assert.ok(!("metrics" in result), "metrics must be absent unless the dev flag is on");
 });
 
 test("an attached image cannot turn an unsupported answer into a claim", async () => {

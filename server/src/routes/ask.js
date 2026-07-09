@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Router } from "express";
+import { config } from "../config.js";
 import { askQuestionUsingDocuments } from "../services/aiAnswerService.js";
 import {
   getAttachmentById,
@@ -77,6 +78,7 @@ export async function loadAttachmentImageFromStorage(
 export function createAskRouter({
   askQuestion = askQuestionUsingDocuments,
   loadAttachmentImage = loadAttachmentImageFromStorage,
+  includeMetrics = config.askDebugMetrics,
 } = {}) {
   const router = Router();
 
@@ -115,15 +117,23 @@ export function createAskRouter({
     }
 
     try {
-      const result = await askQuestion(question, { history, image });
+      const result = await askQuestion(question, { history, image, includeMetrics });
 
-      response.json({
+      const payload = {
         question,
         standaloneQuestion: result.standaloneQuestion || question,
         status: result.status,
         answer: result.answer,
         citations: result.citations,
-      });
+      };
+
+      // Dev-only: surface the log-safe timing/size metrics over HTTP when the
+      // flag is on. Off by default, so the response shape is unchanged.
+      if (includeMetrics && result.metrics) {
+        payload.metrics = result.metrics;
+      }
+
+      response.json(payload);
     } catch (error) {
       response.status(500).json({
         error: error.message || "Could not answer this question.",

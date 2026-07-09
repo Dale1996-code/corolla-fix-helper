@@ -28,8 +28,11 @@ for (const testCase of answerQualityCases) {
   try {
     // Vision cases attach an image so the run exercises the same not-found gate
     // with a photo present; text cases pass image: null and are unchanged.
+    // includeMetrics surfaces log-safe timing/size numbers (no document text)
+    // so a run doubles as a retrieval/answer performance check.
     const primary = await askQuestionUsingDocuments(testCase.question, {
       image: testCase.image || null,
+      includeMetrics: true,
     });
 
     let followUp = null;
@@ -41,7 +44,7 @@ for (const testCase of answerQualityCases) {
       followUp = await askQuestionUsingDocuments(testCase.followUp.question, { history });
     }
 
-    results.push(evaluateAnswerCase(testCase, primary, followUp));
+    results.push({ ...evaluateAnswerCase(testCase, primary, followUp), metrics: primary.metrics });
   } catch (error) {
     results.push({
       id: testCase.id,
@@ -49,6 +52,7 @@ for (const testCase of answerQualityCases) {
       verified: Boolean(testCase.verified),
       pass: false,
       checks: [{ name: "ran without error", pass: false, detail: error.message }],
+      metrics: null,
     });
   }
 }
@@ -66,6 +70,14 @@ for (const result of results) {
       result.pass ? "PASS" : "FAIL",
     ].join(" | ")
   );
+
+  if (result.metrics) {
+    const m = result.metrics;
+    console.log(
+      `    · ${m.totalMs}ms total (retrieval ${m.retrievalMs}ms, answer ${m.answerMs}ms), ` +
+        `${m.chunkCount} chunks, ~${m.approxContextTokens} context tokens`
+    );
+  }
 
   if (!result.pass) {
     for (const check of result.checks.filter((check) => !check.pass)) {

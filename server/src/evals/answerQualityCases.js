@@ -232,6 +232,83 @@ export const answerQualityCases = [
     verified: false,
   },
 
+  // ---- GOLDEN TOPICS: beginner repair questions we want the chatbot to handle ----
+  // These pin the behavior the RAG-improvement plan cares about (trouble codes,
+  // cooling, symptom triage, belts) so a retrieval/prompt change that helps one
+  // and hurts another is visible. They stay verified:false until you run
+  // `npm run eval:answers` on the machine with your real documents + API key,
+  // confirm each expectation against the cited PDF page, then flip verified:true
+  // (and add the id to VERIFIED_IDS in answerQualityCases.test.js).
+  {
+    id: "p0301-cylinder-1-misfire",
+    question:
+      "I have a P0301 code for a cylinder 1 misfire. What should I check first according to the manual?",
+    category: "procedure",
+    system: "Engine",
+    expect: "answered",
+    // A useful answer should point at the ignition/fuel items behind a misfire,
+    // grounded in the manual — not invent a diagnosis.
+    mustIncludeAny: [/misfire/i, /cylinder/i, /(ignition )?coil/i, /spark plug/i],
+    verified: false,
+  },
+  {
+    id: "coolant-drain-and-refill",
+    question: "How do I drain and refill the engine coolant?",
+    category: "procedure",
+    system: "Cooling",
+    expect: "answered",
+    mustIncludeAny: [/coolant/i, /radiator/i, /drain/i],
+    verified: false,
+  },
+  {
+    id: "startup-squeal-belt-triage",
+    question:
+      "My Corolla squeals for a few seconds right after I start it. What should I check?",
+    category: "behavior",
+    system: "Engine",
+    expect: "answered",
+    // Should surface belt / accessory-drive evidence from the documents rather
+    // than guessing at a cause.
+    mustIncludeAny: [/belt/i, /tensioner/i, /pulley/i],
+    verified: false,
+  },
+  {
+    id: "drive-belt-replacement",
+    question: "How do I replace the alternator drive belt?",
+    category: "procedure",
+    system: "Electrical",
+    expect: "answered",
+    mustIncludeAny: [/belt/i],
+    mustIncludeAll: [/tensioner|routing|deflection|idler/i],
+    verified: false,
+  },
+  {
+    id: "refuse-turbo-boost-pressure",
+    question: "What is the turbocharger boost pressure specification?",
+    category: "refusal",
+    system: "Engine",
+    // The 2009 Corolla LE 1.8L (2ZR-FE) is naturally aspirated, so the manual
+    // has no turbo boost spec: the chatbot must refuse instead of inventing one.
+    expect: "refused",
+    verified: false,
+  },
+  {
+    id: "oil-drain-plug-torque-citation-support",
+    question: "What is the oil drain plug torque, and which document states it?",
+    category: "torque",
+    system: "Engine",
+    expect: "answered",
+    // Same confirmed fact as oil-drain-plug-torque (37 N·m / 27 ft-lbf, cited
+    // "Oil and Oil Filter Replacement", page 1), but this case additionally
+    // requires the CITED SNIPPET to contain the value — proving the citation
+    // actually backs the number, not just that the prose mentioned it. Flip to
+    // verified:true once you confirm the cited snippet includes the figure.
+    mustIncludeAny: [/\b37\s*N/i, /\b27\s*ft/i],
+    citationDocLike: /oil/i,
+    citationSupportsAny: [/\b37\s*N/i, /\b27\s*ft/i, /\b377\s*kgf/i],
+    verified: false,
+  },
+
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
   // The model may describe the attached photo, but it must STILL refuse a spec
   // the uploaded PDF chunks do not support — an image is never a source for a

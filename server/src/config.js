@@ -46,6 +46,11 @@ export const config = {
   // Vision Ask reuses the answer model unless OPENAI_VISION_MODEL is set, so a
   // text-only deployment needs no extra configuration.
   openAiVisionModel: process.env.OPENAI_VISION_MODEL || openAiAnswerModel,
+  // Dev-only Ask visibility. When on, Ask attaches a log-safe `metrics` object
+  // (durations, counts, sizes, numeric IDs — never document text) to the service
+  // result and the /api/ask response. Off by default so the response shape and
+  // logs are unchanged in normal use.
+  askDebugMetrics: readBoolean(process.env.ASK_DEBUG_METRICS, false),
   // Optional LLM reranker over hybrid retrieval results. Off by default; when on
   // it reorders a bounded candidate pool before the final limit slice.
   rerankEnabled: readBoolean(process.env.RERANK_ENABLED, false),
