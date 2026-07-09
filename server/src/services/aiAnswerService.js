@@ -190,7 +190,10 @@ export async function generateAnswerTextFromOpenAi({
   const contextText = buildModelContext(chunks);
   const promptLines = [
     "Answer ONLY using the provided Toyota Corolla repair-manual chunks.",
+    "Write for a beginner DIY mechanic: use plain English, short steps, and cautious wording.",
     "Write a thorough, step-by-step repair answer when the chunks support it.",
+    "Clearly separate document-supported facts from general safety reminders.",
+    "If a safety reminder is not stated in the chunks, label it as general safety guidance.",
     "For torque specs, capacities, dimensions, counts, fluid quantities, and other exact numbers, copy the exact number and unit verbatim from the chunks.",
     "Put a citation beside each quoted spec or procedure detail in this format: [Document title, page N].",
     "Never invent a spec, step, tool, warning, or quantity.",
