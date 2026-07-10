@@ -3,21 +3,20 @@ import path from "node:path";
 import multer from "multer";
 import { Router } from "express";
 import { config } from "../config.js";
-import { db } from "../database.js";
 import {
   countDocuments,
+  createDocument,
   deleteDocument,
+  getDocument,
+  getDocumentFileLocation,
+  getDocumentFileRecord,
+  getDocumentMetadataRecord,
   listDocuments,
+  reextractDocument,
   resolveStoredFilePath,
+  updateDocumentMetadata,
 } from "../services/documentService.js";
 import { setDocumentTags } from "../services/documentTagService.js";
-import { rebuildDocumentChunksFromPages } from "../services/documentChunkService.js";
-import { extractPdfData } from "../services/pdfService.js";
-import { getVehicleId } from "../services/vehicleService.js";
-import {
-  createStoredFilename,
-  deriveTitleFromFilename,
-} from "../utils/sanitizeFilename.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -84,18 +83,7 @@ documentsRouter.get("/:id/file", async (request, response) => {
     return;
   }
 
-  const document = db
-    .prepare(`
-      SELECT
-        id,
-        original_filename,
-        stored_filename,
-        file_path,
-        file_type
-      FROM documents
-      WHERE id = ?
-    `)
-    .get(documentId);
+  const document = getDocumentFileRecord(documentId);
 
   if (!document) {
     response.status(404).json({
@@ -137,9 +125,7 @@ documentsRouter.get("/:id/file", async (request, response) => {
 });
 
 documentsRouter.post("/upload", async (request, response) => {
-  const rows = db
-    .prepare("SELECT COUNT(*) AS total FROM documents")
-    .get();
+  const totalBeforeUpload = countDocuments();
 
   try {
     await runUploadMiddleware(request, response);
@@ -175,16 +161,7 @@ documentsRouter.post("/upload", async (request, response) => {
   }
 
   const originalFilename = request.file.originalname;
-  const storedFilename = createStoredFilename(originalFilename);
-  const absoluteFilePath = path.join(config.uploadsDir, storedFilename);
-  const relativeFilePath = `server/uploads/${storedFilename}`.replace(/\\/g, "/");
-  const fileType =
-    path.extname(originalFilename).toLowerCase() === ".pdf"
-      ? "application/pdf"
-      : request.file.mimetype || "application/octet-stream";
-
   const titleInput = normalizeText(request.body.title);
-  const title = titleInput || deriveTitleFromFilename(originalFilename);
   const subsystem = normalizeText(request.body.subsystem);
   const source = normalizeText(request.body.source);
   const notes = normalizeText(request.body.notes);
@@ -192,84 +169,28 @@ documentsRouter.post("/upload", async (request, response) => {
   const isBookmarked =
     request.body.isBookmarked === "true" || request.body.isBookmarked === true;
 
-  let createdDocumentId = null;
-
   try {
-    await fs.writeFile(absoluteFilePath, request.file.buffer);
-
-    const extractionResult = await extractPdfData(request.file.buffer);
-    const vehicleId = getVehicleId();
-
-    const result = db
-      .prepare(`
-        INSERT INTO documents (
-          vehicle_id,
-          title,
-          original_filename,
-          stored_filename,
-          file_path,
-          file_type,
-          system,
-          subsystem,
-          document_type,
-          source,
-          extracted_text,
-          extraction_status,
-          page_count,
-          notes,
-          is_favorite,
-          is_bookmarked
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        vehicleId,
-        title,
-        originalFilename,
-        storedFilename,
-        relativeFilePath,
-        fileType,
-        system,
-        subsystem,
-        documentType,
-        source,
-        extractionResult.extractedText,
-        extractionResult.extractionStatus,
-        extractionResult.pageCount,
-        notes,
-        0,
-        isBookmarked ? 1 : 0
-      );
-
-    const newDocumentId = Number(result.lastInsertRowid);
-    createdDocumentId = newDocumentId;
-    rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
-
-    if (hasOwnField(request.body, "tags")) {
-      setDocumentTags(newDocumentId, request.body.tags);
-    }
-
-    const documents = listDocuments();
-    const newDocument = documents.find(
-      (document) => document.id === newDocumentId
-    );
+    const newDocument = await createDocument({
+      fileBuffer: request.file.buffer,
+      originalFilename,
+      mimetype: request.file.mimetype,
+      titleInput,
+      system,
+      subsystem,
+      documentType,
+      source,
+      notes,
+      isBookmarked,
+      tags: request.body.tags,
+      hasTags: hasOwnField(request.body, "tags"),
+    });
 
     response.status(201).json({
       message: `Uploaded ${originalFilename} successfully.`,
       document: newDocument,
-      totalDocuments: Number(rows.total) + 1,
+      totalDocuments: totalBeforeUpload + 1,
     });
   } catch (error) {
-    await fs.rm(absoluteFilePath, { force: true });
-
-    if (createdDocumentId) {
-      try {
-        db.prepare("DELETE FROM document_chunks WHERE document_id = ?").run(createdDocumentId);
-        db.prepare("DELETE FROM documents WHERE id = ?").run(createdDocumentId);
-      } catch {
-        // Best-effort cleanup; surface the original upload error below.
-      }
-    }
-
     response.status(500).json({
       error: error.message || "Could not save the uploaded document.",
     });
@@ -286,13 +207,7 @@ documentsRouter.post("/:id/extract", async (request, response) => {
     return;
   }
 
-  const existingDocument = db
-    .prepare(`
-      SELECT id, stored_filename, file_path
-      FROM documents
-      WHERE id = ?
-    `)
-    .get(documentId);
+  const existingDocument = getDocumentFileLocation(documentId);
 
   if (!existingDocument) {
     response.status(404).json({
@@ -323,27 +238,7 @@ documentsRouter.post("/:id/extract", async (request, response) => {
     return;
   }
 
-  const extractionResult = await extractPdfData(fileBuffer);
-
-  db.prepare(`
-    UPDATE documents
-    SET
-      extracted_text = ?,
-      extraction_status = ?,
-      page_count = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    extractionResult.extractedText,
-    extractionResult.extractionStatus,
-    extractionResult.pageCount,
-    documentId
-  );
-
-  rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
-
-  const documents = listDocuments();
-  const updatedDocument = documents.find((entry) => entry.id === documentId);
+  const updatedDocument = await reextractDocument(documentId, fileBuffer);
 
   response.json({
     message: "Extraction re-run complete.",
@@ -361,13 +256,7 @@ documentsRouter.delete("/:id", async (request, response) => {
     return;
   }
 
-  const existingDocument = db
-    .prepare(`
-      SELECT id, stored_filename, file_path
-      FROM documents
-      WHERE id = ?
-    `)
-    .get(documentId);
+  const existingDocument = getDocumentFileLocation(documentId);
 
   if (!existingDocument) {
     response.status(404).json({
@@ -400,22 +289,7 @@ documentsRouter.put("/:id", (request, response) => {
     return;
   }
 
-  const existingDocument = db
-    .prepare(`
-      SELECT
-        id,
-        title,
-        system,
-        subsystem,
-        document_type,
-        source,
-        notes,
-        is_favorite,
-        is_bookmarked
-      FROM documents
-      WHERE id = ?
-    `)
-    .get(documentId);
+  const existingDocument = getDocumentMetadataRecord(documentId);
 
   if (!existingDocument) {
     response.status(404).json({
@@ -458,37 +332,22 @@ documentsRouter.put("/:id", (request, response) => {
     return;
   }
 
-  db.prepare(`
-    UPDATE documents
-    SET
-      title = ?,
-      system = ?,
-      subsystem = ?,
-      document_type = ?,
-      source = ?,
-      notes = ?,
-      is_favorite = ?,
-      is_bookmarked = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
+  updateDocumentMetadata(documentId, {
     title,
     system,
     subsystem,
     documentType,
     source,
     notes,
-    isFavorite ? 1 : 0,
-    isBookmarked ? 1 : 0,
-    documentId
-  );
+    isFavorite,
+    isBookmarked,
+  });
 
   if (hasOwnField(request.body, "tags")) {
     setDocumentTags(documentId, request.body.tags);
   }
 
-  const documents = listDocuments();
-  const updatedDocument = documents.find((document) => document.id === documentId);
+  const updatedDocument = getDocument(documentId);
 
   response.json({
     message: "Document metadata updated.",

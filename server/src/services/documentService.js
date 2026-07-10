@@ -6,7 +6,15 @@ import {
   getTagsForDocuments,
   listAllTags,
   pruneOrphanTags,
+  setDocumentTags,
 } from "./documentTagService.js";
+import { rebuildDocumentChunksFromPages } from "./documentChunkService.js";
+import { extractPdfData } from "./pdfService.js";
+import { getVehicleId } from "./vehicleService.js";
+import {
+  createStoredFilename,
+  deriveTitleFromFilename,
+} from "../utils/sanitizeFilename.js";
 
 /**
  * Resolve the on-disk path for a document's stored file.
@@ -488,5 +496,219 @@ export function searchDocuments({
 
   return attachTags(rows, (row, tags) =>
     mapSearchResultRow(row, trimmedQuery, tags)
+  );
+}
+
+// A single mapped document, or undefined when it does not exist. Derived from
+// listDocuments so the tag attachment and embedding-pending flag are built
+// exactly as in the list view (behavior-preserving; callers relied on this
+// whole-list-then-find shape).
+export function getDocument(documentId) {
+  return listDocuments().find((document) => document.id === documentId);
+}
+
+// Minimal row for serving a document's stored file (download/inline view).
+export function getDocumentFileRecord(documentId) {
+  return db
+    .prepare(`
+      SELECT
+        id,
+        original_filename,
+        stored_filename,
+        file_path,
+        file_type
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+}
+
+// Minimal row for locating a document's stored file on disk, used by the
+// re-extract and delete flows. Returns undefined when the document is missing.
+export function getDocumentFileLocation(documentId) {
+  return db
+    .prepare(`
+      SELECT id, stored_filename, file_path
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+}
+
+// Raw metadata row (snake_case) for the partial-update merge in the route.
+// Returns undefined when the document does not exist.
+export function getDocumentMetadataRecord(documentId) {
+  return db
+    .prepare(`
+      SELECT
+        id,
+        title,
+        system,
+        subsystem,
+        document_type,
+        source,
+        notes,
+        is_favorite,
+        is_bookmarked
+      FROM documents
+      WHERE id = ?
+    `)
+    .get(documentId);
+}
+
+// Persist an uploaded PDF: derive its stored path, write the file, extract its
+// text/pages, insert the row, rebuild chunks, and set tags — returning the
+// freshly mapped document. On any failure the written file and (if it was
+// created) the row + chunks are cleaned up before the error is rethrown, so a
+// failed upload never leaves an orphan file or half-inserted document. Fields
+// are already parsed/normalized by the caller.
+export async function createDocument({
+  fileBuffer,
+  originalFilename,
+  mimetype,
+  titleInput,
+  system,
+  subsystem,
+  documentType,
+  source,
+  notes,
+  isBookmarked,
+  tags,
+  hasTags,
+}) {
+  const storedFilename = createStoredFilename(originalFilename);
+  const absoluteFilePath = path.join(config.uploadsDir, storedFilename);
+  const relativeFilePath = `server/uploads/${storedFilename}`.replace(/\\/g, "/");
+  const fileType =
+    path.extname(originalFilename).toLowerCase() === ".pdf"
+      ? "application/pdf"
+      : mimetype || "application/octet-stream";
+  const title = titleInput || deriveTitleFromFilename(originalFilename);
+
+  let createdDocumentId = null;
+
+  try {
+    await fs.writeFile(absoluteFilePath, fileBuffer);
+
+    const extractionResult = await extractPdfData(fileBuffer);
+    const vehicleId = getVehicleId();
+
+    const result = db
+      .prepare(`
+        INSERT INTO documents (
+          vehicle_id,
+          title,
+          original_filename,
+          stored_filename,
+          file_path,
+          file_type,
+          system,
+          subsystem,
+          document_type,
+          source,
+          extracted_text,
+          extraction_status,
+          page_count,
+          notes,
+          is_favorite,
+          is_bookmarked
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        vehicleId,
+        title,
+        originalFilename,
+        storedFilename,
+        relativeFilePath,
+        fileType,
+        system,
+        subsystem,
+        documentType,
+        source,
+        extractionResult.extractedText,
+        extractionResult.extractionStatus,
+        extractionResult.pageCount,
+        notes,
+        0,
+        isBookmarked ? 1 : 0
+      );
+
+    const newDocumentId = Number(result.lastInsertRowid);
+    createdDocumentId = newDocumentId;
+    rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
+
+    if (hasTags) {
+      setDocumentTags(newDocumentId, tags);
+    }
+
+    return getDocument(newDocumentId);
+  } catch (error) {
+    await fs.rm(absoluteFilePath, { force: true });
+
+    if (createdDocumentId) {
+      try {
+        db.prepare("DELETE FROM document_chunks WHERE document_id = ?").run(createdDocumentId);
+        db.prepare("DELETE FROM documents WHERE id = ?").run(createdDocumentId);
+      } catch {
+        // Best-effort cleanup; surface the original create error to the caller.
+      }
+    }
+
+    throw error;
+  }
+}
+
+// Re-run extraction for an existing document from its stored bytes: refresh the
+// extracted text/status/page count and rebuild its chunks, returning the freshly
+// mapped document.
+export async function reextractDocument(documentId, fileBuffer) {
+  const extractionResult = await extractPdfData(fileBuffer);
+
+  db.prepare(`
+    UPDATE documents
+    SET
+      extracted_text = ?,
+      extraction_status = ?,
+      page_count = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    extractionResult.extractedText,
+    extractionResult.extractionStatus,
+    extractionResult.pageCount,
+    documentId
+  );
+
+  rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+
+  return getDocument(documentId);
+}
+
+// Update an existing document's editable metadata (fields already merged +
+// normalized by the caller). Tag replacement is a separate, caller-driven step.
+export function updateDocumentMetadata(documentId, fields) {
+  db.prepare(`
+    UPDATE documents
+    SET
+      title = ?,
+      system = ?,
+      subsystem = ?,
+      document_type = ?,
+      source = ?,
+      notes = ?,
+      is_favorite = ?,
+      is_bookmarked = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    fields.title,
+    fields.system,
+    fields.subsystem,
+    fields.documentType,
+    fields.source,
+    fields.notes,
+    fields.isFavorite ? 1 : 0,
+    fields.isBookmarked ? 1 : 0,
+    documentId
   );
 }
