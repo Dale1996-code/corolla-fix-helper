@@ -27,6 +27,13 @@ function getVehicleProfile() {
   };
 }
 
+// Dashboard summary projections. These are deliberately a smaller, read-only
+// list shape than the canonical service mappers, and are intentionally NOT
+// derived from them: some fields differ on purpose (a blank note title becomes
+// "Untitled note" here; document system/document_type get an "" fallback the
+// service mappers do not apply). Kept standalone so the summary view can evolve
+// without perturbing the canonical API shapes in
+// symptomService/procedureService/noteService/documentService.
 function mapDocumentRow(row) {
   return {
     id: row.id,

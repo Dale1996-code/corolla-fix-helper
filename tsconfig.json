@@ -36,6 +36,7 @@
     "server/test/noteService.test.js",
     "server/test/procedureService.test.js",
     "server/test/procedureSuggestionService.test.js",
+    "server/test/rowMapperCores.test.js",
     "server/test/sanitizeFilename.test.js",
     "server/test/searchService.test.js",
     "server/test/suggestedProcedures.test.js",

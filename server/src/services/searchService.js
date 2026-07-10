@@ -1,6 +1,9 @@
 import { db } from "../database.js";
 import { getVehicleId } from "./vehicleService.js";
 import { normalizeText } from "../utils/text.js";
+import { mapSymptomCore } from "./symptomService.js";
+import { mapProcedureCore } from "./procedureService.js";
+import { mapNoteRow } from "./noteService.js";
 
 function normalizeForSearch(value) {
   return normalizeText(value).toLowerCase();
@@ -138,23 +141,11 @@ function sortSearchResults(results, sort, hasQuery) {
   });
 }
 
+// The search view is exactly the shared symptom core (core columns + linked
+// documents); it does not include linked procedures. Delegated to symptomService
+// so the two views stay in lockstep.
 function mapSymptomRow(row, linksMap) {
-  const linkedDocuments = linksMap.get(row.id) || [];
-
-  return {
-    id: row.id,
-    title: row.title,
-    description: row.description || "",
-    system: row.system || "",
-    suspectedCauses: row.suspected_causes || "",
-    confidence: row.confidence || "medium",
-    status: row.status || "open",
-    notes: row.notes || "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    linkedDocumentIds: linkedDocuments.map((document) => document.id),
-    linkedDocuments,
-  };
+  return mapSymptomCore(row, linksMap.get(row.id) || []);
 }
 
 function listSymptomsForVehicle(vehicleId) {
@@ -211,25 +202,11 @@ function listSymptomsForVehicle(vehicleId) {
   return symptomRows.map((row) => mapSymptomRow(row, linksMap));
 }
 
+// The search view is exactly the shared procedure core (core columns + linked
+// documents); it does not include linked symptoms. Delegated to procedureService
+// so the two views stay in lockstep.
 function mapProcedureRow(row, linksMap) {
-  const linkedDocuments = linksMap.get(row.id) || [];
-
-  return {
-    id: row.id,
-    title: row.title,
-    system: row.system || "",
-    difficulty: row.difficulty || "intermediate",
-    toolsNeeded: row.tools_needed || "",
-    partsNeeded: row.parts_needed || "",
-    safetyNotes: row.safety_notes || "",
-    steps: row.steps || "",
-    notes: row.notes || "",
-    confidence: row.confidence || "medium",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    linkedDocumentIds: linkedDocuments.map((document) => document.id),
-    linkedDocuments,
-  };
+  return mapProcedureCore(row, linksMap.get(row.id) || []);
 }
 
 function listProceduresForVehicle(vehicleId) {
@@ -288,59 +265,9 @@ function listProceduresForVehicle(vehicleId) {
   return procedureRows.map((row) => mapProcedureRow(row, linksMap));
 }
 
-function mapNoteRow(row) {
-  const legacyDocumentId =
-    Number.isInteger(row.document_id) && row.document_id > 0 ? row.document_id : null;
-  const rawRelatedEntityType = normalizeText(row.related_entity_type).toLowerCase();
-  const relatedEntityType = rawRelatedEntityType || (legacyDocumentId ? "document" : "none");
-  let relatedEntityId =
-    Number.isInteger(row.related_entity_id) && row.related_entity_id > 0
-      ? row.related_entity_id
-      : null;
-
-  if (relatedEntityType === "document" && !relatedEntityId) {
-    relatedEntityId = legacyDocumentId;
-  }
-
-  const linkedDocument = row.linked_document_id
-    ? {
-        id: row.linked_document_id,
-        title: row.linked_document_title,
-        system: row.linked_document_system || "",
-        documentType: row.linked_document_type || "",
-      }
-    : null;
-  const linkedSymptom = row.linked_symptom_id
-    ? {
-        id: row.linked_symptom_id,
-        title: row.linked_symptom_title,
-        system: row.linked_symptom_system || "",
-        status: row.linked_symptom_status || "open",
-      }
-    : null;
-  const linkedProcedure = row.linked_procedure_id
-    ? {
-        id: row.linked_procedure_id,
-        title: row.linked_procedure_title,
-        system: row.linked_procedure_system || "",
-        difficulty: row.linked_procedure_difficulty || "intermediate",
-      }
-    : null;
-
-  return {
-    id: row.id,
-    title: row.title || "",
-    content: row.content || row.body || "",
-    noteType: row.note_type || "general",
-    relatedEntityType,
-    relatedEntityId,
-    linkedDocument,
-    linkedSymptom,
-    linkedProcedure,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
+// The note shape is identical between search and the note-detail view, so
+// mapNoteRow is imported from noteService.js (see imports) rather than duplicated
+// here. The search note query below selects the same columns noteService expects.
 
 function listNotesForVehicle(vehicleId) {
   const noteRows = db
