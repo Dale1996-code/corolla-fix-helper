@@ -15,7 +15,7 @@ Run from the repo root:
 - `npm run test` — both suites; `npm run test:server` (Node built-in test runner) and `npm run test:client` (Vitest)
 - `npm run lint` / `npm run typecheck` / `npm run build` — checks; the server build step is a no-op
 - `npm start` — production-style: Express serves `client/dist` after `npm run build`
-- `npm run smoke` — post-build production smoke test: boots the real app against a throwaway DB and hits the main pages/API routes. Run after `npm run build`
+- `npm run smoke` — post-build production smoke test: boots the real app against throwaway database/uploads paths, checks the built frontend, `GET /api/health`, core API routes, Ask's no-key fallback, and a Repair Checklists round trip. Run after `npm run build`
 - `npm run import -- "/path/to/pdfs"` — resumable bulk PDF import (MD5 duplicate detection, image-only report)
 - `npm run demo:seed` — load the optional sample PDF + chunks. **Normal startup seeds nothing — the workspace is empty by default** (or set `SEED_DEMO`)
 - `npm run embed:backfill` — embed `document_chunks` missing the current embedding version; run after importing or re-extracting PDFs
@@ -35,6 +35,14 @@ Two npm workspaces-by-convention (separate `package.json`s, root scripts delegat
 
 - `client/` — React 19 + React Router + Tailwind. One page component per feature under `src/pages/`, tests co-located (`*.test.jsx`, jsdom + Testing Library).
 - `server/` — ES modules. `src/app.js` builds the Express app (`createApp(options)`); `src/index.js` starts it. Routes in `src/routes/` are thin; logic lives in `src/services/`. `src/config.js` reads all env vars (see `.env.example`; key one is `OPENAI_API_KEY`). `src/initDatabase.js` creates/migrates the SQLite schema on startup (documented in `DATA_MODEL.md`).
+
+### Route, service, and mapper conventions
+
+- `src/routes/` owns HTTP parsing, validation, status codes, and response behavior. Dedicated entity services own entity operations and canonical row shaping: `documentService.js`, `symptomService.js`, `procedureService.js`, and `noteService.js`.
+- `src/routes/health.js` serves `GET /api/health` with `status: "ok"`; `src/app.js` mounts it at `/api/health`. `GET /api` is the service name/version check.
+- `src/routes/repairChecklists.js` currently contains the standalone V1 checklist queries and mapping. Its `/api/repair-checklists` routes return ordered checklists, and successful item writes return the refreshed whole checklist; V1 does not link checklists to other entities.
+- All single-vehicle lookups go through `src/services/vehicleService.js` (`getVehicle` or `getVehicleId`). Do not repeat the first-row vehicle query in a route or service.
+- `symptomService.js` exports `mapSymptomCore` and `procedureService.js` exports `mapProcedureCore`. Full entity views add their cross-entity links on top of those cores; `searchService.js` reuses the cores and `noteService.js`'s `mapNoteRow` instead of duplicating row mapping.
 
 ### Dependency injection convention (important for tests)
 

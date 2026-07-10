@@ -13,6 +13,7 @@ The current app supports:
 - Search across documents, symptoms, procedures, and notes using separate Search page sections
 - "Ask your documents" Q&A using uploaded PDF chunks, hybrid keyword+embedding retrieval, OpenAI answer generation, and citations
 - Repair Planner, a document-grounded streaming agent that turns a repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts (`POST /api/repair-plan`, Server-Sent Events)
+- Repair Checklists v1 (shipped July 5, 2026): standalone local job checklists at `/repair-checklists` and `/api/repair-checklists`, with statuses (`planned`, `in_progress`, `blocked`, `done`), ordered check-off items, metadata, notes, and item reordering. V1 does not link checklists to symptoms, procedures, notes, documents, or image attachments.
 - Symptoms linked to documents
 - Procedures linked to documents
 - Direct symptom-to-procedure links, managed from either detail view, plus AI-assisted "Suggest fixes" that ranks existing procedures for a symptom and stays grounded in uploaded document chunks (with a deterministic keyword/system fallback that needs no API key)

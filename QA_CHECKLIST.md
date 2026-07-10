@@ -13,7 +13,7 @@ Check:
 
 - Frontend opens at `http://localhost:5173`.
 - Backend health check works at `http://localhost:4000/api/health`.
-- The sidebar shows Dashboard, Documents, Search, Repair Planner, Symptoms, Procedures, Notes, and Settings.
+- The sidebar shows Dashboard, Documents, Ask AI, Checklists, Repair Planner, Symptoms, Procedures, Notes, and Settings.
 
 ## 2. Settings
 
@@ -67,7 +67,7 @@ Check:
 - Linked symptom and procedure relationships are removed.
 - Linked notes no longer show a stale document link.
 
-## 5. Search
+## 5. Search Sections
 
 1. Open Search.
 2. Search the Documents section for text from an uploaded PDF.
@@ -81,11 +81,11 @@ Check:
 - Result links open the matching item.
 - Empty states are clear when no result matches.
 
-## 6. Ask Your Documents
+## 6. Ask AI
 
 Use a fake or sample PDF with text you can safely test.
 
-1. Open Search.
+1. Open Ask AI.
 2. Run `npm run embed:backfill` if `OPENAI_API_KEY` is configured and the PDF was imported or re-extracted.
 3. Ask a question that should be answered by text in the uploaded PDF.
 4. Ask a question that the uploaded PDFs cannot answer.
@@ -99,7 +99,7 @@ Check:
 
 ### Vision Ask (optional saved image)
 
-First save at least one image attachment on a symptom, procedure, or note (see section 11) so the Ask panel has a photo to choose.
+First save at least one image attachment on a symptom, procedure, or note (see section 12) so the Ask panel has a photo to choose.
 
 1. In the Ask panel, confirm a "saved photo" selector lists your saved attachments.
 2. Select one; confirm its thumbnail appears next to the question input and that "Remove photo" clears it.
@@ -133,7 +133,38 @@ Check:
 - If `OPENAI_API_KEY` is not configured, an AI-not-configured banner appears and nothing crashes.
 - See `docs/repair-planner.md` for the full validation checklist and the live key-backed check.
 
-## 8. Symptoms
+## 8. Repair Checklists
+
+Use a test checklist, not an important repair record.
+
+1. Open **Checklists** and observe the initial loading state.
+2. Create a checklist with a title, description, notes, and each available status:
+   `planned`, `in_progress`, `blocked`, or `done`.
+3. Select the checklist, edit its title, description, notes, and status, then save.
+4. Add several items, edit an item's text, check an item, uncheck it, move items
+   Up and Down, and delete a test item.
+5. Create or update a second checklist, then confirm the checklist with the
+   newest activity appears first in the list. An item write should update the
+   parent checklist's activity time too.
+6. Use the browser Network panel while saving. Each successful create, metadata
+   edit, item add/edit/check/move/delete, or status change should update the
+   visible checklist from the returned whole-checklist payload without an
+   unnecessary second `GET /api/repair-checklists` request.
+7. Test an empty database/list, a slow first load, and a failed list or write
+   request.
+
+Check:
+
+- The sidebar label is **Checklists** and the page opens at `/repair-checklists`.
+- Loading, empty, success, and failure messages are clear and do not leave stale
+  data or banners on another selected checklist.
+- Creating and editing metadata persists title, description, notes, and status.
+- Items remain in their saved order, and Up/Down changes that order.
+- Check and uncheck updates the item and the done count.
+- Successful writes apply the server-returned full checklist in place; the UI
+  does not refetch the entire list unnecessarily.
+
+## 9. Symptoms
 
 1. Create a symptom.
 2. Link it to a document if one exists.
@@ -147,7 +178,7 @@ Check:
 - Linked documents open the correct document page.
 - Counts and empty states make sense.
 
-## 9. Procedures
+## 10. Procedures
 
 1. Create a procedure.
 2. Add steps, tools, parts, safety notes, difficulty, and confidence.
@@ -161,7 +192,7 @@ Check:
 - Linked documents open correctly.
 - Saved Settings system suggestions appear in create or edit fields.
 
-## 10. Notes
+## 11. Notes
 
 1. Create a note.
 2. Pick a note type.
@@ -175,7 +206,7 @@ Check:
 - The detail panel shows the linked item.
 - The linked item opens from the note detail panel.
 
-## 11. Image Attachments
+## 12. Image Attachments
 
 Use test symptoms, procedures, and notes, not important data. Attachments are
 image-only; documents stay PDF-only and are not affected.
@@ -199,7 +230,7 @@ Check:
 - `npm run backup:drill` still passes and reports that the attachment image came
   back intact.
 
-## 12. Build And Tests
+## 13. Build And Tests
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
@@ -217,7 +248,7 @@ Check:
 - Backend tests pass.
 - Frontend tests pass.
 
-## 13. Bulk Import Smoke Test
+## 14. Bulk Import Smoke Test
 
 Use a small folder with fake or safe PDFs first.
 
@@ -234,7 +265,7 @@ Check:
 - Text PDFs and OCR-readable scanned PDFs create searchable chunks for Ask Your Documents.
 - If OCR tools are missing, scanned PDFs show a clear `ocr_unavailable:` extraction status instead of breaking text-PDF imports.
 
-## 14. Local Production Smoke Test
+## 15. Local Production Smoke Test
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper

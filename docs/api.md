@@ -211,6 +211,47 @@ Response:
 - `not_found` — the uploaded documents don't contain enough matching information ("not in documents"); this is deliberate refusal, not an error
 - `ai_not_configured` — matching chunks exist but no `OPENAI_API_KEY` is set
 
+When `ASK_DEBUG_METRICS=true`, the response also includes a development-only
+`metrics` object. The flag is off by default, so normal responses keep the shape
+shown above. The object is log-safe: it contains measurements and numeric
+references, never document text, titles, filenames, or citation snippets.
+
+```json
+{
+  "metrics": {
+    "retrievalMs": 12,
+    "rewriteMs": 0,
+    "answerMs": 842,
+    "totalMs": 860,
+    "chunkCount": 5,
+    "citationCount": 2,
+    "contextChars": 1840,
+    "approxContextTokens": 460,
+    "topSemanticScore": 0.91,
+    "retrievalMode": "hybrid",
+    "chunkRefs": [
+      { "documentId": 3, "pageNumber": 14, "chunkIndex": 2 }
+    ]
+  }
+}
+```
+
+The fields come directly from `buildAskMetrics` in
+`server/src/services/aiAnswerService.js`:
+
+- `retrievalMs`, `rewriteMs`, `answerMs`, and `totalMs` are rounded
+  milliseconds for retrieval, question rewriting, answer generation, and the
+  complete request.
+- `chunkCount` and `citationCount` count the retrieved chunks and returned
+  citations.
+- `contextChars` is the total character count of retrieved chunk text, and
+  `approxContextTokens` is `Math.ceil(contextChars / 4)`, a rough token estimate.
+- `topSemanticScore` and `retrievalMode` describe the first retrieved chunk, or
+  are `null` when there is no such value.
+- `chunkRefs` contains one reference per retrieved chunk with only its numeric
+  `documentId`, `pageNumber`, and `chunkIndex` values (or `null` when a value is
+  unavailable).
+
 Attachment-specific errors: `400` bad id, `404` unknown/missing file, `415` not a JPEG/PNG/WebP. A bad attachment fails **before** anything is sent to OpenAI.
 
 ---

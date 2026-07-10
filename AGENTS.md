@@ -49,13 +49,21 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `client/src/pages/` contains the main React page components and colocated frontend tests. Shared presentational pieces live under `client/src/components/`.
 - `docs/archive/` is historical context only; do not treat archived plans as current repo truth without checking live files.
 
+## Route, Service, And Mapper Conventions
+
+- `server/src/routes/health.js` serves `GET /api/health` with `{ status: "ok", message }`; `server/src/app.js` mounts it at `/api/health`. The `/api` route is the service name/version check.
+- `server/src/routes/repairChecklists.js` currently contains the standalone V1 checklist queries and row mapping. It serves `/api/repair-checklists` and `/api/repair-checklists/:id` plus item add/edit/delete/move routes; list results are newest-activity-first, and successful item writes return the refreshed whole checklist.
+- Routes own HTTP parsing, validation, status codes, and response behavior. Dedicated entity services own entity operations and canonical row shaping: `documentService.js`, `symptomService.js`, `procedureService.js`, and `noteService.js`.
+- All single-vehicle lookups go through `server/src/services/vehicleService.js` (`getVehicle` or `getVehicleId`) instead of repeating the first-row vehicle query.
+- `symptomService.js` exports `mapSymptomCore` and `procedureService.js` exports `mapProcedureCore`. Full entity mappers add their cross-entity links on top of those cores; `searchService.js` must reuse the exported cores and `noteService.js`'s `mapNoteRow` rather than duplicating row mapping in routes or search code.
+
 ## Current Scope Rules
 
 - The app is local-first for one 2009 Toyota Corolla LE 1.8L.
 - Current storage is SQLite plus local uploaded PDF files.
 - The `/search` route is currently branded as "Ask AI" in the UI. It contains the Ask panel plus separate search sections for documents, symptoms, procedures, and notes.
 - Current Repair Planner is a streaming tool-calling agent (`POST /api/repair-plan`, SSE) that plans repairs grounded in uploaded PDFs; it reuses the raw-`fetch` Responses API + dependency-injection conventions and is documented in `docs/repair-planner.md`.
-- Current Repair Checklists is an additive local checklist feature at `/repair-checklists` and `/api/repair-checklists`. It stores standalone job checklists with status (`planned`, `in_progress`, `blocked`, `done`) and ordered check-off items; v1 does not link checklists to symptoms, procedures, notes, documents, or image attachments.
+- Current Repair Checklists is an additive local checklist feature at `/repair-checklists` and `/api/repair-checklists`. It stores standalone job checklists with status (`planned`, `in_progress`, `blocked`, `done`) and ordered check-off items; successful create, metadata, and item writes apply a returned whole-checklist payload, and item activity moves the checklist to the top of the list. V1 does not link checklists to symptoms, procedures, notes, documents, or image attachments.
 - Current document Q&A uses uploaded PDF chunks, OpenAI embeddings, hybrid keyword+embedding retrieval, and OpenAI answer generation when `OPENAI_API_KEY` is configured.
 - Current Ask retrieval can optionally run a second-pass LLM reranker when `RERANK_ENABLED=true`; it is off by default and must fall back to the original hybrid order on any failure.
 - Symptoms and procedures can be manually linked in both directions. `GET /api/symptoms/:id/suggested-procedures` suggests existing procedures only; it uses keyword/system fallback without an API key and optional grounded LLM ranking with an API key.
@@ -96,7 +104,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - The Docker runtime image installs Tesseract and Poppler, so OCR of scanned PDFs works in a container out of the box (matching the default `OCR_ENABLED=true`). Set `OCR_ENABLED=false` to skip OCR.
 - `docs/gcp-deployment.md` targets one Google Compute Engine VM running the Docker image with `/data` mounted for the SQLite database and uploads.
 - `.github/workflows/ci.yml` runs on push and pull request with Node 24, then runs `npm run install:all`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, and `npm run smoke`.
-- `npm run smoke` (`server/src/scripts/smokeTest.js`) is a post-build production smoke test: it boots the real Express app against a throwaway DB/uploads dir and makes live HTTP requests to confirm the built frontend is served, the core API routes respond, Ask degrades gracefully without an API key, and Repair Checklists can round-trip a checklist. Run it after `npm run build`.
+- `npm run smoke` (`server/src/scripts/smokeTest.js`) is a post-build production smoke test: it boots the real Express app against a throwaway DB/uploads dir and makes live HTTP requests to confirm the built frontend is served, `GET /api/health` and the core API routes respond, Ask degrades gracefully without an API key, and Repair Checklists can round-trip a checklist. Run it after `npm run build`.
 - Backup export and restore include the entire uploads tree, so saved attachment images are included. Stop the server before restoring; the restore keeps a pre-restore snapshot beside the database.
 - Backup export and archive creation use `server/src/services/databaseSnapshot.js` (`VACUUM INTO`) instead of raw `.db` copies so committed rows still in SQLite's WAL sidecar are included.
 - Backup code uses `server/src/services/tarExecutable.js`. On Windows, reuse this helper instead of spawning bare `tar`, because it deliberately selects the native `%SystemRoot%\System32\tar.exe` rather than whichever tar appears first on `PATH`.
