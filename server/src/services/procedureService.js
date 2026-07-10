@@ -37,10 +37,12 @@ export function normalizeDifficulty(value) {
   return normalized;
 }
 
-export function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
-  const linkedDocuments = documentLinksMap.get(row.id) || [];
-  const linkedSymptoms = symptomLinksMap.get(row.id) || [];
-
+// The procedure fields shared by the full API view (mapProcedureRow) and the
+// search view (searchService.mapProcedureRow): the core columns plus the
+// linked-document projection. Extracted so the two views cannot silently drift
+// apart. The search view stops here; the full view augments it with linked
+// symptoms. `linkedDocuments` is the already-built array for this row.
+export function mapProcedureCore(row, linkedDocuments) {
   return {
     id: row.id,
     title: row.title,
@@ -56,6 +58,14 @@ export function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
     updatedAt: row.updated_at,
     linkedDocumentIds: linkedDocuments.map((document) => document.id),
     linkedDocuments,
+  };
+}
+
+export function mapProcedureRow(row, documentLinksMap, symptomLinksMap) {
+  const linkedSymptoms = symptomLinksMap.get(row.id) || [];
+
+  return {
+    ...mapProcedureCore(row, documentLinksMap.get(row.id) || []),
     linkedSymptomIds: linkedSymptoms.map((symptom) => symptom.id),
     linkedSymptoms,
   };
