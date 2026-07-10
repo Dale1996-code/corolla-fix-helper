@@ -1,5 +1,40 @@
 # Changelog
 
+## Week of 2026-07-06
+
+### Highlights
+
+- Followed up Repair Checklists v1 with smoke-test coverage, API docs, and README pointers so the new local checklist flow is covered by the production smoke check. See [PR #73](https://github.com/Dale1996-code/corolla-fix-helper/pull/73).
+- Consolidated server internals by adding shared vehicle, HTTP parsing, and row-mapper helpers, then thinning the symptoms, procedures, notes, and documents routes into service modules with focused service tests. See [PR #72](https://github.com/Dale1996-code/corolla-fix-helper/pull/72), [PR #75](https://github.com/Dale1996-code/corolla-fix-helper/pull/75), [PR #78](https://github.com/Dale1996-code/corolla-fix-helper/pull/78), [PR #79](https://github.com/Dale1996-code/corolla-fix-helper/pull/79), [PR #80](https://github.com/Dale1996-code/corolla-fix-helper/pull/80), and [PR #81](https://github.com/Dale1996-code/corolla-fix-helper/pull/81).
+- Improved Ask answer quality and dev visibility by clarifying the beginner-safe AI prompt, adding env-gated `ASK_DEBUG_METRICS`, expanding answer-quality cases, and documenting the RAG iteration log. See [PR #76](https://github.com/Dale1996-code/corolla-fix-helper/pull/76).
+- Fixed `sanitizeFilename` so filenames with uppercase extensions no longer get doubled extensions, with characterization and regression coverage. See [PR #74](https://github.com/Dale1996-code/corolla-fix-helper/pull/74).
+- Refreshed `CLAUDE.md` with current image-attachment docs and expanded repo pointers. See [PR #71](https://github.com/Dale1996-code/corolla-fix-helper/pull/71).
+
+### Key PR Links
+
+- [PR #81: Consolidate row mappers into shared cores](https://github.com/Dale1996-code/corolla-fix-helper/pull/81)
+- [PR #80: Slim documents route into documentService](https://github.com/Dale1996-code/corolla-fix-helper/pull/80)
+- [PR #79: Extract noteService from notes route](https://github.com/Dale1996-code/corolla-fix-helper/pull/79)
+- [PR #78: Extract procedureService from procedures route](https://github.com/Dale1996-code/corolla-fix-helper/pull/78)
+- [PR #76: Improve Ask answer quality and debug visibility](https://github.com/Dale1996-code/corolla-fix-helper/pull/76)
+- [PR #75: Extract symptomService from symptoms route](https://github.com/Dale1996-code/corolla-fix-helper/pull/75)
+- [PR #74: Fix uppercase filename extension sanitizing](https://github.com/Dale1996-code/corolla-fix-helper/pull/74)
+- [PR #73: Add Repair Checklists smoke coverage and docs](https://github.com/Dale1996-code/corolla-fix-helper/pull/73)
+- [PR #72: Consolidate server helpers and shared lookups](https://github.com/Dale1996-code/corolla-fix-helper/pull/72)
+- [PR #71: Refresh CLAUDE.md repo guidance](https://github.com/Dale1996-code/corolla-fix-helper/pull/71)
+
+## Week of 2026-06-29
+
+### Highlights
+
+- Added Repair Checklists v1 as an additive local checklist feature with checklist status, ordered check-off items, API routes, a React page, navigation updates, schema migration support, and server/client tests. See [PR #70](https://github.com/Dale1996-code/corolla-fix-helper/pull/70).
+- Expanded attachment-route typecheck coverage after the image-attachments review pass. See [PR #69](https://github.com/Dale1996-code/corolla-fix-helper/pull/69).
+
+### Key PR Links
+
+- [PR #70: Add Repair Checklists v1](https://github.com/Dale1996-code/corolla-fix-helper/pull/70)
+- [PR #69: Add attachments route test to typecheck coverage](https://github.com/Dale1996-code/corolla-fix-helper/pull/69)
+
 ## Week of 2026-06-22
 
 ### Highlights
