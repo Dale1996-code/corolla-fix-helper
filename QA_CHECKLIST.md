@@ -13,7 +13,7 @@ Check:
 
 - Frontend opens at `http://localhost:5173`.
 - Backend health check works at `http://localhost:4000/api/health`.
-- The sidebar shows Dashboard, Documents, Ask AI, Checklists, Repair Planner, Symptoms, Procedures, Notes, and Settings.
+- The sidebar shows Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Checklists, and Settings.
 
 ## 2. Settings
 

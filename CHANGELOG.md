@@ -29,11 +29,17 @@
 
 - Added Repair Checklists v1 as an additive local checklist feature with checklist status, ordered check-off items, API routes, a React page, navigation updates, schema migration support, and server/client tests. See [PR #70](https://github.com/Dale1996-code/corolla-fix-helper/pull/70).
 - Expanded attachment-route typecheck coverage after the image-attachments review pass. See [PR #69](https://github.com/Dale1996-code/corolla-fix-helper/pull/69).
+- Hardened the production smoke test so it cleans up its temporary workspace and shuts down cleanly on failure. See [PR #68](https://github.com/Dale1996-code/corolla-fix-helper/pull/68).
+- Refreshed the beginner-facing documentation for typecheck scope, Docker OCR, the Ask AI rename, and the smoke test. See [PR #67](https://github.com/Dale1996-code/corolla-fix-helper/pull/67).
+- Added the production smoke test, expanded typecheck coverage to the whole `server/src` tree, and installed Poppler and Tesseract in the Docker runtime image. See [PR #66](https://github.com/Dale1996-code/corolla-fix-helper/pull/66).
 
 ### Key PR Links
 
 - [PR #70: Add Repair Checklists v1](https://github.com/Dale1996-code/corolla-fix-helper/pull/70)
 - [PR #69: Add attachments route test to typecheck coverage](https://github.com/Dale1996-code/corolla-fix-helper/pull/69)
+- [PR #68: Harden smoke test cleanup and shutdown](https://github.com/Dale1996-code/corolla-fix-helper/pull/68)
+- [PR #67: Beginner-friendly documentation refresh](https://github.com/Dale1996-code/corolla-fix-helper/pull/67)
+- [PR #66: Production smoke test, broader typecheck, Docker OCR tools](https://github.com/Dale1996-code/corolla-fix-helper/pull/66)
 
 ## Week of 2026-06-22
 
@@ -42,11 +48,15 @@
 - Implemented the roadmap P0/P1 fixes and P2 docs/pagination pass, including opt-in demo seeding, shared request limiting for AI routes, transactional guardrails, and refreshed docs/checklists. See [PR #60](https://github.com/Dale1996-code/corolla-fix-helper/pull/60).
 - Completed the roadmap P2/P3 cleanup and optional Documents UX work by extracting shared list/result components, adding schema migration version tracking, streaming backup downloads, showing embedding-pending state, adding Documents pagination UI, and removing generated eval/benchmark artifacts from tracking. See [PR #61](https://github.com/Dale1996-code/corolla-fix-helper/pull/61).
 - Rebranded the Search feature to **Ask AI**, added a DaleTech brand mark to the app header, and expanded `CLAUDE.md` with repo conventions and gotchas. See [PR #62](https://github.com/Dale1996-code/corolla-fix-helper/pull/62).
+- Added regression tests that lock in empty-by-default seeding and demo sample-file integrity. See [PR #63](https://github.com/Dale1996-code/corolla-fix-helper/pull/63).
 - Fixed an intermittent failure in the symptom/procedure link tests by resetting link-panel state with a `key` prop instead of a mount effect. See [PR #64](https://github.com/Dale1996-code/corolla-fix-helper/pull/64).
+- Refreshed the changelog and agent notes. See [PR #65](https://github.com/Dale1996-code/corolla-fix-helper/pull/65).
 
 ### Key PR Links
 
+- [PR #65: Refresh changelog and agent notes](https://github.com/Dale1996-code/corolla-fix-helper/pull/65)
 - [PR #64: Fix flaky symptom/procedure link tests](https://github.com/Dale1996-code/corolla-fix-helper/pull/64)
+- [PR #63: Lock in empty-by-default seeding with regression tests](https://github.com/Dale1996-code/corolla-fix-helper/pull/63)
 - [PR #62: Rebrand Search to "Ask AI" and add DaleTech brand](https://github.com/Dale1996-code/corolla-fix-helper/pull/62)
 - [PR #61: Complete roadmap P2/P3 + optional Documents UX](https://github.com/Dale1996-code/corolla-fix-helper/pull/61)
 - [PR #60: Roadmap P0/P1 fixes plus P2 docs and pagination](https://github.com/Dale1996-code/corolla-fix-helper/pull/60)
