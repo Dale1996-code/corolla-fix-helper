@@ -66,6 +66,10 @@ ES modules throughout. The layering rule:
 - `server/src/app.js` — `createApp(options)` builds the Express app: CORS, JSON parsing, all `/api` routers, the rate limiter on the AI endpoints, and static serving of `client/dist`.
 - `server/src/routes/` — **thin** HTTP handlers: parse/validate input, call a service, shape the JSON response.
 - `server/src/services/` — the actual logic (extraction, chunking, retrieval, answering, backup...).
+- Routes own HTTP-specific work: parsing and validating requests, choosing status codes, and shaping response/error behavior. Dedicated entity services own entity operations, database writes, and the canonical row shapes returned by those routes.
+- `server/src/services/vehicleService.js` owns the single-vehicle lookup (`getVehicle` and `getVehicleId`). Routes and other services use it instead of repeating the "first vehicle row" query, so a future multi-vehicle change has one lookup seam.
+- `server/src/services/documentService.js`, `symptomService.js`, `procedureService.js`, and `noteService.js` own the corresponding entity operations and row mapping. `server/src/services/searchService.js` owns keyword search and reuses the exported entity mappers for its result shapes.
+- `symptomService.js` exports `mapSymptomCore`, and `procedureService.js` exports `mapProcedureCore`. These shared cores contain the common entity fields and linked-document projection; the full API mappers add their one cross-entity link set. Search must reuse these exports (and `noteService.js`'s `mapNoteRow`) rather than duplicating row mapping.
 - `server/src/config.js` — the **only** place environment variables are read. Everything else imports `config`.
 - `server/src/initDatabase.js` — creates and migrates the SQLite schema on startup via a `schema_migrations` table (numbered migrations, each applied exactly once, transactional).
 
@@ -216,8 +220,12 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 | `server/src/services/chunkRetrievalService.js` | Hybrid keyword + embedding retrieval; in-memory cosine cache |
 | `server/src/services/chunkRerankService.js` | Optional LLM reranker (off by default, fail-safe) |
 | `server/src/services/aiAnswerService.js` | Citation building + OpenAI answer generation (+ Vision Ask) |
+| `server/src/services/vehicleService.js` | Single-vehicle `getVehicle` / `getVehicleId` lookup shared by routes and services |
+| `server/src/services/symptomService.js` | Symptom CRUD, row shaping, document links, and exported `mapSymptomCore` |
+| `server/src/services/procedureService.js` | Procedure CRUD, row shaping, document links, and exported `mapProcedureCore` |
+| `server/src/services/noteService.js` | Note CRUD, related-entity validation, and canonical `mapNoteRow` |
 | `server/src/services/procedureSuggestionService.js` | Grounded procedure suggestions for a symptom |
-| `server/src/services/searchService.js` | Symptom/procedure/note keyword search + filter options |
+| `server/src/services/searchService.js` | Symptom/procedure/note keyword search + filter options; reuses entity/core mappers |
 | `server/src/services/attachmentService.js` | Image attachment CRUD + per-entity cleanup |
 | `server/src/services/backupService.js`, `databaseSnapshot.js`, `tarExecutable.js` | Backup export/restore plumbing; Windows-safe tar selection |
 | `server/src/services/agent/*` | Repair Planner (see above) |
