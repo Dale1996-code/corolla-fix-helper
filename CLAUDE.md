@@ -75,6 +75,6 @@ Everything lives in one SQLite file (`server/data/` by default) plus `server/upl
 - `docs/architecture.md` — current app structure; `docs/api.md` — per-route `/api` endpoint reference; `docs/onboarding.md` — new-developer walkthrough
 - `QA_CHECKLIST.md` — manual verification steps after changes
 - `docs/repair-planner.md` — agent internals + validation checklist
-- `docs/backup-restore.md` — backup contents + safe restore; `docs/runbook.md` — start/stop, health checks, recovery
+- `docs/backup-restore.md` — backup contents + safe restore; `docs/runbook.md` — start/stop, health checks, recovery; `docs/mobile-access.md` — phone access (Wi-Fi, Tailscale, Home Screen install)
 - `docs/archive/` — superseded plans; don't treat as current
 - Cloud docs (`docs/gcp-deployment.md`) describe an *intended* GCE deployment, not a live one

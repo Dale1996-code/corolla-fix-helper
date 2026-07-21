@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    App icon source. The PNGs next to this file (apple-touch-icon, icon-192/512,
+    icon-maskable, splash-*) are rendered from this same mark; iOS and Android
+    apply their own corner masks to the PNGs, so those are full-bleed squares
+    while this SVG keeps rounded corners for favicon-style use.
+  -->
+  <rect width="512" height="512" rx="96" fill="#111827" />
+  <g stroke="#38bdf8" stroke-opacity="0.09" stroke-width="2">
+    <path d="M104 0v512M408 0v512M0 104h512M0 408h512" />
+  </g>
+  <g transform="rotate(45 256 246)">
+    <!-- Wrench: open-end head, shaft, ring end. The slot and hole are drawn in
+         the background color, which only composes correctly over a solid fill. -->
+    <circle cx="256" cy="152" r="62" fill="#e0f2fe" />
+    <rect x="232" y="152" width="48" height="200" fill="#e0f2fe" />
+    <circle cx="256" cy="352" r="54" fill="#e0f2fe" />
+    <rect x="238" y="52" width="36" height="118" rx="17" fill="#111827" />
+    <circle cx="256" cy="352" r="25" fill="#111827" />
+  </g>
+  <rect x="216" y="452" width="80" height="10" rx="5" fill="#0891b2" />
+</svg>

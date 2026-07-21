@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Corolla Fix Helper — offline</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #111827;
+        color: #e2e8f0;
+        font-family: Georgia, "Times New Roman", serif;
+        text-align: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      main {
+        max-width: 26rem;
+      }
+      img {
+        width: 88px;
+        height: 88px;
+        border-radius: 20px;
+      }
+      h1 {
+        margin: 20px 0 0;
+        font-size: 1.5rem;
+        letter-spacing: -0.01em;
+        color: #f8fafc;
+      }
+      p {
+        margin: 12px 0 0;
+        font-size: 1rem;
+        line-height: 1.55;
+        color: #94a3b8;
+        font-family: "Gill Sans", "Segoe UI", sans-serif;
+      }
+      button {
+        margin-top: 24px;
+        padding: 12px 28px;
+        min-height: 44px;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #f8fafc;
+        background: #0f766e;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-family: "Gill Sans", "Segoe UI", sans-serif;
+      }
+      button:active {
+        background: #0891b2;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icon.svg" alt="" />
+      <h1>Can't reach your repair workspace</h1>
+      <p>
+        Make sure the computer running Corolla Fix Helper is on, and that this
+        phone is on the same Wi-Fi or has Tailscale connected. Nothing is
+        stored in the cloud — the app talks directly to your computer.
+      </p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

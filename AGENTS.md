@@ -138,5 +138,6 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `docs/environment-variables.md` explains placeholder-only env values.
 - `docs/architecture.md` explains current app structure.
 - `docs/backup-restore.md` explains backup contents, safe restore behavior, and the round-trip drill.
+- `docs/mobile-access.md` explains phone access: same-Wi-Fi URLs, Tailscale (and `tailscale serve` for HTTPS), and the iPhone Home Screen install.
 - `docs/gcp-deployment.md` explains the intended Google Compute Engine path.
 - `docs/archive/` contains old plans, generated snapshots, and superseded deployment notes.
