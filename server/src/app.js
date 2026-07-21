@@ -41,7 +41,18 @@ function addFrontendRoutes(app, clientDistDir) {
     return;
   }
 
-  app.use(express.static(clientDistDir));
+  app.use(
+    express.static(clientDistDir, {
+      setHeaders(response, filePath) {
+        // The service worker script must revalidate on every check so a new
+        // deploy's worker is picked up promptly instead of after the browser's
+        // default script-cache window.
+        if (path.basename(filePath) === "sw.js") {
+          response.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    })
+  );
 
   app.use((request, response, next) => {
     if (request.method !== "GET" || request.path.startsWith("/api")) {
@@ -72,6 +83,13 @@ export function createApp(options = {}) {
     })
   );
   app.use(express.json());
+
+  // Repair data must never be served stale — not by the service worker (which
+  // already skips /api) and not by any HTTP cache in between.
+  app.use("/api", (_request, response, next) => {
+    response.setHeader("Cache-Control", "no-store");
+    next();
+  });
 
   addApiInfoRoute(app);
   app.use("/api/health", healthRouter);

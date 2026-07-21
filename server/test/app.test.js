@@ -303,6 +303,24 @@ test("serves the built frontend while keeping API routes separate", async () => 
   assert.equal(healthResponse.body.status, "ok");
 });
 
+test("caching headers: /api is no-store and sw.js revalidates, other statics do not", async () => {
+  fs.writeFileSync(path.join(testClientDistDir, "sw.js"), "// worker");
+
+  const [apiResponse, workerResponse, assetResponse] = await Promise.all([
+    request(app).get("/api/health"),
+    request(app).get("/sw.js"),
+    request(app).get("/assets/app.js"),
+  ]);
+
+  assert.equal(apiResponse.headers["cache-control"], "no-store");
+
+  assert.equal(workerResponse.status, 200);
+  assert.equal(workerResponse.headers["cache-control"], "no-cache");
+
+  assert.equal(assetResponse.status, 200);
+  assert.notEqual(assetResponse.headers["cache-control"], "no-cache");
+});
+
 test("documents API exposes favorite, bookmark, and tag fields", async () => {
   const response = await request(app).get("/api/documents");
 
