@@ -80,6 +80,10 @@ body::before {
   position: relative;
   z-index: 1;
   min-height: 100vh;
+  /* iOS Safari: 100vh includes the collapsed-toolbar area, so content can sit
+     behind the bottom bar. Dynamic viewport units track the real visible
+     height; browsers without dvh keep the 100vh line above. */
+  min-height: 100dvh;
 }
 
 * {
@@ -98,9 +102,29 @@ body::before {
 
 .editorial-app {
   min-height: 100vh;
+  min-height: 100dvh;
   color: var(--color-ink-900);
   font-family: var(--font-body);
   background: transparent;
+  /* Notch/home-indicator clearance for the installed app (viewport-fit=cover).
+     These resolve to 0 in a desktop browser. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Tailwind's min-h-screen is 100vh; keep it in step with the dvh fix. */
+.editorial-app.min-h-screen,
+.editorial-app .min-h-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* The mobile header is the topmost element in the installed app, where the
+   status bar overlays the page (black-translucent); keep its content below
+   the status bar. Plain Safari resolves the inset to 0 and keeps py-4. */
+.editorial-app > header {
+  padding-top: max(1rem, env(safe-area-inset-top));
 }
 
 .editorial-app :is(h1, h2, h3, h4) {
@@ -346,6 +370,34 @@ body::before {
     background-color 160ms ease,
     border-color 160ms ease,
     transform 160ms ease;
+  /* Kill the double-tap-to-zoom delay on touch devices. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS Safari zooms the page when a focused field's font is under 16px, which
+   is disorienting mid-form. Phones and tablets get full-size field text; the
+   desktop layout keeps the denser text-sm styling. */
+@media (max-width: 64rem) {
+  .editorial-app input:not([type="checkbox"]):not([type="radio"]),
+  .editorial-app textarea,
+  .editorial-app select {
+    font-size: 1rem;
+  }
+}
+
+/* Fingertip-sized tap targets (Apple's 44px guideline) on touch devices.
+   Buttons and pill links grow; desktop pointer layouts are untouched. */
+@media (pointer: coarse) {
+  .editorial-app button,
+  .editorial-app nav a,
+  .editorial-app a.rounded-full {
+    min-height: 44px;
+  }
+}
+
+.editorial-app .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
 }
 
 .editorial-app button:not(:disabled):hover,
