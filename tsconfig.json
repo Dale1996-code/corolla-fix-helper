@@ -33,6 +33,7 @@
     "server/test/documentServiceMutations.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
+    "server/test/networkAddresses.test.js",
     "server/test/noteService.test.js",
     "server/test/procedureService.test.js",
     "server/test/procedureSuggestionService.test.js",
