@@ -154,6 +154,24 @@ async function runChecks(baseUrl, { frontendBuilt }) {
       assert.equal(status, 200);
       assert.match(contentType, /html/);
     });
+
+    await check("PWA assets are served for phone installs", async () => {
+      const manifest = await requestJson(baseUrl, "/manifest.webmanifest");
+      assert.equal(manifest.status, 200);
+      assert.equal(manifest.body.name, "Corolla Fix Helper");
+
+      const icon = await requestText(baseUrl, "/apple-touch-icon.png");
+      assert.equal(icon.status, 200);
+      assert.match(icon.contentType, /image\/png/);
+
+      const worker = await requestText(baseUrl, "/sw.js");
+      assert.equal(worker.status, 200);
+      assert.match(worker.contentType, /javascript/);
+
+      const offline = await requestText(baseUrl, "/offline.html");
+      assert.equal(offline.status, 200);
+      assert.match(offline.text, /repair workspace/);
+    });
   } else {
     await check("GET / serves the API fallback notice", async () => {
       const { status, body } = await requestJson(baseUrl, "/");

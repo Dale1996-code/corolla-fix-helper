@@ -190,6 +190,7 @@ Understanding the app:
 Operating it:
 
 - [Runbook](docs/runbook.md) — start/stop, health checks, failure recovery
+- [Use it on your iPhone](docs/mobile-access.md) — same Wi-Fi, Tailscale, Add to Home Screen
 - [Troubleshooting](docs/troubleshooting.md)
 - [Backup and restore](docs/backup-restore.md)
 - [Quality testing the chatbot](docs/quality-testing.md)

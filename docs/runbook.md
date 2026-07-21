@@ -36,7 +36,9 @@ npm run build
 npm start
 ```
 
-App at `http://localhost:4000`.
+App at `http://localhost:4000`. The startup banner also prints the addresses a
+phone can use — see [mobile-access.md](mobile-access.md) for using the app from
+an iPhone (same Wi-Fi, Tailscale, Add to Home Screen).
 
 ### Windows guided script
 
