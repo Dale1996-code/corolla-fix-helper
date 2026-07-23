@@ -64,7 +64,7 @@ Everything lives in one SQLite file (`server/data/` by default) plus `server/upl
 
 ### Conventions & gotchas
 
-- **Rate limiting:** `/api/ask` and `/api/repair-plan` share an in-memory 20-req/min limiter (`middleware/rateLimit.js`) to cap accidental OpenAI spend — it is not authentication.
+- **Rate limiting:** `/api/ask` and `/api/repair-plan` each get their own in-memory 20-req/min limiter window (`middleware/rateLimit.js`), so combined they allow up to ~40 req/min. Tests can inject one shared limiter via `createApp({ aiRateLimiter })`. It caps accidental OpenAI spend — it is not authentication.
 - **Env-gated optional AI:** local OCR (`OCR_ENABLED`, runs only on low-text PDF pages, needs Poppler `pdftoppm` + Tesseract) and a second-pass Ask reranker (`RERANK_ENABLED`, off by default, must fall back to the hybrid order on any failure).
 - **UI vs route:** the `/search` route is branded **"Ask AI"** in the UI (nav item + page heading); the route path itself is unchanged.
 - **Windows:** use `services/tarExecutable.js` (resolves the native `%SystemRoot%\System32\tar.exe`) for any tar work — never spawn bare `tar`. Vite/Vitest/build can fail in a sandbox with an esbuild `Access is denied` error; rerun outside the sandbox before treating it as a real failure.

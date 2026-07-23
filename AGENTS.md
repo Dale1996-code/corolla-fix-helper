@@ -95,7 +95,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `ASK_DEBUG_METRICS=true` is a dev-only Ask visibility flag. It adds log-safe metrics (durations, counts, sizes, numeric IDs; no document text) to `/api/ask` responses and answer eval output, and it is off by default.
 - `RERANK_ENABLED`, `RERANK_CANDIDATE_LIMIT`, and `OPENAI_RERANK_MODEL` control the optional Ask reranker. The rerank model falls back to the answer model when unset.
 - After importing PDFs or re-running extraction with an OpenAI key configured, run `npm run embed:backfill` so new or OCR-created chunks have current embeddings.
-- `/api/ask` and `/api/repair-plan` use an in-memory 20-requests-per-minute limiter to reduce accidental OpenAI spend. It is not a substitute for authentication on any public deployment.
+- `/api/ask` and `/api/repair-plan` each get their own in-memory 20-requests-per-minute limiter window (so combined they allow up to ~40 req/min); a single shared limiter can be injected in tests via `createApp({ aiRateLimiter })`. It reduces accidental OpenAI spend but is not a substitute for authentication on any public deployment.
 
 ## Deployment And CI Notes
 
