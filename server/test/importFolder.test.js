@@ -145,6 +145,44 @@ function makeImportSource() {
   return sourceDir;
 }
 
+test("bulk importer imports distinct PDFs that share a basename across folders", async () => {
+  const sourceDir = fs.mkdtempSync(path.join(tempRoot, "samename-pdfs-"));
+  const chapterA = path.join(sourceDir, "chapterA");
+  const chapterB = path.join(sourceDir, "chapterB");
+  fs.mkdirSync(chapterA, { recursive: true });
+  fs.mkdirSync(chapterB, { recursive: true });
+
+  // Same basename, different bytes — MD5 already proves they are distinct.
+  fs.writeFileSync(
+    path.join(chapterA, "manual.pdf"),
+    createMinimalPdfBuffer({
+      pageText: "Chapter A brake bleeding torque sequence and caliper reseating steps.",
+    })
+  );
+  fs.writeFileSync(
+    path.join(chapterB, "manual.pdf"),
+    createMinimalPdfBuffer({
+      pageText: "Chapter B coolant thermostat replacement and bleeding procedure notes.",
+    })
+  );
+
+  const report = await importPdfFolder(sourceDir, {
+    system: "Reference",
+    documentType: "Repair Manual",
+    source: "Same Name Import Test",
+  });
+
+  assert.equal(report.totalPdfFiles, 2);
+  assert.equal(report.imported, 2, "both distinct PDFs should import despite the shared basename");
+  assert.equal(report.skipped, 0);
+  assert.equal(report.failed, 0);
+
+  const rows = db
+    .prepare("SELECT original_filename FROM documents WHERE source = ?")
+    .all("Same Name Import Test");
+  assert.equal(rows.length, 2);
+});
+
 test("bulk importer imports readable PDFs, skips byte duplicates, tolerates bad files, and counts image-only PDFs", async () => {
   const sourceDir = makeImportSource();
 

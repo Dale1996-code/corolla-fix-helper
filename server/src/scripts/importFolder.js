@@ -71,17 +71,6 @@ function getExistingDocumentByHash(fileMd5) {
     .get(fileMd5) || null;
 }
 
-function getExistingDocumentByFilename(filename) {
-  return db
-    .prepare(`
-      SELECT id, original_filename, stored_filename, extraction_status
-      FROM documents
-      WHERE lower(original_filename) = lower(?)
-      LIMIT 1
-    `)
-    .get(filename) || null;
-}
-
 function isNoTextStatus(status) {
   const normalizedStatus = String(status || "");
 
@@ -183,19 +172,9 @@ async function importSinglePdf(filePath, options, report) {
     return;
   }
 
-  const duplicateByFilename = getExistingDocumentByFilename(originalFilename);
-
-  if (duplicateByFilename) {
-    recordSkipped(report, {
-      filePath,
-      originalFilename,
-      reason: "duplicate_filename",
-      existingDocumentId: duplicateByFilename.id,
-      existingFilename: duplicateByFilename.original_filename,
-      imageOnly: existingDocumentIsImageOnly(duplicateByFilename),
-    });
-    return;
-  }
+  // Distinct files that happen to share a basename are NOT duplicates — the MD5
+  // check above already caught real byte-for-byte duplicates. buildStoredFilename
+  // disambiguates the on-disk name, so we import them.
 
   const extractionResult = await extractPdfData(fileBuffer);
 
