@@ -77,6 +77,34 @@ export function createApp(options = {}) {
   const repairPlanLimiter =
     options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
 
+  // Baseline security headers. This is a local-first app served same-origin, so
+  // a self-only CSP is safe: scripts/styles come from the built bundle, images
+  // (attachments) are same-origin plus data:/blob:, and PDFs open in new tabs
+  // rather than being framed. These headers are defense-in-depth, not a
+  // substitute for the access-control decision tracked separately.
+  app.use((_request, response, next) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "SAMEORIGIN");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'self'",
+        "img-src 'self' data: blob:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self'",
+        "connect-src 'self'",
+        "font-src 'self' data:",
+        "manifest-src 'self'",
+        "worker-src 'self'",
+      ].join("; ")
+    );
+    next();
+  });
+
   app.use(
     cors({
       origin: config.corsOrigin,
