@@ -254,6 +254,7 @@ Documented honestly so they don't surprise anyone:
 - **OCR depends on external tools.** Locally, Tesseract/Poppler must be installed on the machine running the backend or scanned-PDF OCR silently degrades (`ocr_unavailable:` status). The Docker image installs `poppler-utils` and `tesseract-ocr`, so containers are covered.
 - **Restore requires a stopped server.** The running app holds a live SQLite connection; restore replaces the file on disk. The restore CLI is fail-closed (validate → snapshot → atomic swap → rollback), but it can't protect against restoring while the server is writing.
 - **`file_md5` is a duplicate-detection key, not a security control.** MD5 collisions are not a realistic concern for personal PDFs, but don't reuse it as an integrity guarantee.
+- **Server runtime dependencies audit clean** (`npm --prefix server audit` → 0 vulnerabilities). Multer is pinned to ≥ 2.2.0 to clear the deeply-nested-field-name and aborted-upload DoS advisories, and both upload routes cap `files`/`fields`/`parts` in addition to `fileSize`. Keep it that way when bumping deps.
 - **Known dev-dependency advisories** (esbuild via Vite/Vitest) affect the local dev server only, not the built app. Do not run `npm audit fix --force` — it force-upgrades Vite across a major version. See [local-development.md](local-development.md).
 - **Cloud docs describe an *intended* deployment.** Nothing in this branch proves a live GCE deployment exists.
 
