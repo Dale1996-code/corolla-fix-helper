@@ -710,7 +710,7 @@ function NoteDetails({
           </div>
         ) : null}
 
-        <AttachmentPanel entityType="note" entityId={note.id} />
+        <AttachmentPanel key={note.id} entityType="note" entityId={note.id} />
       </div>
 
       {isEditing ? (

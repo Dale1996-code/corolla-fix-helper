@@ -808,7 +808,7 @@ function SymptomDetails({
           onSymptomUpdated={onSymptomUpdated}
         />
 
-        <AttachmentPanel entityType="symptom" entityId={symptom.id} />
+        <AttachmentPanel key={symptom.id} entityType="symptom" entityId={symptom.id} />
       </div>
 
       {isEditing ? (
