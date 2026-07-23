@@ -633,9 +633,9 @@ function ProcedureDetails({
 
         <div>
           <h4 className="font-semibold text-slate-900">Linked documents</h4>
-          {procedure.linkedDocuments.length ? (
+          {(procedure.linkedDocuments || []).length ? (
             <ul className="mt-2 space-y-2">
-              {procedure.linkedDocuments.map((document) => (
+              {(procedure.linkedDocuments || []).map((document) => (
                 <li key={document.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
                   <Link
                     className="font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"

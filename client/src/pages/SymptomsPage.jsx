@@ -773,9 +773,9 @@ function SymptomDetails({
 
         <div>
           <h4 className="font-semibold text-slate-900">Linked documents</h4>
-          {symptom.linkedDocuments.length ? (
+          {(symptom.linkedDocuments || []).length ? (
             <ul className="mt-2 space-y-2">
-              {symptom.linkedDocuments.map((document) => (
+              {(symptom.linkedDocuments || []).map((document) => (
                 <li key={document.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
                   <Link
                     className="font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
