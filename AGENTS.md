@@ -96,6 +96,10 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `RERANK_ENABLED`, `RERANK_CANDIDATE_LIMIT`, and `OPENAI_RERANK_MODEL` control the optional Ask reranker. The rerank model falls back to the answer model when unset.
 - After importing PDFs or re-running extraction with an OpenAI key configured, run `npm run embed:backfill` so new or OCR-created chunks have current embeddings.
 - `/api/ask` and `/api/repair-plan` each get their own in-memory 20-requests-per-minute limiter window (so combined they allow up to ~40 req/min); a single shared limiter can be injected in tests via `createApp({ aiRateLimiter })`. It reduces accidental OpenAI spend but is not a substitute for authentication on any public deployment.
+- Every response carries baseline security headers set in `src/app.js` (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, and a self-only `Content-Security-Policy`). The CSP assumes same-origin assets and PDFs opened in new tabs — if you add a CDN, external font host, or an embedded (`<iframe>`/`<object>`) viewer, widen the matching directive.
+- `src/database.js` sets `PRAGMA busy_timeout = 5000` so a concurrent writer (import/backfill alongside the server) waits briefly instead of failing with `SQLITE_BUSY`.
+- Both upload routes cap `files`/`fields`/`parts` (not just `fileSize`); multer is pinned `>= 2.2.0`. Keep the server audit clean (`npm --prefix server audit`).
+- Bulk import (`importFolder.js`) dedups strictly on MD5. Two distinct files that share a basename both import (the on-disk stored name is disambiguated); only byte-for-byte duplicates are skipped.
 
 ## Deployment And CI Notes
 
