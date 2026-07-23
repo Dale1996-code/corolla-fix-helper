@@ -668,7 +668,7 @@ function ProcedureDetails({
           onProcedureUpdated={onProcedureUpdated}
         />
 
-        <AttachmentPanel key={procedure.id} entityType="procedure" entityId={procedure.id} />
+        <AttachmentPanel key={`attachments-${procedure.id}`} entityType="procedure" entityId={procedure.id} />
       </div>
 
       {isEditing ? (
