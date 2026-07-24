@@ -157,6 +157,91 @@ test("checklist rows are keyboard/SR-accessible buttons with a selected state", 
   });
 });
 
+test("checking an item moves its checklist to the top of the list", async () => {
+  const checklistA = {
+    id: 1,
+    title: "Front brake job",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-02T09:00:00.000Z", // newer -> starts on top
+    items: [],
+    itemCount: 0,
+    doneItemCount: 0,
+  };
+  const checklistB = {
+    id: 2,
+    title: "Oil change",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-01T09:00:00.000Z", // older -> starts below A
+    items: [
+      {
+        id: 20,
+        text: "Drain oil",
+        isDone: false,
+        sortOrder: 0,
+        createdAt: "2026-05-01T08:05:00.000Z",
+        updatedAt: "2026-05-01T08:05:00.000Z",
+      },
+    ],
+    itemCount: 1,
+    doneItemCount: 0,
+  };
+  const touchedB = {
+    ...checklistB,
+    updatedAt: "2026-05-03T09:00:00.000Z", // server bumps activity -> now newest
+    items: [{ ...checklistB.items[0], isDone: true }],
+    doneItemCount: 1,
+  };
+
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/repair-checklists" && (!options.method || options.method === "GET")) {
+      return jsonResponse({ checklists: [checklistA, checklistB], total: 2 });
+    }
+    if (url === "/api/repair-checklists/2/items/20" && options.method === "PUT") {
+      return jsonResponse({ message: "Checklist item updated.", checklist: touchedB });
+    }
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/repair-checklists"]}>
+      <RepairChecklistsPage />
+    </MemoryRouter>
+  );
+
+  const rowNames = () =>
+    screen
+      .getAllByRole("button", { name: /^Select checklist:/ })
+      .map((button) => button.getAttribute("aria-label"));
+
+  // A starts on top (newer updatedAt).
+  await waitFor(() =>
+    expect(rowNames()).toEqual([
+      "Select checklist: Front brake job",
+      "Select checklist: Oil change",
+    ])
+  );
+
+  // Select B, then check its item off.
+  fireEvent.click(screen.getByRole("button", { name: "Select checklist: Oil change" }));
+  const toggle = await screen.findByRole("checkbox", { name: "Toggle done for Drain oil" });
+  fireEvent.click(toggle);
+
+  // The server bumps B's activity; the list re-sorts so B jumps to the top.
+  await waitFor(() =>
+    expect(rowNames()).toEqual([
+      "Select checklist: Oil change",
+      "Select checklist: Front brake job",
+    ])
+  );
+});
+
 test("clears a checklist's saved-status banner when a different checklist is selected", async () => {
   const checklistA = {
     id: 1,

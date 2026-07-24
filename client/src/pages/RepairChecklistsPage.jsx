@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
-import { formatDate } from "../lib/formatDate";
+import { formatDate, getSortTimestamp } from "../lib/formatDate";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -618,13 +618,20 @@ export function RepairChecklistsPage() {
   }, []);
 
   // Replace one checklist in state with a server-returned copy (item mutations
-  // and edits both return the full, refreshed checklist).
+  // and edits both return the full, refreshed checklist), then re-sort so the
+  // just-touched checklist moves to the top — matching the server's
+  // newest-activity-first order (updated_at DESC, id DESC) without a reload.
   function applyChecklistUpdate(updatedChecklist) {
-    setChecklists((currentChecklists) =>
-      currentChecklists.map((checklist) =>
+    setChecklists((currentChecklists) => {
+      const next = currentChecklists.map((checklist) =>
         checklist.id === updatedChecklist.id ? updatedChecklist : checklist
-      )
-    );
+      );
+
+      return next.sort((left, right) => {
+        const activityDelta = getSortTimestamp(right) - getSortTimestamp(left);
+        return activityDelta !== 0 ? activityDelta : right.id - left.id;
+      });
+    });
   }
 
   function handleCreateFormChange(event) {

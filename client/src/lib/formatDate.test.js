@@ -1,5 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { formatDate, getSortTimestamp } from "./formatDate.js";
+import {
+  formatDate,
+  getSortTimestamp,
+  normalizeSqliteTimestamp,
+} from "./formatDate.js";
+
+describe("normalizeSqliteTimestamp", () => {
+  it("marks a bare SQLite timestamp (UTC, no zone) as explicit UTC", () => {
+    // SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" in UTC; JS parses that
+    // space-separated form as LOCAL time, so it must be marked UTC.
+    expect(normalizeSqliteTimestamp("2026-01-15 12:00:00")).toBe("2026-01-15T12:00:00Z");
+  });
+
+  it("leaves ISO strings that already carry a zone untouched", () => {
+    expect(normalizeSqliteTimestamp("2026-06-15T05:22:52Z")).toBe("2026-06-15T05:22:52Z");
+  });
+
+  it("passes non-timestamp values through unchanged", () => {
+    expect(normalizeSqliteTimestamp("")).toBe("");
+    expect(normalizeSqliteTimestamp(null)).toBe(null);
+  });
+});
 
 describe("formatDate", () => {
   it("returns 'Not available' for empty or invalid values", () => {
@@ -33,5 +54,11 @@ describe("getSortTimestamp", () => {
   it("returns 0 when no usable timestamp exists", () => {
     expect(getSortTimestamp({})).toBe(0);
     expect(getSortTimestamp({ updatedAt: "nonsense" })).toBe(0);
+  });
+
+  it("treats a bare SQLite timestamp as UTC when sorting", () => {
+    expect(getSortTimestamp({ updatedAt: "2026-01-15 12:00:00" })).toBe(
+      Date.UTC(2026, 0, 15, 12, 0, 0)
+    );
   });
 });
