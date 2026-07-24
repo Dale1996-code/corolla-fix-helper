@@ -197,6 +197,50 @@ test("adds, checks off, edits, reorders, and deletes checklist items", async () 
   assert.equal(missingItem.status, 404);
 });
 
+test("body-less requests return JSON 400, not an HTML 500", async () => {
+  // With no body/content-type express.json() leaves request.body undefined, which
+  // used to reach request.body.title and throw a TypeError, surfacing as an
+  // unhandled HTML 500 instead of a clean validation error.
+  const emptyCreate = await request(app).post("/api/repair-checklists");
+  assert.equal(emptyCreate.status, 400);
+  assert.match(emptyCreate.body.error, /Title is required/);
+
+  const created = await request(app).post("/api/repair-checklists").send({ title: "Body guard" });
+  const id = created.body.checklist.id;
+
+  const emptyItem = await request(app).post(`/api/repair-checklists/${id}/items`);
+  assert.equal(emptyItem.status, 400);
+  assert.match(emptyItem.body.error, /Item text is required/);
+});
+
+test("isDone requires a real boolean and stores it faithfully", async () => {
+  const created = await request(app).post("/api/repair-checklists").send({ title: "Boolean job" });
+  const id = created.body.checklist.id;
+  const added = await request(app)
+    .post(`/api/repair-checklists/${id}/items`)
+    .send({ text: "Toggle me" });
+  const itemId = added.body.checklist.items[0].id;
+
+  // A string "false" is truthy in JS; it must be rejected, not stored as done.
+  const stringFalse = await request(app)
+    .put(`/api/repair-checklists/${id}/items/${itemId}`)
+    .send({ isDone: "false" });
+  assert.equal(stringFalse.status, 400);
+  assert.match(stringFalse.body.error, /isDone/);
+
+  const setTrue = await request(app)
+    .put(`/api/repair-checklists/${id}/items/${itemId}`)
+    .send({ isDone: true });
+  assert.equal(setTrue.status, 200);
+  assert.equal(setTrue.body.checklist.items[0].isDone, true);
+
+  const setFalse = await request(app)
+    .put(`/api/repair-checklists/${id}/items/${itemId}`)
+    .send({ isDone: false });
+  assert.equal(setFalse.status, 200);
+  assert.equal(setFalse.body.checklist.items[0].isDone, false);
+});
+
 test("item routes return 404 for an unknown checklist", async () => {
   const response = await request(app)
     .post("/api/repair-checklists/999999/items")

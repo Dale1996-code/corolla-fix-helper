@@ -26,6 +26,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: config.maxUploadSizeMb * 1024 * 1024,
+    // fileSize alone does not bound field/part counts, so cap them too: this
+    // route only needs one file plus a handful of metadata text fields.
+    files: 1,
+    fields: 20,
+    parts: 25,
   },
   fileFilter: (_request, file, callback) => {
     const isPdf =

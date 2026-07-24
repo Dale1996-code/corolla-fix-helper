@@ -6,6 +6,18 @@ import { parsePositiveInt } from "../utils/http.js";
 
 export const repairChecklistsRouter = Router();
 
+// Normalize the parsed body to a plain object so handlers can read fields off it
+// without a guard. A missing body, or a JSON scalar like `null`/`"x"`, otherwise
+// left request.body undefined/non-object and threw a TypeError (surfacing as an
+// HTML 500) before validation could return a clean JSON 400.
+repairChecklistsRouter.use((request, _response, next) => {
+  if (request.body === null || typeof request.body !== "object" || Array.isArray(request.body)) {
+    request.body = {};
+  }
+
+  next();
+});
+
 // A checklist status is stored in snake_case; the client maps these to display
 // labels (for example `in_progress` renders as "In progress").
 const allowedStatusValues = new Set(["planned", "in_progress", "blocked", "done"]);
@@ -477,6 +489,13 @@ repairChecklistsRouter.put("/:id/items/:itemId", (request, response) => {
     if (!text) {
       response.status(400).json({
         error: "Item text is required.",
+      });
+      return;
+    }
+
+    if (hasOwnField(request.body, "isDone") && typeof request.body.isDone !== "boolean") {
+      response.status(400).json({
+        error: "isDone must be a boolean (true or false).",
       });
       return;
     }

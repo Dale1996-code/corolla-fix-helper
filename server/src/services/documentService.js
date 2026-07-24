@@ -9,6 +9,7 @@ import {
   setDocumentTags,
 } from "./documentTagService.js";
 import { rebuildDocumentChunksFromPages } from "./documentChunkService.js";
+import { clearChunkEmbeddingCache } from "./chunkEmbeddingService.js";
 import { extractPdfData } from "./pdfService.js";
 import { getVehicleId } from "./vehicleService.js";
 import {
@@ -110,6 +111,10 @@ export async function deleteDocument(document) {
   if (movedAside) {
     await fs.rm(movedAside, { force: true });
   }
+
+  // The in-memory embedding cache still holds this document's chunks; drop it so
+  // deleted PDF text can no longer be retrieved, cited, or sent to OpenAI.
+  clearChunkEmbeddingCache();
 
   return {
     symptomLinksRemoved: linkedCounts.symptom_count,
@@ -711,4 +716,8 @@ export function updateDocumentMetadata(documentId, fields) {
     fields.isBookmarked ? 1 : 0,
     documentId
   );
+
+  // The cache carries per-chunk document title/system copied at load time; drop
+  // it so retrieval citations reflect the updated metadata instead of stale values.
+  clearChunkEmbeddingCache();
 }

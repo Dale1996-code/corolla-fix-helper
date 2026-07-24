@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { buildEntityLink } from "../lib/navigation";
@@ -309,6 +309,11 @@ export function RepairPlannerPage() {
   const [form, setForm] = useState(defaultForm);
   const [run, setRun] = useState(initialRun);
   const runRef = useRef(initialRun);
+  const abortRef = useRef(null);
+
+  // Abort any in-flight repair-plan stream when the page unmounts so navigating
+  // away does not leak the fetch (and its upstream OpenAI request).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const isRunning = run.status === "running";
 
@@ -369,11 +374,17 @@ export function RepairPlannerPage() {
 
     updateRun(() => ({ ...initialRun, status: "running", statusMessage: "Starting..." }));
 
+    // Replace any prior in-flight stream with a fresh controller for this run.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const response = await fetch("/api/repair-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, brief: trimmedBrief }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -427,11 +438,21 @@ export function RepairPlannerPage() {
         current.status === "running" ? { ...current, status: "done", statusMessage: "" } : current
       );
     } catch (error) {
+      // An aborted stream (unmount, or a newer run superseding this one) is not a
+      // user-facing failure — leave the run state alone.
+      if (error.name === "AbortError") {
+        return;
+      }
+
       updateRun((current) => ({
         ...current,
         status: "error",
         message: error.message || "Could not build the plan.",
       }));
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }
 

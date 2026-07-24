@@ -52,7 +52,7 @@ The repo deliberately avoids heavy dependencies — there is no OpenAI SDK or ag
 
 Both stay grounded in uploaded PDFs and degrade gracefully to an "AI not configured" state without `OPENAI_API_KEY`:
 
-1. **Ask your documents** (`POST /api/ask`): RAG flow. PDF upload/extraction → `documentChunkService.js` writes page-aware chunks to `document_chunks` → `embed:backfill` stores Float32 embedding BLOBs (versioned as `model@dimensions`; mismatched versions are ignored at query time) → `chunkRetrievalService.js` embeds the question, cosine-scans an in-memory embedding cache, and fuses with keyword ranking → `aiAnswerService.js` builds citations and calls OpenAI.
+1. **Ask your documents** (`POST /api/ask`): RAG flow. PDF upload/extraction → `documentChunkService.js` writes page-aware chunks to `document_chunks` → `embed:backfill` stores Float32 embedding BLOBs (versioned as `model@dimensions`; a mismatched version is ignored for **semantic** ranking only — the chunk's text still participates in keyword ranking, so a model/dimension change never makes a document vanish from Ask) → `chunkRetrievalService.js` embeds the question, cosine-scans an in-memory embedding cache, and fuses with keyword ranking → `aiAnswerService.js` builds citations and calls OpenAI.
 
 2. **Repair Planner** (`POST /api/repair-plan`, SSE streaming): a hand-rolled tool-calling agent loop in `server/src/services/agent/` (`repairPlannerAgent.js` loop, `repairTools.js` deterministic tools + JSON schemas, `openAiResponsesClient.js` streaming client, `tracing.js`). Events stream to `RepairPlannerPage.jsx` as `data: <json>` frames (`status`, `tool_call`, `text_delta`, `done`, etc.). `docs/repair-planner.md` documents the event protocol, readiness rubric, and how to add tools.
 
@@ -64,7 +64,7 @@ Everything lives in one SQLite file (`server/data/` by default) plus `server/upl
 
 ### Conventions & gotchas
 
-- **Rate limiting:** `/api/ask` and `/api/repair-plan` share an in-memory 20-req/min limiter (`middleware/rateLimit.js`) to cap accidental OpenAI spend — it is not authentication.
+- **Rate limiting:** `/api/ask` and `/api/repair-plan` each get their own in-memory 20-req/min limiter window (`middleware/rateLimit.js`), so combined they allow up to ~40 req/min. Tests can inject one shared limiter via `createApp({ aiRateLimiter })`. It caps accidental OpenAI spend — it is not authentication.
 - **Env-gated optional AI:** local OCR (`OCR_ENABLED`, runs only on low-text PDF pages, needs Poppler `pdftoppm` + Tesseract) and a second-pass Ask reranker (`RERANK_ENABLED`, off by default, must fall back to the hybrid order on any failure).
 - **UI vs route:** the `/search` route is branded **"Ask AI"** in the UI (nav item + page heading); the route path itself is unchanged.
 - **Windows:** use `services/tarExecutable.js` (resolves the native `%SystemRoot%\System32\tar.exe`) for any tar work — never spawn bare `tar`. Vite/Vitest/build can fail in a sandbox with an esbuild `Access is denied` error; rerun outside the sandbox before treating it as a real failure.

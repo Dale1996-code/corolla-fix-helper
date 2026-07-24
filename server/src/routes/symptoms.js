@@ -305,6 +305,13 @@ export function createSymptomsRouter({
 
     try {
       const vehicleId = getVehicleId();
+
+      // Remove attachments before the entity row. If this cleanup throws, the
+      // symptom is still present, so the (entity_type, entity_id) rows and their
+      // image files are never stranded after the owner is gone (which would
+      // otherwise persist in every backup).
+      await deleteAttachmentsForEntity("symptom", symptomId);
+
       const removed = deleteSymptom(vehicleId, symptomId);
 
       if (removed === 0) {
@@ -313,8 +320,6 @@ export function createSymptomsRouter({
         });
         return;
       }
-
-      await deleteAttachmentsForEntity("symptom", symptomId);
 
       response.json({
         message: "Symptom deleted.",

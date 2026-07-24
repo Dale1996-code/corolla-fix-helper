@@ -267,6 +267,11 @@ proceduresRouter.delete("/:id", async (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
+
+    // Remove attachments before the entity row so a cleanup failure can't strand
+    // attachment rows/files after the owning procedure is already gone.
+    await deleteAttachmentsForEntity("procedure", procedureId);
+
     const removed = deleteProcedure(vehicleId, procedureId);
 
     if (removed === 0) {
@@ -275,8 +280,6 @@ proceduresRouter.delete("/:id", async (request, response) => {
       });
       return;
     }
-
-    await deleteAttachmentsForEntity("procedure", procedureId);
 
     response.json({
       message: "Procedure deleted.",

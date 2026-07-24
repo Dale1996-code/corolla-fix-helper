@@ -145,6 +145,84 @@ function makeImportSource() {
   return sourceDir;
 }
 
+test("bulk importer leaves no orphan document row when chunk building fails", async () => {
+  const sourceDir = fs.mkdtempSync(path.join(tempRoot, "partial-fail-pdfs-"));
+  fs.writeFileSync(
+    path.join(sourceDir, "partial.pdf"),
+    createMinimalPdfBuffer({
+      pageText: "Corolla partial import failure recovery test with enough readable text.",
+    })
+  );
+
+  const failingReport = await importPdfFolder(
+    sourceDir,
+    { system: "Reference", documentType: "Repair Manual", source: "Partial Fail Test" },
+    {
+      rebuildChunks: () => {
+        throw new Error("simulated chunk build failure");
+      },
+    }
+  );
+
+  assert.equal(failingReport.imported, 0);
+  assert.equal(failingReport.failed, 1);
+  assert.equal(failingReport.results.failed[0].reason, "import_failed");
+
+  // The committed document row (and any chunks) must be cleaned up, otherwise the
+  // file_md5 dedup would permanently block re-importing this file.
+  const orphanRows = db
+    .prepare("SELECT COUNT(*) AS total FROM documents WHERE source = ?")
+    .get("Partial Fail Test").total;
+  assert.equal(Number(orphanRows), 0, "failed import must not leave an orphan documents row");
+
+  // Re-importing with a working chunk builder should now succeed (not be blocked
+  // as a duplicate by the orphaned row's md5).
+  const retryReport = await importPdfFolder(sourceDir, {
+    system: "Reference",
+    documentType: "Repair Manual",
+    source: "Partial Fail Test",
+  });
+  assert.equal(retryReport.imported, 1, "re-import should succeed after cleanup");
+});
+
+test("bulk importer imports distinct PDFs that share a basename across folders", async () => {
+  const sourceDir = fs.mkdtempSync(path.join(tempRoot, "samename-pdfs-"));
+  const chapterA = path.join(sourceDir, "chapterA");
+  const chapterB = path.join(sourceDir, "chapterB");
+  fs.mkdirSync(chapterA, { recursive: true });
+  fs.mkdirSync(chapterB, { recursive: true });
+
+  // Same basename, different bytes — MD5 already proves they are distinct.
+  fs.writeFileSync(
+    path.join(chapterA, "manual.pdf"),
+    createMinimalPdfBuffer({
+      pageText: "Chapter A brake bleeding torque sequence and caliper reseating steps.",
+    })
+  );
+  fs.writeFileSync(
+    path.join(chapterB, "manual.pdf"),
+    createMinimalPdfBuffer({
+      pageText: "Chapter B coolant thermostat replacement and bleeding procedure notes.",
+    })
+  );
+
+  const report = await importPdfFolder(sourceDir, {
+    system: "Reference",
+    documentType: "Repair Manual",
+    source: "Same Name Import Test",
+  });
+
+  assert.equal(report.totalPdfFiles, 2);
+  assert.equal(report.imported, 2, "both distinct PDFs should import despite the shared basename");
+  assert.equal(report.skipped, 0);
+  assert.equal(report.failed, 0);
+
+  const rows = db
+    .prepare("SELECT original_filename FROM documents WHERE source = ?")
+    .all("Same Name Import Test");
+  assert.equal(rows.length, 2);
+});
+
 test("bulk importer imports readable PDFs, skips byte duplicates, tolerates bad files, and counts image-only PDFs", async () => {
   const sourceDir = makeImportSource();
 

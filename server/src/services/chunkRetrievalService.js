@@ -165,10 +165,12 @@ export function retrieveKeywordChunks(question, { limit = 8 } = {}) {
   return scored.slice(0, getSafeLimit(limit));
 }
 
-// Keyword candidates for hybrid retrieval. Includes chunks that are either not
-// embedded yet (embedding IS NULL) or embedded at the current version, so newly
-// uploaded PDFs are findable by keyword before embed:backfill runs. Chunks with
-// a stale embedding version are excluded so they are not silently resurfaced.
+// Keyword candidates for hybrid retrieval. Keyword ranking runs over EVERY
+// chunk regardless of embedding state: chunks not embedded yet (embedding IS
+// NULL) so newly uploaded PDFs are findable before embed:backfill runs, and
+// chunks embedded at a stale version so a model/dimension change never makes
+// valid documents vanish from Ask. The embedding version only gates semantic
+// ranking (loadChunkEmbeddingCache), never keyword matching.
 function retrieveKeywordCandidates(terms) {
   const rows = db
     .prepare(`
@@ -183,10 +185,8 @@ function retrieveKeywordCandidates(terms) {
         documents.system
       FROM document_chunks
       JOIN documents ON documents.id = document_chunks.document_id
-      WHERE document_chunks.embedding IS NULL
-         OR document_chunks.embedding_version = ?
     `)
-    .all(config.openAiEmbeddingVersion);
+    .all();
 
   return rows
     .map((row) => normalizeKeywordResult(row, terms))
