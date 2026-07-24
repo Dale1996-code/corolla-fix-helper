@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
-import { formatDate } from "../lib/formatDate";
+import { formatDate, getSortTimestamp } from "../lib/formatDate";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -188,9 +188,12 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
             const isSelected = checklist.id === selectedChecklistId;
 
             return (
-              <div
+              <button
                 key={checklist.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm ${
+                type="button"
+                aria-current={isSelected ? "true" : undefined}
+                aria-label={`Select checklist: ${checklist.title}`}
+                className={`${listGridClass} w-full items-center border-b border-slate-100 px-4 py-3 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 ${
                   isSelected ? "bg-sky-50" : "hover:bg-slate-50"
                 }`}
                 onClick={() => onSelectChecklist(checklist.id)}
@@ -203,7 +206,7 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
                 <span className="truncate text-xs text-slate-600">
                   {formatDate(checklist.updatedAt)}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -615,13 +618,20 @@ export function RepairChecklistsPage() {
   }, []);
 
   // Replace one checklist in state with a server-returned copy (item mutations
-  // and edits both return the full, refreshed checklist).
+  // and edits both return the full, refreshed checklist), then re-sort so the
+  // just-touched checklist moves to the top — matching the server's
+  // newest-activity-first order (updated_at DESC, id DESC) without a reload.
   function applyChecklistUpdate(updatedChecklist) {
-    setChecklists((currentChecklists) =>
-      currentChecklists.map((checklist) =>
+    setChecklists((currentChecklists) => {
+      const next = currentChecklists.map((checklist) =>
         checklist.id === updatedChecklist.id ? updatedChecklist : checklist
-      )
-    );
+      );
+
+      return next.sort((left, right) => {
+        const activityDelta = getSortTimestamp(right) - getSortTimestamp(left);
+        return activityDelta !== 0 ? activityDelta : right.id - left.id;
+      });
+    });
   }
 
   function handleCreateFormChange(event) {

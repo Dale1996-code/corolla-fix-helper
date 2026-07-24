@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { attachmentFileUrl, fetchAllImageAttachments } from "../lib/apiClient";
@@ -91,7 +91,16 @@ function buildQueryString(form) {
   return searchParams.toString();
 }
 
-async function fetchSearchSection(endpoint, form, setState, fallbackFilters) {
+// `shouldApply` guards against a stale response overwriting newer state: a slow
+// older search (or one superseded by a newer search or Clear) resolves after a
+// newer request, so we drop its result instead of clobbering the latest one.
+async function fetchSearchSection(
+  endpoint,
+  form,
+  setState,
+  fallbackFilters,
+  { shouldApply = () => true } = {}
+) {
   setState((currentState) => ({
     ...currentState,
     loading: true,
@@ -109,6 +118,10 @@ async function fetchSearchSection(endpoint, form, setState, fallbackFilters) {
       throw new Error(payload.error || "Could not load search results.");
     }
 
+    if (!shouldApply()) {
+      return;
+    }
+
     setState({
       loading: false,
       error: "",
@@ -122,6 +135,10 @@ async function fetchSearchSection(endpoint, form, setState, fallbackFilters) {
       filters: payload.filters || fallbackFilters,
     });
   } catch (error) {
+    if (!shouldApply()) {
+      return;
+    }
+
     setState((currentState) => ({
       ...currentState,
       loading: false,
@@ -619,14 +636,17 @@ function AskDocumentsSection() {
 function DocumentsSection() {
   const [form, setForm] = useState(defaultDocumentsForm);
   const [state, setState] = useState(createSectionState(defaultDocumentsFilters));
+  const requestSeq = useRef(0);
   const hasKeyword = form.q.trim().length > 0;
 
   async function runSearch(nextForm = form) {
+    const seq = (requestSeq.current += 1);
     await fetchSearchSection(
       "/api/search/documents",
       nextForm,
       setState,
-      defaultDocumentsFilters
+      defaultDocumentsFilters,
+      { shouldApply: () => seq === requestSeq.current }
     );
   }
 
@@ -770,14 +790,17 @@ function DocumentsSection() {
 function SymptomsSection() {
   const [form, setForm] = useState(defaultSymptomsForm);
   const [state, setState] = useState(createSectionState(defaultSymptomsFilters));
+  const requestSeq = useRef(0);
   const hasKeyword = form.q.trim().length > 0;
 
   async function runSearch(nextForm = form) {
+    const seq = (requestSeq.current += 1);
     await fetchSearchSection(
       "/api/search/symptoms",
       nextForm,
       setState,
-      defaultSymptomsFilters
+      defaultSymptomsFilters,
+      { shouldApply: () => seq === requestSeq.current }
     );
   }
 
@@ -874,14 +897,17 @@ function SymptomsSection() {
 function ProceduresSection() {
   const [form, setForm] = useState(defaultProceduresForm);
   const [state, setState] = useState(createSectionState(defaultProceduresFilters));
+  const requestSeq = useRef(0);
   const hasKeyword = form.q.trim().length > 0;
 
   async function runSearch(nextForm = form) {
+    const seq = (requestSeq.current += 1);
     await fetchSearchSection(
       "/api/search/procedures",
       nextForm,
       setState,
-      defaultProceduresFilters
+      defaultProceduresFilters,
+      { shouldApply: () => seq === requestSeq.current }
     );
   }
 
@@ -981,10 +1007,14 @@ function ProceduresSection() {
 function NotesSection() {
   const [form, setForm] = useState(defaultNotesForm);
   const [state, setState] = useState(createSectionState(defaultNotesFilters));
+  const requestSeq = useRef(0);
   const hasKeyword = form.q.trim().length > 0;
 
   async function runSearch(nextForm = form) {
-    await fetchSearchSection("/api/search/notes", nextForm, setState, defaultNotesFilters);
+    const seq = (requestSeq.current += 1);
+    await fetchSearchSection("/api/search/notes", nextForm, setState, defaultNotesFilters, {
+      shouldApply: () => seq === requestSeq.current,
+    });
   }
 
   useEffect(() => {

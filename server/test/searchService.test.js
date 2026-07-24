@@ -268,6 +268,19 @@ test("searchSymptoms sorts alphabetically when sort is title", () => {
   );
 });
 
+test("searchSymptoms sorts oldest first when sort is oldest", () => {
+  insertSymptom({ title: "Oldest", updatedAt: "2026-07-01 10:00:00" });
+  insertSymptom({ title: "Newest", updatedAt: "2026-07-03 10:00:00" });
+  insertSymptom({ title: "Middle", updatedAt: "2026-07-02 10:00:00" });
+
+  const results = searchSymptoms({ query: "", sort: "oldest" });
+
+  assert.deepEqual(
+    results.map((symptom) => symptom.title),
+    ["Oldest", "Middle", "Newest"]
+  );
+});
+
 test("searchSymptoms surfaces linked documents in the mapped shape", () => {
   const symptomId = insertSymptom({ title: "Pulsing pedal", system: "Brakes" });
   const rotorDocId = insertDocument("Rotor runout spec");

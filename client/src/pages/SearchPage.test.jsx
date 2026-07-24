@@ -672,6 +672,76 @@ test("SearchPage Ask request omits attachmentId when no photo is selected", asyn
   expect(askBodies[0]).not.toHaveProperty("attachmentId");
 });
 
+test("a slow in-flight search does not overwrite a later Clear", async () => {
+  let resolveSlow;
+  const slow = new Promise((resolve) => {
+    resolveSlow = resolve;
+  });
+
+  const slowResult = {
+    id: 1,
+    title: "SLOW OLD",
+    originalFilename: "slow-old.pdf",
+    system: "Engine",
+    documentType: "Reference",
+    source: "Manual",
+    pageCount: 1,
+    extractionStatus: "completed",
+    isFavorite: false,
+    snippet: "SLOW OLD",
+    snippetField: "Extracted text",
+  };
+
+  const fetchMock = vi.fn((url) => {
+    // Initial load and Clear both hit the no-query URL and return empty.
+    if (url === "/api/search/documents?sort=relevance") {
+      return jsonResponse(emptySearchResponse({ systems: ["Engine"], documentTypes: ["Reference"] }));
+    }
+    if (url === "/api/search/documents?q=slow&sort=relevance") {
+      return slow.then(() => ({
+        ok: true,
+        json: async () => ({ results: [slowResult], total: 1, filters: {} }),
+      }));
+    }
+    if (url === "/api/search/symptoms?sort=newest") return jsonResponse(emptySearchResponse());
+    if (url === "/api/search/procedures?sort=newest") return jsonResponse(emptySearchResponse());
+    if (url === "/api/search/notes?sort=newest") return jsonResponse(emptySearchResponse());
+    if (url === "/api/attachments/all") return jsonResponse({ attachments: [], total: 0 });
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const documentsSection = (await screen.findByRole("heading", { name: "Documents" })).closest(
+    "section"
+  );
+  const keyword = within(documentsSection).getByRole("textbox", { name: "Keyword" });
+
+  // Start a slow search, then Clear before it resolves (Clear stays enabled while
+  // the Search button is disabled/loading).
+  fireEvent.change(keyword, { target: { value: "slow" } });
+  fireEvent.click(within(documentsSection).getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?q=slow&sort=relevance")
+  );
+
+  fireEvent.click(within(documentsSection).getByRole("button", { name: "Clear" }));
+  // Clear's reload resolves immediately; wait until it settles (loading cleared).
+  await within(documentsSection).findByRole("button", { name: "Search" });
+
+  // Now the older, slower search finally resolves — it must be dropped, not
+  // allowed to repopulate results the user just cleared.
+  resolveSlow();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  expect(within(documentsSection).queryByText("SLOW OLD")).not.toBeInTheDocument();
+});
+
 test("SearchPage renders separate search sections for all entity types", async () => {
   const fetchMock = vi.fn((url) => {
     if (url === "/api/search/documents?sort=relevance") {
