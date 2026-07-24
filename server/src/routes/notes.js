@@ -232,6 +232,11 @@ notesRouter.delete("/:id", async (request, response) => {
 
   try {
     const vehicleId = getVehicleId();
+
+    // Remove attachments before the entity row so a cleanup failure can't strand
+    // attachment rows/files after the owning note is already gone.
+    await deleteAttachmentsForEntity("note", noteId);
+
     const removed = deleteNote(vehicleId, noteId);
 
     if (removed === 0) {
@@ -240,8 +245,6 @@ notesRouter.delete("/:id", async (request, response) => {
       });
       return;
     }
-
-    await deleteAttachmentsForEntity("note", noteId);
 
     response.json({
       message: "Note deleted.",
