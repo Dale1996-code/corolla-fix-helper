@@ -128,6 +128,13 @@ function sortSearchResults(results, sort, hasQuery) {
     );
   }
 
+  // Oldest-first is the reverse of the newest-first comparator. Checked before
+  // the `!hasQuery` fallback so it also applies to an unfiltered/no-query list
+  // (the symptom/procedure/note search UIs offer this option).
+  if (sort === "oldest") {
+    return [...results].sort((left, right) => compareNewest(right, left));
+  }
+
   if (sort === "newest" || !hasQuery) {
     return [...results].sort(compareNewest);
   }
