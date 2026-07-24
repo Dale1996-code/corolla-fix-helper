@@ -182,7 +182,7 @@ curl.exe "http://localhost:4000/api/search/documents?q=caliper&system=Brakes"
 | Body field | Required | Notes |
 | --- | --- | --- |
 | `question` | ✅ | max 2000 characters |
-| `history` | – | prior `{question, answer}` turns; used to rewrite vague follow-ups into a standalone question |
+| `history` | – | prior conversation turns as `{ role, content }` objects (`role` is `"user"` or `"assistant"`, anything else is treated as `"user"`); used to rewrite vague follow-ups into a standalone question. Only the most recent turns are kept and each `content` is truncated. Turns in any other shape (e.g. `{question, answer}`) are ignored, silently dropping follow-up context |
 | `attachmentId` | – | id of one **already-saved** image attachment (Vision Ask) — never raw image data |
 
 ```powershell
