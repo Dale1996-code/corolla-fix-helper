@@ -20,6 +20,7 @@ export default [
       sourceType: "module",
       globals: {
         AbortController: "readonly",
+        AbortSignal: "readonly",
         Buffer: "readonly",
         clearInterval: "readonly",
         clearTimeout: "readonly",
@@ -27,6 +28,7 @@ export default [
         fetch: "readonly",
         performance: "readonly",
         process: "readonly",
+        ReadableStream: "readonly",
         setInterval: "readonly",
         setTimeout: "readonly",
         structuredClone: "readonly",

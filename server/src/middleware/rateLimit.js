@@ -15,12 +15,24 @@ export function createRateLimiter({
   // key -> { count, resetAt }
   const hits = new Map();
 
-  return function rateLimit(request, response, next) {
+  // Drop windows that have already expired so the map cannot grow without bound
+  // over a long-running process (a new key/IP each request would otherwise leak).
+  function evictExpired(currentTime) {
+    for (const [existingKey, existingEntry] of hits) {
+      if (currentTime >= existingEntry.resetAt) {
+        hits.delete(existingKey);
+      }
+    }
+  }
+
+  function rateLimit(request, response, next) {
     const key = request.ip || request.socket?.remoteAddress || "unknown";
     const currentTime = now();
     const entry = hits.get(key);
 
     if (!entry || currentTime >= entry.resetAt) {
+      // Sweep other stale windows whenever we open a fresh one.
+      evictExpired(currentTime);
       hits.set(key, { count: 1, resetAt: currentTime + windowMs });
       next();
       return;
@@ -36,5 +48,10 @@ export function createRateLimiter({
     }
 
     next();
-  };
+  }
+
+  // Test/introspection hook: number of tracked windows currently in the map.
+  rateLimit.trackedKeyCount = () => hits.size;
+
+  return rateLimit;
 }

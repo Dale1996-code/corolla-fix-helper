@@ -14,6 +14,7 @@
 // injectable so tests run without an API key and without network calls.
 
 import { config } from "../config.js";
+import { postToOpenAiResponses } from "./aiAnswerService.js";
 
 // Keep the per-chunk snippet short so the whole prompt stays bounded even with a
 // wide candidate pool.
@@ -158,7 +159,7 @@ function parseOpenAiOutputText(payload) {
  * Ask OpenAI to rank the candidate chunks by usefulness for the question.
  * Returns the raw model text; the caller parses and validates it defensively.
  *
- * @param {{ question: string, candidates: any[], model?: string, fetchImpl?: Function }} params
+ * @param {{ question: string, candidates: any[], model?: string, fetchImpl?: typeof fetch }} params
  * @returns {Promise<string>}
  */
 export async function generateChunkRankingFromOpenAi({
@@ -189,17 +190,17 @@ export async function generateChunkRankingFromOpenAi({
     candidateText,
   ].join("\n");
 
-  const response = await fetchImpl("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openAiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  // Route through the shared helper so the reranker inherits the request timeout
+  // and the daily-call ceiling. Any failure here is caught by rerankChunks, which
+  // falls back to the untouched fusion order.
+  const response = await postToOpenAiResponses(
+    {
       model,
       input: prompt,
-    }),
-  });
+      max_output_tokens: config.openAiMaxOutputTokens,
+    },
+    { fetchImpl }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();

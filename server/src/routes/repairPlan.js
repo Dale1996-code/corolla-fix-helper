@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { runRepairPlannerAgent } from "../services/agent/repairPlannerAgent.js";
 
+// Cap the brief (and each optional field) so a giant pasted payload cannot be
+// forwarded to the model. Briefs are longer-form than an Ask question, hence the
+// higher limit.
+export const MAX_BRIEF_LENGTH = 4000;
+export const MAX_PLAN_FIELD_LENGTH = 2000;
+
 // Streaming repair-plan endpoint.
 //
 // POST /api/repair-plan responds with Server-Sent Events. Each agent event is
@@ -16,6 +22,28 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
 
     if (!brief) {
       response.status(400).json({ error: "A repair brief is required." });
+      return;
+    }
+
+    if (brief.length > MAX_BRIEF_LENGTH) {
+      response.status(400).json({
+        error: `Repair brief is too long. Keep it under ${MAX_BRIEF_LENGTH} characters.`,
+      });
+      return;
+    }
+
+    // Guard the optional free-text fields too, so none of them can smuggle a huge
+    // payload past the brief cap.
+    const oversizedField = ["constraints", "availableTools", "availableParts"].find(
+      (field) =>
+        typeof request.body?.[field] === "string" &&
+        request.body[field].length > MAX_PLAN_FIELD_LENGTH
+    );
+
+    if (oversizedField) {
+      response.status(400).json({
+        error: `Field "${oversizedField}" is too long. Keep it under ${MAX_PLAN_FIELD_LENGTH} characters.`,
+      });
       return;
     }
 

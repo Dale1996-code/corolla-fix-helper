@@ -135,7 +135,9 @@ export function createAskRouter({
 
       response.json(payload);
     } catch (error) {
-      response.status(500).json({
+      // Honor an error-carried status (e.g. the daily-budget cap sets 429) so the
+      // spend backstop reads as "too many requests", not a generic server error.
+      response.status(error.status || 500).json({
         error: error.message || "Could not answer this question.",
       });
     }

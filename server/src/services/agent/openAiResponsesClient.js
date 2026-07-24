@@ -1,4 +1,8 @@
 import { config } from "../../config.js";
+import { reserveAiCall } from "../aiUsageBudget.js";
+
+export const OPENAI_STREAM_IDLE_MESSAGE =
+  "The AI model stopped responding and the request was cancelled. Please try again.";
 
 // Streaming client for the OpenAI Responses API (current, non-deprecated API).
 //
@@ -52,6 +56,8 @@ function parseSseBuffer(buffer) {
  *   tools?: any,
  *   apiKey?: string,
  *   signal?: AbortSignal,
+ *   idleTimeoutMs?: number,
+ *   reserveCall?: () => void,
  *   fetchImpl?: typeof fetch,
  * }} [options]
  */
@@ -62,79 +68,126 @@ export async function* streamResponsesTurn({
   tools,
   apiKey = config.openAiApiKey,
   signal,
+  idleTimeoutMs = config.openAiStreamIdleTimeoutMs,
+  reserveCall = reserveAiCall,
   fetchImpl = fetch,
 } = {}) {
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured.");
   }
 
-  const response = await fetchImpl("https://api.openai.com/v1/responses", {
-    method: "POST",
-    signal,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      instructions,
-      input,
-      tools,
-      stream: true,
-    }),
-  });
+  // Count this streamed turn against the daily ceiling before spending on it.
+  reserveCall();
 
-  if (!response.ok || !response.body) {
-    const errorText = response.body ? await response.text() : "";
-    throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
-  }
+  // Abort a stalled stream: an internal controller fires if no bytes arrive for
+  // idleTimeoutMs. It is composed with the caller's signal (client disconnect)
+  // so either can cancel the request. An idle abort surfaces as a clear error;
+  // a caller abort still surfaces as AbortError (a normal disconnect).
+  const idleController = new AbortController();
+  let idledOut = false;
+  let idleTimer = null;
+  const armIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(() => {
+      idledOut = true;
+      idleController.abort();
+    }, idleTimeoutMs);
+  };
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, idleController.signal])
+    : idleController.signal;
 
   try {
-    while (true) {
-      const { value, done } = await reader.read();
+    armIdleTimer();
 
-      if (done) {
-        break;
-      }
+    const response = await fetchImpl("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: combinedSignal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        instructions,
+        input,
+        tools,
+        stream: true,
+        max_output_tokens: config.openAiMaxOutputTokens,
+      }),
+    });
 
-      buffer += decoder.decode(value, { stream: true });
-      const { events, rest } = parseSseBuffer(buffer);
-      buffer = rest;
+    if (!response.ok || !response.body) {
+      const errorText = response.body ? await response.text() : "";
+      throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
+    }
 
-      for (const event of events) {
-        if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-          yield { type: "text_delta", text: event.delta };
-          continue;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
         }
 
-        if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
-          let parsedArguments = {};
+        // Bytes arrived: restart the idle window.
+        armIdleTimer();
 
-          try {
-            parsedArguments = event.item.arguments ? JSON.parse(event.item.arguments) : {};
-          } catch {
-            parsedArguments = {};
+        buffer += decoder.decode(value, { stream: true });
+        const { events, rest } = parseSseBuffer(buffer);
+        buffer = rest;
+
+        for (const event of events) {
+          if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+            yield { type: "text_delta", text: event.delta };
+            continue;
           }
 
-          yield {
-            type: "function_call",
-            callId: event.item.call_id,
-            name: event.item.name,
-            arguments: parsedArguments,
-          };
-          continue;
-        }
+          if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
+            let parsedArguments = {};
 
-        if (event.type === "response.failed" || event.type === "error") {
-          throw new Error(event.response?.error?.message || event.message || "OpenAI stream failed.");
+            try {
+              parsedArguments = event.item.arguments ? JSON.parse(event.item.arguments) : {};
+            } catch {
+              parsedArguments = {};
+            }
+
+            yield {
+              type: "function_call",
+              callId: event.item.call_id,
+              name: event.item.name,
+              arguments: parsedArguments,
+            };
+            continue;
+          }
+
+          if (event.type === "response.failed" || event.type === "error") {
+            throw new Error(event.response?.error?.message || event.message || "OpenAI stream failed.");
+          }
         }
       }
+    } finally {
+      reader.releaseLock?.();
     }
+  } catch (error) {
+    // An idle-timeout abort is a stalled stream, not a client disconnect: surface
+    // a clear message. A caller-initiated abort keeps its AbortError so the route
+    // can treat it as a normal disconnect.
+    if (idledOut) {
+      throw new Error(OPENAI_STREAM_IDLE_MESSAGE, { cause: error });
+    }
+
+    throw error;
   } finally {
-    reader.releaseLock?.();
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
   }
 }

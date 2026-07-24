@@ -70,12 +70,11 @@ export function createApp(options = {}) {
   const { askQuestion, runRepairPlan } = options;
   const clientDistDir = options.clientDistDir || config.clientDistDir;
 
-  // Cap how often the AI endpoints can be hit so an exposed instance cannot burn
-  // the OpenAI budget. A shared limiter can be injected for tests; otherwise each
-  // AI endpoint gets its own 20-requests-per-minute window.
-  const askLimiter = options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
-  const repairPlanLimiter =
-    options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
+  // Cap how often the AI endpoints can be hit so a runaway client cannot burn the
+  // OpenAI budget. One shared 20-requests-per-minute window covers /api/ask and
+  // /api/repair-plan together (not one window each), so the combined AI request
+  // rate is bounded. Injectable for tests.
+  const aiLimiter = options.aiRateLimiter || createRateLimiter({ windowMs: 60_000, max: 20 });
 
   // Baseline security headers. This is a local-first app served same-origin, so
   // a self-only CSP is safe: scripts/styles come from the built bundle, images
@@ -130,10 +129,10 @@ export function createApp(options = {}) {
   app.use("/api/repair-checklists", repairChecklistsRouter);
   app.use("/api/attachments", attachmentsRouter);
   app.use("/api/settings", settingsRouter);
-  app.use("/api/ask", askLimiter, createAskRouter({ askQuestion }));
+  app.use("/api/ask", aiLimiter, createAskRouter({ askQuestion }));
   app.use(
     "/api/repair-plan",
-    repairPlanLimiter,
+    aiLimiter,
     createRepairPlanRouter({ runAgent: runRepairPlan })
   );
 
