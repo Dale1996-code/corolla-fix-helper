@@ -23,6 +23,17 @@ function readBoolean(value, fallback) {
   return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
+// Like readPositiveInteger but allows 0 as an explicit "disabled" value (the
+// daily AI ceiling uses 0/negative to mean "no limit").
+function readNonNegativeInteger(value, fallback) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
 const openAiAnswerModel =
   process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1";
@@ -36,12 +47,28 @@ const openAiEmbeddingDimensions = readPositiveInteger(
   512
 );
 
+// Default-safe binding: loopback only. Reaching the app from a phone or another
+// LAN/Tailscale device is a deliberate opt-in (NETWORK_MODE=1), so the network
+// port is never the default state. See docs/mobile-access.md.
+const networkMode = readBoolean(process.env.NETWORK_MODE, false);
+
 export const config = {
   port: Number(process.env.PORT || 4000),
+  networkMode,
+  host: networkMode ? "0.0.0.0" : "127.0.0.1",
   clientPort,
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
   openAiApiKey: typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY : "",
+  // Accidental-spend guards (not abuse defense — single-user, trusted-LAN app):
+  // cap tokens per model reply, bound a stalled stream, and a coarse daily call
+  // ceiling as a runaway-loop backstop. Set AI_DAILY_CALL_LIMIT=0 to disable.
+  openAiMaxOutputTokens: readPositiveInteger(process.env.OPENAI_MAX_OUTPUT_TOKENS, 2048),
+  openAiStreamIdleTimeoutMs: readPositiveInteger(
+    process.env.OPENAI_STREAM_IDLE_TIMEOUT_MS,
+    30_000
+  ),
+  openAiDailyCallLimit: readNonNegativeInteger(process.env.AI_DAILY_CALL_LIMIT, 500),
   openAiAnswerModel,
   // Vision Ask reuses the answer model unless OPENAI_VISION_MODEL is set, so a
   // text-only deployment needs no extra configuration.

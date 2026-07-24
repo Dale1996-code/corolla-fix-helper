@@ -17,6 +17,7 @@ import {
   retrieveRelevantChunks,
   tokenizeQuestion,
 } from "./chunkRetrievalService.js";
+import { postToOpenAiResponses } from "./aiAnswerService.js";
 
 const DEFAULT_CHUNK_LIMIT = 8;
 const DEFAULT_SUGGESTION_LIMIT = 5;
@@ -322,16 +323,12 @@ export async function generateProcedureSuggestionsFromOpenAi({
     contextText,
   ].join("\n");
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openAiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.openAiAnswerModel,
-      input: prompt,
-    }),
+  // Route through the shared helper so this call inherits the request timeout and
+  // the daily-call ceiling instead of an unbounded raw fetch.
+  const response = await postToOpenAiResponses({
+    model: config.openAiAnswerModel,
+    input: prompt,
+    max_output_tokens: config.openAiMaxOutputTokens,
   });
 
   if (!response.ok) {

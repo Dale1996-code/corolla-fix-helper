@@ -37,3 +37,35 @@ export function parsePositiveIntArray(value) {
 
   return Array.from(uniqueIds);
 }
+
+const EXACT_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/**
+ * True when `address` is an IPv4/IPv6 loopback address.
+ *
+ * Covers the whole 127.0.0.0/8 range and its IPv4-mapped IPv6 form, plus `::1`.
+ * Used to keep host-only routes (backup export) reachable from the machine
+ * itself but not from other devices when the app is run in network mode.
+ */
+export function isLoopbackAddress(address) {
+  if (typeof address !== "string" || !address) {
+    return false;
+  }
+
+  if (EXACT_LOOPBACK_ADDRESSES.has(address)) {
+    return true;
+  }
+
+  return /^127\.\d+\.\d+\.\d+$/.test(address) || /^::ffff:127\./.test(address);
+}
+
+/**
+ * True when the request originates from the host machine itself. Reads the raw
+ * socket peer address (not a client-supplied header) so it cannot be spoofed by
+ * a proxy header — this app does not run behind a trusted proxy.
+ */
+export function isLoopbackRequest(request) {
+  return isLoopbackAddress(
+    request?.socket?.remoteAddress || request?.connection?.remoteAddress || ""
+  );
+}

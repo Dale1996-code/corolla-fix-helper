@@ -10,7 +10,9 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "settings-export-test-"))
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 
-const { createBackupExportHandler } = await import("../src/routes/settings.js");
+const { createBackupExportHandler, requireLoopback } = await import(
+  "../src/routes/settings.js"
+);
 const { db } = await import("../src/database.js");
 
 after(() => {
@@ -74,6 +76,39 @@ function buildHandler(tarProcess, overrides = {}) {
     ...overrides,
   });
 }
+
+test("requireLoopback lets a request from the host machine through", () => {
+  let nextCalled = false;
+  const response = new FakeResponse();
+
+  requireLoopback(
+    { socket: { remoteAddress: "127.0.0.1" } },
+    response,
+    () => {
+      nextCalled = true;
+    }
+  );
+
+  assert.equal(nextCalled, true);
+  assert.equal(response.jsonBody, null);
+});
+
+test("requireLoopback blocks a request from another device with 403", () => {
+  let nextCalled = false;
+  const response = new FakeResponse();
+
+  requireLoopback(
+    { socket: { remoteAddress: "192.168.1.42" } },
+    response,
+    () => {
+      nextCalled = true;
+    }
+  );
+
+  assert.equal(nextCalled, false);
+  assert.equal(response.statusCode, 403);
+  assert.match(response.jsonBody.error, /host machine/i);
+});
 
 test("Settings backup export returns 500 when tar fails before streaming", async () => {
   const tarProcess = fakeTarProcess();

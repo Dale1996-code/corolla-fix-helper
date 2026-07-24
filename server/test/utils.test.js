@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeText, hasOwnField } from "../src/utils/text.js";
-import { parsePositiveInt, parsePositiveIntArray } from "../src/utils/http.js";
+import {
+  parsePositiveInt,
+  parsePositiveIntArray,
+  isLoopbackAddress,
+  isLoopbackRequest,
+} from "../src/utils/http.js";
 
 test("normalizeText trims strings and returns empty string for non-strings", () => {
   assert.equal(normalizeText("  hello  "), "hello");
@@ -55,4 +60,25 @@ test("parsePositiveIntArray drops zero, negative, fractional, and non-numeric it
 
 test("parsePositiveIntArray removes duplicates while preserving first-seen order", () => {
   assert.deepEqual(parsePositiveIntArray([3, 1, 3, 2, "1"]), [3, 1, 2]);
+});
+
+test("isLoopbackAddress recognizes IPv4/IPv6 loopback and rejects LAN addresses", () => {
+  assert.equal(isLoopbackAddress("127.0.0.1"), true);
+  assert.equal(isLoopbackAddress("127.5.6.7"), true);
+  assert.equal(isLoopbackAddress("::1"), true);
+  assert.equal(isLoopbackAddress("::ffff:127.0.0.1"), true);
+
+  assert.equal(isLoopbackAddress("192.168.1.20"), false);
+  assert.equal(isLoopbackAddress("10.0.0.4"), false);
+  assert.equal(isLoopbackAddress("100.101.102.103"), false); // Tailscale CGNAT range
+  assert.equal(isLoopbackAddress("::ffff:192.168.1.20"), false);
+  assert.equal(isLoopbackAddress(""), false);
+  assert.equal(isLoopbackAddress(undefined), false);
+});
+
+test("isLoopbackRequest reads the raw socket peer address", () => {
+  assert.equal(isLoopbackRequest({ socket: { remoteAddress: "127.0.0.1" } }), true);
+  assert.equal(isLoopbackRequest({ connection: { remoteAddress: "::1" } }), true);
+  assert.equal(isLoopbackRequest({ socket: { remoteAddress: "192.168.1.9" } }), false);
+  assert.equal(isLoopbackRequest({}), false);
 });

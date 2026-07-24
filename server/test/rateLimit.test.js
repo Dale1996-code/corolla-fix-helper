@@ -66,6 +66,23 @@ test("rate limiter resets after the window elapses", () => {
   assert.equal(nextCalls, 2);
 });
 
+test("rate limiter evicts expired windows so the map cannot grow unbounded", () => {
+  let clock = 0;
+  const limiter = createRateLimiter({ windowMs: 1000, max: 5, now: () => clock });
+  const noop = () => {};
+
+  // Three distinct clients open windows at t=0.
+  limiter({ ip: "a" }, mockResponse(), noop);
+  limiter({ ip: "b" }, mockResponse(), noop);
+  limiter({ ip: "c" }, mockResponse(), noop);
+  assert.equal(limiter.trackedKeyCount(), 3);
+
+  // After the window elapses, a request from a new client sweeps the stale ones.
+  clock = 2000;
+  limiter({ ip: "d" }, mockResponse(), noop);
+  assert.equal(limiter.trackedKeyCount(), 1, "expired windows a/b/c are evicted");
+});
+
 test("rate limiter tracks clients separately by ip", () => {
   const limiter = createRateLimiter({ windowMs: 1000, max: 1, now: () => 0 });
 

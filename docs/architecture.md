@@ -248,7 +248,7 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 
 Documented honestly so they don't surprise anyone:
 
-- **No authentication.** Anyone who can reach the server can read all data, upload/delete documents, and spend the OpenAI budget. The 20 req/min rate limiter on `/api/ask` and `/api/repair-plan` limits the burn rate but is not access control. Never expose the app publicly without HTTPS + auth in front.
+- **Loopback by default; no authentication.** The server binds to `127.0.0.1` unless `NETWORK_MODE=1` is set (`config.host`), so it is unreachable off-host until network access is a deliberate opt-in. There is still no login, so once network mode is on, anyone who can reach the port can read all data, upload/delete documents, and spend the OpenAI budget — enable it only on trusted networks. The AI rate limiter caps burn rate but is not access control, and the backup export route is loopback-only regardless of mode. Never expose the app publicly (no port-forward, no `tailscale funnel`) without HTTPS + auth in front.
 - **Typecheck is not fully strict** (see the trade-off above) — it catches shape and typo errors across `server/src` but not every null/any hazard. Lint covers the whole `server/` tree and `client/src`.
 - **The embedding cache and retrieval scan are in-memory and linear.** Fine at this scale; a 100× larger corpus would need re-thinking (and is out of scope).
 - **OCR depends on external tools.** Locally, Tesseract/Poppler must be installed on the machine running the backend or scanned-PDF OCR silently degrades (`ocr_unavailable:` status). The Docker image installs `poppler-utils` and `tesseract-ocr`, so containers are covered.

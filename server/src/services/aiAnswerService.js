@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { retrieveRelevantChunks } from "./chunkRetrievalService.js";
+import { reserveAiCall } from "./aiUsageBudget.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.";
@@ -21,8 +22,11 @@ export const OPENAI_TIMEOUT_MESSAGE =
  */
 export async function postToOpenAiResponses(
   body,
-  { fetchImpl = fetch, timeoutMs = OPENAI_REQUEST_TIMEOUT_MS } = {}
+  { fetchImpl = fetch, timeoutMs = OPENAI_REQUEST_TIMEOUT_MS, reserveCall = reserveAiCall } = {}
 ) {
+  // Count this model call against the daily ceiling before spending on it.
+  reserveCall();
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -211,6 +215,7 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
+    max_output_tokens: config.openAiMaxOutputTokens,
   });
 
   if (!response.ok) {
@@ -233,6 +238,7 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
  *   history?: any[],
  *   citations?: any[],
  *   image?: string | null,
+ *   fetchImpl?: typeof fetch,
  * }} params
  * @returns {Promise<string>}
  */
@@ -241,6 +247,7 @@ export async function generateAnswerTextFromOpenAi({
   originalQuestion,
   chunks,
   image = null,
+  fetchImpl = fetch,
 }) {
   const contextText = buildModelContext(chunks);
   const promptLines = [
@@ -289,7 +296,14 @@ export async function generateAnswerTextFromOpenAi({
       ]
     : prompt;
 
-  const response = await postToOpenAiResponses({ model, input });
+  const response = await postToOpenAiResponses(
+    {
+      model,
+      input,
+      max_output_tokens: config.openAiMaxOutputTokens,
+    },
+    { fetchImpl }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
