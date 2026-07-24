@@ -101,6 +101,62 @@ test("RepairChecklistsPage lists a checklist, shows its status and items, and ch
   });
 });
 
+test("checklist rows are keyboard/SR-accessible buttons with a selected state", async () => {
+  const checklistA = {
+    id: 1,
+    title: "Front brake job",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-02T09:00:00.000Z",
+    items: [],
+    itemCount: 0,
+    doneItemCount: 0,
+  };
+  const checklistB = {
+    id: 2,
+    title: "Oil change",
+    status: "planned",
+    description: "",
+    notes: "",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-01T09:00:00.000Z",
+    items: [],
+    itemCount: 0,
+    doneItemCount: 0,
+  };
+
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/repair-checklists" && (!options.method || options.method === "GET")) {
+      return jsonResponse({ checklists: [checklistA, checklistB], total: 2 });
+    }
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/repair-checklists"]}>
+      <RepairChecklistsPage />
+    </MemoryRouter>
+  );
+
+  // Each row is a real <button> (keyboard + screen-reader operable), not a div.
+  const rowA = await screen.findByRole("button", { name: "Select checklist: Front brake job" });
+  const rowB = screen.getByRole("button", { name: "Select checklist: Oil change" });
+
+  // The auto-selected checklist exposes its selected state via aria-current.
+  expect(rowA).toHaveAttribute("aria-current", "true");
+  expect(rowB).not.toHaveAttribute("aria-current");
+
+  // Activating another row switches selection (buttons handle Enter/Space + click).
+  fireEvent.click(rowB);
+  await waitFor(() => {
+    expect(rowB).toHaveAttribute("aria-current", "true");
+    expect(rowA).not.toHaveAttribute("aria-current");
+  });
+});
+
 test("clears a checklist's saved-status banner when a different checklist is selected", async () => {
   const checklistA = {
     id: 1,

@@ -188,9 +188,12 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
             const isSelected = checklist.id === selectedChecklistId;
 
             return (
-              <div
+              <button
                 key={checklist.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm ${
+                type="button"
+                aria-current={isSelected ? "true" : undefined}
+                aria-label={`Select checklist: ${checklist.title}`}
+                className={`${listGridClass} w-full items-center border-b border-slate-100 px-4 py-3 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 ${
                   isSelected ? "bg-sky-50" : "hover:bg-slate-50"
                 }`}
                 onClick={() => onSelectChecklist(checklist.id)}
@@ -203,7 +206,7 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
                 <span className="truncate text-xs text-slate-600">
                   {formatDate(checklist.updatedAt)}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
