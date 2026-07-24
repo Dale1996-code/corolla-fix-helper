@@ -237,7 +237,7 @@ test("hybrid retrieval fixes a wrong keyword-only top page without ties", async 
   assert.notEqual(hybridResults[0].hybridScore, hybridResults[1].hybridScore);
 });
 
-test("hybrid retrieval ignores stale embedding versions", async () => {
+test("hybrid retrieval keeps stale-embedding chunks keyword-findable", async () => {
   const uniqueTag = nextUniqueTag("stale");
   const documentId = insertFakeDocument({
     title: `Stale embedding ${uniqueTag}`,
@@ -251,6 +251,9 @@ test("hybrid retrieval ignores stale embedding versions", async () => {
     },
   ]);
 
+  // Store the chunk under a stale embedding version. Its vector must NOT be used
+  // for semantic ranking (that check is version-gated), but the chunk's text is
+  // still valid content and must remain findable by keyword.
   db.prepare(`
     UPDATE document_chunks
     SET embedding = ?, embedding_version = ?
@@ -268,5 +271,9 @@ test("hybrid retrieval ignores stale embedding versions", async () => {
     createQueryEmbedding: async () => makeVector([[9, 1]]),
   });
 
-  assert.equal(hybridResults.some((result) => result.documentId === documentId), false);
+  const hit = hybridResults.find((result) => result.documentId === documentId);
+  assert.ok(hit, "stale-version chunk should still be keyword-findable");
+  assert.ok(hit.keywordScore > 0, "it should match on keyword, not semantic");
+  // The stale vector must not contribute a semantic score.
+  assert.ok(!hit.semanticScore, "stale embedding version must not be ranked semantically");
 });
