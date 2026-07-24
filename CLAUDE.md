@@ -52,7 +52,7 @@ The repo deliberately avoids heavy dependencies — there is no OpenAI SDK or ag
 
 Both stay grounded in uploaded PDFs and degrade gracefully to an "AI not configured" state without `OPENAI_API_KEY`:
 
-1. **Ask your documents** (`POST /api/ask`): RAG flow. PDF upload/extraction → `documentChunkService.js` writes page-aware chunks to `document_chunks` → `embed:backfill` stores Float32 embedding BLOBs (versioned as `model@dimensions`; mismatched versions are ignored at query time) → `chunkRetrievalService.js` embeds the question, cosine-scans an in-memory embedding cache, and fuses with keyword ranking → `aiAnswerService.js` builds citations and calls OpenAI.
+1. **Ask your documents** (`POST /api/ask`): RAG flow. PDF upload/extraction → `documentChunkService.js` writes page-aware chunks to `document_chunks` → `embed:backfill` stores Float32 embedding BLOBs (versioned as `model@dimensions`; a mismatched version is ignored for **semantic** ranking only — the chunk's text still participates in keyword ranking, so a model/dimension change never makes a document vanish from Ask) → `chunkRetrievalService.js` embeds the question, cosine-scans an in-memory embedding cache, and fuses with keyword ranking → `aiAnswerService.js` builds citations and calls OpenAI.
 
 2. **Repair Planner** (`POST /api/repair-plan`, SSE streaming): a hand-rolled tool-calling agent loop in `server/src/services/agent/` (`repairPlannerAgent.js` loop, `repairTools.js` deterministic tools + JSON schemas, `openAiResponsesClient.js` streaming client, `tracing.js`). Events stream to `RepairPlannerPage.jsx` as `data: <json>` frames (`status`, `tool_call`, `text_delta`, `done`, etc.). `docs/repair-planner.md` documents the event protocol, readiness rubric, and how to add tools.
 

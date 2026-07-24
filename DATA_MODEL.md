@@ -302,7 +302,7 @@ Current use:
 
 The table keeps each document, page, and chunk index unique so re-running extraction can replace old chunks cleanly.
 
-`embedding` stores the Float32 embedding as a SQLite BLOB. `embedding_version` stores the active model and dimension pair, for example `text-embedding-3-small@512`. Hybrid retrieval ignores chunks whose `embedding_version` does not match the current config.
+`embedding` stores the Float32 embedding as a SQLite BLOB. `embedding_version` stores the active model and dimension pair, for example `text-embedding-3-small@512`. Hybrid retrieval ignores a chunk's vector for **semantic** ranking when its `embedding_version` does not match the current config, but the chunk still participates in keyword ranking — so changing the model/dimensions never removes a document from Ask, it just loses semantic ranking until `embed:backfill` re-embeds it.
 
 ### `attachments`
 
