@@ -128,12 +128,19 @@ function runTailscaleCli(args, options = {}) {
 
   const tryCommand = (command) =>
     new Promise((resolve) => {
-      execFileImpl(
-        command,
-        args,
-        { timeout: timeoutMs, windowsHide: true },
-        (error, stdout) => resolve(error ? null : String(stdout))
-      );
+      try {
+        execFileImpl(
+          command,
+          args,
+          { timeout: timeoutMs, windowsHide: true },
+          (error, stdout) => resolve(error ? null : String(stdout))
+        );
+      } catch {
+        // Some injected implementations and process-launch failures throw
+        // before a callback is registered. Treat that like any other failed
+        // command so Windows can still try the normal install location.
+        resolve(null);
+      }
     });
 
   return commands.reduce(
@@ -172,6 +179,22 @@ export async function getTailscaleDnsName(options = {}) {
   return null;
 }
 
+function getUrlPort(url) {
+  if (url.port) {
+    return url.port;
+  }
+
+  if (url.protocol === "http:") {
+    return "80";
+  }
+
+  if (url.protocol === "https:") {
+    return "443";
+  }
+
+  return "";
+}
+
 /**
  * The HTTPS URL `tailscale serve` exposes for this app, or null when Serve is
  * not configured (or not pointing at our port). Serve is what gives the phone
@@ -196,7 +219,8 @@ export async function getTailscaleServeUrl(port, options = {}) {
       const handlers = Object.values(site?.Handlers || {});
       const proxiesToApp = handlers.some((handler) => {
         try {
-          return new URL(handler?.Proxy).port === String(port);
+          const proxyUrl = new URL(handler?.Proxy);
+          return getUrlPort(proxyUrl) === String(port);
         } catch {
           return false;
         }

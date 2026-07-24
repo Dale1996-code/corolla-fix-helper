@@ -7,6 +7,7 @@
 //   - /api/*      : never intercepted — always the real network, real errors.
 //   - navigations : network first; if the server is unreachable, show the
 //                   precached offline page instead of the browser error.
+//   - offline files: cache first, because they must work without the network.
 //   - other GETs  : network only.
 //
 // Bump OFFLINE_CACHE when the precached files change so old caches are
@@ -41,7 +42,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  if (url.pathname.startsWith("/api/")) {
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  if (
+    event.request.method === "GET" &&
+    url.origin === self.location.origin &&
+    PRECACHE_URLS.includes(url.pathname)
+  ) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => cached || fetch(event.request))
+    );
     return;
   }
 
