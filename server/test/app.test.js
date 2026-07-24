@@ -333,6 +333,10 @@ test("documents API exposes favorite, bookmark, and tag fields", async () => {
   assert.equal(typeof firstDocument.isFavorite, "boolean");
   assert.equal(typeof firstDocument.isBookmarked, "boolean");
   assert.ok(Array.isArray(firstDocument.tags));
+  // The list DTO is slim: the large per-document extractedText is not shipped
+  // (the client never reads it), while the small display fields remain.
+  assert.equal(firstDocument.extractedText, undefined);
+  assert.equal(typeof firstDocument.title, "string");
 });
 
 test("seed document is bookmarked and carries starter tags", async () => {
@@ -542,7 +546,9 @@ test("POST /api/documents/:id/extract re-runs extraction, updates status fields,
       response.body.document.extractionStatus === "no_text_found" ||
       response.body.document.extractionStatus.startsWith("ocr_")
   );
-  assert.equal(typeof response.body.document.extractedText, "string");
+  // extractedText is intentionally not part of the document DTO (it is large and
+  // unused by the client); extraction success is confirmed via status + chunks.
+  assert.equal(response.body.document.extractedText, undefined);
   assert.equal(typeof response.body.document.pageCount, "number");
   assert.ok(getChunkRows(documentId).length > 0);
 });
@@ -1177,6 +1183,12 @@ test("search API keeps legacy document search compatible with /api/search/docume
   assert.equal(legacyResponse.body.results[0].system, "Cooling");
   assert.equal(legacyResponse.body.results[0].documentType, "Bulletin");
   assert.match(legacyResponse.body.results[0].snippet, /thermostat/i);
+  // The search DTO ships a server-built snippet but not the full extracted text.
+  assert.equal(
+    legacyResponse.body.results[0].extractedText,
+    undefined,
+    "search results omit the large extractedText field"
+  );
   assert.ok(Array.isArray(legacyResponse.body.filters.systems));
   assert.ok(legacyResponse.body.filters.systems.includes("Cooling"));
   assert.ok(Array.isArray(legacyResponse.body.filters.documentTypes));

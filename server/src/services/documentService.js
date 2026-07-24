@@ -137,7 +137,6 @@ function mapDocumentRow(row, tags = []) {
     documentType: row.document_type,
     source: row.source || "",
     notes: row.notes || "",
-    extractedText: row.extracted_text || "",
     extractionStatus: row.extraction_status,
     pageCount: row.page_count,
     isFavorite: Boolean(row.is_favorite),
@@ -168,7 +167,6 @@ function getDocumentBaseQuery() {
       documents.document_type,
       documents.source,
       documents.notes,
-      documents.extracted_text,
       documents.extraction_status,
       documents.page_count,
       documents.is_favorite,
@@ -504,12 +502,41 @@ export function searchDocuments({
   );
 }
 
-// A single mapped document, or undefined when it does not exist. Derived from
-// listDocuments so the tag attachment and embedding-pending flag are built
-// exactly as in the list view (behavior-preserving; callers relied on this
-// whole-list-then-find shape).
+// True when the document has at least one chunk not embedded at the current
+// version. Targeted single-document form of getPendingEmbeddingDocumentIds, so
+// getDocument does not have to scan every chunk in the library.
+function documentHasPendingEmbedding(documentId) {
+  const row = db
+    .prepare(`
+      SELECT 1
+      FROM document_chunks
+      WHERE document_id = ?
+        AND COALESCE(embedding_version, '') <> ?
+      LIMIT 1
+    `)
+    .get(documentId, config.openAiEmbeddingVersion);
+
+  return Boolean(row);
+}
+
+// A single mapped document, or undefined when it does not exist. Uses a direct
+// `WHERE id = ?` lookup (not a whole-library scan) but returns the same shape as
+// the list view: tags attached and the embedding-pending flag set.
 export function getDocument(documentId) {
-  return listDocuments().find((document) => document.id === documentId);
+  const row = db
+    .prepare(`${getDocumentBaseQuery()} WHERE documents.id = ?`)
+    .get(documentId);
+
+  if (!row) {
+    return undefined;
+  }
+
+  const [document] = attachTags([row], (tagRow, tags) => mapDocumentRow(tagRow, tags));
+
+  return {
+    ...document,
+    embeddingPending: documentHasPendingEmbedding(documentId),
+  };
 }
 
 // Minimal row for serving a document's stored file (download/inline view).
