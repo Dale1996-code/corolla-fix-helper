@@ -141,7 +141,8 @@ function recordImported(report, entry) {
   }
 }
 
-async function importSinglePdf(filePath, options, report) {
+async function importSinglePdf(filePath, options, report, deps = {}) {
+  const rebuildChunks = deps.rebuildChunks || rebuildDocumentChunksFromPages;
   const originalFilename = path.basename(filePath);
   let fileBuffer;
 
@@ -204,6 +205,8 @@ async function importSinglePdf(filePath, options, report) {
       ? "no_text_found"
       : extractionResult.extractionStatus;
 
+  let createdDocumentId = null;
+
   try {
     await fs.mkdir(config.uploadsDir, { recursive: true });
     await fs.writeFile(absoluteFilePath, fileBuffer);
@@ -249,7 +252,8 @@ async function importSinglePdf(filePath, options, report) {
       );
 
     const documentId = Number(result.lastInsertRowid);
-    const chunkSummary = rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+    createdDocumentId = documentId;
+    const chunkSummary = rebuildChunks(documentId, extractionResult.pages);
 
     recordImported(report, {
       filePath,
@@ -264,6 +268,19 @@ async function importSinglePdf(filePath, options, report) {
   } catch (error) {
     await fs.rm(absoluteFilePath, { force: true });
 
+    // Mirror the HTTP upload path (documentService.createDocument): if the row
+    // was already inserted before a later step failed, remove it and any chunks
+    // so a partial failure never leaves an orphan that file_md5 dedup would then
+    // block from ever being re-imported.
+    if (createdDocumentId) {
+      try {
+        db.prepare("DELETE FROM document_chunks WHERE document_id = ?").run(createdDocumentId);
+        db.prepare("DELETE FROM documents WHERE id = ?").run(createdDocumentId);
+      } catch {
+        // Best-effort cleanup; surface the original import error via the report.
+      }
+    }
+
     recordFailed(report, {
       filePath,
       originalFilename,
@@ -273,7 +290,7 @@ async function importSinglePdf(filePath, options, report) {
   }
 }
 
-export async function importPdfFolder(sourceFolder, options = {}) {
+export async function importPdfFolder(sourceFolder, options = {}, deps = {}) {
   const resolvedSourceFolder = path.resolve(sourceFolder || "");
   const report = createEmptyReport(resolvedSourceFolder);
   const sourceStats = await fs.stat(resolvedSourceFolder);
@@ -286,7 +303,7 @@ export async function importPdfFolder(sourceFolder, options = {}) {
   report.totalPdfFiles = pdfFiles.length;
 
   for (const pdfFile of pdfFiles) {
-    await importSinglePdf(pdfFile, options, report);
+    await importSinglePdf(pdfFile, options, report, deps);
   }
 
   return report;
