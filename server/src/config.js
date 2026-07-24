@@ -36,8 +36,15 @@ const openAiEmbeddingDimensions = readPositiveInteger(
   512
 );
 
+// Default-safe binding: loopback only. Reaching the app from a phone or another
+// LAN/Tailscale device is a deliberate opt-in (NETWORK_MODE=1), so the network
+// port is never the default state. See docs/mobile-access.md.
+const networkMode = readBoolean(process.env.NETWORK_MODE, false);
+
 export const config = {
   port: Number(process.env.PORT || 4000),
+  networkMode,
+  host: networkMode ? "0.0.0.0" : "127.0.0.1",
   clientPort,
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),

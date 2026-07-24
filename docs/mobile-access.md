@@ -5,14 +5,25 @@ Tailscale, and installed on the Home Screen like a real app. Nothing moves to th
 cloud: the phone talks directly to the computer running the app, which keeps holding
 all your data.
 
-Everything below assumes the **production-style** start (one server on port 4000):
+Everything below assumes the **production-style** start (one server on port 4000).
+
+By default the app binds to **localhost only** — nothing off the computer can reach
+it, which is the safe default. Phone/LAN/Tailscale access is a deliberate opt-in:
+set `NETWORK_MODE=1` so the app listens on all interfaces.
 
 ```powershell
 npm run build
-npm start
+$env:NETWORK_MODE = "1"; npm start
 ```
 
-The startup banner prints every address that matters:
+Without `NETWORK_MODE`, the banner reminds you it is localhost-only:
+
+```
+Server running on http://localhost:4000
+Bound to localhost only. Set NETWORK_MODE=1 to allow phone/LAN/Tailscale access.
+```
+
+With `NETWORK_MODE=1`, it prints every address that matters:
 
 ```
 Server running on http://localhost:4000
@@ -27,7 +38,8 @@ one; it is sorted to be the most likely home-network address.
 
 ## Option 1 — Same Wi-Fi (quickest)
 
-1. Start the app (`npm run build` once after changes, then `npm start`).
+1. Start the app in network mode (`npm run build` once after changes, then
+   `$env:NETWORK_MODE = "1"; npm start`).
 2. On the iPhone, join the **same Wi-Fi network** as the computer.
 3. Open Safari and type the banner's "On your phone" address, e.g.
    `http://192.168.1.42:4000`.
@@ -107,10 +119,17 @@ Work down the list; each step isolates one layer.
 
 ## Security notes, in plain terms
 
-- The app has **no login**. Anyone who can reach the port can read and change
-  your data and spend your OpenAI credit. Same Wi-Fi and Tailscale both keep it
-  within networks you control — that is the boundary.
+- **Localhost by default.** With no `NETWORK_MODE`, the app is reachable only from
+  the computer running it. Turning on `NETWORK_MODE=1` is what opens it to your
+  Wi-Fi/Tailscale devices, so exposing the port is always a deliberate act.
+- The app has **no login**. Once `NETWORK_MODE=1` is set, anyone who can reach the
+  port can read and change your data and spend your OpenAI credit. Same Wi-Fi and
+  Tailscale both keep it within networks you control — that is the boundary, so
+  only enable network mode on networks where you trust every device.
 - **Never port-forward** port 4000 on your router and never use
   `tailscale funnel` with this app; both would put it on the public internet.
-- The `/api/ask` rate limit (20 requests/minute) is a spend cap, not
-  authentication.
+- **Backups download from the host only.** The Settings backup export
+  (`/api/settings/backup-export`) streams your entire database and uploads, so it
+  is restricted to localhost and returns 403 from any other device even in network
+  mode. Pull backups from the computer that runs the app.
+- The `/api/ask` rate limit is a spend cap, not authentication.

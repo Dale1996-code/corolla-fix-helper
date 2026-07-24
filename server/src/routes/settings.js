@@ -14,8 +14,24 @@ import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import { getVehicle } from "../services/vehicleService.js";
 import { normalizeText } from "../utils/text.js";
+import { isLoopbackRequest } from "../utils/http.js";
 
 export const settingsRouter = Router();
+
+// The backup export streams the entire database and uploads tree. Restrict it to
+// the host machine itself so it is never downloadable from a phone or another
+// device even when the app is deliberately run in network mode — pull backups
+// from the machine that runs the app.
+export function requireLoopback(request, response, next) {
+  if (!isLoopbackRequest(request)) {
+    response.status(403).json({
+      error: "Backups can only be downloaded from the host machine (localhost).",
+    });
+    return;
+  }
+
+  next();
+}
 
 function mapVehicleRow(row) {
   return {
@@ -221,7 +237,7 @@ settingsRouter.get("/", (_request, response) => {
   }
 });
 
-settingsRouter.get("/backup-export", createBackupExportHandler());
+settingsRouter.get("/backup-export", requireLoopback, createBackupExportHandler());
 
 settingsRouter.put("/document-defaults", (request, response) => {
   try {
