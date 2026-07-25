@@ -81,3 +81,49 @@ test("initializeDatabase creates the attachments table and its entity index", ()
     "attachments table should have idx_attachments_entity"
   );
 });
+
+test("migration 003 adds the reverse-link and sort indexes with the right columns", () => {
+  initializeDatabase();
+
+  // The migration is recorded so it never re-runs.
+  const applied = db
+    .prepare("SELECT 1 FROM schema_migrations WHERE name = ?")
+    .get("003_link_and_sort_indexes");
+  assert.ok(applied, "003_link_and_sort_indexes should be recorded as applied");
+
+  const indexNames = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+    .all()
+    .map((row) => row.name);
+
+  for (const expectedIndex of [
+    "idx_documents_created_at",
+    "idx_symptom_documents_document_id",
+    "idx_procedure_documents_document_id",
+    "idx_symptom_procedures_procedure_id",
+    "idx_repair_checklists_vehicle_updated",
+    "idx_repair_checklist_items_order",
+  ]) {
+    assert.ok(indexNames.includes(expectedIndex), `${expectedIndex} should exist`);
+  }
+
+  // Pin the composite column order that the EXPLAIN analysis depends on: the
+  // documents list index must be (created_at, id), not (vehicle_id, updated_at, id).
+  const documentsIndexColumns = db
+    .prepare("PRAGMA index_info(idx_documents_created_at)")
+    .all()
+    .map((column) => column.name);
+  assert.deepEqual(documentsIndexColumns, ["created_at", "id"]);
+
+  const checklistIndexColumns = db
+    .prepare("PRAGMA index_info(idx_repair_checklists_vehicle_updated)")
+    .all()
+    .map((column) => column.name);
+  assert.deepEqual(checklistIndexColumns, ["vehicle_id", "updated_at", "id"]);
+
+  const checklistItemsIndexColumns = db
+    .prepare("PRAGMA index_info(idx_repair_checklist_items_order)")
+    .all()
+    .map((column) => column.name);
+  assert.deepEqual(checklistItemsIndexColumns, ["checklist_id", "sort_order", "id"]);
+});
