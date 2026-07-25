@@ -265,6 +265,42 @@ function createRepairChecklistsTables() {
   `);
 }
 
+// Reverse-link and sort indexes. Each column order matches how the query it
+// serves filters (equality columns first) then sorts (sort columns in order):
+//   - documents list sorts by (created_at DESC, id DESC) with no equality
+//     filter, so (created_at, id) lets SQLite scan the index backward instead of
+//     building a temp B-tree for ORDER BY.
+//   - The link tables' primary keys start with the OWNING id (symptom_id /
+//     procedure_id / symptom_id), so a lookup by the OTHER id (document_id /
+//     procedure_id) has no usable prefix and scans; these indexes cover that
+//     reverse direction and the matching ON DELETE CASCADE.
+//   - repair_checklists filters by vehicle_id then sorts by (updated_at, id);
+//     repair_checklist_items filters by checklist_id then sorts by
+//     (sort_order, id) — the composite indexes cover both filter and sort.
+// All are CREATE INDEX IF NOT EXISTS, so this migration only adds indexes and
+// never touches row data.
+function createLinkAndSortIndexes() {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_documents_created_at
+      ON documents (created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_symptom_documents_document_id
+      ON symptom_documents (document_id);
+
+    CREATE INDEX IF NOT EXISTS idx_procedure_documents_document_id
+      ON procedure_documents (document_id);
+
+    CREATE INDEX IF NOT EXISTS idx_symptom_procedures_procedure_id
+      ON symptom_procedures (procedure_id);
+
+    CREATE INDEX IF NOT EXISTS idx_repair_checklists_vehicle_updated
+      ON repair_checklists (vehicle_id, updated_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_repair_checklist_items_order
+      ON repair_checklist_items (checklist_id, sort_order, id);
+  `);
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -534,6 +570,7 @@ export function initializeDatabase() {
   ensureSchemaMigrationsTable();
   runMigration("001_initial_schema", createTables);
   runMigration("002_repair_checklists", createRepairChecklistsTables);
+  runMigration("003_link_and_sort_indexes", createLinkAndSortIndexes);
 
   ensureAppSettingsRecord();
   seedVehicle();
