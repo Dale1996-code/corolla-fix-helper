@@ -1,5 +1,6 @@
 import { formatDate } from "../../lib/formatDate";
-import { getDifficultyBadgeClass, labelize } from "./procedureDisplay";
+import { labelize } from "../../lib/labelize";
+import { getDifficultyBadgeClass } from "./procedureDisplay";
 
 export function ProceduresList({
   procedures,
@@ -39,9 +40,12 @@ export function ProceduresList({
             const isSelected = procedure.id === selectedProcedureId;
 
             return (
-              <div
+              <button
                 key={procedure.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm ${
+                type="button"
+                aria-current={isSelected ? "true" : undefined}
+                aria-label={`Select procedure: ${procedure.title}`}
+                className={`${listGridClass} w-full items-center border-b border-slate-100 px-4 py-3 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 ${
                   isSelected ? "bg-sky-50" : "hover:bg-slate-50"
                 }`}
                 onClick={() => onSelectProcedure(procedure.id)}
@@ -58,7 +62,7 @@ export function ProceduresList({
                 <span className="truncate text-slate-700">{labelize(procedure.confidence)}</span>
                 <span className="text-slate-700">{procedure.linkedDocumentIds.length}</span>
                 <span className="truncate text-xs text-slate-600">{formatDate(procedure.updatedAt)}</span>
-              </div>
+              </button>
             );
           })}
         </div>

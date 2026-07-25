@@ -1,17 +1,6 @@
 // Shared display helpers for the Symptoms feature, used by both SymptomsPage and
 // its presentational components.
 
-export function labelize(value) {
-  if (!value) {
-    return "Not set";
-  }
-
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 export function getStatusBadgeClass(status) {
   if (status === "resolved") {
     return "bg-emerald-100 text-emerald-800";

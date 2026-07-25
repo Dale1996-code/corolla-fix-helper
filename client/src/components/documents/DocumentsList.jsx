@@ -39,16 +39,27 @@ export function DocumentsList({
             const favoriteLabel = document.isFavorite ? "Yes" : "No";
 
             return (
+              // Row stays a <div> because the favorite toggle is a nested <button>
+              // (buttons cannot nest). The title cell holds an invisible full-row
+              // "stretched link" button instead: clicking anywhere on the row hits
+              // it (via after:absolute after:inset-0), while the favorite button's
+              // own z-index keeps it independently clickable and keyboard-reachable.
               <div
                 key={document.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm transition-colors ${
+                className={`${listGridClass} relative items-center border-b border-slate-100 px-4 py-3 text-sm transition-colors has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-sky-500 ${
                   isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "hover:bg-slate-50"
                 }`}
-                onClick={() => onSelectDocument(document.id)}
               >
                 <div className="min-w-0">
                   <p className="flex items-center gap-1.5 font-medium text-slate-900">
-                    <span className="truncate">{document.title}</span>
+                    <button
+                      type="button"
+                      aria-label={`Select document: ${document.title}`}
+                      className="truncate text-left after:absolute after:inset-0 focus:outline-none"
+                      onClick={() => onSelectDocument(document.id)}
+                    >
+                      {document.title}
+                    </button>
                     {document.isBookmarked ? (
                       <span
                         title="Bookmarked"
@@ -74,7 +85,7 @@ export function DocumentsList({
                 </div>
                 <span className="truncate text-slate-700">{document.system}</span>
                 <span className="truncate text-slate-700">{document.documentType}</span>
-                <div>
+                <div className="relative z-10">
                   <button
                     type="button"
                     disabled={
@@ -82,10 +93,9 @@ export function DocumentsList({
                       !favoriteUpdateState.error
                     }
                     className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleFavorite(document);
-                    }}
+                    onClick={() => onToggleFavorite(document)}
+                    aria-label={`Favorite: ${document.title}`}
+                    aria-pressed={document.isFavorite}
                   >
                     {favoriteLabel}
                   </button>

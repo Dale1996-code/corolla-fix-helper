@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 
 const STATUS_OPTIONS = [
@@ -36,60 +38,6 @@ function statusBadgeClass(status) {
   return STATUS_BADGE_CLASSES[status] || STATUS_BADGE_CLASSES.planned;
 }
 
-function TextField({ label, name, value, onChange, placeholder = "", required = false }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">
-        {label}
-        {required ? " *" : ""}
-      </span>
-      <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function TextAreaField({ label, name, value, onChange, placeholder = "" }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <textarea
-        className="min-h-24 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function SelectField({ label, name, value, onChange }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <select
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-      >
-        {STATUS_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 function StatusBadge({ status }) {
   return (
     <span
@@ -103,7 +51,7 @@ function StatusBadge({ status }) {
 function ChecklistCreateForm({ form, creating, createMessage, createError, onChange, onSubmit }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-slate-900">Create checklist</h3>
+      <h2 className="text-lg font-semibold text-slate-900">Create checklist</h2>
       <p className="mt-1 text-sm text-slate-600">
         Group the steps for a repair job, then check them off and reorder them as you work.
       </p>
@@ -118,7 +66,13 @@ function ChecklistCreateForm({ form, creating, createMessage, createError, onCha
             required
             placeholder="Front brake job"
           />
-          <SelectField label="Status" name="status" value={form.status} onChange={onChange} />
+          <SelectField
+            label="Status"
+            name="status"
+            value={form.status}
+            onChange={onChange}
+            options={STATUS_OPTIONS}
+          />
         </div>
 
         <TextAreaField
@@ -137,23 +91,15 @@ function ChecklistCreateForm({ form, creating, createMessage, createError, onCha
           placeholder="Torque specs, part numbers, reminders..."
         />
 
-        {createMessage ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {createMessage}
-          </p>
-        ) : null}
+        {createMessage ? <SuccessBanner>{createMessage}</SuccessBanner> : null}
 
-        {createError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {createError}
-          </p>
-        ) : null}
+        {createError ? <ErrorBanner>{createError}</ErrorBanner> : null}
 
         <div>
           <button
             type="submit"
             disabled={creating}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
             {creating ? "Saving..." : "Save checklist"}
           </button>
@@ -221,6 +167,7 @@ function ChecklistItemRow({
   itemCount,
   isEditing,
   editingText,
+  pending,
   onToggle,
   onStartEdit,
   onEditTextChange,
@@ -236,6 +183,7 @@ function ChecklistItemRow({
         className="h-4 w-4 shrink-0"
         checked={item.isDone}
         onChange={() => onToggle(item)}
+        disabled={pending}
         aria-label={`Toggle done for ${item.text}`}
       />
 
@@ -255,7 +203,8 @@ function ChecklistItemRow({
           />
           <button
             type="submit"
-            className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500"
+            disabled={pending}
+            className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
             Save
           </button>
@@ -270,7 +219,7 @@ function ChecklistItemRow({
       ) : (
         <span
           className={`min-w-0 flex-1 text-sm ${
-            item.isDone ? "text-slate-400 line-through" : "text-slate-800"
+            item.isDone ? "text-slate-500 line-through" : "text-slate-800"
           }`}
         >
           {item.text}
@@ -282,7 +231,7 @@ function ChecklistItemRow({
           <button
             type="button"
             onClick={() => onMove(item, "up")}
-            disabled={index === 0}
+            disabled={pending || index === 0}
             className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Move ${item.text} up`}
           >
@@ -291,7 +240,7 @@ function ChecklistItemRow({
           <button
             type="button"
             onClick={() => onMove(item, "down")}
-            disabled={index === itemCount - 1}
+            disabled={pending || index === itemCount - 1}
             className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Move ${item.text} down`}
           >
@@ -300,14 +249,17 @@ function ChecklistItemRow({
           <button
             type="button"
             onClick={() => onStartEdit(item)}
-            className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            disabled={pending}
+            className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Edit ${item.text}`}
           >
             Edit
           </button>
           <button
             type="button"
             onClick={() => onDelete(item)}
-            className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+            disabled={pending}
+            className="rounded-lg border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Delete ${item.text}`}
           >
             Delete
@@ -323,6 +275,7 @@ function ChecklistItems({
   itemError,
   newItemText,
   addingItem,
+  itemActionPending,
   editingItemId,
   editingItemText,
   onNewItemTextChange,
@@ -337,7 +290,7 @@ function ChecklistItems({
 }) {
   return (
     <div className="mt-5">
-      <h4 className="font-semibold text-slate-900">Items</h4>
+      <h3 className="font-semibold text-slate-900">Items</h3>
 
       <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={onAddItem}>
         <input
@@ -351,17 +304,13 @@ function ChecklistItems({
         <button
           type="submit"
           disabled={addingItem}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
           {addingItem ? "Adding..." : "Add item"}
         </button>
       </form>
 
-      {itemError ? (
-        <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {itemError}
-        </p>
-      ) : null}
+      {itemError ? <ErrorBanner className="mt-2">{itemError}</ErrorBanner> : null}
 
       {items.length === 0 ? (
         <p className="mt-3 text-sm text-slate-600">No items yet. Add the first step above.</p>
@@ -375,6 +324,7 @@ function ChecklistItems({
               itemCount={items.length}
               isEditing={editingItemId === item.id}
               editingText={editingItemText}
+              pending={itemActionPending}
               onToggle={onToggleItem}
               onStartEdit={onStartEditItem}
               onEditTextChange={onEditItemTextChange}
@@ -391,14 +341,35 @@ function ChecklistItems({
 }
 
 function ChecklistEditForm({ form, saveState, onChange, onSubmit, onCancel }) {
+  const titleInputRef = useRef(null);
+
+  // The Edit button only renders this form once clicked, so mounting is the
+  // "form opened" event — move focus in so a keyboard user lands in it.
+  useEffect(() => {
+    titleInputRef.current?.focus();
+  }, []);
+
   return (
     <form
       className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4"
       onSubmit={onSubmit}
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <TextField label="Title" name="title" value={form.title} onChange={onChange} required />
-        <SelectField label="Status" name="status" value={form.status} onChange={onChange} />
+        <TextField
+          ref={titleInputRef}
+          label="Title"
+          name="title"
+          value={form.title}
+          onChange={onChange}
+          required
+        />
+        <SelectField
+          label="Status"
+          name="status"
+          value={form.status}
+          onChange={onChange}
+          options={STATUS_OPTIONS}
+        />
       </div>
 
       <TextAreaField
@@ -413,7 +384,7 @@ function ChecklistEditForm({ form, saveState, onChange, onSubmit, onCancel }) {
         <button
           type="submit"
           disabled={saveState.saving}
-          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
           {saveState.saving ? "Saving..." : "Save changes"}
         </button>
@@ -426,11 +397,7 @@ function ChecklistEditForm({ form, saveState, onChange, onSubmit, onCancel }) {
         </button>
       </div>
 
-      {saveState.error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {saveState.error}
-        </p>
-      ) : null}
+      {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
     </form>
   );
 }
@@ -460,7 +427,7 @@ function ChecklistDetails({
     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">{checklist.title}</h3>
+          <h2 className="text-xl font-semibold text-slate-900">{checklist.title}</h2>
           <div className="mt-2 flex items-center gap-3">
             <StatusBadge status={checklist.status} />
             <span className="text-xs text-slate-500">
@@ -489,33 +456,6 @@ function ChecklistDetails({
         </div>
       </div>
 
-      <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2">
-        <div>
-          <dt className="font-semibold text-slate-900">Status</dt>
-          <dd className="text-slate-700">{statusLabel(checklist.status)}</dd>
-        </div>
-        <div>
-          <dt className="font-semibold text-slate-900">Created</dt>
-          <dd className="text-slate-700">{formatDate(checklist.createdAt)}</dd>
-        </div>
-      </dl>
-
-      {checklist.description ? (
-        <div className="mt-4 text-sm">
-          <h4 className="font-semibold text-slate-900">Description</h4>
-          <p className="mt-2 whitespace-pre-wrap text-slate-700">{checklist.description}</p>
-        </div>
-      ) : null}
-
-      {checklist.notes ? (
-        <div className="mt-4 text-sm">
-          <h4 className="font-semibold text-slate-900">Notes</h4>
-          <p className="mt-2 whitespace-pre-wrap text-slate-700">{checklist.notes}</p>
-        </div>
-      ) : null}
-
-      <ChecklistItems {...itemsProps} />
-
       {isEditing ? (
         <ChecklistEditForm
           form={editForm}
@@ -524,19 +464,42 @@ function ChecklistDetails({
           onSubmit={onSaveEdit}
           onCancel={onCancelEdit}
         />
-      ) : null}
+      ) : (
+        <>
+          <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <dt className="font-semibold text-slate-900">Status</dt>
+              <dd className="text-slate-700">{statusLabel(checklist.status)}</dd>
+            </div>
+            <div>
+              <dt className="font-semibold text-slate-900">Created</dt>
+              <dd className="text-slate-700">{formatDate(checklist.createdAt)}</dd>
+            </div>
+          </dl>
+
+          {checklist.description ? (
+            <div className="mt-4 text-sm">
+              <h3 className="font-semibold text-slate-900">Description</h3>
+              <p className="mt-2 whitespace-pre-wrap text-slate-700">{checklist.description}</p>
+            </div>
+          ) : null}
+
+          {checklist.notes ? (
+            <div className="mt-4 text-sm">
+              <h3 className="font-semibold text-slate-900">Notes</h3>
+              <p className="mt-2 whitespace-pre-wrap text-slate-700">{checklist.notes}</p>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      <ChecklistItems {...itemsProps} />
 
       {saveState.message ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {saveState.message}
-        </p>
+        <SuccessBanner className="mt-4">{saveState.message}</SuccessBanner>
       ) : null}
 
-      {deleteState.error ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {deleteState.error}
-        </p>
-      ) : null}
+      {deleteState.error ? <ErrorBanner className="mt-4">{deleteState.error}</ErrorBanner> : null}
     </section>
   );
 }
@@ -573,7 +536,11 @@ export function RepairChecklistsPage() {
   const [editingItemText, setEditingItemText] = useState("");
   // Synchronous re-entrancy guard for item mutations (see runItemAction). A ref,
   // not state, so a rapid second event in the same render sees the flag.
+  // itemActionPending mirrors it as state purely to disable item controls
+  // while a mutation is in flight, so a second click is visibly impossible
+  // rather than silently dropped.
   const itemActionInFlight = useRef(false);
+  const [itemActionPending, setItemActionPending] = useState(false);
   const creatingInFlight = useRef(false);
 
   const selectedChecklist = useMemo(() => {
@@ -795,6 +762,7 @@ export function RepairChecklistsPage() {
     }
 
     itemActionInFlight.current = true;
+    setItemActionPending(true);
     setItemError("");
 
     try {
@@ -809,6 +777,7 @@ export function RepairChecklistsPage() {
       return true;
     } finally {
       itemActionInFlight.current = false;
+      setItemActionPending(false);
     }
   }
 
@@ -931,6 +900,7 @@ export function RepairChecklistsPage() {
     itemError,
     newItemText,
     addingItem,
+    itemActionPending,
     editingItemId,
     editingItemText,
     onNewItemTextChange: setNewItemText,
@@ -960,7 +930,6 @@ export function RepairChecklistsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Repair Checklists"
         description="Plan a repair job as a list of steps, check them off as you go, and reorder them with Up/Down."
       />
@@ -983,10 +952,9 @@ export function RepairChecklistsPage() {
           ) : null}
 
           {loadError ? (
-            <section className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
-              <p className="font-semibold text-red-800">Could not load checklists.</p>
-              <p className="mt-2 text-sm text-red-700">{loadError}</p>
-            </section>
+            <ErrorBanner title="Could not load checklists." className="shadow-sm">
+              {loadError}
+            </ErrorBanner>
           ) : null}
 
           {!loading && !loadError ? (

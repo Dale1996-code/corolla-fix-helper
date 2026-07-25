@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { SectionCard } from "../components/SectionCard";
+import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
 import { buildEntityLink } from "../lib/navigation";
 
 const defaultForm = {
@@ -26,22 +28,13 @@ const READINESS_LABELS = {
   not_ready: { label: "Not ready", className: "bg-red-100 text-red-800" },
 };
 
-function Card({ title, children }) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      <div className="mt-4 space-y-4">{children}</div>
-    </section>
-  );
-}
-
 function ActivityLog({ activity, statusMessage, isRunning }) {
   if (!activity.length && !statusMessage) {
     return null;
   }
 
   return (
-    <Card title="Agent activity">
+    <SectionCard title="Agent activity">
       {isRunning ? (
         <p className="text-sm font-medium text-sky-700" role="status">
           {statusMessage || "Working..."}
@@ -73,7 +66,7 @@ function ActivityLog({ activity, statusMessage, isRunning }) {
           </li>
         ))}
       </ol>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -83,9 +76,9 @@ function NarrativePanel({ narrative }) {
   }
 
   return (
-    <Card title="Prioritized plan">
+    <SectionCard title="Prioritized plan">
       <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{narrative}</p>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -97,7 +90,7 @@ function ReadinessPanel({ readiness }) {
   const badge = READINESS_LABELS[readiness.level] || READINESS_LABELS.not_ready;
 
   return (
-    <Card title="Launch readiness">
+    <SectionCard title="Launch readiness">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-2xl font-bold text-slate-900">{readiness.score}/100</span>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${badge.className}`}>
@@ -105,14 +98,15 @@ function ReadinessPanel({ readiness }) {
         </span>
       </div>
 
-      <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+      <InfoBanner className="text-xs">
         Steps are preparation guidance, not verified repair instructions.
-      </p>
+      </InfoBanner>
 
       <ul className="space-y-2">
         {readiness.rubric.map((item) => (
           <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
             <span aria-hidden="true">{item.met ? "✓" : "✗"}</span>
+            <span className="sr-only">{item.met ? "Met: " : "Not met: "}</span>
             <span>
               {item.label} ({item.points} pts)
             </span>
@@ -121,16 +115,16 @@ function ReadinessPanel({ readiness }) {
       </ul>
 
       {readiness.gaps.length ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <InfoBanner tone="amber">
           <p className="font-semibold">Gaps to close</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {readiness.gaps.map((gap, index) => (
               <li key={index}>{gap}</li>
             ))}
           </ul>
-        </div>
+        </InfoBanner>
       ) : null}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -140,7 +134,7 @@ function ChecklistPanel({ checklist }) {
   }
 
   return (
-    <Card title="Owner checklist">
+    <SectionCard title="Owner checklist">
       <div className="space-y-3">
         {checklist.map((item) => (
           <article
@@ -169,7 +163,7 @@ function ChecklistPanel({ checklist }) {
           </article>
         ))}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -179,7 +173,7 @@ function TasksPanel({ tasks }) {
   }
 
   return (
-    <Card title="Extracted tasks">
+    <SectionCard title="Extracted tasks">
       <ul className="space-y-2">
         {tasks.map((task) => (
           <li
@@ -198,7 +192,7 @@ function TasksPanel({ tasks }) {
           </li>
         ))}
       </ul>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -214,7 +208,7 @@ function HandoffPanel({ handoffNotes }) {
   ];
 
   return (
-    <Card title="Handoff drafts">
+    <SectionCard title="Handoff drafts">
       <div className="grid gap-3 md:grid-cols-3">
         {blocks.map((block) => (
           <div key={block.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -227,7 +221,7 @@ function HandoffPanel({ handoffNotes }) {
           </div>
         ))}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -237,7 +231,7 @@ function SourcesPanel({ citations }) {
   }
 
   return (
-    <Card title="Sources">
+    <SectionCard title="Sources">
       <div className="grid gap-3 md:grid-cols-2">
         {citations.map((citation) => {
           const documentName =
@@ -262,27 +256,21 @@ function SourcesPanel({ citations }) {
           );
         })}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
 function StatusBanner({ status, message }) {
   if (status === "ai_not_configured") {
     return (
-      <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        <p className="font-semibold">AI not configured</p>
-        <p className="mt-2 text-amber-700">{message}</p>
-      </section>
+      <InfoBanner tone="amber" title="AI not configured" announce>
+        {message}
+      </InfoBanner>
     );
   }
 
   if (status === "error") {
-    return (
-      <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        <p className="font-semibold text-red-800">Could not build the plan</p>
-        <p className="mt-2">{message}</p>
-      </section>
-    );
+    return <ErrorBanner title="Could not build the plan">{message}</ErrorBanner>;
   }
 
   return null;
@@ -462,6 +450,17 @@ export function RepairPlannerPage() {
     setRun(initialRun);
   }
 
+  function handleStop() {
+    // The fetch's own catch block sees the resulting AbortError and returns
+    // without touching state, so this is the only place run.status changes.
+    abortRef.current?.abort();
+    updateRun((current) =>
+      current.status === "running"
+        ? { ...current, status: "idle", statusMessage: "" }
+        : current
+    );
+  }
+
   const artifacts = run.artifacts;
 
   return (
@@ -472,7 +471,7 @@ export function RepairPlannerPage() {
       />
 
       <div className="space-y-6">
-        <Card title="Describe the repair">
+        <SectionCard title="Describe the repair">
           <form className="space-y-4" onSubmit={handleSubmit}>
             <label className="grid gap-2 text-sm text-slate-700">
               <span className="font-medium text-slate-900">Repair brief</span>
@@ -541,10 +540,19 @@ export function RepairPlannerPage() {
               <button
                 type="submit"
                 disabled={isRunning}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
               >
                 {isRunning ? "Planning..." : "Build repair plan"}
               </button>
+              {isRunning ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="rounded-xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+                >
+                  Stop
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={handleClear}
@@ -554,7 +562,7 @@ export function RepairPlannerPage() {
               </button>
             </div>
           </form>
-        </Card>
+        </SectionCard>
 
         <StatusBanner status={run.status} message={run.message} />
         <ActivityLog activity={run.activity} statusMessage={run.statusMessage} isRunning={isRunning} />

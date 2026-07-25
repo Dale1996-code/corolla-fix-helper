@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
+import { labelize } from "../../lib/labelize";
 import { buildEntityLink } from "../../lib/navigation";
-import { labelize } from "./searchDisplay";
 
 function SnippetBlock({ snippet, snippetField, showSnippetReason }) {
   if (!snippet) {
@@ -94,7 +94,10 @@ export function DocumentResultCard({ result, showSnippetReason }) {
   );
 }
 
-export function SymptomResultCard({ result, showSnippetReason }) {
+// Symptom and procedure result cards are structurally identical, differing
+// only in which status field ("status" vs "difficulty") appears as the
+// subtitle and the target entity type for the link.
+function LinkedDocsResultCard({ entityType, secondaryLabel, result, showSnippetReason }) {
   const linkedDocumentCount =
     typeof result.linkedDocumentCount === "number"
       ? result.linkedDocumentCount
@@ -108,7 +111,7 @@ export function SymptomResultCard({ result, showSnippetReason }) {
         <div>
           <h3 className="text-base font-semibold text-slate-900">{result.title}</h3>
           <p className="mt-1 text-sm text-slate-500">
-            {result.system || "No system"} - {labelize(result.status)}
+            {result.system || "No system"} - {secondaryLabel}
           </p>
         </div>
 
@@ -129,58 +132,35 @@ export function SymptomResultCard({ result, showSnippetReason }) {
       />
 
       <Link
-        to={buildEntityLink("symptom", result.id)}
-        aria-label={`Open symptom ${result.title}`}
+        to={buildEntityLink(entityType, result.id)}
+        aria-label={`Open ${entityType} ${result.title}`}
         className="mt-4 inline-flex text-sm font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
       >
-        Open symptom
+        Open {entityType}
       </Link>
     </article>
   );
 }
 
-export function ProcedureResultCard({ result, showSnippetReason }) {
-  const linkedDocumentCount =
-    typeof result.linkedDocumentCount === "number"
-      ? result.linkedDocumentCount
-      : Array.isArray(result.linkedDocuments)
-        ? result.linkedDocuments.length
-        : 0;
-
+export function SymptomResultCard({ result, showSnippetReason }) {
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-900">{result.title}</h3>
-          <p className="mt-1 text-sm text-slate-500">
-            {result.system || "No system"} - {labelize(result.difficulty)}
-          </p>
-        </div>
+    <LinkedDocsResultCard
+      entityType="symptom"
+      secondaryLabel={labelize(result.status)}
+      result={result}
+      showSnippetReason={showSnippetReason}
+    />
+  );
+}
 
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-            {labelize(result.confidence)}
-          </span>
-          <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800">
-            {linkedDocumentCount} linked docs
-          </span>
-        </div>
-      </div>
-
-      <SnippetBlock
-        snippet={result.snippet}
-        snippetField={result.snippetField}
-        showSnippetReason={showSnippetReason}
-      />
-
-      <Link
-        to={buildEntityLink("procedure", result.id)}
-        aria-label={`Open procedure ${result.title}`}
-        className="mt-4 inline-flex text-sm font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
-      >
-        Open procedure
-      </Link>
-    </article>
+export function ProcedureResultCard({ result, showSnippetReason }) {
+  return (
+    <LinkedDocsResultCard
+      entityType="procedure"
+      secondaryLabel={labelize(result.difficulty)}
+      result={result}
+      showSnippetReason={showSnippetReason}
+    />
   );
 }
 

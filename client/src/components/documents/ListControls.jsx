@@ -18,9 +18,9 @@ export function ListControls({
   return (
     <section className="rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
           Library controls
-        </h3>
+        </h2>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-1 text-xs font-medium text-slate-700">

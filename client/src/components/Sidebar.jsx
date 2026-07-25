@@ -13,9 +13,9 @@ export function Sidebar() {
             DaleTech
           </span>
         </div>
-        <h1 className="mt-2 font-display text-[2rem] font-bold leading-none text-white">
+        <p className="mt-2 font-display text-[2rem] font-bold leading-none text-white">
           Local Repair Helper
-        </h1>
+        </p>
         <p className="mt-3 text-sm leading-6 text-slate-300">
           Documents, symptoms, procedures, and notes for your 2009 Toyota Corolla LE 1.8L.
         </p>

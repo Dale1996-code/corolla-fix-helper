@@ -227,7 +227,13 @@ body::before {
   color: var(--color-ink-700);
 }
 
-.editorial-app .text-slate-600,
+/* Kept distinct from slate-500 below: collapsing both onto ink-500 (#64748b)
+   lightened Tailwind's slate-600 (#475569) and dropped it under WCAG AA
+   (4.5:1) on the app's paper/card backgrounds. */
+.editorial-app .text-slate-600 {
+  color: #475569;
+}
+
 .editorial-app .text-slate-500 {
   color: var(--color-ink-500);
 }
@@ -400,8 +406,12 @@ body::before {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Scoped to buttons and pill/card-style links, not inline text links, so
+   prose links inside paragraphs (e.g. "Open document") do not jitter. */
 .editorial-app button:not(:disabled):hover,
-.editorial-app a:hover {
+.editorial-app nav a:hover,
+.editorial-app a.rounded-full:hover,
+.editorial-app a.rounded-xl:hover {
   transform: translateY(-1px);
 }
 

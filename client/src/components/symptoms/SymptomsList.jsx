@@ -1,5 +1,6 @@
 import { formatDate } from "../../lib/formatDate";
-import { getStatusBadgeClass, labelize } from "./symptomDisplay";
+import { labelize } from "../../lib/labelize";
+import { getStatusBadgeClass } from "./symptomDisplay";
 
 export function SymptomsList({
   symptoms,

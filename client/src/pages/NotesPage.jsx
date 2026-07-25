@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
+import { useScrollToHash } from "../lib/useScrollToHash";
 
 const emptyNoteForm = {
   title: "",
@@ -12,71 +16,6 @@ const emptyNoteForm = {
   relatedEntityType: "none",
   relatedEntityId: "",
 };
-
-function labelize(value) {
-  if (!value) {
-    return "Not set";
-  }
-
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function TextField({ label, name, value, onChange, placeholder = "", required = false }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">
-        {label}
-        {required ? " *" : ""}
-      </span>
-      <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function TextAreaField({ label, name, value, onChange, placeholder = "" }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <textarea
-        className="min-h-28 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function SelectField({ label, name, value, onChange, options }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <select
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
 
 function getRelatedEntityFieldConfig(relatedEntityType, documents, symptoms, procedures) {
   if (relatedEntityType === "document") {
@@ -286,7 +225,7 @@ function NoteCreateForm({
       id="create-note"
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
     >
-      <h3 className="text-lg font-semibold text-slate-900">Create note</h3>
+      <h2 className="text-lg font-semibold text-slate-900">Create note</h2>
       <p className="mt-1 text-sm text-slate-600">
         Save observations, reminders, and repair notes. In this page, you can optionally link
         each note to one document, symptom, or procedure.
@@ -349,23 +288,15 @@ function NoteCreateForm({
           placeholder="Write your note here..."
         />
 
-        {createMessage ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {createMessage}
-          </p>
-        ) : null}
+        {createMessage ? <SuccessBanner>{createMessage}</SuccessBanner> : null}
 
-        {createError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {createError}
-          </p>
-        ) : null}
+        {createError ? <ErrorBanner>{createError}</ErrorBanner> : null}
 
         <div className="flex items-center gap-3">
           <button
             type="submit"
             disabled={creating}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
             {creating ? "Saving..." : "Save note"}
           </button>
@@ -462,9 +393,12 @@ function NotesList({ notes, selectedNoteId, onSelectNote }) {
             const relatedLabel = getLinkedEntityTitle(note);
 
             return (
-              <div
+              <button
                 key={note.id}
-                className={`${listGridClass} cursor-pointer border-b border-slate-100 px-4 py-3 text-sm ${
+                type="button"
+                aria-current={isSelected ? "true" : undefined}
+                aria-label={`Select note: ${note.title}`}
+                className={`${listGridClass} w-full items-center border-b border-slate-100 px-4 py-3 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 ${
                   isSelected ? "bg-sky-50" : "hover:bg-slate-50"
                 }`}
                 onClick={() => onSelectNote(note.id)}
@@ -475,7 +409,7 @@ function NotesList({ notes, selectedNoteId, onSelectNote }) {
                 <span className="truncate text-xs text-slate-600">
                   {formatDate(note.updatedAt)}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -558,7 +492,7 @@ function NoteEditForm({
         <button
           type="submit"
           disabled={saveState.saving}
-          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
           {saveState.saving ? "Saving..." : "Save changes"}
         </button>
@@ -571,11 +505,7 @@ function NoteEditForm({
         </button>
       </div>
 
-      {saveState.error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {saveState.error}
-        </p>
-      ) : null}
+      {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
     </form>
   );
 }
@@ -617,7 +547,7 @@ function NoteDetails({
     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">{note.title}</h3>
+          <h2 className="text-xl font-semibold text-slate-900">{note.title}</h2>
           <p className="mt-1 text-sm text-slate-500">
             Updated {formatDate(note.updatedAt)}
           </p>
@@ -674,7 +604,7 @@ function NoteDetails({
 
       <div className="mt-5 space-y-4 text-sm">
         <div>
-          <h4 className="font-semibold text-slate-900">Content</h4>
+          <h3 className="font-semibold text-slate-900">Content</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {note.content || "No content yet."}
           </p>
@@ -682,7 +612,7 @@ function NoteDetails({
 
         {note.relatedEntityType !== "none" ? (
           <div>
-            <h4 className="font-semibold text-slate-900">{linkedEntityHeading}</h4>
+            <h3 className="font-semibold text-slate-900">{linkedEntityHeading}</h3>
             {linkedEntity ? (
               <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
                 <Link
@@ -729,16 +659,10 @@ function NoteDetails({
       ) : null}
 
       {saveState.message ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {saveState.message}
-        </p>
+        <SuccessBanner className="mt-4">{saveState.message}</SuccessBanner>
       ) : null}
 
-      {deleteState.error ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {deleteState.error}
-        </p>
-      ) : null}
+      {deleteState.error ? <ErrorBanner className="mt-4">{deleteState.error}</ErrorBanner> : null}
     </section>
   );
 }
@@ -754,6 +678,8 @@ function toNotePayload(form) {
 }
 
 export function NotesPage() {
+  useScrollToHash();
+
   const [searchParams] = useSearchParams();
   const requestedNoteIdValue = Number(searchParams.get("noteId"));
   const requestedNoteId =
@@ -1215,10 +1141,9 @@ export function NotesPage() {
           ) : null}
 
           {loadError ? (
-            <section className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
-              <p className="font-semibold text-red-800">Could not load notes.</p>
-              <p className="mt-2 text-sm text-red-700">{loadError}</p>
-            </section>
+            <ErrorBanner title="Could not load notes." className="shadow-sm">
+              {loadError}
+            </ErrorBanner>
           ) : null}
 
           {!loading && !loadError ? (
