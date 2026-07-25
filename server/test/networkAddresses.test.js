@@ -153,6 +153,28 @@ test("getTailscaleDnsName tries the Windows install path after PATH lookup fails
   ]);
 });
 
+test("getTailscaleDnsName still tries the Windows install path after a synchronous throw", async () => {
+  const commandsTried = [];
+  const execFileImpl = (command, _args, _options, callback) => {
+    commandsTried.push(command);
+
+    if (command === "tailscale") {
+      throw new Error("could not start process");
+    }
+
+    callback(null, JSON.stringify({ Self: { DNSName: "pc.ts.net." } }), "");
+  };
+
+  assert.equal(
+    await getTailscaleDnsName({ execFileImpl, platform: "win32" }),
+    "pc.ts.net"
+  );
+  assert.deepEqual(commandsTried, [
+    "tailscale",
+    "C:\\Program Files\\Tailscale\\tailscale.exe",
+  ]);
+});
+
 test("getTailscaleServeUrl finds the HTTPS proxy for our port and strips :443", async () => {
   const serveStatus = {
     Web: {
@@ -185,6 +207,30 @@ test("getTailscaleServeUrl keeps non-443 ports visible in the URL", async () => 
     await getTailscaleServeUrl(4000, { execFileImpl }),
     "https://my-pc.tail1234.ts.net:8443"
   );
+});
+
+test("getTailscaleServeUrl recognizes default HTTP and HTTPS proxy ports", async () => {
+  const cases = [
+    { appPort: 80, proxy: "http://127.0.0.1:80" },
+    { appPort: 443, proxy: "https://127.0.0.1:443" },
+  ];
+
+  for (const { appPort, proxy } of cases) {
+    const serveStatus = {
+      Web: {
+        "my-pc.tail1234.ts.net:443": {
+          Handlers: { "/": { Proxy: proxy } },
+        },
+      },
+    };
+    const execFileImpl = (_command, _args, _options, callback) =>
+      callback(null, JSON.stringify(serveStatus), "");
+
+    assert.equal(
+      await getTailscaleServeUrl(appPort, { execFileImpl }),
+      "https://my-pc.tail1234.ts.net"
+    );
+  }
 });
 
 test("getTailscaleServeUrl returns null when serve targets another port or is unset", async () => {

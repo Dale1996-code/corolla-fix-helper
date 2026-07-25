@@ -7,6 +7,7 @@ Keep repo guidance tied to commands and behavior that exist in the current codeb
 Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 
 - `npm run install:all` installs root, server, and client packages.
+- `powershell -ExecutionPolicy Bypass -File .\start-corolla-helper.ps1` runs the Windows guided setup: it creates `server\.env` if missing, prompts for an OpenAI key, optionally imports PDFs, runs `npm run embed:backfill`, builds, and starts the app. It is interactive and writes local `server\.env`, so do not run it in non-interactive automation unless that setup is the goal.
 - `npm run dev` starts the local backend and frontend together.
 - `npm run dev:server` starts only the Express backend.
 - `npm run dev:client` starts only the Vite frontend.
@@ -35,7 +36,9 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Frontend dev URL: `http://localhost:5173`
 - Backend URL: `http://localhost:4000`
 - Health check: `http://localhost:4000/api/health`
+- Production-style local start is `npm run build` then `npm start`. `server/src/index.js` prints `localhost` plus best-effort phone URLs for same-Wi-Fi, Tailscale, and HTTPS `tailscale serve` install access when those are detectable.
 - Use `QA_CHECKLIST.md` for manual verification after changes.
+- In dev, `client/vite.config.js` proxies `/api` to `http://localhost:4000`; if the backend `PORT` changes, update the Vite proxy target and `CORS_ORIGIN` together.
 - For PowerShell API examples with JSON bodies, prefer `Invoke-RestMethod`; `docs/api.md` documents that Windows PowerShell 5.1 can mangle inline JSON passed to `curl.exe`. Plain GET/download requests and multipart uploads still use `curl.exe`.
 - On Windows, Vite/Vitest/build commands can fail inside the sandbox with an esbuild `Access is denied` error. Rerun outside the sandbox before treating that as a code failure.
 - `npm run build` writes generated frontend output under `client/dist`; do not hand-edit generated files.
@@ -47,6 +50,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `server/src/services/` contains document extraction, chunking, retrieval, embedding, search, attachments, backup/restore, app settings, single-vehicle lookup, document/symptom/procedure/note helpers, and repair-planner agent helpers.
 - `server/src/scripts/` contains repo commands such as folder import, backup drill/restore, smoke testing, embedding backfill, retrieval eval, and answer eval.
 - `client/src/pages/` contains the main React page components and colocated frontend tests. Shared presentational pieces live under `client/src/components/`.
+- `client/public/` contains install/offline assets: `manifest.webmanifest`, `sw.js`, `offline.html`, icons, and splash images.
 - `docs/archive/` is historical context only; do not treat archived plans as current repo truth without checking live files.
 
 ## Route, Service, And Mapper Conventions
@@ -72,6 +76,14 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Current AI support uses in-memory cosine search over SQLite-stored embedding BLOBs. It does not include a vector database or general open-ended chat; both AI features stay grounded in uploaded documents and the supplied input.
 - Current Google Cloud docs describe an intended deployment path, not proof of an active deployment.
 
+## Mobile, Phone Access, And Offline Notes
+
+- Phone access is local/private-network access, not cloud sync. `server/src/services/networkAddresses.js` only builds startup-banner URLs and must degrade to fewer lines, never a startup failure, if interfaces or the Tailscale CLI are unavailable.
+- Tailscale MagicDNS and `tailscale serve` detection are best-effort. The HTTPS `tailscale serve` URL is the recommended iPhone install URL because service workers require a secure origin; plain HTTP same-Wi-Fi access still works, but without the offline fallback page.
+- `client/src/main.jsx` registers the service worker only in production secure contexts. `client/public/sw.js` deliberately caches only `/offline.html` and `/icon.svg`, serves navigations network-first with offline-page fallback, and never intercepts `/api` or `/api/*`.
+- `server/src/app.js` reinforces the same boundary by sending `Cache-Control: no-store` for `/api` responses and `Cache-Control: no-cache` for `sw.js`. If you change PWA/offline behavior, keep repair data network-only and update `client/src/serviceWorker.test.js`.
+- Do not recommend router port-forwarding or `tailscale funnel` for this app unless authentication and public-exposure protections are added; the current app has no login.
+
 ## Storage, Uploads, And PDF Extraction
 
 - If no env override is set, `server/src/config.js` stores SQLite at `server/data/corolla-fix-helper.db` and uploaded PDFs in `server/uploads/`.
@@ -89,6 +101,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 ## Environment And AI Notes
 
 - Keep real secrets out of docs and commits. Put local secrets in `server/.env` or deployment environment variables.
+- `PORT`, `CLIENT_PORT`, `CORS_ORIGIN`, `DATABASE_FILE`, `UPLOADS_DIR`, `MAX_UPLOAD_SIZE_MB`, OpenAI model settings, reranker settings, and OCR settings are read in `server/src/config.js`; `.env.example` and `docs/environment-variables.md` are the current reference for placeholders and defaults.
 - `OPENAI_API_KEY` enables generated Ask answers, Repair Planner model calls, AI-assisted procedure suggestions, optional reranking, embedding backfill, and answer-quality evals.
 - `OPENAI_ANSWER_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE` are read by server config. `OPENAI_MODEL` is still accepted as an older fallback for the answer model.
 - `OPENAI_VISION_MODEL` is used only when Ask includes a saved image; when unset, it falls back to `OPENAI_ANSWER_MODEL`.
@@ -107,8 +120,9 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `.dockerignore` excludes `server/data`, `server/uploads`, `.env`, and nested env files, so database files, uploaded PDFs, and secrets are not copied into the image.
 - The Docker runtime image installs Tesseract and Poppler, so OCR of scanned PDFs works in a container out of the box (matching the default `OCR_ENABLED=true`). Set `OCR_ENABLED=false` to skip OCR.
 - `docs/gcp-deployment.md` targets one Google Compute Engine VM running the Docker image with `/data` mounted for the SQLite database and uploads.
+- The documented Docker build path is `docker build -t "$IMAGE" .` followed by `docker push "$IMAGE"` for Artifact Registry; the VM run command mounts `/opt/corolla-fix-helper-data:/data` and sets `DATABASE_FILE=/data/corolla-fix-helper.db` plus `UPLOADS_DIR=/data/uploads` so SQLite/uploads persist.
 - `.github/workflows/ci.yml` runs on push and pull request with Node 24, then runs `npm run install:all`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, and `npm run smoke`.
-- `npm run smoke` (`server/src/scripts/smokeTest.js`) is a post-build production smoke test: it boots the real Express app against a throwaway DB/uploads dir and makes live HTTP requests to confirm the built frontend is served, `GET /api/health` and the core API routes respond, Ask degrades gracefully without an API key, and Repair Checklists can round-trip a checklist. Run it after `npm run build`.
+- `npm run smoke` (`server/src/scripts/smokeTest.js`) is a post-build production smoke test: it boots the real Express app against a throwaway DB/uploads dir and makes live HTTP requests to confirm the built frontend is served, `GET /api/health` and the core API routes respond, Ask degrades gracefully without an API key, Repair Checklists can round-trip a checklist, and PWA assets (`manifest.webmanifest`, `apple-touch-icon.png`, `sw.js`, `offline.html`) are served. Run it after `npm run build`.
 - Backup export and restore include the entire uploads tree, so saved attachment images are included. Stop the server before restoring; the restore keeps a pre-restore snapshot beside the database.
 - Backup export and archive creation use `server/src/services/databaseSnapshot.js` (`VACUUM INTO`) instead of raw `.db` copies so committed rows still in SQLite's WAL sidecar are included.
 - Backup code uses `server/src/services/tarExecutable.js`. On Windows, reuse this helper instead of spawning bare `tar`, because it deliberately selects the native `%SystemRoot%\System32\tar.exe` rather than whichever tar appears first on `PATH`.
@@ -131,17 +145,23 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - 2026-07-10: `npm run typecheck` passed.
 - 2026-07-10: `npm run test:server` passed 307 backend tests.
 - 2026-07-10: `npm run test:client -- RepairChecklistsPage` passed 2 targeted client tests when rerun outside the Windows sandbox after the known Vite/esbuild `Access is denied` sandbox failure.
+- 2026-07-24: from `server/`, `npm run test -- test/networkAddresses.test.js` passed 16 backend phone-access tests.
+- 2026-07-24: `npm run test:client -- serviceWorker` passed 4 targeted service-worker tests when rerun outside the Windows sandbox after the known Vite/esbuild `Access is denied` startup failure.
 
 ## Useful Docs
 
 - `README.md` is the main entry point.
 - `docs/onboarding.md` is the new-developer guide with a file walkthrough and first-day checklist.
+- `docs/getting-started-windows.md` explains the interactive `start-corolla-helper.ps1` setup path.
 - `docs/api.md` is the endpoint reference for every `/api` route.
+- `DATA_MODEL.md` summarizes the current SQLite tables and migration names.
 - `docs/runbook.md` covers operational procedures: start/stop, health checks, and failure recovery.
+- `docs/troubleshooting.md` is the symptom-by-symptom local failure guide.
 - `docs/local-development.md` explains local setup.
 - `docs/environment-variables.md` explains placeholder-only env values.
 - `docs/architecture.md` explains current app structure.
 - `docs/backup-restore.md` explains backup contents, safe restore behavior, and the round-trip drill.
+- `docs/quality-testing.md` explains `eval:retrieval`, `eval:rerank`, and `eval:answers`.
 - `docs/mobile-access.md` explains phone access: same-Wi-Fi URLs, Tailscale (and `tailscale serve` for HTTPS), and the iPhone Home Screen install.
 - `docs/gcp-deployment.md` explains the intended Google Compute Engine path.
 - `docs/archive/` contains old plans, generated snapshots, and superseded deployment notes.
