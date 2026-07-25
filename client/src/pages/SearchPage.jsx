@@ -1,15 +1,44 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { SectionCard } from "../components/SectionCard";
+import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
+import { SelectField, TextField } from "../components/forms/FormFields";
 import { attachmentFileUrl, fetchAllImageAttachments } from "../lib/apiClient";
+import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
-import { labelize } from "../components/search/searchDisplay";
 import {
   DocumentResultCard,
   NoteResultCard,
   ProcedureResultCard,
   SymptomResultCard,
 } from "../components/search/ResultCards";
+
+// The shared SelectField takes [{ value, label }]; search filter options come
+// back from the API as plain strings, so labelize them into that shape here.
+function toOptions(values) {
+  return values.map((value) => ({ value, label: labelize(value) }));
+}
+
+const DOCUMENTS_SORT_OPTIONS = [
+  { value: "relevance", label: "Relevance" },
+  { value: "newest", label: "Newest" },
+  { value: "title", label: "Title" },
+];
+
+const TITLE_SORT_OPTIONS = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+  { value: "title", label: "Title" },
+];
+
+const NEWEST_OLDEST_SORT_OPTIONS = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+];
+
+const FAVORITE_OPTIONS = [{ value: "true", label: "Favorites only" }];
+const BOOKMARKED_OPTIONS = [{ value: "true", label: "Bookmarked only" }];
 
 const defaultDocumentsForm = {
   q: "",
@@ -147,22 +176,13 @@ async function fetchSearchSection(
   }
 }
 
-function SectionShell({ title, children }) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      <div className="mt-4 space-y-4">{children}</div>
-    </section>
-  );
-}
-
 function SectionActions({ loading, onClear }) {
   return (
     <div className="flex flex-wrap gap-3">
       <button
         type="submit"
         disabled={loading}
-        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
       >
         {loading ? "Searching..." : "Search"}
       </button>
@@ -174,40 +194,6 @@ function SectionActions({ loading, onClear }) {
         Clear
       </button>
     </div>
-  );
-}
-
-function KeywordField({ value, onChange, placeholder }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">Keyword</span>
-      <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function SelectField({ label, value, onChange, emptyLabel, options }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <select
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        value={value}
-        onChange={onChange}
-      >
-        <option value="">{emptyLabel}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {labelize(option)}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
@@ -230,11 +216,7 @@ function SectionStatus({ loading, error, total, label, emptyMessage }) {
   }
 
   if (error) {
-    return (
-      <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        {error}
-      </section>
-    );
+    return <ErrorBanner>{error}</ErrorBanner>;
   }
 
   if (total === 0) {
@@ -343,29 +325,18 @@ function AskAssistantMessage({ message }) {
 
   if (message.status === "ai_not_configured") {
     return (
-      <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        <p className="font-semibold">AI not configured</p>
-        <p className="mt-2 text-amber-700">{message.content}</p>
-      </section>
+      <InfoBanner tone="amber" title="AI not configured">
+        {message.content}
+      </InfoBanner>
     );
   }
 
   if (message.status === "not_found") {
-    return (
-      <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <p className="font-semibold text-slate-900">No answer found</p>
-        <p className="mt-2">{message.content}</p>
-      </section>
-    );
+    return <InfoBanner title="No answer found">{message.content}</InfoBanner>;
   }
 
   if (message.status === "error") {
-    return (
-      <section className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        <p className="font-semibold text-red-800">Could not ask documents</p>
-        <p className="mt-2">{message.content}</p>
-      </section>
-    );
+    return <ErrorBanner title="Could not ask documents">{message.content}</ErrorBanner>;
   }
 
   return null;
@@ -377,7 +348,9 @@ function AskThread({ messages }) {
   }
 
   return (
-    <div className="space-y-4">
+    // The Ask answer can take 10-30s to arrive; aria-live announces it to
+    // screen-reader users instead of leaving them with silence.
+    <div className="space-y-4" role="status" aria-live="polite">
       {messages.map((message, index) =>
         message.role === "user" ? (
           <section
@@ -404,16 +377,11 @@ function AskStatusPanel({ status }) {
     return null;
   }
 
-  const statusClass =
-    status.status === "error"
-      ? "border-red-200 bg-red-50 text-red-700"
-      : "border-dashed border-slate-300 bg-slate-50 text-slate-600";
+  if (status.status === "error") {
+    return <ErrorBanner>{status.message}</ErrorBanner>;
+  }
 
-  return (
-    <section className={`rounded-xl border px-4 py-3 text-sm ${statusClass}`}>
-      {status.message}
-    </section>
-  );
+  return <InfoBanner announce>{status.message}</InfoBanner>;
 }
 
 function buildAskHistory(messages) {
@@ -545,7 +513,7 @@ function AskDocumentsSection() {
   const isLoading = askState.status === "loading";
 
   return (
-    <SectionShell title="Ask your documents">
+    <SectionCard title="Ask your documents">
       <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
         Verify torque specs and safety steps against the manual before doing repair work.
       </p>
@@ -620,7 +588,7 @@ function AskDocumentsSection() {
           <button
             type="submit"
             disabled={isLoading}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
             {isLoading ? "Asking..." : "Ask"}
           </button>
@@ -629,432 +597,248 @@ function AskDocumentsSection() {
 
       <AskThread messages={messages} />
       <AskStatusPanel status={askState} />
-    </SectionShell>
+    </SectionCard>
   );
 }
 
-function DocumentsSection() {
-  const [form, setForm] = useState(defaultDocumentsForm);
-  const [state, setState] = useState(createSectionState(defaultDocumentsFilters));
-  const requestSeq = useRef(0);
-  const hasKeyword = form.q.trim().length > 0;
-
-  async function runSearch(nextForm = form) {
-    const seq = (requestSeq.current += 1);
-    await fetchSearchSection(
-      "/api/search/documents",
-      nextForm,
-      setState,
-      defaultDocumentsFilters,
-      { shouldApply: () => seq === requestSeq.current }
-    );
-  }
-
-  useEffect(() => {
-    runSearch(defaultDocumentsForm);
-  }, []);
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    runSearch();
-  }
-
-  function handleClear() {
-    setForm(defaultDocumentsForm);
-    runSearch(defaultDocumentsForm);
-  }
-
-  return (
-    <SectionShell title="Documents">
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <KeywordField
+// One config per entity type drives a shared SearchSection instead of four
+// near-identical ~150-line components differing only in endpoint, fields,
+// and result card.
+const SEARCH_SECTIONS = [
+  {
+    key: "documents",
+    title: "Documents",
+    endpoint: "/api/search/documents",
+    defaultForm: defaultDocumentsForm,
+    defaultFilters: defaultDocumentsFilters,
+    gridColsClass: "xl:grid-cols-5",
+    resultNoun: "document",
+    resultNounPlural: "documents",
+    emptyMessage: "No documents matched this search.",
+    ResultCard: DocumentResultCard,
+    renderFields({ form, setForm, filters }) {
+      return (
+        <>
+          <TextField
+            label="Keyword"
+            name="q"
             value={form.q}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, q: event.target.value }))
             }
             placeholder="spark plug, wiring, torque specs"
           />
-
           <SelectField
             label="System"
+            name="system"
             value={form.system}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, system: event.target.value }))
             }
-            emptyLabel="All systems"
-            options={state.filters.systems || []}
+            emptyOption="All systems"
+            options={toOptions(filters.systems || [])}
           />
-
           <SelectField
             label="Document type"
+            name="documentType"
             value={form.documentType}
             onChange={(event) =>
-              setForm((currentForm) => ({
-                ...currentForm,
-                documentType: event.target.value,
-              }))
+              setForm((currentForm) => ({ ...currentForm, documentType: event.target.value }))
             }
-            emptyLabel="All document types"
-            options={state.filters.documentTypes || []}
+            emptyOption="All document types"
+            options={toOptions(filters.documentTypes || [])}
           />
-
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Favorite filter</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.favorite}
-              onChange={(event) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  favorite: event.target.value,
-                }))
-              }
-            >
-              <option value="">All documents</option>
-              <option value="true">Favorites only</option>
-            </select>
-          </label>
-
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Bookmark filter</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.bookmarked}
-              onChange={(event) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  bookmarked: event.target.value,
-                }))
-              }
-            >
-              <option value="">All documents</option>
-              <option value="true">Bookmarked only</option>
-            </select>
-          </label>
-
+          <SelectField
+            label="Favorite filter"
+            name="favorite"
+            value={form.favorite}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, favorite: event.target.value }))
+            }
+            emptyOption="All documents"
+            options={FAVORITE_OPTIONS}
+          />
+          <SelectField
+            label="Bookmark filter"
+            name="bookmarked"
+            value={form.bookmarked}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, bookmarked: event.target.value }))
+            }
+            emptyOption="All documents"
+            options={BOOKMARKED_OPTIONS}
+          />
           <SelectField
             label="Tag"
+            name="tag"
             value={form.tag}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, tag: event.target.value }))
             }
-            emptyLabel="All tags"
-            options={state.filters.tags || []}
+            emptyOption="All tags"
+            options={toOptions(filters.tags || [])}
           />
-
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Sort</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.sort}
-              onChange={(event) =>
-                setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
-              }
-            >
-              <option value="relevance">Relevance</option>
-              <option value="newest">Newest</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
-        </div>
-
-        <SectionActions loading={state.loading} onClear={handleClear} />
-      </form>
-
-      {!state.loading && !state.error ? (
-        <ResultSummary total={state.total} label="document result" />
-      ) : null}
-
-      <SectionStatus
-        loading={state.loading}
-        error={state.error}
-        total={state.total}
-        label="documents"
-        emptyMessage="No documents matched this search."
-      />
-
-      {!state.loading && !state.error && state.results.length
-        ? state.results.map((result) => (
-            <DocumentResultCard
-              key={result.id}
-              result={result}
-              showSnippetReason={hasKeyword}
-            />
-          ))
-        : null}
-    </SectionShell>
-  );
-}
-
-function SymptomsSection() {
-  const [form, setForm] = useState(defaultSymptomsForm);
-  const [state, setState] = useState(createSectionState(defaultSymptomsFilters));
-  const requestSeq = useRef(0);
-  const hasKeyword = form.q.trim().length > 0;
-
-  async function runSearch(nextForm = form) {
-    const seq = (requestSeq.current += 1);
-    await fetchSearchSection(
-      "/api/search/symptoms",
-      nextForm,
-      setState,
-      defaultSymptomsFilters,
-      { shouldApply: () => seq === requestSeq.current }
-    );
-  }
-
-  useEffect(() => {
-    runSearch(defaultSymptomsForm);
-  }, []);
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    runSearch();
-  }
-
-  function handleClear() {
-    setForm(defaultSymptomsForm);
-    runSearch(defaultSymptomsForm);
-  }
-
-  return (
-    <SectionShell title="Symptoms">
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KeywordField
+          <SelectField
+            label="Sort"
+            name="sort"
+            value={form.sort}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
+            }
+            options={DOCUMENTS_SORT_OPTIONS}
+          />
+        </>
+      );
+    },
+  },
+  {
+    key: "symptoms",
+    title: "Symptoms",
+    endpoint: "/api/search/symptoms",
+    defaultForm: defaultSymptomsForm,
+    defaultFilters: defaultSymptomsFilters,
+    gridColsClass: "xl:grid-cols-4",
+    resultNoun: "symptom",
+    resultNounPlural: "symptoms",
+    emptyMessage: "No symptoms matched this search.",
+    ResultCard: SymptomResultCard,
+    renderFields({ form, setForm, filters }) {
+      return (
+        <>
+          <TextField
+            label="Keyword"
+            name="q"
             value={form.q}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, q: event.target.value }))
             }
             placeholder="idle, vibration, leak"
           />
-
           <SelectField
             label="System"
+            name="system"
             value={form.system}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, system: event.target.value }))
             }
-            emptyLabel="All systems"
-            options={state.filters.systems || []}
+            emptyOption="All systems"
+            options={toOptions(filters.systems || [])}
           />
-
           <SelectField
             label="Status"
+            name="status"
             value={form.status}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, status: event.target.value }))
             }
-            emptyLabel="All statuses"
-            options={state.filters.statuses || []}
+            emptyOption="All statuses"
+            options={toOptions(filters.statuses || [])}
           />
-
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Sort</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.sort}
-              onChange={(event) =>
-                setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
-              }
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
-        </div>
-
-        <SectionActions loading={state.loading} onClear={handleClear} />
-      </form>
-
-      {!state.loading && !state.error ? (
-        <ResultSummary total={state.total} label="symptom result" />
-      ) : null}
-
-      <SectionStatus
-        loading={state.loading}
-        error={state.error}
-        total={state.total}
-        label="symptoms"
-        emptyMessage="No symptoms matched this search."
-      />
-
-      {!state.loading && !state.error && state.results.length
-        ? state.results.map((result) => (
-            <SymptomResultCard
-              key={result.id}
-              result={result}
-              showSnippetReason={hasKeyword}
-            />
-          ))
-        : null}
-    </SectionShell>
-  );
-}
-
-function ProceduresSection() {
-  const [form, setForm] = useState(defaultProceduresForm);
-  const [state, setState] = useState(createSectionState(defaultProceduresFilters));
-  const requestSeq = useRef(0);
-  const hasKeyword = form.q.trim().length > 0;
-
-  async function runSearch(nextForm = form) {
-    const seq = (requestSeq.current += 1);
-    await fetchSearchSection(
-      "/api/search/procedures",
-      nextForm,
-      setState,
-      defaultProceduresFilters,
-      { shouldApply: () => seq === requestSeq.current }
-    );
-  }
-
-  useEffect(() => {
-    runSearch(defaultProceduresForm);
-  }, []);
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    runSearch();
-  }
-
-  function handleClear() {
-    setForm(defaultProceduresForm);
-    runSearch(defaultProceduresForm);
-  }
-
-  return (
-    <SectionShell title="Procedures">
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KeywordField
+          <SelectField
+            label="Sort"
+            name="sort"
+            value={form.sort}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
+            }
+            options={TITLE_SORT_OPTIONS}
+          />
+        </>
+      );
+    },
+  },
+  {
+    key: "procedures",
+    title: "Procedures",
+    endpoint: "/api/search/procedures",
+    defaultForm: defaultProceduresForm,
+    defaultFilters: defaultProceduresFilters,
+    gridColsClass: "xl:grid-cols-4",
+    resultNoun: "procedure",
+    resultNounPlural: "procedures",
+    emptyMessage: "No procedures matched this search.",
+    ResultCard: ProcedureResultCard,
+    renderFields({ form, setForm, filters }) {
+      return (
+        <>
+          <TextField
+            label="Keyword"
+            name="q"
             value={form.q}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, q: event.target.value }))
             }
             placeholder="cleaning, inspection, replacement"
           />
-
           <SelectField
             label="System"
+            name="system"
             value={form.system}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, system: event.target.value }))
             }
-            emptyLabel="All systems"
-            options={state.filters.systems || []}
+            emptyOption="All systems"
+            options={toOptions(filters.systems || [])}
           />
-
           <SelectField
             label="Difficulty"
+            name="difficulty"
             value={form.difficulty}
             onChange={(event) =>
-              setForm((currentForm) => ({
-                ...currentForm,
-                difficulty: event.target.value,
-              }))
+              setForm((currentForm) => ({ ...currentForm, difficulty: event.target.value }))
             }
-            emptyLabel="All difficulties"
-            options={state.filters.difficulties || []}
+            emptyOption="All difficulties"
+            options={toOptions(filters.difficulties || [])}
           />
-
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Sort</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.sort}
-              onChange={(event) =>
-                setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
-              }
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
-        </div>
-
-        <SectionActions loading={state.loading} onClear={handleClear} />
-      </form>
-
-      {!state.loading && !state.error ? (
-        <ResultSummary total={state.total} label="procedure result" />
-      ) : null}
-
-      <SectionStatus
-        loading={state.loading}
-        error={state.error}
-        total={state.total}
-        label="procedures"
-        emptyMessage="No procedures matched this search."
-      />
-
-      {!state.loading && !state.error && state.results.length
-        ? state.results.map((result) => (
-            <ProcedureResultCard
-              key={result.id}
-              result={result}
-              showSnippetReason={hasKeyword}
-            />
-          ))
-        : null}
-    </SectionShell>
-  );
-}
-
-function NotesSection() {
-  const [form, setForm] = useState(defaultNotesForm);
-  const [state, setState] = useState(createSectionState(defaultNotesFilters));
-  const requestSeq = useRef(0);
-  const hasKeyword = form.q.trim().length > 0;
-
-  async function runSearch(nextForm = form) {
-    const seq = (requestSeq.current += 1);
-    await fetchSearchSection("/api/search/notes", nextForm, setState, defaultNotesFilters, {
-      shouldApply: () => seq === requestSeq.current,
-    });
-  }
-
-  useEffect(() => {
-    runSearch(defaultNotesForm);
-  }, []);
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    runSearch();
-  }
-
-  function handleClear() {
-    setForm(defaultNotesForm);
-    runSearch(defaultNotesForm);
-  }
-
-  return (
-    <SectionShell title="Notes">
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KeywordField
+          <SelectField
+            label="Sort"
+            name="sort"
+            value={form.sort}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
+            }
+            options={TITLE_SORT_OPTIONS}
+          />
+        </>
+      );
+    },
+  },
+  {
+    key: "notes",
+    title: "Notes",
+    endpoint: "/api/search/notes",
+    defaultForm: defaultNotesForm,
+    defaultFilters: defaultNotesFilters,
+    gridColsClass: "xl:grid-cols-4",
+    resultNoun: "note",
+    resultNounPlural: "notes",
+    emptyMessage: "No notes matched this search.",
+    ResultCard: NoteResultCard,
+    renderFields({ form, setForm, filters }) {
+      return (
+        <>
+          <TextField
+            label="Keyword"
+            name="q"
             value={form.q}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, q: event.target.value }))
             }
             placeholder="observation, reminder, repair log"
           />
-
           <SelectField
             label="Note type"
+            name="noteType"
             value={form.noteType}
             onChange={(event) =>
               setForm((currentForm) => ({ ...currentForm, noteType: event.target.value }))
             }
-            emptyLabel="All note types"
-            options={state.filters.noteTypes || []}
+            emptyOption="All note types"
+            options={toOptions(filters.noteTypes || [])}
           />
-
           <SelectField
             label="Linked item type"
+            name="relatedEntityType"
             value={form.relatedEntityType}
             onChange={(event) =>
               setForm((currentForm) => ({
@@ -1062,50 +846,82 @@ function NotesSection() {
                 relatedEntityType: event.target.value,
               }))
             }
-            emptyLabel="All link types"
-            options={state.filters.relatedEntityTypes || []}
+            emptyOption="All link types"
+            options={toOptions(filters.relatedEntityTypes || [])}
           />
+          <SelectField
+            label="Sort"
+            name="sort"
+            value={form.sort}
+            onChange={(event) =>
+              setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
+            }
+            options={NEWEST_OLDEST_SORT_OPTIONS}
+          />
+        </>
+      );
+    },
+  },
+];
 
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Sort</span>
-            <select
-              className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-              value={form.sort}
-              onChange={(event) =>
-                setForm((currentForm) => ({ ...currentForm, sort: event.target.value }))
-              }
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-            </select>
-          </label>
+function SearchSection({ config }) {
+  const [form, setForm] = useState(config.defaultForm);
+  const [state, setState] = useState(createSectionState(config.defaultFilters));
+  const requestSeq = useRef(0);
+  const hasKeyword = form.q.trim().length > 0;
+  const ResultCard = config.ResultCard;
+
+  async function runSearch(nextForm = form) {
+    const seq = (requestSeq.current += 1);
+    await fetchSearchSection(config.endpoint, nextForm, setState, config.defaultFilters, {
+      shouldApply: () => seq === requestSeq.current,
+    });
+  }
+
+  useEffect(() => {
+    runSearch(config.defaultForm);
+    // Only re-run on mount (per section); runSearch/config are stable for a
+    // given section's lifetime.
+  }, []);
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    runSearch();
+  }
+
+  function handleClear() {
+    setForm(config.defaultForm);
+    runSearch(config.defaultForm);
+  }
+
+  return (
+    <SectionCard title={config.title}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className={`grid gap-4 md:grid-cols-2 ${config.gridColsClass}`}>
+          {config.renderFields({ form, setForm, filters: state.filters })}
         </div>
 
         <SectionActions loading={state.loading} onClear={handleClear} />
       </form>
 
       {!state.loading && !state.error ? (
-        <ResultSummary total={state.total} label="note result" />
+        <ResultSummary total={state.total} label={`${config.resultNoun} result`} />
       ) : null}
 
       <SectionStatus
         loading={state.loading}
         error={state.error}
         total={state.total}
-        label="notes"
-        emptyMessage="No notes matched this search."
+        label={config.resultNounPlural}
+        emptyMessage={config.emptyMessage}
       />
 
       {!state.loading && !state.error && state.results.length
         ? state.results.map((result) => (
-            <NoteResultCard
-              key={result.id}
-              result={result}
-              showSnippetReason={hasKeyword}
-            />
+            <ResultCard key={result.id} result={result} showSnippetReason={hasKeyword} />
           ))
         : null}
-    </SectionShell>
+    </SectionCard>
   );
 }
 
@@ -1113,17 +929,15 @@ export function SearchPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Working Feature"
         title="Ask AI"
         description="Search documents, symptoms, procedures, and notes from one page while keeping each search area separate and easy to understand."
       />
 
       <div className="space-y-6">
         <AskDocumentsSection />
-        <DocumentsSection />
-        <SymptomsSection />
-        <ProceduresSection />
-        <NotesSection />
+        {SEARCH_SECTIONS.map((config) => (
+          <SearchSection key={config.key} config={config} />
+        ))}
       </div>
     </>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ErrorBanner } from "./feedback/Banner";
 import {
   attachmentFileUrl,
   deleteAttachment,
@@ -98,6 +99,14 @@ export function AttachmentPanel({ entityType, entityId }) {
   }
 
   async function handleDelete(attachment) {
+    const confirmed = window.confirm(
+      `Delete this photo${attachment.caption ? ` ("${attachment.caption}")` : ""}? This cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
       setDeletingId(attachment.id);
       setActionError("");
@@ -114,17 +123,13 @@ export function AttachmentPanel({ entityType, entityId }) {
 
   return (
     <div data-testid="attachment-panel">
-      <h4 className="font-semibold text-slate-900">Photos</h4>
+      <h3 className="font-semibold text-slate-900">Photos</h3>
 
       {loading ? (
         <p className="mt-2 text-sm text-slate-600">Loading photos...</p>
       ) : null}
 
-      {loadError ? (
-        <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {loadError}
-        </p>
-      ) : null}
+      {loadError ? <ErrorBanner className="mt-2">{loadError}</ErrorBanner> : null}
 
       {!loading && !loadError && attachments.length === 0 ? (
         <p className="mt-2 text-sm text-slate-700">
@@ -147,7 +152,7 @@ export function AttachmentPanel({ entityType, entityId }) {
                 <img
                   className="h-28 w-full object-cover"
                   src={attachmentFileUrl(attachment.id)}
-                  alt={attachment.caption || attachment.originalFilename}
+                  alt={attachment.caption || attachment.originalFilename || "Attached photo"}
                 />
               </a>
               <div className="space-y-1 px-2 py-2">
@@ -209,11 +214,7 @@ export function AttachmentPanel({ entityType, entityId }) {
           </button>
         </div>
 
-        {actionError ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {actionError}
-          </p>
-        ) : null}
+        {actionError ? <ErrorBanner>{actionError}</ErrorBanner> : null}
       </form>
     </div>
   );

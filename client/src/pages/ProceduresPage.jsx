@@ -2,11 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import {
+  SelectField,
+  SuggestionDatalist,
+  TextAreaField,
+  TextField,
+} from "../components/forms/FormFields";
 import { setProcedureSymptoms } from "../lib/apiClient";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
-import { labelize } from "../components/procedures/procedureDisplay";
+import { useScrollToHash } from "../lib/useScrollToHash";
 import { ProceduresListControls } from "../components/procedures/ProceduresListControls";
 import { ProceduresList } from "../components/procedures/ProceduresList";
 
@@ -50,83 +58,6 @@ function matchesSearch(procedure, query) {
   ];
 
   return searchableFields.some((value) => value?.toLowerCase().includes(query));
-}
-
-function TextField({
-  label,
-  name,
-  value,
-  onChange,
-  placeholder = "",
-  required = false,
-  listId = "",
-}) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">
-        {label}
-        {required ? " *" : ""}
-      </span>
-      <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-        list={listId || undefined}
-      />
-    </label>
-  );
-}
-
-function TextAreaField({ label, name, value, onChange, placeholder = "" }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <textarea
-        className="min-h-24 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function SelectField({ label, name, value, onChange, options }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <select
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function SuggestionDatalist({ id, options }) {
-  if (!options.length) {
-    return null;
-  }
-
-  return (
-    <datalist id={id}>
-      {options.map((option) => (
-        <option key={option} value={option} />
-      ))}
-    </datalist>
-  );
 }
 
 function LinkedDocumentsSelector({
@@ -187,7 +118,7 @@ function ProcedureCreateForm({
       id="create-procedure"
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
     >
-      <h3 className="text-lg font-semibold text-slate-900">Create procedure</h3>
+      <h2 className="text-lg font-semibold text-slate-900">Create procedure</h2>
       <p className="mt-1 text-sm text-slate-600">
         Save one repair procedure and link it to the documents you use while doing it.
       </p>
@@ -281,23 +212,15 @@ function ProcedureCreateForm({
           disabled={creating}
         />
 
-        {createMessage ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {createMessage}
-          </p>
-        ) : null}
+        {createMessage ? <SuccessBanner>{createMessage}</SuccessBanner> : null}
 
-        {createError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {createError}
-          </p>
-        ) : null}
+        {createError ? <ErrorBanner>{createError}</ErrorBanner> : null}
 
         <div className="flex items-center gap-3">
           <button
             type="submit"
             disabled={creating}
-            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
             {creating ? "Saving..." : "Save procedure"}
           </button>
@@ -380,7 +303,7 @@ function ProcedureEditForm({
         <button
           type="submit"
           disabled={saveState.saving}
-          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
           {saveState.saving ? "Saving..." : "Save changes"}
         </button>
@@ -393,11 +316,7 @@ function ProcedureEditForm({
         </button>
       </div>
 
-      {saveState.error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {saveState.error}
-        </p>
-      ) : null}
+      {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
 
       <SuggestionDatalist
         id="edit-procedure-system-suggestions"
@@ -439,7 +358,7 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
 
   return (
     <div>
-      <h4 className="font-semibold text-slate-900">Linked symptoms</h4>
+      <h3 className="font-semibold text-slate-900">Linked symptoms</h3>
 
       {linkedSymptoms.length ? (
         <ul className="mt-2 space-y-2">
@@ -502,7 +421,7 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
               type="button"
               onClick={handleSaveLinks}
               disabled={saveState.saving}
-              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
             >
               {saveState.saving ? "Saving..." : "Save linked symptoms"}
             </button>
@@ -512,11 +431,7 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
           </div>
         ) : null}
 
-        {saveState.error ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {saveState.error}
-          </p>
-        ) : null}
+        {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
       </fieldset>
     </div>
   );
@@ -551,7 +466,7 @@ function ProcedureDetails({
     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">{procedure.title}</h3>
+          <h2 className="text-xl font-semibold text-slate-900">{procedure.title}</h2>
           <p className="mt-1 text-sm text-slate-500">
             Updated {formatDate(procedure.updatedAt)}
           </p>
@@ -597,42 +512,42 @@ function ProcedureDetails({
 
       <div className="mt-5 space-y-4 text-sm">
         <div>
-          <h4 className="font-semibold text-slate-900">Tools needed</h4>
+          <h3 className="font-semibold text-slate-900">Tools needed</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {procedure.toolsNeeded || "No tools listed yet."}
           </p>
         </div>
 
         <div>
-          <h4 className="font-semibold text-slate-900">Parts needed</h4>
+          <h3 className="font-semibold text-slate-900">Parts needed</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {procedure.partsNeeded || "No parts listed yet."}
           </p>
         </div>
 
         <div>
-          <h4 className="font-semibold text-slate-900">Safety notes</h4>
+          <h3 className="font-semibold text-slate-900">Safety notes</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {procedure.safetyNotes || "No safety notes yet."}
           </p>
         </div>
 
         <div>
-          <h4 className="font-semibold text-slate-900">Steps</h4>
+          <h3 className="font-semibold text-slate-900">Steps</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {procedure.steps || "No steps yet."}
           </p>
         </div>
 
         <div>
-          <h4 className="font-semibold text-slate-900">Notes</h4>
+          <h3 className="font-semibold text-slate-900">Notes</h3>
           <p className="mt-2 whitespace-pre-wrap text-slate-700">
             {procedure.notes || "No notes yet."}
           </p>
         </div>
 
         <div>
-          <h4 className="font-semibold text-slate-900">Linked documents</h4>
+          <h3 className="font-semibold text-slate-900">Linked documents</h3>
           {(procedure.linkedDocuments || []).length ? (
             <ul className="mt-2 space-y-2">
               {(procedure.linkedDocuments || []).map((document) => (
@@ -685,16 +600,10 @@ function ProcedureDetails({
       ) : null}
 
       {saveState.message ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {saveState.message}
-        </p>
+        <SuccessBanner className="mt-4">{saveState.message}</SuccessBanner>
       ) : null}
 
-      {deleteState.error ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {deleteState.error}
-        </p>
-      ) : null}
+      {deleteState.error ? <ErrorBanner className="mt-4">{deleteState.error}</ErrorBanner> : null}
     </section>
   );
 }
@@ -715,6 +624,8 @@ function toProcedurePayload(form) {
 }
 
 export function ProceduresPage() {
+  useScrollToHash();
+
   const [searchParams] = useSearchParams();
   const requestedProcedureIdValue = Number(searchParams.get("procedureId"));
   const requestedProcedureId =
@@ -1182,10 +1093,9 @@ export function ProceduresPage() {
           ) : null}
 
           {loadError ? (
-            <section className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
-              <p className="font-semibold text-red-800">Could not load procedures.</p>
-              <p className="mt-2 text-sm text-red-700">{loadError}</p>
-            </section>
+            <ErrorBanner title="Could not load procedures." className="shadow-sm">
+              {loadError}
+            </ErrorBanner>
           ) : null}
 
           {!loading && !loadError ? (

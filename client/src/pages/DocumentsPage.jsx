@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import {
+  SuggestionDatalist,
+  TextAreaField,
+  TextField,
+} from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
+import { useScrollToHash } from "../lib/useScrollToHash";
 import {
   getDocumentTags,
   normalizeExtractionStatus,
@@ -56,62 +63,6 @@ function normalizeBookmarkFilter(value) {
   return "all";
 }
 
-function TextField({
-  label,
-  name,
-  value,
-  onChange,
-  required = false,
-  placeholder = "",
-  listId = "",
-}) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">
-        {label}
-        {required ? " *" : ""}
-      </span>
-      <input
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-        list={listId || undefined}
-      />
-    </label>
-  );
-}
-
-function TextAreaField({ label, name, value, onChange, placeholder = "" }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <textarea
-        className="min-h-24 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function SuggestionDatalist({ id, options }) {
-  if (!options.length) {
-    return null;
-  }
-
-  return (
-    <datalist id={id}>
-      {options.map((option) => (
-        <option key={option} value={option} />
-      ))}
-    </datalist>
-  );
-}
 
 function UploadForm({
   form,
@@ -141,7 +92,7 @@ function UploadForm({
         }`}
       >
         <div>
-          <h3 className="text-lg font-semibold text-slate-950">Import PDF</h3>
+          <h2 className="text-lg font-semibold text-slate-950">Import PDF</h2>
           <p className="mt-1 text-sm text-slate-600">
             Upload one document at a time, then review status and fix details if needed
           </p>
@@ -268,23 +219,15 @@ function UploadForm({
             placeholder="Any quick notes about this document"
           />
 
-          {feedback ? (
-            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              {feedback}
-            </p>
-          ) : null}
+          {feedback ? <SuccessBanner>{feedback}</SuccessBanner> : null}
 
-          {error ? (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </p>
-          ) : null}
+          {error ? <ErrorBanner>{error}</ErrorBanner> : null}
 
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
             <button
               type="submit"
               disabled={uploading}
-              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
             >
               {uploading ? "Uploading..." : "Upload PDF"}
             </button>
@@ -376,7 +319,7 @@ function EditMetadataForm({
         <button
           type="submit"
           disabled={saving}
-          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
           {saving ? "Saving..." : "Save metadata"}
         </button>
@@ -431,7 +374,7 @@ function DocumentDetails({
     <section className="rounded-lg border border-slate-300 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">{document.title}</h3>
+          <h2 className="text-xl font-semibold text-slate-900">{document.title}</h2>
           <p className="mt-1 text-sm text-slate-500">{document.originalFilename}</p>
         </div>
 
@@ -530,10 +473,9 @@ function DocumentDetails({
       </dl>
 
       {document.extractionStatus?.startsWith("failed") ? (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <p className="font-semibold">Extraction error details</p>
-          <p className="mt-1">{document.extractionStatus}</p>
-        </div>
+        <ErrorBanner title="Extraction error details" className="mt-4">
+          {document.extractionStatus}
+        </ErrorBanner>
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -558,7 +500,7 @@ function DocumentDetails({
       </div>
 
       <div className="mt-4">
-        <h4 className="text-sm font-semibold text-slate-900">Tags</h4>
+        <h3 className="text-sm font-semibold text-slate-900">Tags</h3>
         <div className="mt-2">
           {getDocumentTags(document).length ? (
             <TagChips tags={getDocumentTags(document)} />
@@ -569,7 +511,7 @@ function DocumentDetails({
       </div>
 
       <div className="mt-4">
-        <h4 className="text-sm font-semibold text-slate-900">Document notes</h4>
+        <h3 className="text-sm font-semibold text-slate-900">Document notes</h3>
         <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
           {document.notes || "No notes yet."}
         </p>
@@ -588,31 +530,24 @@ function DocumentDetails({
       ) : null}
 
       {saveState.message ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {saveState.message}
-        </p>
+        <SuccessBanner className="mt-4">{saveState.message}</SuccessBanner>
       ) : null}
 
-      {saveState.error ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {saveState.error}
-        </p>
-      ) : null}
+      {saveState.error ? <ErrorBanner className="mt-4">{saveState.error}</ErrorBanner> : null}
       {extractionRunState.message ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {extractionRunState.message}
-        </p>
+        <SuccessBanner className="mt-4">{extractionRunState.message}</SuccessBanner>
       ) : null}
       {extractionRunState.error ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {extractionRunState.error}
-        </p>
+        <ErrorBanner className="mt-4">{extractionRunState.error}</ErrorBanner>
       ) : null}
     </section>
   );
 }
 
 export function DocumentsPage() {
+  useScrollToHash();
+
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [documents, setDocuments] = useState([]);
   const [documentDefaults, setDocumentDefaults] = useState(emptyDocumentDefaults);
@@ -625,10 +560,15 @@ export function DocumentsPage() {
   const [uploadError, setUploadError] = useState("");
   // Import is collapsed by default so the library (the reason to visit this
   // page) is visible immediately; open it when arriving via the dashboard's
-  // "#document-upload" quick action.
-  const [isUploadOpen, setIsUploadOpen] = useState(
-    () => typeof window !== "undefined" && window.location.hash === "#document-upload"
-  );
+  // "#document-upload" quick action. An effect (not a useState initializer)
+  // so clicking that action while already on /documents also opens it.
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+
+  useEffect(() => {
+    if (location.hash === "#document-upload") {
+      setIsUploadOpen(true);
+    }
+  }, [location.hash]);
 
   const [sortBy, setSortBy] = useState("newest");
   const [systemFilter, setSystemFilter] = useState("all");
@@ -1285,7 +1225,7 @@ export function DocumentsPage() {
     <>
       <PageHeader
         title="Documents"
-        description=""
+        description="Upload PDFs for your Corolla and keep the library organized with systems, tags, favorites, and bookmarks."
       />
 
       <div className="space-y-6">
@@ -1311,10 +1251,9 @@ export function DocumentsPage() {
           ) : null}
 
           {loadError ? (
-            <section className="rounded-lg border border-red-200 bg-red-50 p-6 shadow-sm">
-              <p className="font-semibold text-red-800">Could not load documents.</p>
-              <p className="mt-2 text-sm text-red-700">{loadError}</p>
-            </section>
+            <ErrorBanner title="Could not load documents." className="shadow-sm">
+              {loadError}
+            </ErrorBanner>
           ) : null}
 
           {!loading && !loadError ? (

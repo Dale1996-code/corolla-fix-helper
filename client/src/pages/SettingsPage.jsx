@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import { TextAreaField, TextField } from "../components/forms/FormFields";
 import { requestJson } from "../lib/apiClient";
 
 const emptyVehicleForm = {
@@ -54,48 +56,6 @@ function parseLineList(value) {
   }
 
   return nextItems;
-}
-
-function TextField({ label, name, value, onChange, required = false, placeholder = "" }) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">
-        {label}
-        {required ? " *" : ""}
-      </span>
-      <input
-        className="rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-
-function TextAreaField({
-  label,
-  name,
-  value,
-  onChange,
-  placeholder = "",
-  helpText = "",
-}) {
-  return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span className="font-medium text-slate-900">{label}</span>
-      <textarea
-        className="min-h-28 rounded-xl border border-slate-300 px-3 py-2 outline-none transition focus:border-sky-500"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-      />
-      {helpText ? <span className="text-xs text-slate-500">{helpText}</span> : null}
-    </label>
-  );
 }
 
 function RuntimeRow({ label, value, helpText = "" }) {
@@ -303,7 +263,6 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Local Setup"
         title="Settings"
         description="Manage the Corolla profile saved in this app, keep reusable document labels ready for uploads, and review the local paths this computer is using."
       />
@@ -315,17 +274,16 @@ export function SettingsPage() {
       ) : null}
 
       {loadError ? (
-        <section className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
-          <p className="font-semibold text-red-800">Could not load settings.</p>
-          <p className="mt-2 text-sm text-red-700">{loadError}</p>
-        </section>
+        <ErrorBanner title="Could not load settings." className="shadow-sm">
+          {loadError}
+        </ErrorBanner>
       ) : null}
 
       {!loading && !loadError ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           <div className="space-y-6">
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Vehicle profile</h3>
+              <h2 className="text-lg font-semibold text-slate-900">Vehicle profile</h2>
               <p className="mt-1 text-sm text-slate-600">
                 This app stores one Corolla profile. Update it here if you want the rest
                 of the app to match the car you are working on.
@@ -374,23 +332,15 @@ export function SettingsPage() {
                   placeholder="1.8L"
                 />
 
-                {vehicleSaveMessage ? (
-                  <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    {vehicleSaveMessage}
-                  </p>
-                ) : null}
+                {vehicleSaveMessage ? <SuccessBanner>{vehicleSaveMessage}</SuccessBanner> : null}
 
-                {vehicleSaveError ? (
-                  <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {vehicleSaveError}
-                  </p>
-                ) : null}
+                {vehicleSaveError ? <ErrorBanner>{vehicleSaveError}</ErrorBanner> : null}
 
                 <div className="flex items-center gap-3">
                   <button
                     type="submit"
                     disabled={vehicleSaving}
-                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
                   >
                     {vehicleSaving ? "Saving..." : "Save vehicle profile"}
                   </button>
@@ -400,7 +350,7 @@ export function SettingsPage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Document defaults</h3>
+              <h2 className="text-lg font-semibold text-slate-900">Document defaults</h2>
               <p className="mt-1 text-sm text-slate-600">
                 Save the common labels you want ready when importing PDFs. These stay on
                 this computer only and show up as suggestions in the Documents page.
@@ -426,23 +376,15 @@ export function SettingsPage() {
                   />
                 </div>
 
-                {defaultsSaveMessage ? (
-                  <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    {defaultsSaveMessage}
-                  </p>
-                ) : null}
+                {defaultsSaveMessage ? <SuccessBanner>{defaultsSaveMessage}</SuccessBanner> : null}
 
-                {defaultsSaveError ? (
-                  <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {defaultsSaveError}
-                  </p>
-                ) : null}
+                {defaultsSaveError ? <ErrorBanner>{defaultsSaveError}</ErrorBanner> : null}
 
                 <div className="flex items-center gap-3">
                   <button
                     type="submit"
                     disabled={defaultsSaving}
-                    className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300"
+                    className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
                   >
                     {defaultsSaving ? "Saving..." : "Save document defaults"}
                   </button>
@@ -468,7 +410,7 @@ export function SettingsPage() {
           </div>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-900">Local app info</h3>
+            <h2 className="text-lg font-semibold text-slate-900">Local app info</h2>
             <p className="mt-1 text-sm text-slate-600">
               These values come from the local server config and your optional{" "}
               <code>.env</code> file. They are shown for reference only so the browser
@@ -518,20 +460,12 @@ export function SettingsPage() {
                   <button
                     type="button"
                     onClick={handleBackupExport}
-                    className="rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-amber-300"
+                    className="rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-slate-600"
                   >
                     Export backup (.tar.gz)
                   </button>
-                  {backupExportMessage ? (
-                    <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                      {backupExportMessage}
-                    </p>
-                  ) : null}
-                  {backupExportError ? (
-                    <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      {backupExportError}
-                    </p>
-                  ) : null}
+                  {backupExportMessage ? <SuccessBanner>{backupExportMessage}</SuccessBanner> : null}
+                  {backupExportError ? <ErrorBanner>{backupExportError}</ErrorBanner> : null}
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-amber-800">
