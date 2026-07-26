@@ -116,7 +116,7 @@ Key points:
 - OCR is **local** (Poppler `pdftoppm` + Tesseract), never OpenAI. If the tools are missing, text PDFs still work; scanned PDFs get an extraction status starting with `ocr_unavailable:`.
 - If anything fails mid-upload, the route deletes the written file and the partially-created rows before returning an error.
 - Re-running extraction (`POST /api/documents/:id/extract`) runs the same pipeline on the stored file and rebuilds that document's chunks.
-- The bulk importer (`server/src/scripts/importFolder.js`, `npm run import`) uses this same storage model. It is resumable: it skips duplicates by MD5 hash first and original filename second, keeps going after corrupt files, and reports imported / skipped / failed / `IMAGE-ONLY` counts.
+- The bulk importer (`server/src/scripts/importFolder.js`, `npm run import`) uses this same storage model. It is resumable: it skips duplicates by MD5 hash only (two byte-distinct files that share a basename both import, with the stored filename disambiguated), keeps going after corrupt files, and reports imported / skipped / failed / `IMAGE-ONLY` counts.
 
 ## Data Flow 2: "Ask your documents" (RAG)
 

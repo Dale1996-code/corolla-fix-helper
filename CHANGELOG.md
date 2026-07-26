@@ -1,5 +1,27 @@
 # Changelog
 
+## Week of 2026-07-20
+
+### Highlights
+
+- Made the app fully usable from an iPhone: an installable PWA (manifest, wrench icon, launch screens), a safe offline fallback page that never intercepts `/api` and caches nothing dynamic, and a phone-ready startup banner that prints LAN/Tailscale/HTTPS install URLs. See [docs/mobile-access.md](docs/mobile-access.md). See [PR #83](https://github.com/Dale1996-code/corolla-fix-helper/pull/83).
+- Worked through `corolla-fix-helper-audit-MASTER.md` in stages: cache invalidation on document delete/edit plus dependency/security hardening (multer bump, upload field caps, baseline security headers, `PRAGMA busy_timeout`) in Stage 1 & 2 ([PR #84](https://github.com/Dale1996-code/corolla-fix-helper/pull/84)); loopback-by-default binding (`NETWORK_MODE` opt-in) and AI accidental-spend guards — the shared rate limiter, a daily call ceiling, output-token caps, and a stream idle timeout — in Stage 3 safety ([PR #85](https://github.com/Dale1996-code/corolla-fix-helper/pull/85)); an ~12.5x smaller `GET /api/documents`/search payload by dropping the unused `extractedText` field in Stage 3 perf ([PR #86](https://github.com/Dale1996-code/corolla-fix-helper/pull/86)); checklist UTC-timestamp/ordering fixes, a working search "Oldest" sort, and keyboard/screen-reader-accessible checklist rows in Stage 3 client ([PR #87](https://github.com/Dale1996-code/corolla-fix-helper/pull/87)); and a new index-only migration `003_link_and_sort_indexes` covering document/link/checklist sort queries in Stage 3 indexes ([PR #89](https://github.com/Dale1996-code/corolla-fix-helper/pull/89)).
+- Committed a curated set of offline/PWA phone-access fixes (service worker `/api` bypass, startup-banner refinements, new tests) that had been left uncommitted by a paused scheduled task. See [PR #88](https://github.com/Dale1996-code/corolla-fix-helper/pull/88).
+- Re-applied two `AGENTS.md` corrections — the AI rate limiter is one shared 20/min window, and the folder importer dedups by MD5 only — after PR #88's merge order had reverted them. See [PR #90](https://github.com/Dale1996-code/corolla-fix-helper/pull/90).
+- Frontend accessibility and consistency pass: converted clickable `<div>` list rows to real `<button>`s for keyboard/screen-reader navigation, fixed low-contrast text and a hidden `<h1>`, added `role="alert"`/`role="status"` banners across 57 previously-silent messages, and de-duplicated shared form/section components. See [PR #91](https://github.com/Dale1996-code/corolla-fix-helper/pull/91).
+
+### Key PR Links
+
+- [PR #91: Fix frontend accessibility, contrast, and duplication issues](https://github.com/Dale1996-code/corolla-fix-helper/pull/91)
+- [PR #90: docs(AGENTS): re-apply shared-limiter + MD5-only import corrections](https://github.com/Dale1996-code/corolla-fix-helper/pull/90)
+- [PR #89: Stage 3 indexes: reverse-link + sort indexes, migration 003 (#18)](https://github.com/Dale1996-code/corolla-fix-helper/pull/89)
+- [PR #88: Offline/PWA phone-access hardening (from paused Codex scheduled task)](https://github.com/Dale1996-code/corolla-fix-helper/pull/88)
+- [PR #87: Stage 3 client: checklist UTC/ordering (#10), search Oldest+race (#11), checklist a11y (#12)](https://github.com/Dale1996-code/corolla-fix-helper/pull/87)
+- [PR #86: Stage 3 perf: slim document list/search DTOs (#4)](https://github.com/Dale1996-code/corolla-fix-helper/pull/86)
+- [PR #85: Stage 3 safety: loopback-default binding (#3) + AI accidental-spend guards (#5)](https://github.com/Dale1996-code/corolla-fix-helper/pull/85)
+- [PR #84: Audit fixes: Stages 1 & 2 (findings #1, #2, #7, #8, #13–#17, #19–#22)](https://github.com/Dale1996-code/corolla-fix-helper/pull/84)
+- [PR #83: iPhone access: installable PWA, phone-ready startup URLs, mobile polish](https://github.com/Dale1996-code/corolla-fix-helper/pull/83)
+
 ## Week of 2026-07-06
 
 ### Highlights
@@ -9,9 +31,11 @@
 - Improved Ask answer quality and dev visibility by clarifying the beginner-safe AI prompt, adding env-gated `ASK_DEBUG_METRICS`, expanding answer-quality cases, and documenting the RAG iteration log. See [PR #76](https://github.com/Dale1996-code/corolla-fix-helper/pull/76).
 - Fixed `sanitizeFilename` so filenames with uppercase extensions no longer get doubled extensions, with characterization and regression coverage. See [PR #74](https://github.com/Dale1996-code/corolla-fix-helper/pull/74).
 - Refreshed `CLAUDE.md` with current image-attachment docs and expanded repo pointers. See [PR #71](https://github.com/Dale1996-code/corolla-fix-helper/pull/71).
+- Synced documentation and agent guidance through PR #81, restored CHANGELOG entries that had gone missing for PRs #63 and #65–#68, and aligned the QA checklist's sidebar order with the live navigation. See [PR #82](https://github.com/Dale1996-code/corolla-fix-helper/pull/82).
 
 ### Key PR Links
 
+- [PR #82: Sync documentation through PR 81](https://github.com/Dale1996-code/corolla-fix-helper/pull/82)
 - [PR #81: Consolidate row mappers into shared cores](https://github.com/Dale1996-code/corolla-fix-helper/pull/81)
 - [PR #80: Slim documents route into documentService](https://github.com/Dale1996-code/corolla-fix-helper/pull/80)
 - [PR #79: Extract noteService from notes route](https://github.com/Dale1996-code/corolla-fix-helper/pull/79)
