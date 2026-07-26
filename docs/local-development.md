@@ -114,9 +114,9 @@ npm run build
 npm run test
 ```
 
-`npm run lint` checks the importer-related server files with ESLint.
+`npm run lint` runs ESLint over the whole `server/` tree and `client/src`.
 
-`npm run typecheck` checks the changed server JavaScript files with TypeScript `checkJs`. This is intentionally scoped to changed code so older unrelated warnings do not block importer work.
+`npm run typecheck` runs TypeScript `checkJs` over the whole `server/src` tree (plus a curated set of tests) via `tsconfig.json`, with several strict-family flags on. Full `strict` (`strictNullChecks`/`noImplicitAny`) is still off, so a clean run is broad coverage, not exhaustive null/any safety.
 
 `npm run build` checks that the app can produce a production frontend build.
 
@@ -164,7 +164,7 @@ The importer:
 - stores each document in SQLite
 - runs OCR on low-text pages when OCR is enabled and the local tools are installed
 - rebuilds `document_chunks` for document Q&A, including OCR text
-- skips duplicates by MD5 file hash first and original filename second
+- skips duplicates by MD5 file hash only (two byte-distinct files that share a basename both import; the stored filename is disambiguated)
 - keeps going when one PDF is corrupt or unreadable
 - prints imported, skipped, failed, and `IMAGE-ONLY` counts; `ocr_unavailable:` means the OCR tools were missing
 

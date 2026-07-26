@@ -14,7 +14,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
   ```
 
   `400` invalid input · `404` not found · `415` wrong media type (attachments) · `429` rate limited · `500` server failure.
-- **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` are each limited to **20 requests/minute** (in-house limiter, `server/src/middleware/rateLimit.js`). Everything else is unlimited.
+- **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. Everything else is unlimited.
 - **PowerShell examples:** plain `GET`/download requests use `curl.exe` (the real curl, not the PowerShell alias). Requests with a **JSON body** use `Invoke-RestMethod` instead. This is deliberate: passing inline JSON to `curl.exe` is mangled by Windows PowerShell 5.1's parser — it strips the double quotes before curl ever sees them (a literal, a `$variable`, and `ConvertTo-Json` output all break the same way), so the server receives invalid JSON and returns `400`. `Invoke-RestMethod` hands its `-Body` to the request in-process, so the JSON survives intact in both Windows PowerShell 5.1 and PowerShell 7. Multipart uploads (`-F`) still use `curl.exe`; if a field value contains spaces, run those from PowerShell 7 or a POSIX shell to avoid the same 5.1 quoting issue.
 
 ## Quick Endpoint List
@@ -408,4 +408,4 @@ Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire upload
 
 ## Keeping This Document Honest
 
-This reference was written against the route files on 2026-07-02 and last updated 2026-07-07 (Repair Checklists). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
+This reference was written against the route files on 2026-07-02 and last updated 2026-07-25 (shared rate-limit wording). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.

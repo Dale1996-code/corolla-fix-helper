@@ -357,6 +357,7 @@ Applied migrations:
 
 - `001_initial_schema` — original tables, columns, and indexes.
 - `002_repair_checklists` — adds the `repair_checklists` and `repair_checklist_items` tables.
+- `003_link_and_sort_indexes` — adds `idx_documents_created_at` plus reverse-link indexes on `symptom_documents.document_id`, `procedure_documents.document_id`, and `symptom_procedures.procedure_id`, and adds `idx_repair_checklists_vehicle_updated` and `idx_repair_checklist_items_order` for checklist sorting. Index-only: no new tables or columns.
 
 ## Not In The Current Schema
 

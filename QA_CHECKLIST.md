@@ -243,7 +243,7 @@ npm run test
 Check:
 
 - Lint finishes without errors.
-- Typecheck finishes without errors for the changed server files.
+- Typecheck finishes without errors across the whole `server/src` tree.
 - The build finishes without errors.
 - Backend tests pass.
 - Frontend tests pass.

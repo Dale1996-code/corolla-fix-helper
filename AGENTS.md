@@ -147,6 +147,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - 2026-07-10: `npm run test:client -- RepairChecklistsPage` passed 2 targeted client tests when rerun outside the Windows sandbox after the known Vite/esbuild `Access is denied` sandbox failure.
 - 2026-07-24: from `server/`, `npm run test -- test/networkAddresses.test.js` passed 16 backend phone-access tests.
 - 2026-07-24: `npm run test:client -- serviceWorker` passed 4 targeted service-worker tests when rerun outside the Windows sandbox after the known Vite/esbuild `Access is denied` startup failure.
+- 2026-07-25: after pulling PR #91 (frontend a11y/duplication pass), `npm install --prefix client` picked up the new `eslint-plugin-jsx-a11y` dependency; `npm run lint`, `npm run typecheck`, `npm run test:server` (351 tests), and `npm run test:client` (74 tests) all passed.
 
 ## Useful Docs
 
