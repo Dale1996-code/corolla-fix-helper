@@ -1,6 +1,14 @@
 import { config } from "../config.js";
-import { retrieveRelevantChunks } from "./chunkRetrievalService.js";
+import {
+  MINIMUM_SEMANTIC_SCORE,
+  retrieveRelevantChunks,
+} from "./chunkRetrievalService.js";
 import { reserveAiCall } from "./aiUsageBudget.js";
+import {
+  describeOpenAiFailure,
+  parseCompleteOpenAiOutputText,
+  parseOpenAiOutputText,
+} from "./openAiResponsePayload.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.";
@@ -49,25 +57,6 @@ export async function postToOpenAiResponses(
   } finally {
     clearTimeout(timer);
   }
-}
-
-function parseOpenAiOutputText(payload) {
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
 }
 
 export function normalizeConversationHistory(history) {
@@ -215,6 +204,9 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
+    // Deterministic: the same question must rewrite to the same search query,
+    // otherwise retrieval (and every eval built on it) drifts run to run.
+    temperature: 0,
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 
@@ -223,7 +215,16 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
     throw new Error(`OpenAI question rewrite failed (${response.status}): ${errorText}`);
   }
 
-  const rewrittenQuestion = parseOpenAiOutputText(await response.json())
+  const payload = await response.json();
+
+  // A truncated or filtered rewrite would become a mangled search query. This
+  // path is not wrapped by a caller, so fail SOFT: fall back to the user's own
+  // question rather than failing the whole request.
+  if (describeOpenAiFailure(payload)) {
+    return normalizedQuestion;
+  }
+
+  const rewrittenQuestion = parseOpenAiOutputText(payload)
     .replace(/^["']|["']$/g, "")
     .trim();
 
@@ -235,7 +236,6 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
  *   question: string,
  *   originalQuestion?: string,
  *   chunks: any[],
- *   history?: any[],
  *   citations?: any[],
  *   image?: string | null,
  *   fetchImpl?: typeof fetch,
@@ -300,6 +300,9 @@ export async function generateAnswerTextFromOpenAi({
     {
       model,
       input,
+      // Deterministic answers: a torque spec must not vary between identical
+      // questions, and the answer-quality eval can only diff runs if it is fixed.
+      temperature: 0,
       max_output_tokens: config.openAiMaxOutputTokens,
     },
     { fetchImpl }
@@ -310,7 +313,10 @@ export async function generateAnswerTextFromOpenAi({
     throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
   }
 
-  return parseOpenAiOutputText(await response.json());
+  // Throws when the reply was truncated, filtered, or refused. Half a repair
+  // procedure reads exactly like a complete one, so it must never be returned
+  // as if it were the finished answer.
+  return parseCompleteOpenAiOutputText(await response.json());
 }
 
 export async function askQuestionUsingDocuments(
@@ -336,10 +342,35 @@ export async function askQuestionUsingDocuments(
   let retrievedChunks = [];
   let builtCitations = [];
 
-  const finalize = (result) =>
-    includeMetrics
+  // Passages that were retrieved but that the response does not cite.
+  //
+  // Every not_found exit sets `citations: []`, which threw away evidence the
+  // system already had in hand: the user was told "not in documents" with no way
+  // to see what the search actually found. This is PURELY ADDITIVE -- `citations`
+  // keeps its exact current shape (including [] on not_found) so no existing
+  // consumer changes behavior, and the recovered passages arrive alongside it.
+  //
+  // Derived from `retrievedChunks` rather than the built citations, because two
+  // of the four not_found exits fire BEFORE citations are built (the relevance
+  // gate and the empty-citations guard). Omitted entirely when the response
+  // already cites its sources, so an answered response stays byte-identical.
+  const buildRetrievedContext = (result) => {
+    const hasCitations = Array.isArray(result.citations) && result.citations.length > 0;
+
+    if (hasCitations || !retrievedChunks.length) {
+      return null;
+    }
+
+    return buildCitationsFromChunks(retrievedChunks);
+  };
+
+  const finalize = (result) => {
+    const retrievedContext = buildRetrievedContext(result);
+    const withContext = retrievedContext ? { ...result, retrievedContext } : result;
+
+    return includeMetrics
       ? {
-          ...result,
+          ...withContext,
           metrics: buildAskMetrics({
             chunks: retrievedChunks,
             citations: builtCitations,
@@ -349,7 +380,8 @@ export async function askQuestionUsingDocuments(
             totalMs: performance.now() - startedAt,
           }),
         }
-      : result;
+      : withContext;
+  };
 
   const normalizedQuestion = typeof question === "string" ? question.trim() : "";
   const normalizedHistory = normalizeConversationHistory(history);
@@ -398,8 +430,11 @@ export async function askQuestionUsingDocuments(
   const bestChunk = chunks[0];
   const minimumChunkTermMatches = Math.max(1, Math.ceil(bestChunk.totalQueryTerms * 0.4));
 
+  // Shares chunkRetrievalService's floor rather than repeating the literal, so
+  // calibrating the threshold later moves one number instead of two.
   const hasSemanticEvidence =
-    bestChunk.retrievalMode === "hybrid" && Number(bestChunk.semanticScore || 0) >= 0.2;
+    bestChunk.retrievalMode === "hybrid" &&
+    Number(bestChunk.semanticScore || 0) >= MINIMUM_SEMANTIC_SCORE;
 
   if (!hasSemanticEvidence && (bestChunk.chunkMatchedTerms || 0) < minimumChunkTermMatches) {
     return finalize({
@@ -423,10 +458,20 @@ export async function askQuestionUsingDocuments(
   }
 
   const answerStart = performance.now();
+  // NOTE: `history` is deliberately NOT passed. Nothing reads it -- not
+  // generateAnswerTextFromOpenAi, and not any injected implementation -- so it
+  // was a genuinely dead parameter. Multi-turn context reaches the model solely
+  // through the rewrite call above (rewriteQuestion), which folds the history
+  // into the standalone question. Do not reintroduce it without a test proving
+  // it is read; conversation history does not belong in the answer prompt.
+  //
+  // `citations` IS still passed even though the default OpenAI implementation
+  // ignores it. It is part of this dependency-injection seam's contract, and
+  // four injected test doubles read it (app.test.js, pdfOcr.test.js). Dropping
+  // it would narrow a public seam, not delete dead code.
   const answerText = await generateAnswerText({
     question: retrievalQuestion,
     originalQuestion: normalizedQuestion,
-    history: normalizedHistory,
     chunks,
     citations,
     image,

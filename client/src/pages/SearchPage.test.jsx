@@ -279,6 +279,107 @@ test("SearchPage shows not-found state from Ask response", async () => {
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });
 
+test("SearchPage shows retrieved context on a not-found Ask response", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const contextSnippet =
+    "Water pump x Timing chain cover 24 241 17 -- torque table row from the engine manual.";
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the water pump torque?",
+        status: "not_found",
+        answer: "The uploaded documents do not contain enough information to answer that.",
+        // citations stays [] exactly as before; the passages arrive alongside it.
+        citations: [],
+        retrievedContext: [
+          {
+            documentId: 12,
+            documentTitle: "Engine Mechanical Torque Specifications",
+            originalFilename: "engine-torque.pdf",
+            pageNumber: 3,
+            chunkIndex: 0,
+            snippet: contextSnippet,
+          },
+        ],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  expect(askSection).not.toBeNull();
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the water pump torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(await within(askSection).findByText("No answer found")).toBeInTheDocument();
+
+  // The recovered evidence is shown...
+  expect(
+    within(askSection).getByRole("heading", {
+      name: "Retrieved context (may include passages the answer did not use)",
+    })
+  ).toBeInTheDocument();
+  expect(within(askSection).getByText(contextSnippet)).toBeInTheDocument();
+  expect(
+    within(askSection).getByText("Engine Mechanical Torque Specifications, page 3")
+  ).toBeInTheDocument();
+
+  // ...but never as a sourced answer.
+  expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
+});
+
+test("SearchPage omits retrieved context when the response has none", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the water pump torque?",
+        status: "not_found",
+        answer: "The uploaded documents do not contain enough information to answer that.",
+        citations: [],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the water pump torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(await within(askSection).findByText("No answer found")).toBeInTheDocument();
+  expect(
+    within(askSection).queryByText(/Retrieved context/)
+  ).not.toBeInTheDocument();
+});
+
 test("SearchPage shows an answered Ask response with clickable citation cards", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const citationSnippet =

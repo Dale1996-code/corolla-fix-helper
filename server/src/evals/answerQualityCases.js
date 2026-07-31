@@ -290,7 +290,17 @@ export const answerQualityCases = [
     // The 2009 Corolla LE 1.8L (2ZR-FE) is naturally aspirated, so the manual
     // has no turbo boost spec: the chatbot must refuse instead of inventing one.
     expect: "refused",
-    verified: false,
+    // CONFIRMED against the local corpus (1443 documents / 19636 chunks):
+    // /boost\s*pressure/i matches 0 chunks, and so does /turbo\w*\s+(boost|pressure)/i.
+    // "wastegate" matches 0. Every /turbo/i (24), /supercharg/i (24), and
+    // /intercooler/i (12) hit is a SAE/Toyota abbreviation-glossary row
+    // ("TC Turbocharger", "SC Supercharger", "CAC Charge Air Cooler Intercooler"),
+    // and every /boost/i (18) hit is either that glossary ("BACS Boost Altitude
+    // Compensation System") or the vacuum BRAKE BOOSTER — never forced induction.
+    // This makes it a stronger refusal than the fictional cases: the corpus does
+    // contain "turbo" and "boost" as plausible distractors, so a refusal here
+    // proves the not-found gate is driven by absence of the SPEC, not the word.
+    verified: true,
   },
   {
     id: "oil-drain-plug-torque-citation-support",
@@ -301,12 +311,29 @@ export const answerQualityCases = [
     // Same confirmed fact as oil-drain-plug-torque (37 N·m / 27 ft-lbf, cited
     // "Oil and Oil Filter Replacement", page 1), but this case additionally
     // requires the CITED SNIPPET to contain the value — proving the citation
-    // actually backs the number, not just that the prose mentioned it. Flip to
-    // verified:true once you confirm the cited snippet includes the figure.
+    // actually backs the number, not just that the prose mentioned it.
+    //
+    // CONFIRMED against the local corpus. Two chunks state the spec verbatim, and
+    // both fall inside the 220-char citation snippet window (buildSnippet in
+    // aiAnswerService.js keeps only the first 217 chars):
+    //   chunk 14359 — doc 748 "Oil and Oil Filter Replacement ... (Engine Oil)", page 1:
+    //     "...Clean and install the oil drain plug with a new gasket.
+    //      Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)"
+    //   chunk 14369 — doc 749 "Oil and Oil Filter Replacement ... (Oil Filter)", page 1:
+    //     same sentence, same figure.
+    // Independently cross-corroborated by chunk 18772 ("Engine Mechanical Torque
+    // Specifications", page 3), whose table row reads "Oil pan drain plug x Oil
+    // pan 37 377 27" — i.e. 37 N·m / 377 kgf-cm / 27 ft-lbf from a second document.
+    //
+    // The snippet check is genuinely discriminating, not incidental: scanning all
+    // 19636 chunk snippets, EXACTLY 2 match any of citationSupportsAny — the two
+    // above — and both mention "drain plug". There are 0 coincidental matches
+    // anywhere in the corpus, so this assertion cannot pass on an unrelated
+    // citation that merely happens to contain the digits.
     mustIncludeAny: [/\b37\s*N/i, /\b27\s*ft/i],
     citationDocLike: /oil/i,
     citationSupportsAny: [/\b37\s*N/i, /\b27\s*ft/i, /\b377\s*kgf/i],
-    verified: false,
+    verified: true,
   },
 
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----

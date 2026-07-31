@@ -1,5 +1,8 @@
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import { normalizeText } from "../../utils/text.js";
+// The safety rubric lives in its own module so the "is this safety critical"
+// keyword list and the "which warnings apply" rule table stay in sync.
+import { detectSafetyFlags, isSafetyCriticalTask } from "../safetyClassifier.js";
 
 // Deterministic tools the repair-planning agent can call.
 //
@@ -25,40 +28,6 @@ const INTERMEDIATE_TERMS = ["alternator", "starter", "strut", "radiator", "water
 const SKILL_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const DIFFICULTY_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 
-// Work that can injure a beginner (or others on the road) if done wrong. A task
-// touching any of these is "safety critical": it cannot be marked Ready and is
-// recommended to a shop, unless the owner explicitly acknowledges the risk.
-const SAFETY_CRITICAL_KEYWORDS = [
-  "brake",
-  "rotor",
-  "caliper",
-  "master cylinder",
-  "fuel",
-  "injector",
-  "gas tank",
-  "electrical",
-  "wiring",
-  "battery",
-  "alternator",
-  "starter",
-  "lift",
-  "lifting",
-  "jack",
-  "suspension",
-  "strut",
-  "shock",
-  "control arm",
-  "ball joint",
-  "spring",
-  "airbag",
-  "steering",
-];
-
-function isSafetyCriticalTask(task) {
-  const haystack = `${task?.title || ""} ${task?.system || ""}`.toLowerCase();
-  return SAFETY_CRITICAL_KEYWORDS.some((keyword) => haystack.includes(keyword));
-}
-
 function detectSystem(text) {
   const lowered = text.toLowerCase();
 
@@ -83,29 +52,6 @@ function detectDifficulty(text) {
   }
 
   return "beginner";
-}
-
-function detectSafetyFlags(text) {
-  const lowered = text.toLowerCase();
-  const flags = [];
-
-  if (/(brake|abs|caliper|rotor|master cylinder)/.test(lowered)) {
-    flags.push("Brake work affects stopping safety. Bleed and test before driving.");
-  }
-  if (/(fuel|injector|gas tank)/.test(lowered)) {
-    flags.push("Fuel system work is a fire hazard. Relieve pressure and avoid sparks.");
-  }
-  if (/(battery|alternator|wiring|electrical|starter)/.test(lowered)) {
-    flags.push("Disconnect the battery before electrical work.");
-  }
-  if (/(jack|lift|wheel|suspension|strut|control arm)/.test(lowered)) {
-    flags.push("Use jack stands. Never work under a vehicle held only by a jack.");
-  }
-  if (/(coolant|radiator|thermostat|overheat)/.test(lowered)) {
-    flags.push("Never open a hot cooling system. Let it cool to avoid burns.");
-  }
-
-  return flags;
 }
 
 function buildKeywords(text, system) {

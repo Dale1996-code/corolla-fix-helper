@@ -9,7 +9,14 @@ import {
 import { rerankChunks } from "./chunkRerankService.js";
 
 const RECIPROCAL_RANK_K = 60;
-const MINIMUM_SEMANTIC_SCORE = 0.2;
+
+// Cosine-similarity floor below which a chunk is not considered semantically
+// relevant. Exported because aiAnswerService applies the SAME floor to the top
+// chunk when deciding whether there is any semantic evidence to answer from --
+// it previously hardcoded its own `>= 0.2`, so the two could drift apart
+// silently. This value is still UNCALIBRATED; when it is calibrated against
+// real positive/negative pairs, this is the single number to change.
+export const MINIMUM_SEMANTIC_SCORE = 0.2;
 
 export function tokenizeQuestion(question) {
   if (typeof question !== "string") {

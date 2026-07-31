@@ -252,6 +252,24 @@ function AskCitationCard({ citation }) {
   );
 }
 
+// One passage card. Shared by the answered-path "Retrieved snippets" list and
+// the not-found "Retrieved context" list, which render identical cards under
+// different headings.
+function AskPassageCard({ passage }) {
+  const documentName =
+    passage.documentTitle || passage.originalFilename || "Untitled document";
+  const pageLabel = passage.pageNumber ? `page ${passage.pageNumber}` : "page unknown";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+      <p className="font-semibold text-slate-900">
+        {documentName}, {pageLabel}
+      </p>
+      <p className="mt-2 leading-6">{passage.snippet}</p>
+    </div>
+  );
+}
+
 function AskRetrievedSnippets({ citations }) {
   const snippets = citations.filter((citation) => citation.snippet);
 
@@ -263,25 +281,43 @@ function AskRetrievedSnippets({ citations }) {
     <section className="space-y-3">
       <h3 className="text-sm font-semibold text-slate-900">Retrieved snippets</h3>
       <div className="space-y-2">
-        {snippets.map((citation) => {
-          const documentName =
-            citation.documentTitle || citation.originalFilename || "Untitled document";
-          const pageLabel = citation.pageNumber
-            ? `page ${citation.pageNumber}`
-            : "page unknown";
+        {snippets.map((citation) => (
+          <AskPassageCard
+            key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+            passage={citation}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
 
-          return (
-            <div
-              key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
-            >
-              <p className="font-semibold text-slate-900">
-                {documentName}, {pageLabel}
-              </p>
-              <p className="mt-2 leading-6">{citation.snippet}</p>
-            </div>
-          );
-        })}
+// Passages retrieval found when the answer cites nothing. Deliberately worded so
+// it can never be mistaken for a sourced answer: these were NOT used to answer,
+// and one of them may still be the page the owner needs.
+function AskRetrievedContext({ passages }) {
+  const snippets = passages.filter((passage) => passage.snippet);
+
+  if (!snippets.length) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-900">
+        Retrieved context (may include passages the answer did not use)
+      </h3>
+      <p className="text-sm text-slate-600">
+        These pages came closest to your question. They were not used to answer it, so check
+        them yourself before relying on anything here.
+      </p>
+      <div className="space-y-2">
+        {snippets.map((passage) => (
+          <AskPassageCard
+            key={`context-${passage.documentId}-${passage.pageNumber}-${passage.chunkIndex}`}
+            passage={passage}
+          />
+        ))}
       </div>
     </section>
   );
@@ -289,6 +325,9 @@ function AskRetrievedSnippets({ citations }) {
 
 function AskAssistantMessage({ message }) {
   const citations = Array.isArray(message.citations) ? message.citations : [];
+  const retrievedContext = Array.isArray(message.retrievedContext)
+    ? message.retrievedContext
+    : [];
 
   if (message.status === "answered") {
     return (
@@ -332,7 +371,12 @@ function AskAssistantMessage({ message }) {
   }
 
   if (message.status === "not_found") {
-    return <InfoBanner title="No answer found">{message.content}</InfoBanner>;
+    return (
+      <div className="space-y-4">
+        <InfoBanner title="No answer found">{message.content}</InfoBanner>
+        <AskRetrievedContext passages={retrievedContext} />
+      </div>
+    );
   }
 
   if (message.status === "error") {
@@ -487,6 +531,12 @@ function AskDocumentsSection() {
           originalQuestion: payload.question || trimmedQuestion,
           standaloneQuestion: payload.standaloneQuestion || payload.question || trimmedQuestion,
           citations: Array.isArray(payload.citations) ? payload.citations : [],
+          // Present only when the answer cites nothing (a not-found reply). These
+          // are the passages retrieval actually found, so "no answer" does not
+          // have to be a dead end.
+          retrievedContext: Array.isArray(payload.retrievedContext)
+            ? payload.retrievedContext
+            : [],
         },
       ]);
       setAskState({

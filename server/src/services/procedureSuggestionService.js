@@ -18,6 +18,7 @@ import {
   tokenizeQuestion,
 } from "./chunkRetrievalService.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
+import { parseCompleteOpenAiOutputText } from "./openAiResponsePayload.js";
 
 const DEFAULT_CHUNK_LIMIT = 8;
 const DEFAULT_SUGGESTION_LIMIT = 5;
@@ -257,25 +258,6 @@ function parseLlmSuggestions(rawText, { candidates, chunks, limit }) {
   return suggestions;
 }
 
-function parseOpenAiOutputText(payload) {
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
-}
-
 /**
  * Ask OpenAI to rank candidate procedures using the retrieved chunks. Returns
  * the raw model text; the caller parses and grounds it defensively.
@@ -328,6 +310,8 @@ export async function generateProcedureSuggestionsFromOpenAi({
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
+    // Deterministic: the same symptom should suggest the same procedures.
+    temperature: 0,
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 
@@ -338,7 +322,9 @@ export async function generateProcedureSuggestionsFromOpenAi({
     );
   }
 
-  return parseOpenAiOutputText(await response.json());
+  // A truncated JSON array would parse into a partial suggestion list. Throwing
+  // is safe: the caller catches and returns no suggestions.
+  return parseCompleteOpenAiOutputText(await response.json());
 }
 
 /**

@@ -15,6 +15,7 @@
 
 import { config } from "../config.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
+import { parseCompleteOpenAiOutputText } from "./openAiResponsePayload.js";
 
 // Keep the per-chunk snippet short so the whole prompt stays bounded even with a
 // wide candidate pool.
@@ -136,25 +137,6 @@ export function applyRanking(candidates, order) {
   return reordered;
 }
 
-function parseOpenAiOutputText(payload) {
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
-}
-
 /**
  * Ask OpenAI to rank the candidate chunks by usefulness for the question.
  * Returns the raw model text; the caller parses and validates it defensively.
@@ -197,6 +179,9 @@ export async function generateChunkRankingFromOpenAi({
     {
       model,
       input: prompt,
+      // Deterministic ranking, so an A/B rerank eval measures the reranker
+      // rather than sampling noise.
+      temperature: 0,
       max_output_tokens: config.openAiMaxOutputTokens,
     },
     { fetchImpl }
@@ -207,7 +192,9 @@ export async function generateChunkRankingFromOpenAi({
     throw new Error(`OpenAI chunk rerank failed (${response.status}): ${errorText}`);
   }
 
-  return parseOpenAiOutputText(await response.json());
+  // A truncated ranking array would parse into a partial order. Throwing here is
+  // safe: rerankChunks catches and falls back to the untouched fusion order.
+  return parseCompleteOpenAiOutputText(await response.json());
 }
 
 /**
