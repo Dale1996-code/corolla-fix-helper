@@ -5,9 +5,8 @@ import {
 } from "./chunkRetrievalService.js";
 import { reserveAiCall } from "./aiUsageBudget.js";
 import {
-  describeOpenAiFailure,
   parseCompleteOpenAiOutputText,
-  parseOpenAiOutputText,
+  readOpenAiResponse,
 } from "./openAiResponsePayload.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
@@ -215,18 +214,16 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
     throw new Error(`OpenAI question rewrite failed (${response.status}): ${errorText}`);
   }
 
-  const payload = await response.json();
+  const parsed = readOpenAiResponse(await response.json());
 
-  // A truncated or filtered rewrite would become a mangled search query. This
-  // path is not wrapped by a caller, so fail SOFT: fall back to the user's own
-  // question rather than failing the whole request.
-  if (describeOpenAiFailure(payload)) {
+  // A truncated, filtered, or otherwise unfinished rewrite would become a
+  // mangled search query. This path is not wrapped by a caller, so fail SOFT:
+  // fall back to the user's own question rather than failing the whole request.
+  if (!parsed.ok) {
     return normalizedQuestion;
   }
 
-  const rewrittenQuestion = parseOpenAiOutputText(payload)
-    .replace(/^["']|["']$/g, "")
-    .trim();
+  const rewrittenQuestion = parsed.text.replace(/^["']|["']$/g, "").trim();
 
   return rewrittenQuestion || normalizedQuestion;
 }

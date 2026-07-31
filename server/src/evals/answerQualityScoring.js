@@ -81,6 +81,41 @@ function checkAnswered(result, spec, label) {
     });
   }
 
+  const supportsAny =
+    Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length
+      ? spec.citationSupportsAny
+      : null;
+
+  // When a case constrains BOTH the document and the supporting value, ONE
+  // citation must satisfy both together.
+  //
+  // Checking them independently allowed cross-citation laundering: with the
+  // eight retrieved chunks all becoming citations, citation A could supply the
+  // document match while unrelated citation B happened to contain the number,
+  // and the case would pass without any single source actually backing the
+  // claim. That is precisely the failure this assertion exists to catch.
+  if (spec.citationDocLike && supportsAny) {
+    const citations = Array.isArray(result?.citations) ? result.citations : [];
+    const grounding = citations.find(
+      (citation) =>
+        (textMatches(citation?.documentTitle || "", spec.citationDocLike) ||
+          textMatches(citation?.originalFilename || "", spec.citationDocLike)) &&
+        supportsAny.some((pattern) => textMatches(citation?.snippet || "", pattern))
+    );
+
+    checks.push({
+      name: `${label}: one citation both cites the expected document and supports the value`,
+      pass: Boolean(grounding),
+      detail: grounding
+        ? `${grounding.documentTitle || grounding.originalFilename}, page ${grounding.pageNumber}`
+        : `no single citation matched ${String(spec.citationDocLike)} AND one of [${supportsAny
+            .map(String)
+            .join(", ")}]`,
+    });
+
+    return checks;
+  }
+
   if (spec.citationDocLike) {
     checks.push({
       name: `${label}: cites the expected document`,
@@ -92,8 +127,8 @@ function checkAnswered(result, spec, label) {
   // Citation grounding: at least one cited snippet must actually contain a
   // supporting term, so a confidently-worded answer cannot pass on a citation
   // that does not back it up.
-  if (Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length) {
-    const pass = spec.citationSupportsAny.some((pattern) =>
+  if (supportsAny) {
+    const pass = supportsAny.some((pattern) =>
       citationSnippetSupports(result?.citations, pattern)
     );
     checks.push({
@@ -101,7 +136,7 @@ function checkAnswered(result, spec, label) {
       pass,
       detail: pass
         ? "matched"
-        : `no citation snippet matched [${spec.citationSupportsAny.map(String).join(", ")}]`,
+        : `no citation snippet matched [${supportsAny.map(String).join(", ")}]`,
     });
   }
 

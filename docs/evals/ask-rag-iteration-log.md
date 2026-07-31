@@ -145,3 +145,80 @@ Closing run after `temperature: 0` landed: **6/6 verified cases still pass.**
    a new invariant test asserting every `SAFETY_CRITICAL_KEYWORDS` entry yields at least
    one warning: a shock-absorber task blocked "Ready" while showing the owner no reason
    why — the same latent class as the documented airbag gap. Fixed.
+
+### Milestone 1, round 2 — independent review response
+
+Three blocking findings, fixed on the same branch as a second commit.
+
+1. **`retrievedContext` never reached the client.** `routes/ask.js` rebuilds the
+   response from an explicit allowlist and dropped the field, so the service
+   produced it and the route discarded it. The client test that "proved" the
+   feature used a hand-built payload the server could not actually emit — a real
+   gap in how that change was verified. Fixed additively (allowlist kept, field
+   attached only on `not_found` with a non-empty array) and now covered by route
+   tests that run the **real** `askQuestionUsingDocuments` behind the route, plus
+   a test pinning the exact response key set against a future "spread the
+   service result" refactor. Documented in `docs/api.md`.
+
+2. **The payload parser was fail-open.** It accepted any payload with text,
+   inferring success from content rather than from status. Rewritten to succeed
+   only on `status: "completed"` **with** at least one well-formed non-empty
+   `output_text` string, and to classify `in_progress` / `queued` / `cancelled` /
+   `failed` / `incomplete` (with defensive truncation-reason variants), refusals,
+   malformed text, and empty output. Object- and array-valued text are rejected
+   rather than coerced — `String({})` would have rendered `"[object Object]"` as
+   an answer. Failures now carry a SAFE `message` (never provider text) separate
+   from an internal, length-capped `diagnostic`; nothing is logged. Legacy test
+   doubles gained `status: "completed"` rather than the parser being relaxed.
+   Notably this also closes a quieter hole: an empty or malformed reply used to
+   become `""`, which `isNotFoundAnswer()` turned into an ordinary `not_found` —
+   an infrastructure failure presented to the owner as an honest "not in
+   documents".
+
+3. **Safety warnings and readiness blocking were still two systems.** Round 1
+   moved them into one module but kept a keyword list and a separate rule table.
+   Now a single `SAFETY_RULES` table drives both, so "blocked with no warning"
+   and "warned but not blocking" are structurally impossible. Patterns are
+   word-bounded and context-specific instead of substring matches, which fixed a
+   pre-existing false positive: the bare substring `abs` matched "shock
+   ABSorber", so replacing a shock absorber raised a **brake-bleeding** warning.
+   Phrase-matrix tests cover false negatives and false positives together.
+
+   **Documented policy:** ordinary suspension work (including shock-absorber
+   replacement) IS treated as safety-critical, because a mis-torqued suspension
+   joint fails at speed. It receives a suspension-specific warning; the
+   electrical-shock warning is now reachable only from genuinely electrical text.
+
+**Eval scoring — cross-citation laundering.** `citationDocLike` and
+`citationSupportsAny` were evaluated independently across all citations, so with
+eight chunks all becoming citations, one citation could supply the document match
+and an unrelated one the number. When a case constrains both, a single citation
+must now satisfy them together. Pinned by a regression test that passes under the
+old logic and fails under the new one.
+
+**Deterministic preflight.** The live gate needs the real corpus and an API key.
+`answerQualityScoring.test.js` now scores both verified cases against fixed
+citation fixtures with no database and no network, including the turbo case's
+known distractor classes (SAE glossary rows, and the vacuum brake booster), so
+those cannot quietly come to satisfy a boost-pressure request. The live-corpus
+evidence stays recorded on the cases themselves; the unit suite does not depend
+on the mutable local corpus.
+
+### Corrections to the round 1 report
+
+- **"No existing test was edited" was inaccurate.** `test/answerQualityCases.test.js`
+  is a pre-existing file and its `VERIFIED_IDS` expectation was extended from four
+  entries to six. No existing *assertion* was weakened or removed, and no test was
+  changed to accommodate a code change — but the claim as written was too strong.
+  Round 2 also legitimately changed test doubles: `status: "completed"` was added
+  to two OpenAI mocks, and one round-1 test that asserted a status-less payload is
+  "treated as complete" was replaced, because the fail-closed contract inverts it.
+- **"43 new tests" was a hand count and should not be treated as precise.**
+  Describe it as new and expanded coverage; the authoritative numbers are the
+  suite totals reported by the runners.
+- **Several new exports are internal testing seams, not stable public APIs.**
+  `readOpenAiUsage`, `parseOpenAiRefusal`, `describeOpenAiFailure`,
+  `matchedSafetyRuleIds`, `SAFETY_RULES`, and `MINIMUM_SEMANTIC_SCORE` exist for
+  cross-module reuse and invariant testing. The stable surfaces are the HTTP API
+  and `parseCompleteOpenAiOutputText` / `readOpenAiResponse` /
+  `detectSafetyFlags` / `isSafetyCriticalTask`.

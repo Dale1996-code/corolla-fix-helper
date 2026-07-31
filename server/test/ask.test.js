@@ -282,3 +282,102 @@ test("loadAttachmentImageFromStorage returns a base64 data URI for a stored imag
 
   assert.equal(uri, `data:image/jpeg;base64,${bytes.toString("base64")}`);
 });
+
+// ---- retrievedContext: service -> route integration ----
+//
+// These use the REAL askQuestionUsingDocuments behind the route (only retrieval
+// and the model are faked), so they prove the field survives the route's
+// explicit response allowlist. A hand-built payload could not prove that -- and
+// did not: the field was originally dropped here.
+
+const { askQuestionUsingDocuments } = await import("../src/services/aiAnswerService.js");
+
+const routeChunk = {
+  documentId: 7,
+  documentTitle: "Engine Manual",
+  originalFilename: "engine-manual.pdf",
+  pageNumber: 3,
+  chunkIndex: 0,
+  chunkText: "Oil drain plug torque is 27 ft-lb.",
+  retrievalMode: "hybrid",
+  semanticScore: 0.9,
+  totalQueryTerms: 4,
+  chunkMatchedTerms: 4,
+};
+
+function realServiceApp({ chunks, answerText }) {
+  return makeApp({
+    askQuestion: (question, options) =>
+      askQuestionUsingDocuments(question, {
+        ...options,
+        isAiConfigured: true,
+        retrieveChunks: async () => chunks,
+        generateAnswerText: async () => answerText,
+      }),
+  });
+}
+
+test("POST /api/ask emits retrievedContext on a real not-found response", async () => {
+  const app = realServiceApp({ chunks: [routeChunk], answerText: "not in documents" });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the water pump torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "not_found");
+  // Unchanged contract.
+  assert.deepEqual(response.body.citations, []);
+  // Added contract, proven through the real route.
+  assert.equal(response.body.retrievedContext.length, 1);
+  assert.equal(response.body.retrievedContext[0].documentTitle, "Engine Manual");
+  assert.equal(response.body.retrievedContext[0].pageNumber, 3);
+  assert.match(response.body.retrievedContext[0].snippet, /Oil drain plug torque/);
+});
+
+test("POST /api/ask omits retrievedContext on an answered response", async () => {
+  const app = realServiceApp({
+    chunks: [routeChunk],
+    answerText: "The oil drain plug torque is 27 ft-lb.",
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "answered");
+  assert.equal(response.body.citations.length, 1);
+  assert.ok(
+    !("retrievedContext" in response.body),
+    "an answered reply already cites its sources"
+  );
+});
+
+test("POST /api/ask omits retrievedContext when nothing was retrieved", async () => {
+  const app = realServiceApp({ chunks: [], answerText: "not in documents" });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "something the documents never mention" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "not_found");
+  assert.deepEqual(response.body.citations, []);
+  assert.ok(!("retrievedContext" in response.body));
+});
+
+test("the route response shape stays an explicit allowlist", async () => {
+  // Guards against a future "just spread the service result" refactor: the
+  // service's internal fields must not leak into the HTTP contract.
+  const app = realServiceApp({ chunks: [routeChunk], answerText: "not in documents" });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the water pump torque?" });
+
+  assert.deepEqual(
+    Object.keys(response.body).sort(),
+    ["answer", "citations", "question", "retrievedContext", "standaloneQuestion", "status"]
+  );
+});

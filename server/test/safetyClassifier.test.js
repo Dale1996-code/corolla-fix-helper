@@ -5,111 +5,183 @@ import test from "node:test";
 import {
   detectSafetyFlags,
   isSafetyCriticalTask,
-  SAFETY_CRITICAL_KEYWORDS,
-  SAFETY_FLAG_RULES,
+  matchedSafetyRuleIds,
+  SAFETY_RULES,
 } from "../src/services/safetyClassifier.js";
 
-// ---- Behavior preserved from the original repairTools.js implementation ----
+// ---- Structural invariants: the two halves cannot disagree ----
 
-test("the five original rules still produce their original flag text", () => {
-  const expectations = [
-    ["Replace front brake pads", "Brake work affects stopping safety. Bleed and test before driving."],
-    ["Replace the fuel injector", "Fuel system work is a fire hazard. Relieve pressure and avoid sparks."],
-    ["Replace the alternator", "Disconnect the battery before electrical work."],
-    ["Replace a control arm", "Use jack stands. Never work under a vehicle held only by a jack."],
-    ["Flush the radiator", "Never open a hot cooling system. Let it cool to avoid burns."],
-  ];
+test("every rule that blocks readiness also produces a warning", () => {
+  for (const rule of SAFETY_RULES) {
+    if (!rule.blocksReadiness) {
+      continue;
+    }
 
-  for (const [task, flag] of expectations) {
-    assert.ok(
-      detectSafetyFlags(task).includes(flag),
-      `expected "${task}" to still produce: ${flag}`
+    assert.ok(rule.flag && rule.flag.trim(), `rule "${rule.id}" blocks Ready with no warning`);
+  }
+});
+
+test("every blocking warning explains why readiness is blocked", () => {
+  for (const rule of SAFETY_RULES) {
+    if (!rule.blocksReadiness) {
+      continue;
+    }
+
+    assert.match(
+      rule.flag,
+      /cannot be marked Ready/,
+      `rule "${rule.id}" blocks Ready without telling the owner why`
     );
   }
 });
 
-test("an unrelated task produces no flags", () => {
-  assert.deepEqual(detectSafetyFlags("Replace the cabin air filter"), []);
-  assert.equal(isSafetyCriticalTask({ title: "Replace the cabin air filter" }), false);
+test("anything classified safety-critical always yields at least one flag", () => {
+  // Structural now that both read one table, but pinned so a future refactor
+  // cannot reintroduce the split that let "airbag" and "shock" block silently.
+  for (const rule of SAFETY_RULES) {
+    const probe = `${rule.id} work`;
+    if (!isSafetyCriticalTask({ title: probe })) {
+      continue;
+    }
+
+    assert.ok(detectSafetyFlags(probe).length > 0, `"${probe}" blocked Ready with no warning`);
+  }
 });
+
+test("rule ids are unique", () => {
+  const ids = SAFETY_RULES.map((rule) => rule.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+// ---- Phrase matrix: expected CRITICAL / blocking ----
+
+const EXPECTED_CRITICAL = [
+  ["replace water pump", "cooling"],
+  ["diagnose overheating engine", "cooling"],
+  ["airbag module", "srs"],
+  ["air bag module", "srs"],
+  ["seat-belt pretensioner", "srs"],
+  ["tie rod end", "steering"],
+  ["steering rack", "steering"],
+  ["ball joint", "steering"],
+  ["coil spring", "spring"],
+  ["jacking or supporting the vehicle", "lifting"],
+  ["fuel-line work", "fuel"],
+  ["electrical shock hazard", "electrical"],
+];
+
+for (const [phrase, expectedRuleId] of EXPECTED_CRITICAL) {
+  test(`critical: "${phrase}" blocks Ready via the ${expectedRuleId} rule`, () => {
+    assert.equal(isSafetyCriticalTask({ title: phrase }), true, `"${phrase}" should block Ready`);
+    assert.ok(detectSafetyFlags(phrase).length > 0, `"${phrase}" produced no warning`);
+    assert.ok(
+      matchedSafetyRuleIds(phrase).includes(expectedRuleId),
+      `"${phrase}" matched ${JSON.stringify(matchedSafetyRuleIds(phrase))}, expected ${expectedRuleId}`
+    );
+  });
+}
+
+// ---- Phrase matrix: expected NON-critical (false-positive guards) ----
+
+const EXPECTED_NOT_CRITICAL = [
+  "steering wheel audio switch",
+  "radiator support panel",
+  "valve lift",
+  "spring-loaded clip",
+  "replace the cabin air filter",
+  "clean the interior trim",
+];
+
+for (const phrase of EXPECTED_NOT_CRITICAL) {
+  test(`not critical: "${phrase}"`, () => {
+    assert.equal(
+      isSafetyCriticalTask({ title: phrase }),
+      false,
+      `"${phrase}" should NOT block Ready, matched ${JSON.stringify(matchedSafetyRuleIds(phrase))}`
+    );
+    assert.deepEqual(detectSafetyFlags(phrase), []);
+  });
+}
+
+// ---- Documented policy: suspension work IS critical, with the right warning ----
+
+test("shock absorber replacement is critical by policy, with a SUSPENSION warning", () => {
+  // Documented product decision: ordinary suspension work blocks Ready because a
+  // mis-torqued joint fails at speed. The important part is that it gets the
+  // suspension warning and NOT the electrical-shock one.
+  const phrase = "shock absorber replacement";
+
+  assert.equal(isSafetyCriticalTask({ title: phrase }), true);
+  assert.deepEqual(matchedSafetyRuleIds(phrase), ["suspension"]);
+
+  const flags = detectSafetyFlags(phrase);
+  assert.ok(flags.some((flag) => /Suspension components carry/.test(flag)));
+  assert.ok(
+    !flags.some((flag) => /Disconnect the battery/.test(flag)),
+    "a suspension shock must not raise the electrical-shock warning"
+  );
+});
+
+test("electrical shock and suspension shocks are told apart", () => {
+  assert.deepEqual(matchedSafetyRuleIds("electrical shock hazard"), ["electrical"]);
+  assert.deepEqual(matchedSafetyRuleIds("replace the rear shocks"), ["suspension"]);
+});
+
+// ---- Regressions from the old substring matcher ----
+
+test('"shock absorber" no longer raises a BRAKE warning', () => {
+  // The old rule tested the bare substring "abs", which matched "shock
+  // ABSorber" and produced a brake-bleeding warning for suspension work.
+  assert.ok(!matchedSafetyRuleIds("shock absorber replacement").includes("brakes"));
+  // ...while genuine ABS work still matches.
+  assert.ok(matchedSafetyRuleIds("abs sensor fault").includes("brakes"));
+});
+
+test("the five original warning topics still fire on their original phrases", () => {
+  const expectations = [
+    ["Replace front brake pads", "brakes"],
+    ["Replace the fuel injector", "fuel"],
+    ["Replace the alternator", "electrical"],
+    ["Replace a control arm", "suspension"],
+    ["Flush the radiator", "cooling"],
+  ];
+
+  for (const [phrase, ruleId] of expectations) {
+    assert.ok(
+      matchedSafetyRuleIds(phrase).includes(ruleId),
+      `"${phrase}" lost its ${ruleId} classification`
+    );
+  }
+});
+
+// ---- Gaps closed by unification ----
+
+test("cooling work now blocks Ready, matching its own scalding warning", () => {
+  for (const title of ["Drain and refill the coolant", "Replace the thermostat"]) {
+    assert.ok(detectSafetyFlags(title).length > 0, `no flag for: ${title}`);
+    assert.equal(isSafetyCriticalTask({ title }), true, `not critical: ${title}`);
+  }
+});
+
+test("a clock spring is SRS, not a compressed suspension spring", () => {
+  const ids = matchedSafetyRuleIds("replace the airbag clock spring");
+
+  assert.ok(ids.includes("srs"));
+  assert.ok(!ids.includes("spring"), "a clockspring is not a compressed coil spring");
+});
+
+test("a ball joint raises both the steering and lifting hazards", () => {
+  const flags = detectSafetyFlags("replace the front lower ball joint and support the vehicle");
+
+  assert.ok(flags.some((flag) => /Steering components/.test(flag)));
+  assert.ok(flags.some((flag) => /jack stands/.test(flag)));
+});
+
+// ---- Input handling ----
 
 test("detectSafetyFlags tolerates non-string input", () => {
   assert.deepEqual(detectSafetyFlags(/** @type {any} */ (null)), []);
   assert.deepEqual(detectSafetyFlags(/** @type {any} */ (undefined)), []);
-});
-
-// ---- Gaps this module was extracted to close ----
-
-test("SRS/airbag work now produces a flag (previously critical but silent)", () => {
-  for (const task of [
-    "Replace the airbag clock spring",
-    "Diagnose the SRS warning light",
-    "Replace the seat belt pretensioner",
-  ]) {
-    const flags = detectSafetyFlags(task);
-    assert.ok(
-      flags.some((flag) => /SRS\/airbag/.test(flag)),
-      `expected an SRS warning for: ${task}`
-    );
-  }
-});
-
-test("steering and ball-joint work now produce a control-loss flag", () => {
-  for (const task of [
-    "Replace the outer tie rod end",
-    "Replace the front lower ball joint",
-    "Replace the steering rack",
-  ]) {
-    const flags = detectSafetyFlags(task);
-    assert.ok(
-      flags.some((flag) => /Steering and suspension joints/.test(flag)),
-      `expected a steering/control warning for: ${task}`
-    );
-  }
-});
-
-test("spring work now warns about stored energy", () => {
-  const flags = detectSafetyFlags("Replace the front strut coil spring");
-
-  assert.ok(flags.some((flag) => /Compressed springs store enough energy/.test(flag)));
-});
-
-test("cooling work is now safety-critical, matching its own burn warning", () => {
-  // The bug this closes: the task warned "never open a hot cooling system" yet
-  // isSafetyCriticalTask returned false, so it could still be marked Ready.
-  for (const title of ["Drain and refill the coolant", "Replace the radiator", "Replace the thermostat"]) {
-    assert.ok(detectSafetyFlags(title).length > 0, `no flag for: ${title}`);
-    assert.equal(isSafetyCriticalTask({ title }), true, `not safety-critical: ${title}`);
-  }
-});
-
-test("every safety-critical keyword also produces at least one warning flag", () => {
-  // The invariant that was broken. If a task is dangerous enough to block Ready,
-  // it must be able to tell the owner WHY.
-  for (const keyword of SAFETY_CRITICAL_KEYWORDS) {
-    const flags = detectSafetyFlags(`Replace the ${keyword}`);
-    assert.ok(
-      flags.length > 0,
-      `safety-critical keyword "${keyword}" produces no warning flag`
-    );
-  }
-});
-
-test("a ball joint task is both safety-critical and lifted safely", () => {
-  const flags = detectSafetyFlags("Replace the front lower ball joint");
-
-  assert.equal(isSafetyCriticalTask({ title: "Replace the front lower ball joint" }), true);
-  // Both hazards apply: the car is in the air AND the joint carries control loads.
-  assert.ok(flags.some((flag) => /jack stands/i.test(flag)));
-  assert.ok(flags.some((flag) => /Steering and suspension joints/.test(flag)));
-});
-
-test("flag order is deterministic and follows the rule table", () => {
-  const flags = detectSafetyFlags("brake and airbag and coolant work");
-  const ruleOrder = SAFETY_FLAG_RULES.map((rule) => rule.flag);
-  const sorted = [...flags].sort((a, b) => ruleOrder.indexOf(a) - ruleOrder.indexOf(b));
-
-  assert.deepEqual(flags, sorted);
 });
 
 test("isSafetyCriticalTask reads the system field as well as the title", () => {
@@ -118,14 +190,10 @@ test("isSafetyCriticalTask reads the system field as well as the title", () => {
   assert.equal(isSafetyCriticalTask(null), false);
 });
 
-test("a clock spring gets the SRS warning, not the coil-spring one", () => {
-  const flags = detectSafetyFlags("Replace the airbag clock spring");
+test("flag order is deterministic and follows the rule table", () => {
+  const flags = detectSafetyFlags("brake and airbag and coolant work");
+  const ruleOrder = SAFETY_RULES.map((rule) => rule.flag);
+  const sorted = [...flags].sort((a, b) => ruleOrder.indexOf(a) - ruleOrder.indexOf(b));
 
-  assert.ok(flags.some((flag) => /SRS\/airbag/.test(flag)));
-  assert.ok(
-    !flags.some((flag) => /Compressed springs/.test(flag)),
-    "a clockspring is not a compressed suspension spring"
-  );
-  // ...but a real suspension spring still gets it.
-  assert.ok(detectSafetyFlags("Replace the spring").some((f) => /Compressed springs/.test(f)));
+  assert.deepEqual(flags, sorted);
 });

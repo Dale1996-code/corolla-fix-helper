@@ -50,9 +50,12 @@ function stubFetch(outputText = "The oil drain plug torque is 27 ft-lb.") {
   globalThis.fetch = /** @type {any} */ (
     async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
+      // status: "completed" is required by the fail-closed parser -- a real
+      // Responses API payload always carries it, and a double that omits it is
+      // simply unrealistic. The parser is not relaxed to accommodate mocks.
       return {
         ok: true,
-        json: async () => ({ output_text: outputText }),
+        json: async () => ({ status: "completed", output_text: outputText }),
       };
     }
   );
@@ -382,18 +385,48 @@ test("a truncated rewrite falls back to the user's own question instead of throw
   assert.equal(rewritten, "what about the rear?");
 });
 
-test("a completed payload with no status field is still treated as complete", async () => {
-  // Guards the additive posture: every pre-existing stub returns a bare
-  // { output_text } with no status, and must keep taking the original path.
-  const calls = stubFetch("The oil drain plug torque is 27 ft-lb.");
+test("a payload with no status field fails closed rather than being assumed complete", async () => {
+  // Fail-closed contract: we only render text the provider confirmed finished.
+  // An absent status cannot confirm that, so it is not shown.
+  globalThis.fetch = /** @type {any} */ (
+    async () => ({ ok: true, json: async () => ({ output_text: "27 ft-lb" }) })
+  );
 
-  const answer = await generateAnswerTextFromOpenAi({
-    question: "What is the oil drain plug torque?",
-    chunks: [sampleChunk],
-  });
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "What is the oil drain plug torque?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.equal(error.failure.kind, "unknown_status");
+      assert.equal(error.failure.reason, "absent");
+      return true;
+    }
+  );
+});
 
-  assert.equal(calls.length, 1);
-  assert.equal(answer, "The oil drain plug torque is 27 ft-lb.");
+test("a completed response with no usable text fails closed instead of answering blank", async () => {
+  // Previously an empty payload produced "" which isNotFoundAnswer() would have
+  // turned into an ordinary not_found -- an infrastructure failure disguised as
+  // an honest "not in documents".
+  globalThis.fetch = /** @type {any} */ (
+    async () => ({ ok: true, json: async () => ({ status: "completed", output_text: "   " }) })
+  );
+
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "What is the oil drain plug torque?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.equal(error.failure.kind, "empty_output");
+      return true;
+    }
+  );
 });
 
 // ---- retrievedContext: recover evidence discarded by the not_found exits ----

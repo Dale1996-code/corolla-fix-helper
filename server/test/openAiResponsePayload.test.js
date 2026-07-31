@@ -5,100 +5,261 @@ import test from "node:test";
 import {
   describeOpenAiFailure,
   parseCompleteOpenAiOutputText,
-  parseOpenAiOutputText,
   parseOpenAiRefusal,
+  readOpenAiResponse,
   readOpenAiUsage,
 } from "../src/services/openAiResponsePayload.js";
 
-test("parseOpenAiOutputText prefers the flattened output_text", () => {
-  assert.equal(parseOpenAiOutputText({ output_text: "  37 Nm  " }), "37 Nm");
+const completed = (extra) => ({ status: "completed", ...extra });
+
+function expectFailure(payload, kind) {
+  const result = readOpenAiResponse(payload);
+
+  assert.equal(result.ok, false, `expected a failure of kind ${kind}`);
+  assert.equal(result.failure.kind, kind);
+  // A failure must never leak text: that is the whole point of failing closed.
+  assert.equal(result.text, "");
+  return result.failure;
+}
+
+// ---- Success paths ----
+
+test("completed response with valid flattened text", () => {
+  const result = readOpenAiResponse(completed({ output_text: "  37 Nm  " }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "37 Nm");
 });
 
-test("parseOpenAiOutputText falls back to walking output[].content[]", () => {
-  const payload = {
-    output: [
-      {
-        content: [
-          { type: "output_text", text: "line one" },
-          { type: "something_else", text: "ignored" },
-        ],
-      },
-      { content: [{ type: "output_text", text: "line two" }] },
-    ],
-  };
+test("completed response with valid nested text", () => {
+  const result = readOpenAiResponse(
+    completed({
+      output: [{ content: [{ type: "output_text", text: "37 Nm" }] }],
+    })
+  );
 
-  assert.equal(parseOpenAiOutputText(payload), "line one\n\nline two");
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "37 Nm");
 });
 
-test("parseOpenAiOutputText returns empty string for junk payloads", () => {
-  for (const payload of [null, undefined, {}, { output: "nope" }, 42]) {
-    assert.equal(parseOpenAiOutputText(payload), "");
+test("blank flattened text falls back to valid nested text", () => {
+  // A blank output_text is treated as ABSENT, not as an empty answer, so a
+  // payload that only populates the nested form still works.
+  const result = readOpenAiResponse(
+    completed({
+      output_text: "   ",
+      output: [{ content: [{ type: "output_text", text: "37 Nm" }] }],
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "37 Nm");
+});
+
+test("multiple output items are flattened in order", () => {
+  const result = readOpenAiResponse(
+    completed({
+      output: [
+        { content: [{ type: "output_text", text: "line one" }] },
+        { content: [{ type: "output_text", text: "line two" }] },
+      ],
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "line one\nline two");
+});
+
+test("non-text content types are skipped, not treated as malformed", () => {
+  // reasoning/other parts are simply not answer text.
+  const result = readOpenAiResponse(
+    completed({
+      output: [
+        {
+          content: [
+            { type: "reasoning", text: "internal" },
+            { type: "output_text", text: "37 Nm" },
+          ],
+        },
+      ],
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "37 Nm");
+});
+
+// ---- Non-success statuses: every one must fail closed ----
+
+test("incomplete/truncated is classified and yields no text", () => {
+  const failure = expectFailure(
+    {
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      output_text: "Loosen the caliper bolts and torque them to",
+    },
+    "truncated"
+  );
+
+  assert.equal(failure.reason, "max_output_tokens");
+  assert.doesNotMatch(failure.message, /Loosen the caliper/);
+});
+
+test("incomplete content_filter is classified separately", () => {
+  expectFailure(
+    { status: "incomplete", incomplete_details: { reason: "content_filter" } },
+    "content_filter"
+  );
+});
+
+test("undocumented token-shaped incomplete reasons still classify as truncated", () => {
+  // Defensive: the documented value is max_output_tokens, but any token/length
+  // shaped reason means the same thing and must not degrade to a vaguer kind.
+  for (const reason of ["max_tokens", "output_token_limit", "length"]) {
+    const failure = expectFailure(
+      { status: "incomplete", incomplete_details: { reason } },
+      "truncated"
+    );
+    assert.equal(failure.reason, reason);
   }
 });
 
-test("describeOpenAiFailure returns null for a completed response", () => {
-  assert.equal(describeOpenAiFailure({ status: "completed", output_text: "ok" }), null);
-});
-
-test("a payload with no status field is treated as complete", () => {
-  // The whole existing test suite stubs bare { output_text } payloads. If this
-  // regressed, every previously-passing AI test would start throwing.
-  assert.equal(describeOpenAiFailure({ output_text: "ok" }), null);
-});
-
-test("describeOpenAiFailure classifies max_output_tokens as truncated", () => {
-  const failure = describeOpenAiFailure({
-    status: "incomplete",
-    incomplete_details: { reason: "max_output_tokens" },
-    output_text: "half a procedure",
-  });
-
-  assert.equal(failure.kind, "truncated");
-  assert.equal(failure.reason, "max_output_tokens");
-});
-
-test("describeOpenAiFailure classifies content_filter separately", () => {
-  const failure = describeOpenAiFailure({
-    status: "incomplete",
-    incomplete_details: { reason: "content_filter" },
-  });
-
-  assert.equal(failure.kind, "content_filter");
-});
-
-test("an incomplete response with an unknown reason still fails closed", () => {
-  const failure = describeOpenAiFailure({ status: "incomplete" });
-
-  assert.equal(failure.kind, "incomplete");
+test("incomplete with an unknown reason still fails closed", () => {
+  const failure = expectFailure({ status: "incomplete" }, "incomplete");
   assert.equal(failure.reason, "unknown");
 });
 
-test("describeOpenAiFailure surfaces a failed response's error message", () => {
-  const failure = describeOpenAiFailure({
-    status: "failed",
-    error: { message: "upstream exploded" },
-  });
-
-  assert.equal(failure.kind, "failed");
-  assert.match(failure.message, /upstream exploded/);
+test("cancelled fails closed and discards any text", () => {
+  expectFailure({ status: "cancelled", output_text: "partial answer" }, "cancelled");
 });
+
+test("queued fails closed", () => {
+  expectFailure({ status: "queued" }, "queued");
+});
+
+test("in_progress fails closed and discards streaming text", () => {
+  expectFailure({ status: "in_progress", output_text: "partial" }, "in_progress");
+});
+
+test("failed fails closed without exposing the provider message to the client", () => {
+  const failure = expectFailure(
+    {
+      status: "failed",
+      error: { message: "upstream exploded while processing your prompt", code: "server_error" },
+    },
+    "failed"
+  );
+
+  // The safe message must not carry provider internals...
+  assert.doesNotMatch(failure.message, /upstream exploded/);
+  assert.doesNotMatch(failure.message, /your prompt/);
+  // ...but the detail is retained out-of-band for a developer.
+  assert.match(failure.diagnostic, /upstream exploded/);
+  assert.equal(failure.reason, "server_error");
+});
+
+test("a provider message is length-capped so it cannot become a content dump", () => {
+  const failure = expectFailure(
+    { status: "failed", error: { message: "x".repeat(5000) } },
+    "failed"
+  );
+
+  assert.ok(failure.diagnostic.length <= 210, `diagnostic was ${failure.diagnostic.length}`);
+});
+
+test("an absent status fails closed", () => {
+  const failure = expectFailure({ output_text: "37 Nm" }, "unknown_status");
+  assert.equal(failure.reason, "absent");
+});
+
+test("an unrecognized status fails closed", () => {
+  expectFailure({ status: "something_new", output_text: "37 Nm" }, "unknown_status");
+});
+
+// ---- Malformed and empty output ----
+
+test("completed response with no usable text fails closed", () => {
+  expectFailure(completed({ output_text: "   " }), "empty_output");
+  expectFailure(completed({}), "empty_output");
+  expectFailure(completed({ output: [] }), "empty_output");
+  expectFailure(completed({ output: [{ content: [] }] }), "empty_output");
+});
+
+test("object-valued output_text is rejected, not coerced", () => {
+  // String({}) would render "[object Object]" as if it were an answer.
+  expectFailure(completed({ output_text: { value: "37 Nm" } }), "malformed_output");
+});
+
+test("array-valued output_text is rejected, not coerced", () => {
+  expectFailure(completed({ output_text: ["37 Nm"] }), "malformed_output");
+});
+
+test("a nested output_text part with non-string text is rejected", () => {
+  for (const text of [{ value: "37" }, ["37"], 37, null]) {
+    expectFailure(
+      completed({ output: [{ content: [{ type: "output_text", text }] }] }),
+      "malformed_output"
+    );
+  }
+});
+
+test("malformed mixed content fails closed rather than returning the valid half", () => {
+  // A part CLAIMING to be output_text but carrying a non-string means we do not
+  // understand the payload. Returning only the readable half would silently drop
+  // content -- the same hazard as truncation -- so it fails closed.
+  expectFailure(
+    completed({
+      output: [
+        { content: [{ type: "output_text", text: "Torque the bolts to" }] },
+        { content: [{ type: "output_text", text: { value: "37 Nm" } }] },
+      ],
+    }),
+    "malformed_output"
+  );
+});
+
+// ---- Refusal ----
 
 test("a refusal is detected even though it carries no output_text", () => {
-  const payload = {
-    status: "completed",
+  const payload = completed({
     output: [{ content: [{ type: "refusal", refusal: "I can't help with that." }] }],
-  };
+  });
 
   assert.equal(parseOpenAiRefusal(payload), "I can't help with that.");
-  assert.equal(describeOpenAiFailure(payload).kind, "refusal");
+  const failure = expectFailure(payload, "refusal");
+  assert.match(failure.diagnostic, /can't help/);
 });
 
-test("readOpenAiUsage coerces token counts and tolerates a missing usage block", () => {
-  assert.deepEqual(
-    readOpenAiUsage({ usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 } }),
-    { inputTokens: 10, outputTokens: 20, totalTokens: 30 }
+test("a refusal on an unfinished response is still reported by status", () => {
+  // Status is checked before content, so an unfinished response never reaches
+  // refusal handling and is reported as unfinished.
+  expectFailure(
+    {
+      status: "incomplete",
+      incomplete_details: { reason: "content_filter" },
+      output: [{ content: [{ type: "refusal", refusal: "no" }] }],
+    },
+    "content_filter"
   );
+});
+
+// ---- Usage metadata ----
+
+test("usage is read when present and absent usage is handled safely", () => {
+  const withUsage = readOpenAiResponse(
+    completed({ output_text: "ok", usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 } })
+  );
+  assert.deepEqual(withUsage.usage, { inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+
+  // Absent usage must not throw and must not block a valid answer.
+  const withoutUsage = readOpenAiResponse(completed({ output_text: "ok" }));
+  assert.equal(withoutUsage.ok, true);
+  assert.equal(withoutUsage.usage, null);
+
   assert.equal(readOpenAiUsage({}), null);
+  assert.equal(readOpenAiUsage({ usage: null }), null);
+  assert.equal(readOpenAiUsage({ usage: "nope" }), null);
+  assert.equal(readOpenAiUsage({ usage: [] }), null);
   assert.deepEqual(readOpenAiUsage({ usage: {} }), {
     inputTokens: 0,
     outputTokens: 0,
@@ -106,14 +267,41 @@ test("readOpenAiUsage coerces token counts and tolerates a missing usage block",
   });
 });
 
-test("parseCompleteOpenAiOutputText returns text when the reply finished", () => {
-  assert.equal(
-    parseCompleteOpenAiOutputText({ status: "completed", output_text: "37 Nm" }),
-    "37 Nm"
+test("usage still rides along on a failure", () => {
+  const failure = expectFailure(
+    {
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      usage: { output_tokens: 512 },
+    },
+    "truncated"
   );
+
+  assert.equal(failure.usage.outputTokens, 512);
 });
 
-test("parseCompleteOpenAiOutputText throws with .failure attached when truncated", () => {
+// ---- Junk input ----
+
+test("junk payloads fail closed instead of throwing", () => {
+  for (const payload of [null, undefined, {}, 42, "text", []]) {
+    const result = readOpenAiResponse(/** @type {any} */ (payload));
+    assert.equal(result.ok, false);
+    assert.equal(result.text, "");
+  }
+});
+
+// ---- Thin wrappers ----
+
+test("describeOpenAiFailure returns null only for a usable completed response", () => {
+  assert.equal(describeOpenAiFailure(completed({ output_text: "ok" })), null);
+  assert.equal(describeOpenAiFailure(completed({ output_text: "" })).kind, "empty_output");
+});
+
+test("parseCompleteOpenAiOutputText returns text when the reply finished", () => {
+  assert.equal(parseCompleteOpenAiOutputText(completed({ output_text: "37 Nm" })), "37 Nm");
+});
+
+test("parseCompleteOpenAiOutputText throws a SAFE message with .failure attached", () => {
   assert.throws(
     () =>
       parseCompleteOpenAiOutputText({
@@ -126,9 +314,24 @@ test("parseCompleteOpenAiOutputText throws with .failure attached when truncated
       const error = /** @type {any} */ (thrown);
       assert.equal(error.failure.kind, "truncated");
       assert.equal(error.failure.usage.outputTokens, 512);
-      // The partial answer must not be smuggled out inside the error message.
+      // ask.js returns error.message to the client verbatim, so the partial
+      // answer must not be smuggled out inside it.
       assert.doesNotMatch(error.message, /Torque the bolts/);
       return true;
     }
   );
+});
+
+test("no failure message leaks provider or model text", () => {
+  const payloads = [
+    { status: "failed", error: { message: "secret prompt echo" } },
+    { status: "cancelled", output_text: "secret partial answer" },
+    { status: "in_progress", output_text: "secret partial answer" },
+    completed({ output: [{ content: [{ type: "refusal", refusal: "secret refusal text" }] }] }),
+  ];
+
+  for (const payload of payloads) {
+    const failure = describeOpenAiFailure(payload);
+    assert.doesNotMatch(failure.message, /secret/);
+  }
 });
