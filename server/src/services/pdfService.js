@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { config } from "../config.js";
+import { buildPageTextFromItems } from "./pdfTextLayout.js";
 
 const OCR_COMMAND_MAX_BUFFER = 20 * 1024 * 1024;
 const OCR_TEMP_PREFIX = path.join(os.tmpdir(), "corolla-fix-helper-ocr-");
@@ -208,11 +209,13 @@ export async function extractPdfData(
       const page = await pdfDocument.getPage(pageNumber);
       const textContent = await page.getTextContent();
 
-      const rawPageText = textContent.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
+      // Column-aware reading order (audit F3). The previous
+      // `.map(str).join(" ")` discarded every transform coordinate, so a
+      // two-column service-manual page interleaved its columns and a torque
+      // value could end up beside an unrelated label. buildPageTextFromItems
+      // segments columns first, then orders by y within each column.
+      const layout = buildPageTextFromItems(textContent.items);
+      const rawPageText = layout.text;
       let pageText = rawPageText;
 
       if (shouldRunOcr(pageText) && config.ocrEnabled && !ocrDisabledDueToMissingTools) {

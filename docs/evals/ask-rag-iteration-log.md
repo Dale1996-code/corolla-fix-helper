@@ -416,3 +416,67 @@ established finding (1) above rather than assuming it.
 - The floor never empties the context: dropping everything would turn a weak but
   real answer into a not_found with no evidence to show.
 - The shadow report contains no document text, titles, or filenames.
+
+---
+
+## Milestone 4 — extraction: column-aware reading order
+
+### F3: reading order was destroyed at extraction
+
+`pdfService` built page text with `items.map(str).join(" ")`, discarding every
+`transform` coordinate. On a two-column service-manual page -- which is most of
+this corpus -- that interleaves the columns: a torque row from the left column
+lands beside unrelated prose from the right, and the resulting chunk can appear
+to state a value it does not. Every layer above (chunking, retrieval, citation
+snippets, and now evidence quotes) inherits that corruption.
+
+`services/pdfTextLayout.js` segments **columns first, then orders by y within
+each column**. The ordering matters: "group by y-band, sort by x within band" --
+the originally proposed algorithm -- yields row-wise interleaving (L1 R1 / L2 R2),
+which is not reading order and does not satisfy the requirement that column 1
+fully precede column 2. Pinned by a test asserting exactly that property, and by
+one showing a torque value stays with its own column's label.
+
+**Deliberately conservative.** A wrong column split silently reorders correct
+text, which is worse than no split, so a page is only treated as multi-column
+when the gutter survives several guards: an absolute minimum width (~12pt -- real
+gutters are 20-40pt, inter-word gaps under 10pt), no row spanning the gap (which
+is how a table differs from real columns), both sides spanning most of the
+content height, and each column holding a meaningful share of the page's items.
+Anything else falls back to single-column ordering. All four guards have tests.
+
+### Dual representations
+
+`buildPageTextFromItems` returns both: `layoutText` (line breaks and column
+separation preserved -- what a human reading the page sees, and the right thing
+to check an evidence quote against) and `text` (whitespace-normalized, for
+retrieval and keyword matching). They carry the SAME order, which is the actual
+fix; previously the order itself was wrong.
+
+**Deferred: persisting `layoutText`.** Storing it would need a schema migration
+plus re-extraction of all 1443 documents / 19636 chunks. Re-extracting the
+owner's corpus is their call, not a side effect of a code change, and nothing
+consumes the column yet. The extractor produces both representations today, so
+adding the column later is additive. Recorded as a follow-up.
+
+### F12 / atomic swap: the plan's concern was already obsolete
+
+The plan flagged `rebuildDocumentChunksFromPages` as a data-loss risk -- "hard
+DELETEs before rebuilding, so a partial failure leaves a document unusable". That
+is **no longer true**: the DELETE and the INSERTs already run inside one
+`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` transaction, and the chunks are built
+before the transaction opens, so a build failure never reaches the DELETE.
+
+Rather than rewrite working code to satisfy a stale finding, the property is now
+pinned by tests: a mid-insert failure (two pages with the same number colliding
+on `UNIQUE(document_id, page_number, chunk_index)`, which fails *after* the
+DELETE) rolls back and leaves the original chunks byte-identical, and a rebuild
+never touches another document.
+
+### Corpus impact
+
+Existing chunks were extracted with the old ordering and are unchanged. The fix
+applies to documents uploaded or re-extracted from now on. Re-extracting the
+existing corpus (`POST /api/documents/:id/extract`, then
+`npm run embed:backfill`) is a deliberate owner-run operation, not something this
+change performs.
