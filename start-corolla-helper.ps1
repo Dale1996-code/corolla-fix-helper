@@ -105,7 +105,7 @@ if ([string]::IsNullOrWhiteSpace($openAiKey)) {
   Set-EnvValue -Path $serverEnvPath -Name "OPENAI_API_KEY" -Value $openAiKey
 }
 
-Set-EnvValue -Path $serverEnvPath -Name "OPENAI_ANSWER_MODEL" -Value "gpt-4.1"
+Set-EnvValue -Path $serverEnvPath -Name "OPENAI_ANSWER_MODEL" -Value "gpt-5.5-2026-04-23"
 Set-EnvValue -Path $serverEnvPath -Name "OPENAI_EMBEDDING_MODEL" -Value "text-embedding-3-small"
 Set-EnvValue -Path $serverEnvPath -Name "OPENAI_EMBEDDING_DIMENSIONS" -Value "512"
 

@@ -35,12 +35,12 @@ function readNonNegativeInteger(value, fallback) {
 }
 
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
-// Pinned SNAPSHOT, not the floating "gpt-4.1" alias. An alias silently changes
+// Pinned SNAPSHOT, not a floating model alias. An alias silently changes
 // model behavior underneath the eval suite, so a green run proves nothing about
 // the next one and a regression cannot be told apart from a model update.
 // Override with OPENAI_ANSWER_MODEL to move deliberately.
 const openAiAnswerModel =
-  process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-2025-04-14";
+  process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-5.5-2026-04-23";
 // The optional Ask reranker reuses the answer model unless OPENAI_RERANK_MODEL
 // is set, so enabling it needs no extra model configuration.
 const openAiRerankModel = process.env.OPENAI_RERANK_MODEL || openAiAnswerModel;

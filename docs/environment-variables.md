@@ -37,7 +37,7 @@ DATABASE_FILE=./data/corolla-fix-helper.db
 UPLOADS_DIR=./uploads
 MAX_UPLOAD_SIZE_MB=20
 OPENAI_API_KEY=
-OPENAI_ANSWER_MODEL=gpt-4.1
+OPENAI_ANSWER_MODEL=gpt-5.5-2026-04-23
 # Model used only when an Ask request includes a saved image attachment.
 # Leave blank to reuse OPENAI_ANSWER_MODEL.
 OPENAI_VISION_MODEL=
@@ -70,7 +70,7 @@ What each one means:
 - `UPLOADS_DIR` is where uploaded PDFs are stored.
 - `MAX_UPLOAD_SIZE_MB` is the largest PDF upload size in megabytes.
 - `OPENAI_API_KEY` is the OpenAI API key used by the "Ask your documents" feature.
-- `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is `gpt-4.1`.
+- `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is the pinned snapshot `gpt-5.5-2026-04-23`.
 - `OPENAI_VISION_MODEL` is the OpenAI model used only when Ask includes one already-saved image attachment. Leave it blank to reuse `OPENAI_ANSWER_MODEL`.
 - `ASK_DEBUG_METRICS` enables development-only Ask visibility when set to `true`. It adds a log-safe metrics object to `/api/ask` responses and answer-eval output. The object contains durations, counts, sizes, and numeric identifiers, never document text. The default is `false`.
 - `RERANK_ENABLED` turns the optional Ask reranker on or off. The default is `false`. When `true`, Ask retrieval over-fetches a wider candidate pool and asks the model to reorder it before the final result slice. It needs an API key; with no key, a malformed reply, or any error it silently falls back to the existing hybrid order.
@@ -115,7 +115,7 @@ For the intended Docker-on-VM deployment, pass env values to Docker instead of s
 -e UPLOADS_DIR=/data/uploads
 -e MAX_UPLOAD_SIZE_MB=20
 -e OPENAI_API_KEY=placeholder-openai-key
--e OPENAI_ANSWER_MODEL=gpt-4.1
+-e OPENAI_ANSWER_MODEL=gpt-5.5-2026-04-23
 -e OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 -e OPENAI_EMBEDDING_DIMENSIONS=512
 -e OPENAI_EMBEDDING_BATCH_SIZE=64

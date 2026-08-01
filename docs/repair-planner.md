@@ -105,13 +105,14 @@ Set the key in the server environment (see `.env.example`):
 
 ```
 OPENAI_API_KEY=sk-...
-OPENAI_ANSWER_MODEL=gpt-4.1-mini
+OPENAI_ANSWER_MODEL=gpt-5.5-2026-04-23
 ```
 
-`gpt-4.1-mini` is a current, non-deprecated model on the Responses API and is a
-cost-friendly default for a local single-vehicle tool. Any current Responses-API
-model id works — see https://developers.openai.com/api/docs/models. Without a key
-the feature still loads and returns the `ai_not_configured` event.
+`gpt-5.5-2026-04-23` is the pinned repository default for the Responses API.
+The app detects this GPT-5 reasoning-family model and sends `reasoning.effort`
+instead of unsupported `temperature`. You can override it with any model ID
+available to your OpenAI API account. Without a key the feature still loads and
+returns the `ai_not_configured` event.
 
 ## Extending it
 
