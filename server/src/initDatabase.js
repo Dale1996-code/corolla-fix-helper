@@ -566,30 +566,11 @@ function runMigration(name, migrate) {
   }
 }
 
-/**
- * Persistent daily AI call counter.
- *
- * The ceiling previously lived in module memory, so every server restart reset
- * it -- a crash-restart loop could spend well past the cap. One row per local
- * day in SQLite, rather than a second persistence mechanism (a JSON file or a
- * lock file), because the database is already the app's only durable store.
- */
-function createAiUsageTable() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS ai_usage_daily (
-      day_key TEXT PRIMARY KEY,
-      call_count INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-}
-
 export function initializeDatabase() {
   ensureSchemaMigrationsTable();
   runMigration("001_initial_schema", createTables);
   runMigration("002_repair_checklists", createRepairChecklistsTables);
   runMigration("003_link_and_sort_indexes", createLinkAndSortIndexes);
-  runMigration("004_ai_usage_daily", createAiUsageTable);
 
   ensureAppSettingsRecord();
   seedVehicle();

@@ -524,22 +524,27 @@ not solve this -- the ambiguity is inside one manual. Two template cases now
 check that an answer names the applicability condition it is scoped to rather
 than silently picking one variant. Both PASS on the live corpus.
 
-### Daily spend ceiling made durable (migration 004)
+### Daily spend ceiling: NOT persisted (planned item removed by owner decision)
 
-The counter lived in module memory, so every restart reset it -- meaning a
-crash-restart loop, the exact failure the cap exists to stop, could spend
-straight past it. It is now one row per local day in `ai_usage_daily`. SQLite,
-not a JSON or lock file, because the database is already the app's only durable
-store and a second persistence mechanism would need its own backup story.
+Milestone 5 originally persisted the existing daily model-call ceiling to SQLite
+via migration `004_ai_usage_daily`, per the plan's "persist the daily budget in
+SQLite (a new numbered migration)".
 
-The increment is a single atomic upsert: a read-then-write would let two
-concurrent Ask requests observe the same count and slip past the ceiling
-together. The table is also created lazily on first use, not only by the
-migration, because aiUsageBudget is reachable from eval scripts and focused tests
-that never call `initializeDatabase()` -- relying on the migration alone made the
-ceiling silently fail open in exactly those paths, which defeats the guard rather
-than degrading it. Six tests pin the behavior, including that a restart cannot
-reset the count.
+**That work was removed before merge at the owner's direction.** The owner does
+not want an application-level spend cap and disables it with
+`AI_DAILY_CALL_LIMIT=0`, so making it durable was overhead with no benefit --
+and persistence would have made the ceiling accumulate across eval runs that
+restarts previously cleared.
+
+`aiUsageBudget.js` is byte-identical to `main` again: the counter is back in
+module memory and resets on restart. The **pre-existing** cap itself is
+untouched and still enforced at both call sites; it predates this branch
+(commit `5fbf664`) and removing it would be a separate change.
+
+Known consequence, accepted: a crash-restart loop resets the counter and can
+spend past the ceiling. With the cap disabled by configuration this is moot; if
+it is ever re-enabled and that matters, this section is the record of what was
+removed and why.
 
 ### Eval pacing: infrastructure failures no longer read as regressions
 
