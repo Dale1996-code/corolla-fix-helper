@@ -3,6 +3,7 @@ import test from "node:test";
 
 // Pure payload parsing: no database, no network, no config. Safe to import directly.
 import {
+  createRedactedOpenAiHttpError,
   describeOpenAiFailure,
   parseCompleteOpenAiOutputText,
   parseOpenAiRefusal,
@@ -334,4 +335,145 @@ test("no failure message leaks provider or model text", () => {
     const failure = describeOpenAiFailure(payload);
     assert.doesNotMatch(failure.message, /secret/);
   }
+});
+
+// ---- Nested output-message status and structure ----
+
+test("top-level completed + nested incomplete message fails closed", () => {
+  // The response object finished; the MESSAGE inside it did not. Its text is
+  // partial, so a top-level "completed" must not license rendering it.
+  const failure = expectFailure(
+    completed({
+      output: [
+        {
+          status: "incomplete",
+          content: [{ type: "output_text", text: "Torque the caliper bolts to" }],
+        },
+      ],
+    }),
+    "incomplete"
+  );
+
+  assert.equal(failure.reason, "output_message_incomplete");
+});
+
+test("top-level completed + nested cancelled message fails closed", () => {
+  const failure = expectFailure(
+    completed({
+      output: [{ status: "cancelled", content: [{ type: "output_text", text: "partial" }] }],
+    }),
+    "incomplete"
+  );
+
+  assert.equal(failure.reason, "output_message_cancelled");
+});
+
+test("a nonblank flattened output_text cannot bypass a bad nested message", () => {
+  // The regression this guards: reading output_text first and returning early
+  // meant nested validation never ran.
+  expectFailure(
+    completed({
+      output_text: "The oil drain plug torque is 37 Nm.",
+      output: [{ status: "incomplete", content: [{ type: "output_text", text: "The oil" }] }],
+    }),
+    "incomplete"
+  );
+});
+
+test("valid flattened text with malformed nested output fails closed", () => {
+  expectFailure(
+    completed({
+      output_text: "37 Nm",
+      output: [{ content: [{ type: "output_text", text: { value: "37 Nm" } }] }],
+    }),
+    "malformed_output"
+  );
+});
+
+test("flattened and nested text that disagree fail closed", () => {
+  // We cannot tell which representation reflects what the model produced, so we
+  // do not pick the convenient one.
+  const failure = expectFailure(
+    completed({
+      output_text: "The torque is 37 Nm.",
+      output: [{ content: [{ type: "output_text", text: "The torque is 54 Nm." }] }],
+    }),
+    "malformed_output"
+  );
+
+  assert.equal(failure.reason, "flattened_nested_mismatch");
+});
+
+test("flattened and nested text that agree are accepted", () => {
+  // Whitespace-insensitive: the flattening uses its own separators.
+  const result = readOpenAiResponse(
+    completed({
+      output_text: "line one\n\nline two",
+      output: [
+        { status: "completed", content: [{ type: "output_text", text: "line one" }] },
+        { status: "completed", content: [{ type: "output_text", text: "line two" }] },
+      ],
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "line one\n\nline two");
+});
+
+test("multiple completed output messages are preserved", () => {
+  const result = readOpenAiResponse(
+    completed({
+      output: [
+        { status: "completed", content: [{ type: "output_text", text: "step one" }] },
+        { status: "completed", content: [{ type: "output_text", text: "step two" }] },
+      ],
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "step one\nstep two");
+});
+
+test("mixed completed and incomplete messages fail closed rather than returning the good one", () => {
+  expectFailure(
+    completed({
+      output: [
+        { status: "completed", content: [{ type: "output_text", text: "step one" }] },
+        { status: "incomplete", content: [{ type: "output_text", text: "step tw" }] },
+      ],
+    }),
+    "incomplete"
+  );
+});
+
+test("output messages with no status are still accepted when the response completed", () => {
+  // Not every payload stamps a per-message status; absence there is normal and
+  // must not break valid responses.
+  const result = readOpenAiResponse(
+    completed({ output: [{ content: [{ type: "output_text", text: "37 Nm" }] }] })
+  );
+
+  assert.equal(result.ok, true);
+});
+
+// ---- Redacted HTTP errors ----
+
+test("createRedactedOpenAiHttpError never puts the provider body in the message", () => {
+  const error = /** @type {any} */ (
+    createRedactedOpenAiHttpError(400, "echoed-private-prompt and document text")
+  );
+
+  assert.doesNotMatch(error.message, /echoed-private-prompt/);
+  assert.doesNotMatch(error.message, /document text/);
+  assert.equal(error.failure.kind, "http_error");
+  assert.equal(error.failure.reason, "http_400");
+  assert.equal(error.failure.httpStatus, 400);
+  // Retained out-of-band, bounded.
+  assert.match(error.failure.diagnostic, /echoed-private-prompt/);
+});
+
+test("a redacted HTTP error diagnostic is length-capped", () => {
+  const error = /** @type {any} */ (createRedactedOpenAiHttpError(500, "y".repeat(9000)));
+
+  assert.ok(error.failure.diagnostic.length <= 210);
 });

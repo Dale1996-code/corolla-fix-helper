@@ -222,3 +222,74 @@ on the mutable local corpus.
   cross-module reuse and invariant testing. The stable surfaces are the HTTP API
   and `parseCompleteOpenAiOutputText` / `readOpenAiResponse` /
   `detectSafetyFlags` / `isSafetyCriticalTask`.
+
+### Milestone 1, round 3 — second review response
+
+**Safety classification unified across the real planner flow.** Round 2 unified the
+rule table, but `extractRepairTasks`, `checkRepairReadiness`, and
+`buildOwnerChecklist` still reached their own conclusions: flags were computed
+from the full fragment while criticality was re-derived from the truncated title
+plus the system name. `classifyRepairTask` is now the single entry point, and its
+result supplies the system, the critical verdict, the warnings, and the blocking
+reason together. `detectSystem` became a bounded-regex fallback used only when no
+hazard rule claims the task, so a hazard rule's system is authoritative
+("diagnose engine overheating" is Cooling, not Engine). Checklist rows now carry
+`safetyFlags` and `safetyReason`, and the Repair Planner page renders them, so
+"Shop Recommended" can never appear without the hazard that justifies it.
+The readiness gap names the hazards actually detected instead of a fixed example
+list. End-to-end tests run all ten review phrases through extraction → readiness
+→ checklist and assert system, flags, readiness, and checklist text together.
+
+**Provider HTTP bodies redacted.** `createRedactedOpenAiHttpError` gives the
+client a fixed generic message and keeps the body only as a bounded internal
+diagnostic the route never reads. Applied to all five non-2xx sites, not just the
+two named in the review — `chunkEmbeddingService` is on the Ask retrieval path
+and its throw propagates uncaught to `ask.js`, so it leaked identically, and its
+prompt is the question plus chunk text. Question-rewrite failures now fall back
+to the user's own question on HTTP errors too, matching the parse-failure path;
+answer-generation failures still surface as a 500 so they stay distinguishable
+from an honest `not_found`.
+
+**Nested output messages validated.** A top-level `completed` no longer licenses
+rendering text from an output message whose own status is `incomplete`,
+`cancelled`, or anything else non-completed. Nested validation now runs *before*
+the flattened field is read, so a nonblank `output_text` cannot paper over bad
+nested output, and the two representations must agree (whitespace-insensitive) or
+the response fails closed as `flattened_nested_mismatch`.
+
+**Hardening.** `retrievedContext` is de-duplicated by chunk id (falling back to
+document+page+index), capped at the configured chunk limit, and safe against
+malformed rows. Non-object rows are dropped immediately after retrieval, because
+the relevance gate dereferences `chunks[0]` and a null row surfaced as a 500
+rather than an honest not-found. `buildCitationsFromChunks` now filters rows with
+no document identity and no text, which turns the previously unreachable
+empty-citations guard into a real contract with a test.
+
+#### Re-verifying `refuse-turbo-boost-pressure` after corpus drift
+
+A verified must-refuse case is only valid while the corpus still lacks the fact,
+and the corpus is mutable. `npm run eval:answers` now runs
+`src/evals/negativeCorpusPreconditions.js` against the live database before
+scoring. If it finds a turbo/boost term next to a real pressure figure, a
+`boost pressure` phrase, or a wastegate reference, it prints the matching
+documents and pages and **fails the run even when every case passed** — a stale
+refusal expectation that stays green is worse than a red one, because nobody
+looks at it again.
+
+The known distractors (SAE/Toyota abbreviation glossary rows, and the vacuum
+brake booster) are deliberately excluded so the check does not cry wolf; that
+exclusion is pinned by unit tests against a fake database, which keeps the normal
+suite independent of the corpus.
+
+When it fires:
+
+1. Open each reported document and page and decide whether it is genuine
+   forced-induction evidence or a new distractor class.
+2. If it is a **distractor**, add it to the exclusions in
+   `negativeCorpusPreconditions.js` with a test, and record why here.
+3. If it is **genuine** (e.g. a turbocharged-engine manual was imported), the
+   case's premise is dead. Set `verified: false`, remove it from `VERIFIED_IDS`
+   in `test/answerQualityCases.test.js`, and either retire the case or rewrite it
+   against a fact the corpus still lacks — then re-verify from the corpus the way
+   the round-1 entry above describes.
+4. Never re-green the case by loosening the check.

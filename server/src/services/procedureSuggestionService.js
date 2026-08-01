@@ -18,7 +18,10 @@ import {
   tokenizeQuestion,
 } from "./chunkRetrievalService.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
-import { parseCompleteOpenAiOutputText } from "./openAiResponsePayload.js";
+import {
+  createRedactedOpenAiHttpError,
+  parseCompleteOpenAiOutputText,
+} from "./openAiResponsePayload.js";
 
 const DEFAULT_CHUNK_LIMIT = 8;
 const DEFAULT_SUGGESTION_LIMIT = 5;
@@ -316,10 +319,9 @@ export async function generateProcedureSuggestionsFromOpenAi({
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `OpenAI procedure suggestion failed (${response.status}): ${errorText}`
-    );
+    // Redacted for consistency; the caller catches and falls back to the
+    // deterministic suggestions.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
   // A truncated JSON array would parse into a partial suggestion list. Throwing

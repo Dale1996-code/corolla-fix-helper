@@ -155,6 +155,11 @@ function ChecklistPanel({ checklist }) {
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-500">{item.system}</p>
+            {/* A row can only read "Shop Recommended" alongside the hazard that
+                justifies it, so the reason travels with the recommendation. */}
+            {item.safetyFlags?.length ? (
+              <p className="mt-2 text-xs text-red-700">⚠ {item.safetyFlags.join(" ")}</p>
+            ) : null}
             <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-slate-700">
               {item.steps.map((step, index) => (
                 <li key={index}>{step}</li>

@@ -41,7 +41,37 @@ const SAFE_MESSAGES = {
   refusal: "The AI declined to answer this question.",
   empty_output: "The AI returned no usable answer text. Please try again.",
   malformed_output: "The AI reply was not in a readable format, so it was not shown.",
+  http_error: "The AI service rejected the request. Please try again.",
 };
+
+/**
+ * Build a redacted Error for a non-2xx OpenAI HTTP response.
+ *
+ * The provider body can echo the prompt -- which here means the user's question
+ * and retrieved document passages -- and ask.js serializes `error.message`
+ * straight to the browser. So the message is a fixed generic string, and the
+ * body is retained only as a bounded diagnostic on `error.failure`, which the
+ * route never reads. Nothing here logs.
+ *
+ * @param {number|string} status HTTP status code
+ * @param {string} body Raw provider response body (never surfaced)
+ * @returns {Error}
+ */
+export function createRedactedOpenAiHttpError(status, body) {
+  const error = new Error(SAFE_MESSAGES.http_error);
+  // @ts-expect-error -- diagnostic detail intentionally attached to the Error
+  error.failure = {
+    kind: "http_error",
+    reason: `http_${status}`,
+    message: SAFE_MESSAGES.http_error,
+    // Bounded, and never returned to the client.
+    diagnostic: truncateDiagnostic(body),
+    httpStatus: Number(status) || 0,
+    usage: null,
+  };
+
+  return error;
+}
 
 function truncateDiagnostic(value) {
   const text = typeof value === "string" ? value.trim() : "";
@@ -159,16 +189,26 @@ function classifyIncompleteReason(reason) {
  * malformed. Multiple output items are flattened in order.
  *
  * @param {any} payload
- * @returns {{ malformed: boolean, parts: string[] }}
+ * @returns {{ malformed: boolean, unfinished: string, parts: string[] }}
  */
 function collectNestedOutputText(payload) {
   const parts = [];
 
   if (!Array.isArray(payload?.output)) {
-    return { malformed: false, parts };
+    return { malformed: false, unfinished: "", parts };
   }
 
   for (const item of payload.output) {
+    // An output MESSAGE carries its own status. A top-level "completed" only
+    // means the response object finished; an individual message inside it can
+    // still be incomplete or cancelled, and its text would then be partial.
+    // Trusting the outer status alone would render half a procedure.
+    const itemStatus = typeof item?.status === "string" ? item.status.trim() : "";
+
+    if (itemStatus && itemStatus !== SUCCESS_STATUS) {
+      return { malformed: false, unfinished: itemStatus, parts: [] };
+    }
+
     if (!Array.isArray(item?.content)) {
       continue;
     }
@@ -179,7 +219,7 @@ function collectNestedOutputText(payload) {
       }
 
       if (typeof content.text !== "string") {
-        return { malformed: true, parts: [] };
+        return { malformed: true, unfinished: "", parts: [] };
       }
 
       const text = content.text.trim();
@@ -190,7 +230,28 @@ function collectNestedOutputText(payload) {
     }
   }
 
-  return { malformed: false, parts };
+  return { malformed: false, unfinished: "", parts };
+}
+
+/**
+ * Do the flattened and nested representations tell the same story?
+ *
+ * `output_text` is a convenience flattening of the nested output. When both are
+ * present they must agree; if they do not, we cannot tell which one reflects
+ * what the model actually produced, so we fail closed rather than picking the
+ * more convenient one. Comparison is whitespace-insensitive because the
+ * flattening joins parts with its own separators.
+ */
+function flattenedAgreesWithNested(flattened, parts) {
+  const normalize = (value) => value.replace(/\s+/g, " ").trim();
+  const flat = normalize(flattened);
+  const joined = normalize(parts.join(" "));
+
+  if (!joined) {
+    return true;
+  }
+
+  return flat === joined || normalize(flat).includes(joined) || joined.includes(flat);
 }
 
 /**
@@ -240,12 +301,18 @@ export function readOpenAiResponse(payload) {
     return fail("refusal", { reason: "refusal", diagnostic: truncateDiagnostic(refusal), usage });
   }
 
-  // 3. Prefer the flattened field, but only when it is a NON-BLANK string.
-  //    A blank output_text is treated as absent so valid nested text can serve.
-  const flattened = typeof payload?.output_text === "string" ? payload.output_text.trim() : "";
+  // 3. Validate the NESTED output first, always. A nonblank top-level
+  //    output_text must not be able to paper over nested output that is
+  //    incomplete, cancelled, or malformed.
+  const { malformed, unfinished, parts } = collectNestedOutputText(payload);
 
-  if (flattened) {
-    return { ok: true, text: flattened, usage };
+  if (malformed) {
+    return fail("malformed_output", { reason: "output_text_part_not_a_string", usage });
+  }
+
+  if (unfinished) {
+    // The response object finished, but one of its messages did not.
+    return fail("incomplete", { reason: `output_message_${unfinished}`, usage });
   }
 
   if (payload?.output_text !== undefined && typeof payload.output_text !== "string") {
@@ -253,10 +320,15 @@ export function readOpenAiResponse(payload) {
     return fail("malformed_output", { reason: "output_text_not_a_string", usage });
   }
 
-  const { malformed, parts } = collectNestedOutputText(payload);
+  // A blank output_text is treated as ABSENT so valid nested text can serve.
+  const flattened = typeof payload?.output_text === "string" ? payload.output_text.trim() : "";
 
-  if (malformed) {
-    return fail("malformed_output", { reason: "output_text_part_not_a_string", usage });
+  if (flattened) {
+    if (!flattenedAgreesWithNested(flattened, parts)) {
+      return fail("malformed_output", { reason: "flattened_nested_mismatch", usage });
+    }
+
+    return { ok: true, text: flattened, usage };
   }
 
   if (!parts.length) {

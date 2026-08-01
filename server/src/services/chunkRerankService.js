@@ -15,7 +15,10 @@
 
 import { config } from "../config.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
-import { parseCompleteOpenAiOutputText } from "./openAiResponsePayload.js";
+import {
+  createRedactedOpenAiHttpError,
+  parseCompleteOpenAiOutputText,
+} from "./openAiResponsePayload.js";
 
 // Keep the per-chunk snippet short so the whole prompt stays bounded even with a
 // wide candidate pool.
@@ -188,8 +191,10 @@ export async function generateChunkRankingFromOpenAi({
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI chunk rerank failed (${response.status}): ${errorText}`);
+    // Redacted for consistency. rerankChunks catches this and falls back, so it
+    // does not currently reach a client -- but the prompt contains document
+    // snippets, so it must not become a leak if that changes.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
   // A truncated ranking array would parse into a partial order. Throwing here is

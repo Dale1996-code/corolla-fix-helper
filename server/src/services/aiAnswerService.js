@@ -5,6 +5,7 @@ import {
 } from "./chunkRetrievalService.js";
 import { reserveAiCall } from "./aiUsageBudget.js";
 import {
+  createRedactedOpenAiHttpError,
   parseCompleteOpenAiOutputText,
   readOpenAiResponse,
 } from "./openAiResponsePayload.js";
@@ -103,8 +104,29 @@ function buildSnippet(text) {
   return normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
 }
 
+/**
+ * A chunk is citable only if it can point the owner at something. A row with no
+ * document identity AND no text is not evidence -- it is a malformed row, and
+ * rendering it as a citation would imply a source that cannot be opened.
+ *
+ * This filter is what makes the "no citations could be built" guard below a
+ * reachable contract rather than dead defensive code.
+ */
+function isCitableChunk(chunk) {
+  if (!chunk || typeof chunk !== "object") {
+    return false;
+  }
+
+  const hasSource =
+    chunk.documentId !== undefined && chunk.documentId !== null
+      ? true
+      : Boolean(chunk.documentTitle || chunk.originalFilename);
+
+  return hasSource || Boolean(buildSnippet(chunk.chunkText));
+}
+
 function buildCitationsFromChunks(chunks) {
-  return chunks.map((chunk) => ({
+  return (Array.isArray(chunks) ? chunks : []).filter(isCitableChunk).map((chunk) => ({
     documentId: chunk.documentId,
     documentTitle: chunk.documentTitle,
     originalFilename: chunk.originalFilename,
@@ -209,9 +231,13 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 
+  // Fail SOFT on an HTTP error too, matching the parse-failure path below. The
+  // rewrite is an optimization -- retrieving on the user's own question is a
+  // perfectly good outcome, and far better than failing the whole Ask request.
+  // The body is drained but never surfaced: it can echo the prompt.
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI question rewrite failed (${response.status}): ${errorText}`);
+    await response.text();
+    return normalizedQuestion;
   }
 
   const parsed = readOpenAiResponse(await response.json());
@@ -306,8 +332,9 @@ export async function generateAnswerTextFromOpenAi({
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
+    // Redacted: this prompt contains retrieved document passages, and ask.js
+    // serializes error.message straight to the browser.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
   // Throws when the reply was truncated, filtered, or refused. Half a repair
@@ -354,11 +381,44 @@ export async function askQuestionUsingDocuments(
   const buildRetrievedContext = (result) => {
     const hasCitations = Array.isArray(result.citations) && result.citations.length > 0;
 
-    if (hasCitations || !retrievedChunks.length) {
+    if (hasCitations || !Array.isArray(retrievedChunks) || !retrievedChunks.length) {
       return null;
     }
 
-    return buildCitationsFromChunks(retrievedChunks);
+    // Bound and de-duplicate locally rather than trusting the retriever: an
+    // injected or future retriever could return more than chunkLimit, or repeat
+    // a chunk. Retrieval order is preserved (best first).
+    const seen = new Set();
+    const unique = [];
+
+    for (const chunk of retrievedChunks) {
+      if (!chunk || typeof chunk !== "object") {
+        continue;
+      }
+
+      // Stable identity, with a document+page+index fallback when the row id is
+      // absent (injected chunks in tests and evals often omit it).
+      const chunkId = chunk.chunkId ?? chunk.id;
+      const identity =
+        chunkId === undefined || chunkId === null
+          ? `doc:${chunk.documentId ?? "?"}:${chunk.pageNumber ?? "?"}:${
+              chunk.chunkIndex ?? "?"
+            }`
+          : `id:${chunkId}`;
+
+      if (seen.has(identity)) {
+        continue;
+      }
+
+      seen.add(identity);
+      unique.push(chunk);
+
+      if (unique.length >= chunkLimit) {
+        break;
+      }
+    }
+
+    return unique.length ? buildCitationsFromChunks(unique) : null;
   };
 
   const finalize = (result) => {
@@ -408,10 +468,17 @@ export async function askQuestionUsingDocuments(
   const retrievalQuestion = standaloneQuestion.trim() || normalizedQuestion;
 
   const retrievalStart = performance.now();
-  retrievedChunks = await retrieveChunks(retrievalQuestion, {
+  const rawChunks = await retrieveChunks(retrievalQuestion, {
     limit: chunkLimit,
     mode: "hybrid",
   });
+  // Drop rows that are not objects before anything reads their fields. The
+  // relevance gate below dereferences chunks[0] directly, so a null or string
+  // row from an injected or future retriever would throw and surface as a 500
+  // instead of an honest not_found.
+  retrievedChunks = (Array.isArray(rawChunks) ? rawChunks : []).filter(
+    (chunk) => chunk && typeof chunk === "object"
+  );
   retrievalMs = performance.now() - retrievalStart;
   const chunks = retrievedChunks;
 
@@ -445,6 +512,10 @@ export async function askQuestionUsingDocuments(
   const citations = buildCitationsFromChunks(chunks);
   builtCitations = citations;
 
+  // Reachable contract, not dead defense: buildCitationsFromChunks drops rows
+  // with no document identity and no text, so retrieval can return chunks while
+  // none of them are citable. Answering from sources we cannot show the owner
+  // would be ungrounded, so refuse instead.
   if (!citations.length) {
     return finalize({
       status: "not_found",

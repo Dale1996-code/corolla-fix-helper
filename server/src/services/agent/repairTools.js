@@ -2,7 +2,7 @@ import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import { normalizeText } from "../../utils/text.js";
 // The safety rubric lives in its own module so the "is this safety critical"
 // keyword list and the "which warnings apply" rule table stay in sync.
-import { detectSafetyFlags, isSafetyCriticalTask } from "../safetyClassifier.js";
+import { classifyRepairTask } from "../safetyClassifier.js";
 
 // Deterministic tools the repair-planning agent can call.
 //
@@ -11,15 +11,34 @@ import { detectSafetyFlags, isSafetyCriticalTask } from "../safetyClassifier.js"
 // deterministic means the structured artifacts the UI renders do not depend on
 // model randomness, and the whole pipeline can be tested without a live model.
 
-const SYSTEM_KEYWORDS = [
-  { system: "Engine", terms: ["engine", "idle", "misfire", "spark", "coil", "timing", "oil", "valve", "intake", "throttle"] },
-  { system: "Cooling", terms: ["coolant", "radiator", "thermostat", "overheat", "water pump", "temperature"] },
-  { system: "Brakes", terms: ["brake", "rotor", "caliper", "pad", "abs", "master cylinder"] },
-  { system: "Electrical", terms: ["battery", "alternator", "fuse", "wiring", "starter", "sensor", "light", "charging"] },
-  { system: "Suspension", terms: ["strut", "shock", "control arm", "bushing", "ball joint", "alignment", "steering"] },
-  { system: "Transmission", terms: ["transmission", "clutch", "gear", "shift", "solenoid", "atf"] },
-  { system: "HVAC", terms: ["heater", "ac", "air conditioning", "blower", "cabin filter", "vent"] },
-  { system: "Fuel", terms: ["fuel", "injector", "pump", "filter", "tank"] },
+// Fallback system detection, used ONLY when no safety rule claims the task.
+//
+// Bounded patterns, not substring `includes`. The old list matched substrings,
+// which mis-filed real work: "abs" hit "shock ABSorber" (Brakes), and a bare
+// "steering" made "steering wheel audio switch" Suspension repair. Anything
+// hazardous is classified by safetyClassifier instead, so this table only has to
+// name non-hazard systems.
+const SYSTEM_PATTERNS = [
+  {
+    system: "Engine",
+    pattern:
+      /\bengines?\b|\bidles?\b|\bidling\b|\bmisfires?\b|\bspark plugs?\b|\bignition coils?\b|\btiming (chain|belt|cover)\b|\bengine oil\b|\boil (pan|filter|change|pressure)\b|\bvalves?\b|\bintake\b|\bthrottle\b|\bcamshafts?\b|\bhead gasket\b/,
+  },
+  {
+    system: "Transmission",
+    pattern:
+      /\btransmissions?\b|\btransaxles?\b|\bclutch\b|\bgears?\b|\bshift(ing|er)?\b|\bsolenoids?\b|\batf\b/,
+  },
+  {
+    system: "HVAC",
+    pattern:
+      /\bheaters?\b|\ba\/?c\b|\bair conditioning\b|\bblowers?\b|\bcabin (air )?filters?\b|\bvents?\b|\bdefrost(er)?\b|\brefrigerant\b/,
+  },
+  {
+    system: "Electrical",
+    pattern:
+      /\bfuses?\b|\bsensors?\b|\bheadlights?\b|\btail ?lights?\b|\bcharging system\b|\brelays?\b|\bgrounds?\b/,
+  },
 ];
 
 const ADVANCED_TERMS = ["timing", "transmission", "clutch", "head gasket", "valve", "rebuild", "camshaft"];
@@ -28,16 +47,38 @@ const INTERMEDIATE_TERMS = ["alternator", "starter", "strut", "radiator", "water
 const SKILL_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const DIFFICULTY_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 
-function detectSystem(text) {
-  const lowered = text.toLowerCase();
+function detectFallbackSystem(text) {
+  const lowered = String(text || "").toLowerCase();
 
-  for (const entry of SYSTEM_KEYWORDS) {
-    if (entry.terms.some((term) => lowered.includes(term))) {
+  for (const entry of SYSTEM_PATTERNS) {
+    if (entry.pattern.test(lowered)) {
       return entry.system;
     }
   }
 
   return "General";
+}
+
+/**
+ * The one place a task's system, hazards, warnings, and readiness verdict are
+ * decided. Everything downstream (extraction, readiness, checklist) reads this
+ * result rather than re-deriving its own answer from different inputs.
+ *
+ * `text` is the full task text. An explicit `system` (present on model-supplied
+ * tasks reaching checkRepairReadiness / buildOwnerChecklist) is included in the
+ * hazard match so "system: Brakes" still counts, but the DERIVED system is never
+ * fed back in -- that loop is what let a task be blocked with no matching hazard.
+ */
+function classifyTask(text, explicitSystem = "") {
+  const hazardText = `${text || ""} ${explicitSystem || ""}`;
+  const classification = classifyRepairTask(hazardText, {
+    fallbackSystem: detectFallbackSystem(text),
+  });
+
+  return {
+    ...classification,
+    system: explicitSystem || classification.system || "General",
+  };
 }
 
 function detectDifficulty(text) {
@@ -98,7 +139,8 @@ export function extractRepairTasks({ brief } = {}) {
   const source = fragments.length ? fragments : [normalizedBrief];
 
   const tasks = source.map((fragment, index) => {
-    const system = detectSystem(fragment);
+    const classification = classifyTask(fragment);
+    const { system } = classification;
     const difficulty = detectDifficulty(fragment);
 
     return {
@@ -106,7 +148,11 @@ export function extractRepairTasks({ brief } = {}) {
       title: fragment.length > 120 ? `${fragment.slice(0, 117)}...` : fragment,
       system,
       difficulty,
-      safetyFlags: detectSafetyFlags(fragment),
+      safetyFlags: classification.flags,
+      // Carried on the task so readiness and the checklist reuse THIS decision
+      // instead of re-classifying the (possibly truncated) title and reaching a
+      // different answer.
+      safetyCritical: classification.safetyCritical,
       keywords: buildKeywords(fragment, system),
     };
   });
@@ -163,6 +209,48 @@ export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = r
 
 // --- Tool: check_repair_readiness -----------------------------------------
 
+/**
+ * Safety assessment for a task arriving at readiness / checklist generation.
+ *
+ * Tasks produced by extractRepairTasks already carry a decision; reuse it so the
+ * three stages cannot disagree. Model-supplied tasks (the agent may pass its own
+ * task objects) have not been classified yet, so classify them here from the
+ * same rules. Either way exactly one rule set decides.
+ */
+function resolveTaskSafety(task) {
+  const classification = classifyTask(task?.title || "", task?.system || "");
+  const flags =
+    Array.isArray(task?.safetyFlags) && task.safetyFlags.length
+      ? task.safetyFlags
+      : classification.flags;
+
+  // Never report "critical" without a warning to show for it. If a task was
+  // hand-built with flags but no recognizable hazard text, the flags themselves
+  // are the evidence of criticality.
+  const safetyCritical = classification.safetyCritical || flags.length > 0;
+
+  const hazards = classification.hazards.length
+    ? classification.hazards
+    : safetyCritical
+    ? ["declared safety risk"]
+    : [];
+
+  return {
+    ...classification,
+    flags,
+    safetyCritical,
+    hazards,
+    // Recomputed from the RESOLVED hazards so a task can never be critical with
+    // an empty reason (which happens when flags were supplied but the title
+    // carries no recognizable hazard text).
+    blockingReason: hazards.length
+      ? `Safety-critical work detected (${hazards.join(
+          ", "
+        )}). Treat the steps as preparation only and have a professional confirm the repair.`
+      : "",
+  };
+}
+
 export function checkRepairReadiness({
   tasks = [],
   availableTools = "",
@@ -175,10 +263,18 @@ export function checkRepairReadiness({
   const hasTools = normalizeText(availableTools).length > 0;
   const hasParts = normalizeText(availableParts).length > 0;
 
-  const safetyFlaggedTasks = tasks.filter(
-    (task) => Array.isArray(task.safetyFlags) && task.safetyFlags.length > 0
-  );
-  const safetyCriticalTasks = tasks.filter((task) => isSafetyCriticalTask(task));
+  // One classification per task, reused for both the critical verdict and the
+  // warnings. Previously these came from different places: safetyFlags were
+  // computed in extractRepairTasks from the full fragment, while criticality was
+  // re-derived here from the (truncated) title plus the system name -- so a task
+  // could be blocked with no warning, or warned about without blocking.
+  const assessed = tasks.map((task) => ({
+    task,
+    assessment: resolveTaskSafety(task),
+  }));
+
+  const safetyFlaggedTasks = assessed.filter(({ assessment }) => assessment.flags.length > 0);
+  const safetyCriticalTasks = assessed.filter(({ assessment }) => assessment.safetyCritical);
   const hasSafetyCritical = safetyCriticalTasks.length > 0;
   const safetyAcknowledged = ackSafety === true;
   const overSkillTasks = tasks.filter(
@@ -219,8 +315,16 @@ export function checkRepairReadiness({
     );
   }
   if (hasSafetyCritical && !safetyAcknowledged) {
+    // Name the hazards actually detected rather than a fixed example list, so
+    // the blocking reason always matches the warnings shown on the tasks.
+    const hazards = [
+      ...new Set(safetyCriticalTasks.flatMap(({ assessment }) => assessment.hazards)),
+    ];
+
     gaps.push(
-      "Safety-critical work detected (e.g. brakes, fuel, electrical, lifting, or suspension). Treat the steps as preparation only and have a professional confirm the repair."
+      `Safety-critical work detected (${hazards.join(
+        ", "
+      )}). Treat the steps as preparation only and have a professional confirm the repair.`
     );
   }
 
@@ -245,7 +349,9 @@ export function checkRepairReadiness({
     gaps,
     safetyCritical: hasSafetyCritical,
     safetyAcknowledged: hasSafetyCritical ? safetyAcknowledged : true,
-    safetyFlags: [...new Set(safetyFlaggedTasks.flatMap((task) => task.safetyFlags))],
+    safetyFlags: [
+      ...new Set(safetyFlaggedTasks.flatMap(({ assessment }) => assessment.flags)),
+    ],
   };
 }
 
@@ -261,7 +367,9 @@ export function buildOwnerChecklist({
 
   const checklist = tasks.map((task) => {
     const difficultyRank = DIFFICULTY_RANK[task.difficulty] || 1;
-    const safetyCritical = isSafetyCriticalTask(task);
+    // Same assessment the readiness check used -- not a second opinion.
+    const assessment = resolveTaskSafety(task);
+    const { safetyCritical } = assessment;
 
     // Safety-critical work is recommended to a shop unless the owner explicitly
     // accepts the risk; otherwise fall back to the skill-vs-difficulty split.
@@ -275,9 +383,14 @@ export function buildOwnerChecklist({
     return {
       taskId: task.id,
       task: task.title,
-      system: task.system,
+      system: task.system || assessment.system,
       owner,
       safetyCritical,
+      // A checklist row can say "Shop Recommended" only alongside the warnings
+      // that justify it. Carrying them here means the reason travels with the
+      // recommendation instead of living only on the task list above it.
+      safetyFlags: assessment.flags,
+      safetyReason: safetyCritical ? assessment.blockingReason : "",
       priority: difficultyRank,
       // Generic placeholders, not verified repair instructions — labeled so a
       // beginner does not mistake them for a real procedure.

@@ -23,6 +23,11 @@
 /**
  * @typedef {object} SafetyRule
  * @property {string} id
+ * @property {string | null} system  System this hazard implies, or null when the
+ *                                   hazard says nothing about which system the
+ *                                   work belongs to (lifting, springs).
+ * @property {string} hazard       Short hazard-category label, used to say WHY
+ *                                 readiness is blocked.
  * @property {RegExp} pattern      Matched against the lowercased task text.
  * @property {boolean} blocksReadiness  Whether a match blocks a "Ready" rating.
  * @property {string} flag         Warning shown to the owner. When the rule
@@ -41,6 +46,8 @@
 export const SAFETY_RULES = [
   {
     id: "brakes",
+    system: "Brakes",
+    hazard: "brake system",
     // \babs\b, not a bare "abs" substring: the old rule fired on "shock absorber".
     pattern:
       /\bbrakes?\b|\bbraking\b|\babs\b|\bcalipers?\b|\brotors?\b|\bmaster cylinder\b|\bbrake booster\b|\bbrake (line|fluid|pads?|shoes?)\b/,
@@ -50,6 +57,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "fuel",
+    system: "Fuel",
+    hazard: "fuel system",
     pattern: /\bfuel\b|\binjectors?\b|\bgas tank\b|\bfuel (line|rail|pump|filter)\b/,
     blocksReadiness: true,
     flag:
@@ -57,6 +66,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "electrical",
+    system: "Electrical",
+    hazard: "electrical system",
     // "electrical shock" belongs here, NOT with suspension shocks.
     pattern:
       /\bbatter(y|ies)\b|\balternators?\b|\bwiring\b|\bwiring harness\b|\belectrical\b|\bstarter\b|\belectric(al)? shock\b|\bshock hazard\b/,
@@ -66,6 +77,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "lifting",
+    system: null,
+    hazard: "vehicle lifting",
     // Only lifting THE VEHICLE. "valve lift" is a measurement, not a hazard,
     // and a "steering wheel" is not a road wheel that implies the car is up on
     // stands -- hence the lookbehind rather than a bare \bwheels?\b.
@@ -77,6 +90,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "suspension",
+    system: "Suspension",
+    hazard: "suspension",
     // Product policy: ordinary suspension work IS treated as safety-critical,
     // because a mis-torqued or mis-assembled suspension joint fails at speed.
     // Documented rather than silently inherited: this is why "shock absorber
@@ -90,6 +105,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "steering",
+    system: "Suspension",
+    hazard: "steering and wheel-locating joints",
     // \bsteering\b(?! wheel) so "steering wheel audio switch" is ordinary trim
     // work, while "steering rack" / "steering column" remain critical.
     pattern:
@@ -100,6 +117,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "spring",
+    system: null,
+    hazard: "stored spring energy",
     // Stored mechanical energy. Requires a spring CONTEXT -- "spring-loaded
     // clip" is a trim fastener, not a compressed suspension spring.
     pattern: /\b(coil|leaf|valve|strut) springs?\b|\bspring compressor\b|\bsprings\b/,
@@ -109,6 +128,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "srs",
+    system: "Restraints",
+    hazard: "SRS/airbag",
     pattern: /\bair ?bags?\b|\bsrs\b|\bpretensioners?\b|\bclock ?spring\b|\binflators?\b/,
     blocksReadiness: true,
     flag:
@@ -116,6 +137,8 @@ export const SAFETY_RULES = [
   },
   {
     id: "cooling",
+    system: "Cooling",
+    hazard: "pressurized cooling system",
     // Requires a cooling CONTEXT: "radiator support panel" is body work, and a
     // bare "cooling" mention is not by itself a pressurized-system hazard.
     pattern:
@@ -167,4 +190,46 @@ export function isSafetyCriticalTask(task) {
  */
 export function matchedSafetyRuleIds(text) {
   return matchingRules(text).map((rule) => rule.id);
+}
+
+/**
+ * THE single classification entry point for the repair planner.
+ *
+ * Every downstream answer -- detected system, safety-critical status, warning
+ * flags, and the readiness-blocking reason -- comes from this one evaluation, so
+ * the planner cannot mark a task Shop Recommended while showing no warning, or
+ * warn about a hazard the readiness check ignored.
+ *
+ * When a hazard rule matches, its `system` is authoritative: "diagnose engine
+ * overheating" is Cooling work even though the word "engine" appears. Rules with
+ * a null system (lifting, springs) contribute a hazard but do not name a system,
+ * so a generic fallback still applies.
+ *
+ * @param {string} text
+ * @param {{ fallbackSystem?: string }} [options]
+ * @returns {{
+ *   system: string | null,
+ *   safetyCritical: boolean,
+ *   flags: string[],
+ *   ruleIds: string[],
+ *   hazards: string[],
+ *   blockingReason: string,
+ * }}
+ */
+export function classifyRepairTask(text, { fallbackSystem = null } = {}) {
+  const rules = matchingRules(text);
+  const blocking = rules.filter((rule) => rule.blocksReadiness);
+  const systemRule = rules.find((rule) => rule.system);
+  const hazards = blocking.map((rule) => rule.hazard);
+
+  return {
+    system: systemRule ? systemRule.system : fallbackSystem,
+    safetyCritical: blocking.length > 0,
+    flags: rules.map((rule) => rule.flag),
+    ruleIds: rules.map((rule) => rule.id),
+    hazards,
+    blockingReason: hazards.length
+      ? `Safety-critical work detected (${hazards.join(", ")}). Treat the steps as preparation only and have a professional confirm the repair.`
+      : "",
+  };
 }

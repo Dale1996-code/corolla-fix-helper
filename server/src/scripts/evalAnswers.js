@@ -17,10 +17,52 @@ if (!config.openAiApiKey) {
 }
 
 // Importing database.js initializes the (real) database from config.
-await import("../database.js");
+const { db } = await import("../database.js");
 const { askQuestionUsingDocuments } = await import("../services/aiAnswerService.js");
 const { answerQualityCases } = await import("../evals/answerQualityCases.js");
 const { evaluateAnswerCase, summarize } = await import("../evals/answerQualityScoring.js");
+const { NEGATIVE_CASE_PRECONDITIONS } = await import(
+  "../evals/negativeCorpusPreconditions.js"
+);
+
+// A verified must-refuse case is only valid while the corpus still lacks the
+// fact. The corpus is mutable, so check before trusting the expectation: if real
+// evidence has appeared, the case needs a human, not a silent green tick.
+const staleNegativeCases = new Set();
+
+for (const [caseId, check] of Object.entries(NEGATIVE_CASE_PRECONDITIONS)) {
+  const testCase = answerQualityCases.find((entry) => entry.id === caseId);
+
+  if (!testCase || !testCase.verified) {
+    continue;
+  }
+
+  const { stale, matches } = check(db);
+
+  if (!stale) {
+    continue;
+  }
+
+  staleNegativeCases.add(caseId);
+  console.log("");
+  console.log(`!! NEEDS HUMAN RE-VERIFICATION: ${caseId}`);
+  console.log(
+    "   This case expects a refusal because the corpus had no such specification."
+  );
+  console.log("   Evidence suggesting the corpus now DOES contain one:");
+
+  for (const match of matches.slice(0, 5)) {
+    console.log(`   - [${match.ruleId}] ${match.documentTitle}, page ${match.pageNumber}`);
+    console.log(`     ...${match.excerpt}...`);
+  }
+
+  if (matches.length > 5) {
+    console.log(`   - ...and ${matches.length - 5} more`);
+  }
+
+  console.log("   See docs/evals/ask-rag-iteration-log.md for the re-verification steps.");
+  console.log("");
+}
 
 const results = [];
 
@@ -100,6 +142,16 @@ for (const [category, bucket] of Object.entries(summary.byCategory)) {
 
 if (!summary.allVerifiedPass) {
   console.log("\nFAIL: one or more verified cases did not pass.");
+  process.exitCode = 1;
+} else if (staleNegativeCases.size) {
+  // The cases passed, but at least one passed on a premise the corpus no longer
+  // supports. Failing here is the point: a stale refusal expectation that stays
+  // green is worse than a red one, because nobody looks at it again.
+  console.log(
+    `\nFAIL: verified cases passed, but ${[...staleNegativeCases].join(
+      ", "
+    )} needs human re-verification (see above).`
+  );
   process.exitCode = 1;
 } else {
   console.log("\nOK: all verified cases passed.");

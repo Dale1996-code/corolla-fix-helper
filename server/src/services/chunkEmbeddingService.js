@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { createRedactedOpenAiHttpError } from "./openAiResponsePayload.js";
 import { db } from "../database.js";
 
 let chunkEmbeddingCache = null;
@@ -156,8 +157,11 @@ export async function createOpenAiEmbeddings(texts, { fetchImpl = fetch } = {}) 
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI embeddings request failed (${response.status}): ${errorText}`);
+    // Redacted. This runs on the Ask request path (chunkRetrievalService embeds
+    // the question) and the throw propagates uncaught to ask.js, so a raw body
+    // here would reach the browser. The embedding input is the question text and
+    // chunk text, which is exactly what must not be echoed back.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
   const payload = await response.json();
