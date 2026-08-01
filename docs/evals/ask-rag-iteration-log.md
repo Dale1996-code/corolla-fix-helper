@@ -480,3 +480,94 @@ applies to documents uploaded or re-extracted from now on. Re-extracting the
 existing corpus (`POST /api/documents/:id/extract`, then
 `npm run embed:backfill`) is a deliberate owner-run operation, not something this
 change performs.
+
+---
+
+## Milestone 5 — evals, applicability, spend durability
+
+### Pinned model snapshot
+
+The answer model defaulted to the floating `gpt-4.1` alias. An alias changes
+behavior underneath the eval suite, so a green run proves nothing about the next
+one and a real regression cannot be told apart from a model update. The default
+is now the `gpt-4.1-2025-04-14` snapshot; `OPENAI_ANSWER_MODEL` still overrides
+it, so moving forward is a deliberate act. Verified against the live API before
+committing (both the alias and the snapshot return 200 for this account).
+
+### Hazard tiers: resolving the audit's internal contradiction
+
+F9 said warnings must be purely additive and never alter the answer. Section 8.G
+said dangerous requests must be "refusal-or-redirect... never a procedure". Both
+cannot hold. The rule adopted, applied to the REQUEST rather than the topic:
+
+| Tier | Example | Behavior |
+| --- | --- | --- |
+| T1 routine | cabin filter | answer normally |
+| T2 hazardous but documented | brake pads | answer, plus the document's own safety text |
+| T3 specialist | airbag control module | answer as preparation only, with a shop referral |
+| T4 defeat / unsafe | permanently disable the airbag | refuse the procedure |
+
+Only T4 refuses. Brake and airbag work are exactly what this app exists to help
+with, so "dangerous topic" alone must never trigger a refusal -- an owner who is
+going to do the job anyway is safer with the manual's warnings than without them.
+T4 also refuses on grounding, not just policy: the manual does not document how
+to defeat a restraint system, so there is nothing to cite.
+
+Four new template cases cover the tiers. Both T4 cases (disable airbag, bypass
+brake fluid warning) PASS on the live corpus.
+
+### Applicability (F19), rated higher than "Low"
+
+One uploaded FSM legitimately carries different values for the same fastener
+across 2ZR-FE/2AZ-FE, ABS/non-ABS, and US/Canada trim. Single-vehicle scope does
+not solve this -- the ambiguity is inside one manual. Two template cases now
+check that an answer names the applicability condition it is scoped to rather
+than silently picking one variant. Both PASS on the live corpus.
+
+### Daily spend ceiling made durable (migration 004)
+
+The counter lived in module memory, so every restart reset it -- meaning a
+crash-restart loop, the exact failure the cap exists to stop, could spend
+straight past it. It is now one row per local day in `ai_usage_daily`. SQLite,
+not a JSON or lock file, because the database is already the app's only durable
+store and a second persistence mechanism would need its own backup story.
+
+The increment is a single atomic upsert: a read-then-write would let two
+concurrent Ask requests observe the same count and slip past the ceiling
+together. The table is also created lazily on first use, not only by the
+migration, because aiUsageBudget is reachable from eval scripts and focused tests
+that never call `initializeDatabase()` -- relying on the migration alone made the
+ceiling silently fail open in exactly those paths, which defeats the guard rather
+than degrading it. Six tests pin the behavior, including that a restart cannot
+reset the count.
+
+### Eval pacing: infrastructure failures no longer read as regressions
+
+Adding six cases pushed the suite past the account's 30000 TPM tier, and the
+first paced-less run reported **5/6 verified** with two cases failing on
+"The AI service rejected the request" -- which looks exactly like a product
+regression caused by the model pin. It was not: a direct probe confirmed both the
+alias and the pinned snapshot return 200.
+
+`evalAnswers.js` now spaces cases (`EVAL_CASE_DELAY_MS`, default 2000ms), retries
+a 429 with backoff, counts rate-limited cases separately, and prints an explicit
+warning that those are infrastructure failures rather than product regressions.
+It also surfaces the bounded internal `failure.diagnostic` -- the client-facing
+message stays generic because provider bodies must never reach a browser, but a
+local developer tool that cannot see why it failed is not usable.
+
+Re-run with pacing: **6/6 verified**, and `procedure` went 1/9 -> 4/9 with
+`capacity` 6/9 -> 7/9.
+
+**This also explains the deferred "unattributed procedure-category movement" from
+Milestone 1.** That movement was almost certainly rate limiting too, not a
+product change. Closing that follow-up.
+
+### Deferred: JSONL telemetry
+
+Not implemented, as planned. Per-request JSONL logging needs a rotation and
+retention policy first -- these logs would describe which repair documents the
+owner consults, and an unbounded append-only file of that on a personal machine
+is a privacy liability, not an observability win. The log-safe `metrics` object
+(counts, durations, numeric refs, and now the relevance-floor shadow report)
+already covers the diagnostic need without persisting anything.

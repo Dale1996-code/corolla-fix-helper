@@ -66,13 +66,70 @@ for (const [caseId, check] of Object.entries(NEGATIVE_CASE_PRECONDITIONS)) {
 
 const results = [];
 
+// Pacing. Running every case back-to-back exceeds the account's tokens-per-minute
+// tier (observed: 30000 TPM), and a 429 then looks exactly like a product
+// regression in the results table. Space the cases out, and retry a rate-limited
+// case rather than recording a false failure.
+const CASE_DELAY_MS = Number(process.env.EVAL_CASE_DELAY_MS || 2000);
+const MAX_RATE_LIMIT_RETRIES = 4;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Rate limiting is infrastructure, not a product signal. Tell them apart. */
+function isRateLimited(error) {
+  return Number(error?.failure?.httpStatus) === 429;
+}
+
+/**
+ * The client-facing message is deliberately generic, because provider bodies
+ * must never reach a browser. This is a local developer tool, so surface the
+ * bounded internal diagnostic here -- otherwise a failing eval is undebuggable.
+ */
+function describeError(error) {
+  const parts = [error.message];
+
+  if (error?.failure?.httpStatus) {
+    parts.push(`[http ${error.failure.httpStatus}]`);
+  }
+
+  if (error?.failure?.diagnostic) {
+    parts.push(`diagnostic: ${error.failure.diagnostic}`);
+  }
+
+  return parts.join(" ");
+}
+
+async function askWithRetry(question, options) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await askQuestionUsingDocuments(question, options);
+    } catch (error) {
+      if (!isRateLimited(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
+        throw error;
+      }
+
+      const backoffMs = 5000 * (attempt + 1);
+      console.log(`    - rate limited, retrying in ${backoffMs / 1000}s`);
+      await sleep(backoffMs);
+    }
+  }
+}
+
+let rateLimitedCases = 0;
+let caseIndex = 0;
+
 for (const testCase of answerQualityCases) {
+  if (caseIndex > 0 && CASE_DELAY_MS > 0) {
+    await sleep(CASE_DELAY_MS);
+  }
+  caseIndex += 1;
+
   try {
     // Vision cases attach an image so the run exercises the same not-found gate
     // with a photo present; text cases pass image: null and are unchanged.
     // includeMetrics surfaces log-safe timing/size numbers (no document text)
     // so a run doubles as a retrieval/answer performance check.
-    const primary = await askQuestionUsingDocuments(testCase.question, {
+    const primary = await askWithRetry(testCase.question, {
       image: testCase.image || null,
       includeMetrics: true,
     });
@@ -83,17 +140,21 @@ for (const testCase of answerQualityCases) {
         { role: "user", content: testCase.question },
         { role: "assistant", content: primary.answer },
       ];
-      followUp = await askQuestionUsingDocuments(testCase.followUp.question, { history });
+      followUp = await askWithRetry(testCase.followUp.question, { history });
     }
 
     results.push({ ...evaluateAnswerCase(testCase, primary, followUp), metrics: primary.metrics });
   } catch (error) {
+    if (isRateLimited(error)) {
+      rateLimitedCases += 1;
+    }
+
     results.push({
       id: testCase.id,
       category: testCase.category,
       verified: Boolean(testCase.verified),
       pass: false,
-      checks: [{ name: "ran without error", pass: false, detail: error.message }],
+      checks: [{ name: "ran without error", pass: false, detail: describeError(error) }],
       metrics: null,
     });
   }
@@ -138,6 +199,16 @@ for (const [category, bucket] of Object.entries(summary.byCategory)) {
     `  ${category}: ${bucket.passed}/${bucket.total} passed ` +
       `(${bucket.verifiedPassed}/${bucket.verified} verified)`
   );
+}
+
+if (rateLimitedCases) {
+  // Never let an infrastructure failure read as a green run OR as a product
+  // regression. Say exactly what happened.
+  console.log(
+    `\nWARNING: ${rateLimitedCases} case(s) still hit the provider rate limit after retries.`
+  );
+  console.log("Those are infrastructure failures, not product regressions.");
+  console.log("Raise EVAL_CASE_DELAY_MS and re-run before drawing conclusions.");
 }
 
 if (!summary.allVerifiedPass) {
