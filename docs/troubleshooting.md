@@ -111,7 +111,7 @@ If you see an AI-not-configured message:
 
 1. Stop the backend.
 2. Add `OPENAI_API_KEY=placeholder-openai-key` to `server/.env`, replacing the placeholder with your real key only in that local file.
-3. Keep `OPENAI_ANSWER_MODEL=gpt-4.1` unless you intentionally want another available 4o/4.1-class answer model.
+3. Keep `OPENAI_ANSWER_MODEL=gpt-5.5-2026-04-23` unless you intentionally want another model available to your OpenAI API account.
 4. Keep `OPENAI_EMBEDDING_MODEL=text-embedding-3-small` and `OPENAI_EMBEDDING_DIMENSIONS=512` unless you intentionally rebuild all embeddings with another pair.
 5. Start the backend again.
 
