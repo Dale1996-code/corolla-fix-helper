@@ -36,6 +36,8 @@
     "server/test/networkAddresses.test.js",
     "server/test/noteService.test.js",
     "server/test/openAiResponsePayload.test.js",
+    "server/test/openAiModelCapabilities.test.js",
+    "server/test/reasoningModelRequests.test.js",
     "server/test/procedureService.test.js",
     "server/test/procedureSuggestionService.test.js",
     "server/test/rowMapperCores.test.js",

@@ -22,6 +22,7 @@ import {
   createRedactedOpenAiHttpError,
   parseCompleteOpenAiOutputText,
 } from "./openAiResponsePayload.js";
+import { buildModelTuning } from "./openAiModelCapabilities.js";
 
 const DEFAULT_CHUNK_LIMIT = 8;
 const DEFAULT_SUGGESTION_LIMIT = 5;
@@ -313,8 +314,7 @@ export async function generateProcedureSuggestionsFromOpenAi({
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
-    // Deterministic: the same symptom should suggest the same procedures.
-    temperature: 0,
+    ...buildModelTuning(config.openAiAnswerModel),
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 

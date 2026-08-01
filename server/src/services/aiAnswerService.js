@@ -10,6 +10,7 @@ import {
   readOpenAiResponse,
 } from "./openAiResponsePayload.js";
 import { applyRelevanceFloor } from "./relevanceFloor.js";
+import { buildModelTuning } from "./openAiModelCapabilities.js";
 import {
   buildEvidenceContext,
   buildEvidencePromptLines,
@@ -242,9 +243,9 @@ export async function rewriteQuestionFromOpenAi({ question, history }) {
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
-    // Deterministic: the same question must rewrite to the same search query,
-    // otherwise retrieval (and every eval built on it) drifts run to run.
-    temperature: 0,
+    // Model-aware sampling: temperature: 0 on a classic model, reasoning.effort
+    // on a reasoning model (which rejects temperature outright).
+    ...buildModelTuning(config.openAiAnswerModel),
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 
@@ -340,9 +341,7 @@ export async function generateAnswerTextFromOpenAi({
     {
       model,
       input,
-      // Deterministic answers: a torque spec must not vary between identical
-      // questions, and the answer-quality eval can only diff runs if it is fixed.
-      temperature: 0,
+      ...buildModelTuning(model),
       max_output_tokens: config.openAiMaxOutputTokens,
     },
     { fetchImpl }
@@ -408,7 +407,7 @@ export async function generateEvidenceAnswerFromOpenAi({
     {
       model,
       input,
-      temperature: 0,
+      ...buildModelTuning(model),
       text: { format: EVIDENCE_RESPONSE_SCHEMA },
       max_output_tokens: config.openAiMaxOutputTokens,
     },

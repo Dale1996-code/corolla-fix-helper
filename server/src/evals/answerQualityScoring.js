@@ -46,9 +46,27 @@ export function isRefusal(result) {
 function checkAnswered(result, spec, label) {
   const checks = [];
 
+  // "partial" counts as answered.
+  //
+  // The evidence contract (Milestone 2) added a third status that did not exist
+  // when this check was written: `partial` means at least one claim VERIFIED
+  // against its cited chunk, alongside one or more gaps. That is a successful,
+  // grounded answer that also reports what it could not support -- refusing it
+  // here would penalize the contract for being honest.
+  //
+  // Observed live: for the drain-plug case the model emitted three correct
+  // torque claims plus a meta-claim about which document states them, whose
+  // quote was not literally on the page. The verifier rejected the meta-claim
+  // into a gap, which is exactly right, and the status became `partial`.
+  //
+  // This does NOT weaken the gate. `not_found` still fails an answered
+  // expectation, and the value, citation, and conjunctive
+  // document-plus-value checks below all still have to pass on their own.
+  const answeredStatuses = ["answered", "partial"];
+
   checks.push({
-    name: `${label}: status is "answered"`,
-    pass: result?.status === "answered",
+    name: `${label}: status is answered or partial`,
+    pass: answeredStatuses.includes(result?.status),
     detail: `status=${result?.status}`,
   });
 

@@ -19,6 +19,7 @@ import {
   createRedactedOpenAiHttpError,
   parseCompleteOpenAiOutputText,
 } from "./openAiResponsePayload.js";
+import { buildModelTuning } from "./openAiModelCapabilities.js";
 
 // Keep the per-chunk snippet short so the whole prompt stays bounded even with a
 // wide candidate pool.
@@ -182,9 +183,7 @@ export async function generateChunkRankingFromOpenAi({
     {
       model,
       input: prompt,
-      // Deterministic ranking, so an A/B rerank eval measures the reranker
-      // rather than sampling noise.
-      temperature: 0,
+      ...buildModelTuning(model),
       max_output_tokens: config.openAiMaxOutputTokens,
     },
     { fetchImpl }

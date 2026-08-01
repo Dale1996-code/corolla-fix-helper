@@ -360,3 +360,66 @@ test("preflight: the turbo refusal case is not satisfied by known distractor cla
   });
   assert.equal(refused.pass, true);
 });
+
+// ---- The evidence contract's `partial` status ----
+
+test("partial counts as answered: a grounded answer that also reports gaps", () => {
+  // Milestone 2 introduced `partial` (>=1 verified claim plus >=1 gap) after
+  // this scorer was written. Rejecting it would penalize the contract for being
+  // honest about what it could not support.
+  const spec = {
+    id: "partial-probe",
+    category: "torque",
+    expect: "answered",
+    mustIncludeAny: [/\b37\s*N/i],
+  };
+
+  const partial = evaluateAnswerCase(spec, {
+    status: "partial",
+    answer: "The oil drain plug torque is 37 Nm.",
+    citations: [{ documentTitle: "Oil Manual", pageNumber: 1, snippet: "Torque : 37 Nm" }],
+  });
+
+  assert.equal(partial.pass, true);
+});
+
+test("not_found still fails a case that expects an answer", () => {
+  // The gate is not weakened: only `partial` was added, not `not_found`.
+  const spec = {
+    id: "notfound-probe",
+    category: "torque",
+    expect: "answered",
+    mustIncludeAny: [/\b37\s*N/i],
+  };
+
+  const notFound = evaluateAnswerCase(spec, {
+    status: "not_found",
+    answer: "not in documents",
+    citations: [],
+  });
+
+  assert.equal(notFound.pass, false);
+});
+
+test("partial does not excuse a missing value or citation", () => {
+  const spec = {
+    id: "partial-strict-probe",
+    category: "torque",
+    expect: "answered",
+    mustIncludeAny: [/\b37\s*N/i],
+  };
+
+  const wrongValue = evaluateAnswerCase(spec, {
+    status: "partial",
+    answer: "The oil drain plug torque is 54 Nm.",
+    citations: [{ documentTitle: "Oil Manual", pageNumber: 1, snippet: "..." }],
+  });
+  assert.equal(wrongValue.pass, false);
+
+  const noCitation = evaluateAnswerCase(spec, {
+    status: "partial",
+    answer: "The oil drain plug torque is 37 Nm.",
+    citations: [],
+  });
+  assert.equal(noCitation.pass, false);
+});

@@ -8,6 +8,13 @@ import test, { after } from "node:test";
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-evidence-"));
 process.env.DATABASE_FILE = path.join(tempRoot, "evidence.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+// Pin the AI feature flags too. config.js calls dotenv.config() at import,
+// so without this a developer's local server/.env leaks into the suite --
+// setting ASK_EVIDENCE_CONTRACT=true there made these tests take the
+// evidence path and attempt REAL API calls. Cases that want the contract
+// enable it explicitly via the evidenceContract option.
+process.env.ASK_EVIDENCE_CONTRACT = "false";
+
 
 const { db } = await import("../src/database.js");
 const { askQuestionUsingDocuments, NOT_FOUND_MESSAGE } = await import(
