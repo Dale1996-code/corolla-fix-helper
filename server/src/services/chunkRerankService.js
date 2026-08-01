@@ -15,6 +15,11 @@
 
 import { config } from "../config.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
+import {
+  createRedactedOpenAiHttpError,
+  parseCompleteOpenAiOutputText,
+} from "./openAiResponsePayload.js";
+import { buildModelTuning } from "./openAiModelCapabilities.js";
 
 // Keep the per-chunk snippet short so the whole prompt stays bounded even with a
 // wide candidate pool.
@@ -136,25 +141,6 @@ export function applyRanking(candidates, order) {
   return reordered;
 }
 
-function parseOpenAiOutputText(payload) {
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
-}
-
 /**
  * Ask OpenAI to rank the candidate chunks by usefulness for the question.
  * Returns the raw model text; the caller parses and validates it defensively.
@@ -197,17 +183,22 @@ export async function generateChunkRankingFromOpenAi({
     {
       model,
       input: prompt,
+      ...buildModelTuning(model),
       max_output_tokens: config.openAiMaxOutputTokens,
     },
     { fetchImpl }
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI chunk rerank failed (${response.status}): ${errorText}`);
+    // Redacted for consistency. rerankChunks catches this and falls back, so it
+    // does not currently reach a client -- but the prompt contains document
+    // snippets, so it must not become a leak if that changes.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
-  return parseOpenAiOutputText(await response.json());
+  // A truncated ranking array would parse into a partial order. Throwing here is
+  // safe: rerankChunks catches and falls back to the untouched fusion order.
+  return parseCompleteOpenAiOutputText(await response.json());
 }
 
 /**

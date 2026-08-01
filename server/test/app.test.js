@@ -15,6 +15,13 @@ const testAssetDir = path.join(testClientDistDir, "assets");
 
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+// Pin the AI feature flags too. config.js calls dotenv.config() at import,
+// so without this a developer's local server/.env leaks into the suite --
+// setting ASK_EVIDENCE_CONTRACT=true there made these tests take the
+// evidence path and attempt REAL API calls. Cases that want the contract
+// enable it explicitly via the evidenceContract option.
+process.env.ASK_EVIDENCE_CONTRACT = "false";
+
 process.env.PORT = "4100";
 process.env.CLIENT_PORT = "5174";
 process.env.OPENAI_API_KEY = "";

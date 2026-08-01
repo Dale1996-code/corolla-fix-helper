@@ -127,6 +127,31 @@ export function createAskRouter({
         citations: result.citations,
       };
 
+      // Additive: on a not-found reply the service recovers the passages
+      // retrieval actually found, which `citations: []` would otherwise discard.
+      // Kept behind an explicit allowlist check (not a spread of `result`) so
+      // the response shape stays deliberate, and attached only when there is
+      // something to show. Answered replies already cite their sources and are
+      // left byte-identical.
+      if (
+        result.status === "not_found" &&
+        Array.isArray(result.retrievedContext) &&
+        result.retrievedContext.length > 0
+      ) {
+        payload.retrievedContext = result.retrievedContext;
+      }
+
+      // Evidence contract (ASK_EVIDENCE_CONTRACT). Additive and allowlisted like
+      // retrievedContext: absent entirely with the flag off, so the default
+      // response shape is unchanged.
+      if (result.evidence && typeof result.evidence === "object") {
+        payload.evidence = {
+          documentSupported: result.evidence.documentSupported || [],
+          generalGuidance: result.evidence.generalGuidance || [],
+          gaps: result.evidence.gaps || [],
+        };
+      }
+
       // Dev-only: surface the log-safe timing/size metrics over HTTP when the
       // flag is on. Off by default, so the response shape is unchanged.
       if (includeMetrics && result.metrics) {

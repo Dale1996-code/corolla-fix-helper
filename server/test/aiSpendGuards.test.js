@@ -41,7 +41,10 @@ function okJsonFetch(captured) {
     return {
       ok: true,
       async json() {
-        return { output_text: "ok" };
+        // A real Responses API payload always carries a status, and the parser
+        // fails closed without one. Keep the double realistic rather than
+        // relaxing the parser to accept it.
+        return { status: "completed", output_text: "ok" };
       },
       async text() {
         return "";

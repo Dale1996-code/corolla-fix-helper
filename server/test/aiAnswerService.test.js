@@ -14,6 +14,13 @@ const tempRoot = fs.mkdtempSync(
 );
 process.env.DATABASE_FILE = path.join(tempRoot, "ai-answer.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+// Pin the AI feature flags too. config.js calls dotenv.config() at import,
+// so without this a developer's local server/.env leaks into the suite --
+// setting ASK_EVIDENCE_CONTRACT=true there made these tests take the
+// evidence path and attempt REAL API calls. Cases that want the contract
+// enable it explicitly via the evidenceContract option.
+process.env.ASK_EVIDENCE_CONTRACT = "false";
+
 
 // Distinct answer/vision models let the model-selection assertions tell the two
 // requests apart (when OPENAI_VISION_MODEL is unset they would be identical).
@@ -27,6 +34,7 @@ const {
   buildAskMetrics,
   generateAnswerTextFromOpenAi,
   NOT_FOUND_MESSAGE,
+  rewriteQuestionFromOpenAi,
 } = await import("../src/services/aiAnswerService.js");
 
 const realFetch = globalThis.fetch;
@@ -49,9 +57,12 @@ function stubFetch(outputText = "The oil drain plug torque is 27 ft-lb.") {
   globalThis.fetch = /** @type {any} */ (
     async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
+      // status: "completed" is required by the fail-closed parser -- a real
+      // Responses API payload always carries it, and a double that omits it is
+      // simply unrealistic. The parser is not relaxed to accommodate mocks.
       return {
         ok: true,
-        json: async () => ({ output_text: outputText }),
+        json: async () => ({ status: "completed", output_text: outputText }),
       };
     }
   );
@@ -272,4 +283,253 @@ test("an attached image cannot turn an unsupported answer into a claim", async (
   assert.equal(result.status, "not_found");
   assert.equal(result.answer, NOT_FOUND_MESSAGE);
   assert.deepEqual(result.citations, []);
+});
+
+// ---- Determinism: every model call pins temperature: 0 ----
+
+test("the answer request pins temperature: 0", async () => {
+  const calls = stubFetch();
+
+  await generateAnswerTextFromOpenAi({
+    question: "What is the oil drain plug torque?",
+    chunks: [sampleChunk],
+  });
+
+  assert.equal(calls[0].body.temperature, 0);
+});
+
+test("the vision answer request also pins temperature: 0", async () => {
+  const calls = stubFetch();
+
+  await generateAnswerTextFromOpenAi({
+    question: "What is this part?",
+    chunks: [sampleChunk],
+    image: dataUri,
+  });
+
+  assert.equal(calls[0].body.model, "vision-model-test");
+  assert.equal(calls[0].body.temperature, 0);
+});
+
+test("the question-rewrite request pins temperature: 0", async () => {
+  const calls = stubFetch("What is the rear brake caliper torque?");
+
+  await rewriteQuestionFromOpenAi({
+    question: "what about the rear?",
+    history: [{ role: "user", content: "front brake caliper torque" }],
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.temperature, 0);
+});
+
+// ---- Truncation: a half-finished reply must never be presented as complete ----
+
+function stubTruncatedFetch(reason = "max_output_tokens") {
+  globalThis.fetch = /** @type {any} */ (
+    async () => ({
+      ok: true,
+      json: async () => ({
+        status: "incomplete",
+        incomplete_details: { reason },
+        output_text: "Loosen the caliper bolts and torque them to",
+        usage: { input_tokens: 1200, output_tokens: 512, total_tokens: 1712 },
+      }),
+    })
+  );
+}
+
+test("a truncated answer throws instead of returning half a procedure", async () => {
+  stubTruncatedFetch();
+
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "How do I replace the front brake pads?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.match(error.message, /cut off/i);
+      assert.equal(error.failure.kind, "truncated");
+      assert.equal(error.failure.reason, "max_output_tokens");
+      // usage is read off the payload, not guessed
+      assert.equal(error.failure.usage.outputTokens, 512);
+      // the partial text must not leak into the message
+      assert.doesNotMatch(error.message, /Loosen the caliper/);
+      return true;
+    }
+  );
+});
+
+test("a content-filtered answer throws with its own reason", async () => {
+  stubTruncatedFetch("content_filter");
+
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "How do I replace the front brake pads?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.equal(error.failure.kind, "content_filter");
+      return true;
+    }
+  );
+});
+
+test("a truncated rewrite falls back to the user's own question instead of throwing", async () => {
+  stubTruncatedFetch();
+
+  const rewritten = await rewriteQuestionFromOpenAi({
+    question: "what about the rear?",
+    history: [{ role: "user", content: "front brake caliper torque" }],
+  });
+
+  // Fail SOFT here: this call is not wrapped by a caller, and a mangled search
+  // query is worse than simply retrieving on what the user actually typed.
+  assert.equal(rewritten, "what about the rear?");
+});
+
+test("a payload with no status field fails closed rather than being assumed complete", async () => {
+  // Fail-closed contract: we only render text the provider confirmed finished.
+  // An absent status cannot confirm that, so it is not shown.
+  globalThis.fetch = /** @type {any} */ (
+    async () => ({ ok: true, json: async () => ({ output_text: "27 ft-lb" }) })
+  );
+
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "What is the oil drain plug torque?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.equal(error.failure.kind, "unknown_status");
+      assert.equal(error.failure.reason, "absent");
+      return true;
+    }
+  );
+});
+
+test("a completed response with no usable text fails closed instead of answering blank", async () => {
+  // Previously an empty payload produced "" which isNotFoundAnswer() would have
+  // turned into an ordinary not_found -- an infrastructure failure disguised as
+  // an honest "not in documents".
+  globalThis.fetch = /** @type {any} */ (
+    async () => ({ ok: true, json: async () => ({ status: "completed", output_text: "   " }) })
+  );
+
+  await assert.rejects(
+    () =>
+      generateAnswerTextFromOpenAi({
+        question: "What is the oil drain plug torque?",
+        chunks: [sampleChunk],
+      }),
+    (thrown) => {
+      const error = /** @type {any} */ (thrown);
+      assert.equal(error.failure.kind, "empty_output");
+      return true;
+    }
+  );
+});
+
+// ---- retrievedContext: recover evidence discarded by the not_found exits ----
+
+test("not_found surfaces the retrieved passages without changing citations", async () => {
+  const result = await askQuestionUsingDocuments("water pump torque", {
+    isAiConfigured: true,
+    retrieveChunks: async () => [strongChunk()],
+    generateAnswerText: async () => NOT_FOUND_MESSAGE,
+  });
+
+  // Unchanged contract: citations stays exactly as it was.
+  assert.equal(result.status, "not_found");
+  assert.deepEqual(result.citations, []);
+
+  // Added contract: the evidence that was already in hand is no longer thrown away.
+  assert.equal(result.retrievedContext.length, 1);
+  assert.equal(result.retrievedContext[0].documentTitle, "Engine Manual");
+  assert.equal(result.retrievedContext[0].pageNumber, 3);
+  assert.match(result.retrievedContext[0].snippet, /Oil drain plug torque/);
+});
+
+test("the relevance gate also surfaces retrieved context (it exits before citations exist)", async () => {
+  const result = await askQuestionUsingDocuments("something unrelated entirely", {
+    isAiConfigured: true,
+    // Weak chunk: no semantic evidence and too few matched terms, so the gate
+    // short-circuits before buildCitationsFromChunks is ever reached.
+    retrieveChunks: async () => [
+      strongChunk({ semanticScore: 0.01, chunkMatchedTerms: 0, totalQueryTerms: 4 }),
+    ],
+    generateAnswerText: async () => {
+      throw new Error("the model must not be called when the relevance gate trips");
+    },
+  });
+
+  assert.equal(result.status, "not_found");
+  assert.deepEqual(result.citations, []);
+  assert.equal(result.retrievedContext.length, 1);
+});
+
+test("an answered response is unchanged and carries no retrievedContext", async () => {
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    retrieveChunks: async () => [strongChunk()],
+    generateAnswerText: async () => "The oil drain plug torque is 27 ft-lb.",
+  });
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.citations.length, 1);
+  assert.ok(
+    !("retrievedContext" in result),
+    "an answered response already cites its sources, so the field is omitted"
+  );
+});
+
+test("not_found with nothing retrieved carries no retrievedContext", async () => {
+  const result = await askQuestionUsingDocuments("nothing matches this", {
+    isAiConfigured: true,
+    retrieveChunks: async () => [],
+    generateAnswerText: async () => NOT_FOUND_MESSAGE,
+  });
+
+  assert.equal(result.status, "not_found");
+  assert.deepEqual(result.citations, []);
+  assert.ok(!("retrievedContext" in result), "no chunks retrieved means nothing to show");
+});
+
+test("the ai-not-configured response is unchanged", async () => {
+  const result = await askQuestionUsingDocuments("anything", { isAiConfigured: false });
+
+  assert.equal(result.status, "ai_not_configured");
+  assert.deepEqual(result.citations, []);
+  assert.ok(!("retrievedContext" in result));
+});
+
+// ---- The dead `history` parameter stays deleted ----
+
+test("the answer call receives no history, but still receives citations", async () => {
+  let seenKeys = [];
+
+  await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    history: [{ role: "user", content: "we were talking about the front brakes" }],
+    retrieveChunks: async () => [strongChunk()],
+    rewriteQuestion: async () => "What is the oil drain plug torque?",
+    generateAnswerText: async (params) => {
+      seenKeys = Object.keys(params);
+      return "The oil drain plug torque is 27 ft-lb.";
+    },
+  });
+
+  // history was a genuinely dead parameter: nothing read it. Conversation
+  // context reaches the model only via the rewrite call.
+  assert.ok(!seenKeys.includes("history"), `history must not be passed, got: ${seenKeys}`);
+
+  // citations is NOT dead -- it is part of this injection seam's contract and
+  // several injected test doubles read it. Deleting it would be a contract change.
+  assert.ok(seenKeys.includes("citations"), `citations must still be passed, got: ${seenKeys}`);
 });

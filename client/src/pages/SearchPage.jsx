@@ -252,6 +252,24 @@ function AskCitationCard({ citation }) {
   );
 }
 
+// One passage card. Shared by the answered-path "Retrieved snippets" list and
+// the not-found "Retrieved context" list, which render identical cards under
+// different headings.
+function AskPassageCard({ passage }) {
+  const documentName =
+    passage.documentTitle || passage.originalFilename || "Untitled document";
+  const pageLabel = passage.pageNumber ? `page ${passage.pageNumber}` : "page unknown";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+      <p className="font-semibold text-slate-900">
+        {documentName}, {pageLabel}
+      </p>
+      <p className="mt-2 leading-6">{passage.snippet}</p>
+    </div>
+  );
+}
+
 function AskRetrievedSnippets({ citations }) {
   const snippets = citations.filter((citation) => citation.snippet);
 
@@ -263,32 +281,142 @@ function AskRetrievedSnippets({ citations }) {
     <section className="space-y-3">
       <h3 className="text-sm font-semibold text-slate-900">Retrieved snippets</h3>
       <div className="space-y-2">
-        {snippets.map((citation) => {
-          const documentName =
-            citation.documentTitle || citation.originalFilename || "Untitled document";
-          const pageLabel = citation.pageNumber
-            ? `page ${citation.pageNumber}`
-            : "page unknown";
-
-          return (
-            <div
-              key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
-            >
-              <p className="font-semibold text-slate-900">
-                {documentName}, {pageLabel}
-              </p>
-              <p className="mt-2 leading-6">{citation.snippet}</p>
-            </div>
-          );
-        })}
+        {snippets.map((citation) => (
+          <AskPassageCard
+            key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+            passage={citation}
+          />
+        ))}
       </div>
     </section>
   );
 }
 
+// Passages retrieval found when the answer cites nothing. Deliberately worded so
+// it can never be mistaken for a sourced answer: these were NOT used to answer,
+// and one of them may still be the page the owner needs.
+function AskRetrievedContext({ passages }) {
+  const snippets = passages.filter((passage) => passage.snippet);
+
+  if (!snippets.length) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-900">
+        Retrieved context (may include passages the answer did not use)
+      </h3>
+      <p className="text-sm text-slate-600">
+        These pages came closest to your question. They were not used to answer it, so check
+        them yourself before relying on anything here.
+      </p>
+      <div className="space-y-2">
+        {snippets.map((passage) => (
+          <AskPassageCard
+            key={`context-${passage.documentId}-${passage.pageNumber}-${passage.chunkIndex}`}
+            passage={passage}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Evidence contract rendering (ASK_EVIDENCE_CONTRACT). Three visually distinct
+// blocks instead of one prose blob, so a document-supported spec can never be
+// mistaken for general advice or vice versa.
+function AskEvidence({ evidence }) {
+  const supported = Array.isArray(evidence?.documentSupported)
+    ? evidence.documentSupported
+    : [];
+  const guidance = Array.isArray(evidence?.generalGuidance) ? evidence.generalGuidance : [];
+  const gaps = Array.isArray(evidence?.gaps) ? evidence.gaps : [];
+
+  if (!supported.length && !guidance.length && !gaps.length) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4">
+      {supported.length ? (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-slate-800">
+          <h3 className="font-semibold text-emerald-900">From your documents</h3>
+          <ul className="mt-2 space-y-3">
+            {supported.map((item, index) => (
+              <li key={`claim-${index}`}>
+                <p className="leading-6">{item.claim}</p>
+                {/* The quote is the evidence, shown so the owner can check it
+                    rather than trusting the claim. */}
+                <p className="mt-1 border-l-2 border-emerald-300 pl-3 text-xs italic text-slate-600">
+                  “{item.evidenceQuote}”
+                </p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
+                  {item.documentTitle || item.originalFilename}, page {item.pageNumber}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {guidance.length ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-800">
+          <h3 className="font-semibold text-amber-900">
+            General guidance — not from your documents
+          </h3>
+          <ul className="mt-2 list-disc space-y-1 pl-5 leading-6">
+            {guidance.map((line, index) => (
+              <li key={`guidance-${index}`}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {gaps.length ? (
+        <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          <h3 className="font-semibold text-slate-900">Not covered by your documents</h3>
+          <ul className="mt-2 list-disc space-y-1 pl-5 leading-6">
+            {gaps.map((gap, index) => (
+              <li key={`gap-${index}`}>{gap}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function AskAssistantMessage({ message }) {
   const citations = Array.isArray(message.citations) ? message.citations : [];
+  const evidence = message.evidence || null;
+  const retrievedContext = Array.isArray(message.retrievedContext)
+    ? message.retrievedContext
+    : [];
+
+  // Evidence contract: replaces the single prose blob with labeled channels.
+  // "partial" only ever occurs on this path.
+  if (evidence && (message.status === "answered" || message.status === "partial")) {
+    return (
+      <div className="space-y-4">
+        <AskEvidence evidence={evidence} />
+
+        {citations.length ? (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              {citations.map((citation) => (
+                <AskCitationCard
+                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+                  citation={citation}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
 
   if (message.status === "answered") {
     return (
@@ -332,7 +460,12 @@ function AskAssistantMessage({ message }) {
   }
 
   if (message.status === "not_found") {
-    return <InfoBanner title="No answer found">{message.content}</InfoBanner>;
+    return (
+      <div className="space-y-4">
+        <InfoBanner title="No answer found">{message.content}</InfoBanner>
+        <AskRetrievedContext passages={retrievedContext} />
+      </div>
+    );
   }
 
   if (message.status === "error") {
@@ -487,6 +620,18 @@ function AskDocumentsSection() {
           originalQuestion: payload.question || trimmedQuestion,
           standaloneQuestion: payload.standaloneQuestion || payload.question || trimmedQuestion,
           citations: Array.isArray(payload.citations) ? payload.citations : [],
+          // Present only when the answer cites nothing (a not-found reply). These
+          // are the passages retrieval actually found, so "no answer" does not
+          // have to be a dead end.
+          retrievedContext: Array.isArray(payload.retrievedContext)
+            ? payload.retrievedContext
+            : [],
+          // Present only when ASK_EVIDENCE_CONTRACT is on. Null keeps the legacy
+          // prose rendering path selected.
+          evidence:
+            payload.evidence && typeof payload.evidence === "object"
+              ? payload.evidence
+              : null,
         },
       ]);
       setAskState({

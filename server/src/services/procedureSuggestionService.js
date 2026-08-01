@@ -18,6 +18,11 @@ import {
   tokenizeQuestion,
 } from "./chunkRetrievalService.js";
 import { postToOpenAiResponses } from "./aiAnswerService.js";
+import {
+  createRedactedOpenAiHttpError,
+  parseCompleteOpenAiOutputText,
+} from "./openAiResponsePayload.js";
+import { buildModelTuning } from "./openAiModelCapabilities.js";
 
 const DEFAULT_CHUNK_LIMIT = 8;
 const DEFAULT_SUGGESTION_LIMIT = 5;
@@ -257,25 +262,6 @@ function parseLlmSuggestions(rawText, { candidates, chunks, limit }) {
   return suggestions;
 }
 
-function parseOpenAiOutputText(payload) {
-  const outputText =
-    typeof payload?.output_text === "string"
-      ? payload.output_text
-      : Array.isArray(payload?.output)
-      ? payload.output
-          .flatMap((item) =>
-            Array.isArray(item?.content)
-              ? item.content.map((content) =>
-                  content?.type === "output_text" ? content.text || "" : ""
-                )
-              : []
-          )
-          .join("\n")
-      : "";
-
-  return outputText.trim();
-}
-
 /**
  * Ask OpenAI to rank candidate procedures using the retrieved chunks. Returns
  * the raw model text; the caller parses and grounds it defensively.
@@ -328,17 +314,19 @@ export async function generateProcedureSuggestionsFromOpenAi({
   const response = await postToOpenAiResponses({
     model: config.openAiAnswerModel,
     input: prompt,
+    ...buildModelTuning(config.openAiAnswerModel),
     max_output_tokens: config.openAiMaxOutputTokens,
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `OpenAI procedure suggestion failed (${response.status}): ${errorText}`
-    );
+    // Redacted for consistency; the caller catches and falls back to the
+    // deterministic suggestions.
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
   }
 
-  return parseOpenAiOutputText(await response.json());
+  // A truncated JSON array would parse into a partial suggestion list. Throwing
+  // is safe: the caller catches and returns no suggestions.
+  return parseCompleteOpenAiOutputText(await response.json());
 }
 
 /**

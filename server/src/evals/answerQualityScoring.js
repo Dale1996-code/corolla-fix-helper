@@ -46,9 +46,27 @@ export function isRefusal(result) {
 function checkAnswered(result, spec, label) {
   const checks = [];
 
+  // "partial" counts as answered.
+  //
+  // The evidence contract (Milestone 2) added a third status that did not exist
+  // when this check was written: `partial` means at least one claim VERIFIED
+  // against its cited chunk, alongside one or more gaps. That is a successful,
+  // grounded answer that also reports what it could not support -- refusing it
+  // here would penalize the contract for being honest.
+  //
+  // Observed live: for the drain-plug case the model emitted three correct
+  // torque claims plus a meta-claim about which document states them, whose
+  // quote was not literally on the page. The verifier rejected the meta-claim
+  // into a gap, which is exactly right, and the status became `partial`.
+  //
+  // This does NOT weaken the gate. `not_found` still fails an answered
+  // expectation, and the value, citation, and conjunctive
+  // document-plus-value checks below all still have to pass on their own.
+  const answeredStatuses = ["answered", "partial"];
+
   checks.push({
-    name: `${label}: status is "answered"`,
-    pass: result?.status === "answered",
+    name: `${label}: status is answered or partial`,
+    pass: answeredStatuses.includes(result?.status),
     detail: `status=${result?.status}`,
   });
 
@@ -81,6 +99,41 @@ function checkAnswered(result, spec, label) {
     });
   }
 
+  const supportsAny =
+    Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length
+      ? spec.citationSupportsAny
+      : null;
+
+  // When a case constrains BOTH the document and the supporting value, ONE
+  // citation must satisfy both together.
+  //
+  // Checking them independently allowed cross-citation laundering: with the
+  // eight retrieved chunks all becoming citations, citation A could supply the
+  // document match while unrelated citation B happened to contain the number,
+  // and the case would pass without any single source actually backing the
+  // claim. That is precisely the failure this assertion exists to catch.
+  if (spec.citationDocLike && supportsAny) {
+    const citations = Array.isArray(result?.citations) ? result.citations : [];
+    const grounding = citations.find(
+      (citation) =>
+        (textMatches(citation?.documentTitle || "", spec.citationDocLike) ||
+          textMatches(citation?.originalFilename || "", spec.citationDocLike)) &&
+        supportsAny.some((pattern) => textMatches(citation?.snippet || "", pattern))
+    );
+
+    checks.push({
+      name: `${label}: one citation both cites the expected document and supports the value`,
+      pass: Boolean(grounding),
+      detail: grounding
+        ? `${grounding.documentTitle || grounding.originalFilename}, page ${grounding.pageNumber}`
+        : `no single citation matched ${String(spec.citationDocLike)} AND one of [${supportsAny
+            .map(String)
+            .join(", ")}]`,
+    });
+
+    return checks;
+  }
+
   if (spec.citationDocLike) {
     checks.push({
       name: `${label}: cites the expected document`,
@@ -92,8 +145,8 @@ function checkAnswered(result, spec, label) {
   // Citation grounding: at least one cited snippet must actually contain a
   // supporting term, so a confidently-worded answer cannot pass on a citation
   // that does not back it up.
-  if (Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length) {
-    const pass = spec.citationSupportsAny.some((pattern) =>
+  if (supportsAny) {
+    const pass = supportsAny.some((pattern) =>
       citationSnippetSupports(result?.citations, pattern)
     );
     checks.push({
@@ -101,7 +154,7 @@ function checkAnswered(result, spec, label) {
       pass,
       detail: pass
         ? "matched"
-        : `no citation snippet matched [${spec.citationSupportsAny.map(String).join(", ")}]`,
+        : `no citation snippet matched [${supportsAny.map(String).join(", ")}]`,
     });
   }
 

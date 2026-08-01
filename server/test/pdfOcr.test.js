@@ -8,6 +8,13 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-pdf-ocr-test-"))
 
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+// Pin the AI feature flags too. config.js calls dotenv.config() at import,
+// so without this a developer's local server/.env leaks into the suite --
+// setting ASK_EVIDENCE_CONTRACT=true there made these tests take the
+// evidence path and attempt REAL API calls. Cases that want the contract
+// enable it explicitly via the evidenceContract option.
+process.env.ASK_EVIDENCE_CONTRACT = "false";
+
 process.env.OPENAI_API_KEY = "";
 process.env.OCR_ENABLED = "true";
 

@@ -211,6 +211,77 @@ Response:
 - `not_found` — the uploaded documents don't contain enough matching information ("not in documents"); this is deliberate refusal, not an error
 - `ai_not_configured` — matching chunks exist but no `OPENAI_API_KEY` is set
 
+#### `retrievedContext` (not-found replies only)
+
+A `not_found` reply always returns `citations: []`. When retrieval *did* find
+passages that simply were not good enough to answer from, those passages are
+additionally returned as `retrievedContext` so a refusal is not a dead end. It is
+**omitted entirely** when it would be empty:
+
+| Case | `citations` | `retrievedContext` |
+| --- | --- | --- |
+| `answered` | the cited chunks | absent (the answer already cites its sources) |
+| `not_found`, passages retrieved | `[]` | present, non-empty |
+| `not_found`, nothing retrieved | `[]` | absent |
+| `ai_not_configured` | `[]` | absent |
+
+Entries use the same shape as `citations`. These passages were **not** used to
+answer and are not endorsed as correct — the UI labels them "Retrieved context
+(may include passages the answer did not use)".
+
+```json
+{
+  "question": "What is the water pump torque?",
+  "standaloneQuestion": "What is the water pump torque?",
+  "status": "not_found",
+  "answer": "not in documents",
+  "citations": [],
+  "retrievedContext": [
+    {
+      "documentId": 12,
+      "documentTitle": "Engine Mechanical Torque Specifications",
+      "originalFilename": "engine-torque.pdf",
+      "pageNumber": 3,
+      "chunkIndex": 0,
+      "snippet": "..."
+    }
+  ]
+}
+```
+
+#### `evidence` (only when `ASK_EVIDENCE_CONTRACT=true`)
+
+With the evidence contract enabled, Ask requests atomic claims instead of prose
+and verifies each one server-side before it can render. The response gains an
+`evidence` object and `status` may additionally be `partial`:
+
+| Field | Meaning |
+| --- | --- |
+| `evidence.documentSupported[]` | Verified claims. Each carries `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
+| `evidence.generalGuidance[]` | General mechanical advice explicitly NOT from the documents. Never contains a specification. |
+| `evidence.gaps[]` | What the documents do not answer, plus anything removed by verification. |
+
+Server-side verification, in order:
+
+1. The reply must match the JSON schema (hand-written validator).
+2. Each `sourceId` (`S1`..`Sn`, prompt-local; never a database row id) must map to a retrieved chunk.
+3. The `evidenceQuote` must be a genuine substring of that chunk (whitespace- and case-insensitive).
+4. Every unit-bearing number in the claim must be present in the quote, allowing conversions within a unit family (37 N·m grounds a 27 ft-lbf claim).
+5. `status` is derived by the server from what actually verified — never taken from the model.
+
+Anything failing a step is removed from the answer and becomes a gap. **Gap text
+never reprints the failing value**, so an ungrounded specification cannot render
+under any heading. `citations` contains only chunks that backed a verified claim,
+rather than every retrieved chunk.
+
+`status` values on this path: `answered` (all claims verified, no gaps),
+`partial` (some verified, some gaps), `not_found` (nothing verified).
+
+**Model-call failures.** When the model reply cannot be confirmed as finished —
+truncated, filtered, cancelled, still generating, refused, or malformed — the
+request fails with a `500` and a short safe `error` string rather than returning
+a partial answer. Provider error text is never forwarded to the client.
+
 When `ASK_DEBUG_METRICS=true`, the response also includes a development-only
 `metrics` object. The flag is off by default, so normal responses keep the shape
 shown above. The object is log-safe: it contains measurements and numeric

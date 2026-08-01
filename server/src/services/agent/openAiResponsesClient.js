@@ -1,4 +1,5 @@
 import { config } from "../../config.js";
+import { buildModelTuning } from "../openAiModelCapabilities.js";
 import { reserveAiCall } from "../aiUsageBudget.js";
 
 export const OPENAI_STREAM_IDLE_MESSAGE =
@@ -115,6 +116,10 @@ export async function* streamResponsesTurn({
         instructions,
         input,
         tools,
+        // Same model-aware rule as the non-streaming paths. This request never
+        // sent temperature, so on a classic model this is a no-op beyond making
+        // the omission explicit.
+        ...buildModelTuning(model),
         stream: true,
         max_output_tokens: config.openAiMaxOutputTokens,
       }),

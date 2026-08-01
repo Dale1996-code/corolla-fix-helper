@@ -35,8 +35,12 @@ function readNonNegativeInteger(value, fallback) {
 }
 
 const clientPort = Number(process.env.CLIENT_PORT || 5173);
+// Pinned SNAPSHOT, not the floating "gpt-4.1" alias. An alias silently changes
+// model behavior underneath the eval suite, so a green run proves nothing about
+// the next one and a regression cannot be told apart from a model update.
+// Override with OPENAI_ANSWER_MODEL to move deliberately.
 const openAiAnswerModel =
-  process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1";
+  process.env.OPENAI_ANSWER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-2025-04-14";
 // The optional Ask reranker reuses the answer model unless OPENAI_RERANK_MODEL
 // is set, so enabling it needs no extra model configuration.
 const openAiRerankModel = process.env.OPENAI_RERANK_MODEL || openAiAnswerModel;
@@ -81,6 +85,15 @@ export const config = {
   // Optional LLM reranker over hybrid retrieval results. Off by default; when on
   // it reorders a bounded candidate pool before the final limit slice.
   rerankEnabled: readBoolean(process.env.RERANK_ENABLED, false),
+  // Ask evidence contract: structured atomic claims, each with a verbatim quote
+  // the server verifies against the cited chunk, plus a numeric anomaly
+  // detector. Off by default -- with the flag off the Ask response is
+  // byte-identical to before (pinned by test).
+  askEvidenceContract: readBoolean(process.env.ASK_EVIDENCE_CONTRACT, false),
+  // Per-chunk relevance floor. SHADOW BY DEFAULT: it computes what it would drop
+  // and reports that through Ask metrics, but changes nothing until the
+  // threshold has been calibrated on a real corpus (npm run eval:relevance-floor).
+  askRelevanceFloor: readBoolean(process.env.ASK_RELEVANCE_FLOOR, false),
   rerankCandidateLimit: readPositiveInteger(process.env.RERANK_CANDIDATE_LIMIT, 20),
   openAiRerankModel,
   openAiEmbeddingModel,

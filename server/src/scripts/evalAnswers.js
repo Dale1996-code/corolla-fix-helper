@@ -17,20 +17,119 @@ if (!config.openAiApiKey) {
 }
 
 // Importing database.js initializes the (real) database from config.
-await import("../database.js");
+const { db } = await import("../database.js");
 const { askQuestionUsingDocuments } = await import("../services/aiAnswerService.js");
 const { answerQualityCases } = await import("../evals/answerQualityCases.js");
 const { evaluateAnswerCase, summarize } = await import("../evals/answerQualityScoring.js");
+const { NEGATIVE_CASE_PRECONDITIONS } = await import(
+  "../evals/negativeCorpusPreconditions.js"
+);
+
+// A verified must-refuse case is only valid while the corpus still lacks the
+// fact. The corpus is mutable, so check before trusting the expectation: if real
+// evidence has appeared, the case needs a human, not a silent green tick.
+const staleNegativeCases = new Set();
+
+for (const [caseId, check] of Object.entries(NEGATIVE_CASE_PRECONDITIONS)) {
+  const testCase = answerQualityCases.find((entry) => entry.id === caseId);
+
+  if (!testCase || !testCase.verified) {
+    continue;
+  }
+
+  const { stale, matches } = check(db);
+
+  if (!stale) {
+    continue;
+  }
+
+  staleNegativeCases.add(caseId);
+  console.log("");
+  console.log(`!! NEEDS HUMAN RE-VERIFICATION: ${caseId}`);
+  console.log(
+    "   This case expects a refusal because the corpus had no such specification."
+  );
+  console.log("   Evidence suggesting the corpus now DOES contain one:");
+
+  for (const match of matches.slice(0, 5)) {
+    console.log(`   - [${match.ruleId}] ${match.documentTitle}, page ${match.pageNumber}`);
+    console.log(`     ...${match.excerpt}...`);
+  }
+
+  if (matches.length > 5) {
+    console.log(`   - ...and ${matches.length - 5} more`);
+  }
+
+  console.log("   See docs/evals/ask-rag-iteration-log.md for the re-verification steps.");
+  console.log("");
+}
 
 const results = [];
 
+// Pacing. Running every case back-to-back exceeds the account's tokens-per-minute
+// tier (observed: 30000 TPM), and a 429 then looks exactly like a product
+// regression in the results table. Space the cases out, and retry a rate-limited
+// case rather than recording a false failure.
+const CASE_DELAY_MS = Number(process.env.EVAL_CASE_DELAY_MS || 2000);
+const MAX_RATE_LIMIT_RETRIES = 4;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Rate limiting is infrastructure, not a product signal. Tell them apart. */
+function isRateLimited(error) {
+  return Number(error?.failure?.httpStatus) === 429;
+}
+
+/**
+ * The client-facing message is deliberately generic, because provider bodies
+ * must never reach a browser. This is a local developer tool, so surface the
+ * bounded internal diagnostic here -- otherwise a failing eval is undebuggable.
+ */
+function describeError(error) {
+  const parts = [error.message];
+
+  if (error?.failure?.httpStatus) {
+    parts.push(`[http ${error.failure.httpStatus}]`);
+  }
+
+  if (error?.failure?.diagnostic) {
+    parts.push(`diagnostic: ${error.failure.diagnostic}`);
+  }
+
+  return parts.join(" ");
+}
+
+async function askWithRetry(question, options) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await askQuestionUsingDocuments(question, options);
+    } catch (error) {
+      if (!isRateLimited(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
+        throw error;
+      }
+
+      const backoffMs = 5000 * (attempt + 1);
+      console.log(`    - rate limited, retrying in ${backoffMs / 1000}s`);
+      await sleep(backoffMs);
+    }
+  }
+}
+
+let rateLimitedCases = 0;
+let caseIndex = 0;
+
 for (const testCase of answerQualityCases) {
+  if (caseIndex > 0 && CASE_DELAY_MS > 0) {
+    await sleep(CASE_DELAY_MS);
+  }
+  caseIndex += 1;
+
   try {
     // Vision cases attach an image so the run exercises the same not-found gate
     // with a photo present; text cases pass image: null and are unchanged.
     // includeMetrics surfaces log-safe timing/size numbers (no document text)
     // so a run doubles as a retrieval/answer performance check.
-    const primary = await askQuestionUsingDocuments(testCase.question, {
+    const primary = await askWithRetry(testCase.question, {
       image: testCase.image || null,
       includeMetrics: true,
     });
@@ -41,17 +140,21 @@ for (const testCase of answerQualityCases) {
         { role: "user", content: testCase.question },
         { role: "assistant", content: primary.answer },
       ];
-      followUp = await askQuestionUsingDocuments(testCase.followUp.question, { history });
+      followUp = await askWithRetry(testCase.followUp.question, { history });
     }
 
     results.push({ ...evaluateAnswerCase(testCase, primary, followUp), metrics: primary.metrics });
   } catch (error) {
+    if (isRateLimited(error)) {
+      rateLimitedCases += 1;
+    }
+
     results.push({
       id: testCase.id,
       category: testCase.category,
       verified: Boolean(testCase.verified),
       pass: false,
-      checks: [{ name: "ran without error", pass: false, detail: error.message }],
+      checks: [{ name: "ran without error", pass: false, detail: describeError(error) }],
       metrics: null,
     });
   }
@@ -98,8 +201,28 @@ for (const [category, bucket] of Object.entries(summary.byCategory)) {
   );
 }
 
+if (rateLimitedCases) {
+  // Never let an infrastructure failure read as a green run OR as a product
+  // regression. Say exactly what happened.
+  console.log(
+    `\nWARNING: ${rateLimitedCases} case(s) still hit the provider rate limit after retries.`
+  );
+  console.log("Those are infrastructure failures, not product regressions.");
+  console.log("Raise EVAL_CASE_DELAY_MS and re-run before drawing conclusions.");
+}
+
 if (!summary.allVerifiedPass) {
   console.log("\nFAIL: one or more verified cases did not pass.");
+  process.exitCode = 1;
+} else if (staleNegativeCases.size) {
+  // The cases passed, but at least one passed on a premise the corpus no longer
+  // supports. Failing here is the point: a stale refusal expectation that stays
+  // green is worse than a red one, because nobody looks at it again.
+  console.log(
+    `\nFAIL: verified cases passed, but ${[...staleNegativeCases].join(
+      ", "
+    )} needs human re-verification (see above).`
+  );
   process.exitCode = 1;
 } else {
   console.log("\nOK: all verified cases passed.");

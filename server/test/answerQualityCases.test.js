@@ -33,6 +33,14 @@ const VERIFIED_IDS = [
   "refuse-flux-capacitor",
   "refuse-boeing-tire",
   "refuse-warp-core",
+  // Confirmed against the real local corpus (1443 docs / 19636 chunks) rather
+  // than inferred from a passing run — see the evidence recorded on each case in
+  // src/evals/answerQualityCases.js. These two are what make the gate meaningful:
+  // the first is the only assertion that a CITED SNIPPET backs the value (the
+  // anti-laundering check), the second is the only plausible-but-absent
+  // automotive refusal (the other three refusals are fictional).
+  "oil-drain-plug-torque-citation-support",
+  "refuse-turbo-boost-pressure",
 ];
 
 const VALID_CATEGORIES = new Set([
