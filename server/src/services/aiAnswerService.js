@@ -9,6 +9,7 @@ import {
   parseCompleteOpenAiOutputText,
   readOpenAiResponse,
 } from "./openAiResponsePayload.js";
+import { applyRelevanceFloor } from "./relevanceFloor.js";
 import {
   buildEvidenceContext,
   buildEvidencePromptLines,
@@ -175,6 +176,7 @@ function buildModelContext(chunks) {
  *   rewriteMs?: number,
  *   answerMs?: number,
  *   totalMs?: number,
+ *   relevanceFloor?: any,
  * }} [params]
  */
 export function buildAskMetrics({
@@ -184,6 +186,7 @@ export function buildAskMetrics({
   rewriteMs = 0,
   answerMs = 0,
   totalMs = 0,
+  relevanceFloor = null,
 } = {}) {
   const roundMs = (value) => Math.round(Number(value) || 0);
   const contextChars = chunks.reduce(
@@ -210,6 +213,9 @@ export function buildAskMetrics({
       pageNumber: chunk?.pageNumber ?? null,
       chunkIndex: chunk?.chunkIndex ?? null,
     })),
+    // Shadow-mode visibility for the relevance floor. Numeric references and
+    // scores only, so this stays safe to log.
+    relevanceFloor,
   };
 }
 
@@ -445,6 +451,8 @@ export async function askQuestionUsingDocuments(
   {
     chunkLimit = 8,
     evidenceContract = config.askEvidenceContract,
+    relevanceFloor = config.askRelevanceFloor,
+    relevanceFloorThreshold = MINIMUM_SEMANTIC_SCORE,
     generateEvidenceAnswer = generateEvidenceAnswerFromOpenAi,
     generateAnswerText = generateAnswerTextFromOpenAi,
     history = [],
@@ -464,6 +472,7 @@ export async function askQuestionUsingDocuments(
   let answerMs = 0;
   let retrievedChunks = [];
   let builtCitations = [];
+  let relevanceFloorReport = null;
 
   // Passages that were retrieved but that the response does not cite.
   //
@@ -534,6 +543,7 @@ export async function askQuestionUsingDocuments(
             rewriteMs,
             answerMs,
             totalMs: performance.now() - startedAt,
+            relevanceFloor: relevanceFloorReport,
           }),
         }
       : withContext;
@@ -579,6 +589,26 @@ export async function askQuestionUsingDocuments(
     (chunk) => chunk && typeof chunk === "object"
   );
   retrievalMs = performance.now() - retrievalStart;
+
+  // Relevance floor. Shadow by default: it reports what it WOULD drop without
+  // dropping anything, so the effect can be measured on a real corpus before it
+  // is allowed to change answers. See services/relevanceFloor.js.
+  const floor = applyRelevanceFloor(retrievedChunks, {
+    threshold: relevanceFloorThreshold,
+    enforce: relevanceFloor,
+  });
+  relevanceFloorReport = {
+    enforced: floor.enforced,
+    threshold: floor.threshold,
+    droppedCount: floor.droppedCount,
+    keptCount: floor.keptCount,
+    dropped: floor.dropped,
+  };
+
+  if (floor.enforced) {
+    retrievedChunks = floor.chunks;
+  }
+
   const chunks = retrievedChunks;
 
   if (!chunks.length) {

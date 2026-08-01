@@ -15,6 +15,7 @@
     "eval:retrieval": "node src/scripts/evalHybridRetrieval.js",
     "eval:rerank": "node src/scripts/evalRerankAb.js",
     "eval:answers": "node src/scripts/evalAnswers.js",
+    "eval:relevance-floor": "node src/scripts/evalRelevanceFloor.js",
     "build": "node -e \"console.log('No server build step needed yet.')\"",
     "test": "node --test"
   },

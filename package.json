@@ -22,6 +22,7 @@
     "eval:retrieval": "npm --prefix server run eval:retrieval",
     "eval:rerank": "npm --prefix server run eval:rerank",
     "eval:answers": "npm --prefix server run eval:answers",
+    "eval:relevance-floor": "npm --prefix server run eval:relevance-floor",
     "lint": "eslint server && npm --prefix client run lint",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm --prefix server run test",

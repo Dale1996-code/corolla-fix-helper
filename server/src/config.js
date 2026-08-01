@@ -86,6 +86,10 @@ export const config = {
   // detector. Off by default -- with the flag off the Ask response is
   // byte-identical to before (pinned by test).
   askEvidenceContract: readBoolean(process.env.ASK_EVIDENCE_CONTRACT, false),
+  // Per-chunk relevance floor. SHADOW BY DEFAULT: it computes what it would drop
+  // and reports that through Ask metrics, but changes nothing until the
+  // threshold has been calibrated on a real corpus (npm run eval:relevance-floor).
+  askRelevanceFloor: readBoolean(process.env.ASK_RELEVANCE_FLOOR, false),
   rerankCandidateLimit: readPositiveInteger(process.env.RERANK_CANDIDATE_LIMIT, 20),
   openAiRerankModel,
   openAiEmbeddingModel,

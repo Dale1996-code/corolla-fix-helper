@@ -346,3 +346,73 @@ Decision kept from the plan: the labeled general-guidance channel stays, rather
 than being deleted. Deleting it would not stop the model producing general
 knowledge -- it would only remove the label, making the output less honest. The
 numeric rule is what makes the channel safe.
+
+---
+
+## Milestone 3 — relevance floor: calibrated, and deliberately NOT activated
+
+The audit proposed dropping every retrieved chunk below `MINIMUM_SEMANTIC_SCORE`
+as a same-day, "near-zero-risk" fix. Milestone 3 built the floor and the harness
+to justify it. The harness says: **do not turn it on.**
+
+### Why a new eval was needed
+
+`npm run eval:retrieval` structurally cannot observe this filter. It imports only
+the retrieval layer, while the filter sits above it in `askQuestionUsingDocuments`
+-- a green retrieval eval would have proved nothing about the floor. So
+`npm run eval:relevance-floor` runs the REAL Ask pipeline against the REAL corpus
+with a stub answer generator: retrieval and scoring are genuine, no answer-model
+tokens are spent, and the whole sweep costs only the query embeddings.
+
+### Measured result (26 text cases, 208 chunks reaching the answer stage)
+
+```
+with body-text keyword hit: 208  (exempt from the floor)
+semantic-only:                0
+no semantic score:            0
+semantic score min/p25/median/p75/max: 0.281 / 0.488 / 0.524 / 0.567 / 0.719
+```
+
+Threshold sweep from 0 to 0.5: **0 chunks dropped at every threshold**, positive
+or negative.
+
+The floor is inert here for two independent reasons:
+
+1. Every chunk that reaches the answer stage has a real body-text keyword hit, so
+   nothing is judged on semantics alone.
+2. Even ignoring that, the **minimum observed semantic score is 0.281**, already
+   above the proposed 0.2 threshold. A 0.2 floor could not have dropped anything
+   regardless.
+
+This turns §5's "possibly near-inert" concern into a measurement. Shipping the
+floor as an immediate fix would have added a filter, a config flag, and a code
+path that provably do nothing on this corpus -- while carrying the risk that a
+future corpus change silently starts dropping evidence.
+
+**Decision: `ASK_RELEVANCE_FLOOR` stays off.** The floor ships in SHADOW MODE --
+it computes what it would drop and reports that through the existing log-safe
+Ask metrics (`metrics.relevanceFloor`, numeric references and scores only, no
+document text) so the picture can be re-checked cheaply after any corpus change.
+
+### Contract change made during calibration
+
+The first implementation exempted any chunk with `keywordScore > 0`. That made
+the floor inert by construction, because `scoreChunkForTerms` awards +2 for a
+title hit, +1 filename, +1 system -- so `keywordScore > 0` can mean nothing more
+than "this document is named after your question" while the chunk body matched no
+term at all. That is precisely the laundering vector the audit flagged.
+
+The exemption now keys on `chunkMatchedTerms > 0` (real body-text hits). One
+Milestone 3 test was updated to match; the new behavior is pinned by a test
+showing a title-only match is now droppable while a body match is not. The sweep
+was re-run after the change and the result was unchanged, which is what
+established finding (1) above rather than assuming it.
+
+### Safety properties pinned by test
+
+- Shadow mode changes nothing.
+- A chunk with no semantic score is never dropped (protects unembedded and
+  stale-embedding-version chunks, so a newly uploaded PDF cannot vanish from Ask).
+- The floor never empties the context: dropping everything would turn a weak but
+  real answer into a not_found with no evidence to show.
+- The shadow report contains no document text, titles, or filenames.
