@@ -609,3 +609,105 @@ owner consults, and an unbounded append-only file of that on a personal machine
 is a privacy liability, not an observability win. The log-safe `metrics` object
 (counts, durations, numeric refs, and now the relevance-floor shadow report)
 already covers the diagnostic need without persisting anything.
+
+---
+
+## Source-quality limitation: overprinted text in ALLDATA PDFs (non-blocking)
+
+Found during the manual `ASK_EVIDENCE_CONTRACT=true` Ask check. The check passed
+overall; this is a **source-data limitation**, not a pipeline defect, and it is
+recorded here rather than fixed.
+
+### What was seen
+
+A supported disposal claim rendered this evidence quote:
+
+> "used oil and used oil filters filters filters must be disposed at designated
+> must be disposed of at designated must be disposed of at designated disposal
+> sites."
+
+### Where the repetition originates
+
+**Stage 1 -- the original PDF's text layer.** The PDF *overprints*: identical
+text runs are drawn at identical coordinates. Raw pdf.js items for document 748,
+page 1:
+
+```
+#42  x= 66 y=460  "For environmental protection, used oil and used oil filters"
+#43  x=339 y=460  "filters"
+#44  x=339 y=460  "filters"                                    <- same x,y
+#45  x=339 y=460  "filters must be disposed of at designated"  <- same x,y
+#46  x=373 y=460  "must be disposed of at designated"
+#47  x=373 y=460  "must be disposed of at designated"          <- same x,y
+#48  x=373 y=460  "must be disposed of at designated"          <- same x,y
+#49  x= 66 y=443  "disposal sites."
+#50-52 x=66 y=443 "disposal sites." x3                         <- same x,y
+```
+
+A human reads one copy because the duplicates are painted on top of each other.
+Any extractor reading the content stream sees all four. It is not isolated to
+this sentence -- items #70-73 repeat "REMOVE OIL FILTER CAP ASSEMBLY" x4 the same
+way. This is characteristic of ALLDATA's HTML-to-PDF export (faux-bold or
+layered rendering).
+
+### Stage-by-stage trace
+
+| Stage | Duplicated | Note |
+| --- | --- | --- |
+| 1. Original PDF page | yes -- **origin** | Overprinted runs at identical coordinates |
+| 2. `documents.extracted_text` | yes | Faithful copy |
+| 3. Chunk text | yes | Faithful copy |
+| 4. Retrieved chunk | yes | Same stored text |
+| 5. Structured evidence | quote only | The model quoted a contiguous substring VERBATIM, as the contract requires |
+| 6. Client render | quote only | Displayed the quote as-is |
+
+**Extraction, chunking, retrieval, evidence verification, and rendering all
+preserved the source faithfully.** Nothing in the pipeline introduced or
+amplified the repetition.
+
+### The claim itself stayed clean
+
+The generated claim was correct and readable -- "The documents say used oil and
+used oil filters must be disposed of at designated disposal sites." Only the
+evidence *quote* shows the artifact, because a quote must be a verbatim
+substring of the chunk to pass verification. That is the contract working as
+designed. No specification value was affected.
+
+### Identifiers
+
+- Document **748** -- *Oil and Oil Filter Replacement [12 2007] (Engine Oil) ALLDATA diy*
+- Page **1**, chunk id **14358**, chunk_index **2**
+- Clean visible wording: *"For environmental protection, used oil and used oil
+  filters must be disposed of at designated disposal sites."*
+- Document **749** (the Oil Filter variant) carries the identical artifact at
+  chunk **14368**
+
+### Scope
+
+**366 of 19636 chunks (1.9%) across 75 of 1443 documents** contain a
+three-times-repeated phrase. Worst affected: doc 777 (95 chunks), doc 740 (47),
+doc 632 (35), doc 750 (15), doc 739 (14).
+
+### Targeted re-extraction would NOT fix this
+
+Worth stating explicitly, because it is the intuitive first suggestion: the same
+PDF through the same extractor produces the same overprinted runs. Re-extraction
+changes nothing here, and it would cost a re-embed of the affected documents for
+no benefit.
+
+### Future work (low priority, deliberately not done in this branch)
+
+1. **Evidence-quote quality warning** -- flag a quote containing a
+   three-times-repeated phrase so the UI can label it "this source page contains
+   overprinted text". Display-only: no corpus change, no extraction change, no
+   re-embedding.
+2. **Coordinate-aware extraction deduplication** -- drop identical text runs at
+   identical coordinates during extraction. This is the only option that cleans
+   stored data, but it changes extraction and requires re-extracting and
+   re-embedding the 75 affected documents. Honest caveat measured on this
+   sample: it would collapse #44, #47/48, and #50-52, but not #43 versus #45,
+   which is a prefix rather than an exact duplicate -- so it reduces the artifact
+   rather than eliminating it.
+
+Neither is implemented. The corpus, extraction pipeline, evidence contract, and
+UI are unchanged.
