@@ -81,6 +81,11 @@ export const config = {
   // Optional LLM reranker over hybrid retrieval results. Off by default; when on
   // it reorders a bounded candidate pool before the final limit slice.
   rerankEnabled: readBoolean(process.env.RERANK_ENABLED, false),
+  // Ask evidence contract: structured atomic claims, each with a verbatim quote
+  // the server verifies against the cited chunk, plus a numeric anomaly
+  // detector. Off by default -- with the flag off the Ask response is
+  // byte-identical to before (pinned by test).
+  askEvidenceContract: readBoolean(process.env.ASK_EVIDENCE_CONTRACT, false),
   rerankCandidateLimit: readPositiveInteger(process.env.RERANK_CANDIDATE_LIMIT, 20),
   openAiRerankModel,
   openAiEmbeddingModel,

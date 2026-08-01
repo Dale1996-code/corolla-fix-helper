@@ -141,6 +141,17 @@ export function createAskRouter({
         payload.retrievedContext = result.retrievedContext;
       }
 
+      // Evidence contract (ASK_EVIDENCE_CONTRACT). Additive and allowlisted like
+      // retrievedContext: absent entirely with the flag off, so the default
+      // response shape is unchanged.
+      if (result.evidence && typeof result.evidence === "object") {
+        payload.evidence = {
+          documentSupported: result.evidence.documentSupported || [],
+          generalGuidance: result.evidence.generalGuidance || [],
+          gaps: result.evidence.gaps || [],
+        };
+      }
+
       // Dev-only: surface the log-safe timing/size metrics over HTTP when the
       // flag is on. Off by default, so the response shape is unchanged.
       if (includeMetrics && result.metrics) {

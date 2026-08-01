@@ -293,3 +293,56 @@ When it fires:
    against a fact the corpus still lacks — then re-verify from the corpus the way
    the round-1 entry above describes.
 4. Never re-green the case by loosening the check.
+
+---
+
+## Milestone 2 — evidence contract (ASK_EVIDENCE_CONTRACT)
+
+One vertical slice behind one flag, following the `rerankEnabled` pattern
+(`config.askEvidenceContract` plus default-parameter injection), so tests and
+evals toggle it without env vars. **Flag off is byte-identical**, pinned by a
+test that also fails if the evidence path runs at all.
+
+`server/src/services/askEvidenceContract.js` (leaf module, no dependencies):
+
+- **Structured output** via `text.format` json_schema, with prompt-local source
+  ids (`S1`..`Sn`). Never database row ids -- re-extraction recreates chunk ids,
+  so a row id in a model reply is meaningless the moment a document is
+  re-extracted.
+- **Atomic claims with a verbatim `evidenceQuote`**, verified server-side as a
+  real substring of the mapped chunk (whitespace/case-insensitive because PDF
+  extraction spacing is erratic, but no paraphrase passes). A chunk id proves
+  retrieval; a quote proves support.
+- **Hand-written validator** (~60 lines). No runtime schema dependency, per the
+  repo's documented no-heavy-dependencies convention.
+- **Numeric anomaly detector**, named honestly: presence-matching cannot prove a
+  number belongs to the right fastener, only that it is absent from the cited
+  text. Scoped to unit-bearing specifications, so step numbers, fastener counts,
+  page references, and ordinals pass untouched -- a blanket digit ban would
+  mangle ordinary procedure prose.
+- **Unit-family conversion.** A torque table prints "37 (377, 27)", so a claim
+  stating the ft-lbf figure is grounded by a chunk stating the N·m figure.
+  Conversion is within a family only: applying every factor to every number
+  falsely grounded an invented 54 N·m, because 377 kgf-cm times the kPa->psi
+  factor is 54.7. Caught by a test during implementation.
+- **Server-derived status** (`answered` / `partial` / `not_found`), never taken
+  from a model-supplied field that could contradict its own claims.
+- **Citations are earned.** Only chunks that actually backed a verified claim are
+  cited, which fixes "every retrieved chunk becomes a citation" (audit F1).
+
+**Gap text never reprints the failing value.** An early implementation echoed the
+rejected number into the gap ("Removed unsourced specification (30 Nm)"), which
+put the ungrounded value back on screen under a different heading -- exactly what
+failing closed is supposed to prevent. Values are redacted to
+`[unverified value]` in anything the owner reads, and retained server-side in
+`rejected` for diagnosis.
+
+Client: `SearchPage` renders three visually distinct blocks (document-supported
+with the quote shown, general guidance explicitly labeled as not from the
+documents, and gaps) instead of one `whitespace-pre-line` blob. The legacy prose
+path is still selected when no `evidence` field is present.
+
+Decision kept from the plan: the labeled general-guidance channel stays, rather
+than being deleted. Deleting it would not stop the model producing general
+knowledge -- it would only remove the label, making the output less honest. The
+numeric rule is what makes the channel safe.

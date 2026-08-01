@@ -9,10 +9,21 @@ import {
   parseCompleteOpenAiOutputText,
   readOpenAiResponse,
 } from "./openAiResponsePayload.js";
+import {
+  buildEvidenceContext,
+  buildEvidencePromptLines,
+  deriveEvidenceStatus,
+  EVIDENCE_RESPONSE_SCHEMA,
+  renderEvidenceAnswer,
+  validateEvidencePayload,
+  verifyEvidence,
+} from "./askEvidenceContract.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.";
 export const NOT_FOUND_MESSAGE = "not in documents";
+export const EVIDENCE_UNAVAILABLE_MESSAGE =
+  "The AI reply could not be checked against your documents, so it was not shown. Please try again.";
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_HISTORY_CONTENT_LENGTH = 1200;
@@ -343,10 +354,98 @@ export async function generateAnswerTextFromOpenAi({
   return parseCompleteOpenAiOutputText(await response.json());
 }
 
+/**
+ * Evidence-contract answer generation (Milestone 2, behind ASK_EVIDENCE_CONTRACT).
+ *
+ * Asks for structured atomic claims instead of prose, using `text.format` with a
+ * json_schema. Returns the PARSED, VALIDATED payload -- verification against the
+ * chunks happens in askQuestionUsingDocuments, which owns the chunk mapping.
+ *
+ * Separate from generateAnswerTextFromOpenAi rather than a mode inside it, so
+ * the flag-off path is not touched at all.
+ *
+ * @param {{
+ *   question: string,
+ *   originalQuestion?: string,
+ *   chunks: any[],
+ *   image?: string | null,
+ *   fetchImpl?: typeof fetch,
+ * }} params
+ */
+export async function generateEvidenceAnswerFromOpenAi({
+  question,
+  originalQuestion,
+  chunks,
+  image = null,
+  fetchImpl = fetch,
+}) {
+  const promptLines = buildEvidencePromptLines({
+    question,
+    originalQuestion,
+    hasImage: Boolean(image),
+  });
+  const prompt = [...promptLines, "", "Sources:", buildEvidenceContext(chunks)].join("\n");
+  const model = image ? config.openAiVisionModel : config.openAiAnswerModel;
+  const input = image
+    ? [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: prompt },
+            { type: "input_image", image_url: image },
+          ],
+        },
+      ]
+    : prompt;
+
+  const response = await postToOpenAiResponses(
+    {
+      model,
+      input,
+      temperature: 0,
+      text: { format: EVIDENCE_RESPONSE_SCHEMA },
+      max_output_tokens: config.openAiMaxOutputTokens,
+    },
+    { fetchImpl }
+  );
+
+  if (!response.ok) {
+    throw createRedactedOpenAiHttpError(response.status, await response.text());
+  }
+
+  // Same fail-closed gate as the prose path: an unfinished structured reply is
+  // truncated JSON, which is worse than truncated prose.
+  const text = parseCompleteOpenAiOutputText(await response.json());
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const error = new Error(EVIDENCE_UNAVAILABLE_MESSAGE);
+    // @ts-expect-error -- diagnostic detail intentionally attached
+    error.failure = { kind: "evidence_not_json", reason: "json_parse_failed" };
+    throw error;
+  }
+
+  const validated = validateEvidencePayload(parsed);
+
+  if (!validated.ok) {
+    const error = new Error(EVIDENCE_UNAVAILABLE_MESSAGE);
+    // @ts-expect-error -- diagnostic detail intentionally attached
+    error.failure = { kind: "evidence_schema_invalid", reason: validated.reason };
+    throw error;
+  }
+
+  return validated.value;
+}
+
 export async function askQuestionUsingDocuments(
   question,
   {
     chunkLimit = 8,
+    evidenceContract = config.askEvidenceContract,
+    generateEvidenceAnswer = generateEvidenceAnswerFromOpenAi,
     generateAnswerText = generateAnswerTextFromOpenAi,
     history = [],
     image = null,
@@ -522,6 +621,55 @@ export async function askQuestionUsingDocuments(
       answer: NOT_FOUND_MESSAGE,
       citations: [],
       standaloneQuestion: retrievalQuestion,
+    });
+  }
+
+  // Evidence contract (ASK_EVIDENCE_CONTRACT). Everything above is shared; only
+  // the answer step differs, so retrieval, the relevance gate, citations, and
+  // retrievedContext behave identically with the flag on or off.
+  if (evidenceContract) {
+    const evidenceStart = performance.now();
+    const raw = await generateEvidenceAnswer({
+      question: retrievalQuestion,
+      originalQuestion: normalizedQuestion,
+      chunks,
+      image,
+    });
+    answerMs = performance.now() - evidenceStart;
+
+    // Server-side verification: every quote must really be in the chunk it
+    // names, and every unit-bearing number must be present in that quote.
+    const verified = verifyEvidence(raw, chunks);
+    // Status is DERIVED, never taken from the model -- a model-supplied status
+    // could contradict its own claims.
+    const status = deriveEvidenceStatus(verified);
+    const evidenceCitations = buildCitationsFromChunks(
+      chunks.filter((_, index) =>
+        verified.documentSupported.some(
+          (item) =>
+            item.pageNumber === chunks[index].pageNumber &&
+            item.chunkIndex === chunks[index].chunkIndex &&
+            item.documentId === chunks[index].documentId
+        )
+      )
+    );
+    builtCitations = evidenceCitations;
+
+    return finalize({
+      status,
+      answer:
+        status === "not_found"
+          ? NOT_FOUND_MESSAGE
+          : renderEvidenceAnswer(verified) || NOT_FOUND_MESSAGE,
+      // Only chunks that actually backed a verified claim are cited. This is the
+      // fix for "every retrieved chunk becomes a citation".
+      citations: status === "not_found" ? [] : evidenceCitations,
+      standaloneQuestion: retrievalQuestion,
+      evidence: {
+        documentSupported: verified.documentSupported,
+        generalGuidance: verified.generalGuidance,
+        gaps: verified.gaps,
+      },
     });
   }
 

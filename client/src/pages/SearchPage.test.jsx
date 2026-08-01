@@ -380,6 +380,123 @@ test("SearchPage omits retrieved context when the response has none", async () =
   ).not.toBeInTheDocument();
 });
 
+test("SearchPage renders evidence-contract channels as distinct blocks", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "partial",
+        answer: "The oil drain plug torque is 37 Nm. [Oil Manual, page 1]",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Torque : 37 Nm",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 37 Nm.",
+              evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+            },
+          ],
+          generalGuidance: ["Let the engine cool before draining the oil."],
+          gaps: ["The filter torque is not covered."],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  // Document-supported claims, with the quote shown so the owner can check it.
+  expect(
+    await within(askSection).findByRole("heading", { name: "From your documents" })
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getByText("The oil drain plug torque is 37 Nm.")
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getByText(/Torque : 37 Nm \(377 kgf-cm, 27 ft-lbf\)/)
+  ).toBeInTheDocument();
+
+  // General guidance is a visually separate, explicitly labeled channel.
+  expect(
+    within(askSection).getByRole("heading", {
+      name: "General guidance — not from your documents",
+    })
+  ).toBeInTheDocument();
+
+  // Gaps are shown rather than hidden.
+  expect(
+    within(askSection).getByRole("heading", { name: "Not covered by your documents" })
+  ).toBeInTheDocument();
+  expect(within(askSection).getByText("The filter torque is not covered.")).toBeInTheDocument();
+});
+
+test("SearchPage keeps the legacy prose rendering when no evidence field is present", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "The oil drain plug torque is 37 Nm.",
+        citations: [],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(await within(askSection).findByText("Answer")).toBeInTheDocument();
+  expect(
+    within(askSection).queryByText("From your documents")
+  ).not.toBeInTheDocument();
+});
+
 test("SearchPage shows an answered Ask response with clickable citation cards", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const citationSnippet =
