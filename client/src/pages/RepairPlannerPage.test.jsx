@@ -28,11 +28,10 @@ const completedRun = [
   { type: "tool_call", name: "extract_repair_tasks" },
   { type: "tool_result", name: "extract_repair_tasks", summary: "Found 1 task(s)." },
   { type: "tool_call", name: "search_repair_docs" },
-  { type: "text_delta", text: "The brake job is the priority. " },
-  { type: "text_delta", text: "Follow-up questions: What is the mileage?" },
   {
     type: "done",
     status: "completed",
+    evidenceStatus: "partial",
     text: "The brake job is the priority.",
     artifacts: {
       tasks: [
@@ -78,6 +77,16 @@ const completedRun = [
           steps: ["Review source procedure", "Gather parts", "Perform the repair"],
         },
       ],
+      requirements: {
+        tools: { status: "unknown", required: [], satisfied: [], missing: [] },
+        parts: { status: "satisfied", required: ["brake pads"], satisfied: ["brake pads"], missing: [] },
+      },
+      evidence: {
+        verifiedClaims: [
+          { taskId: 1, kind: "numeric_spec", claim: "torque caliper bolts to 25 ft-lb", sourceId: "S1" },
+        ],
+        gaps: ["Required tools could not be established from your documents."],
+      },
       handoffNotes: {
         partsShoppingList: "Parts run: brake pads",
         mechanicHandoff: "Vehicle: Corolla",
@@ -267,4 +276,74 @@ test("RepairPlannerPage surfaces a typed planner failure instead of a plan", asy
 
   expect(await screen.findByText(/ran out of steps/i)).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Owner checklist" })).not.toBeInTheDocument();
+});
+
+// --- Evidence status --------------------------------------------------------
+
+function doneFrame(evidenceStatus, gaps = []) {
+  return {
+    type: "done",
+    status: "completed",
+    evidenceStatus,
+    text: "Repair plan\n\n1. Torque caliper bolts to 25 ft-lb [S1]",
+    artifacts: {
+      tasks: [{ id: 1, title: "Replace front brake pads", system: "Brakes", difficulty: "beginner" }],
+      citations: [],
+      readiness: { score: 30, level: "not_ready", rubric: [], gaps: [] },
+      checklist: [],
+      handoffNotes: null,
+      requirements: {
+        tools: { status: "unknown", required: [], satisfied: [], missing: [] },
+        parts: { status: "unknown", required: [], satisfied: [], missing: [] },
+      },
+      evidence: { verifiedClaims: [], gaps },
+    },
+  };
+}
+
+async function runWithFrames(frames) {
+  vi.stubGlobal("fetch", vi.fn(() => streamResponse(frames)));
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Replace the front brake pads." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+}
+
+test("RepairPlannerPage renders each evidence status with honest wording", async () => {
+  await runWithFrames([doneFrame("verified")]);
+
+  expect(await screen.findByText("Verified against your documents")).toBeInTheDocument();
+  // "Verified" must not read as a promise about the manuals themselves.
+  expect(screen.getByText(/not a promise that your manuals cover the whole repair/i)).toBeInTheDocument();
+});
+
+test("RepairPlannerPage shows the partial banner and its gaps", async () => {
+  await runWithFrames([
+    doneFrame("partial", ["Required tools could not be established from your documents."]),
+  ]);
+
+  expect(await screen.findByText("Partly verified")).toBeInTheDocument();
+  expect(
+    screen.getByText("Required tools could not be established from your documents.")
+  ).toBeInTheDocument();
+});
+
+test("RepairPlannerPage shows not_found without presenting the plan as guidance", async () => {
+  await runWithFrames([doneFrame("not_found")]);
+
+  expect(await screen.findByText("Not found in your documents")).toBeInTheDocument();
+  expect(screen.getByText(/not as repair guidance/i)).toBeInTheDocument();
+});
+
+test("RepairPlannerPage renders the plan from done.text, not from model prose", async () => {
+  await runWithFrames([
+    // A planner that still leaked prose would show this. It must not appear:
+    // the page renders done.text only.
+    { type: "text_delta", text: "Torque everything to 54 Nm." },
+    doneFrame("partial"),
+  ]);
+
+  expect(await screen.findByText(/Torque caliper bolts to 25 ft-lb/)).toBeInTheDocument();
+  expect(screen.queryByText(/54 Nm/)).not.toBeInTheDocument();
 });

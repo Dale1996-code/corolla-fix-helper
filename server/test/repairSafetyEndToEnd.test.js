@@ -20,11 +20,18 @@ function runFlow(phrase) {
   assert.equal(tasks.length, 1, `expected one task for: ${phrase}`);
 
   const task = tasks[0];
+  // This matrix isolates the SAFETY dimension of readiness, so the tool and
+  // part groups are handed in already satisfied. Readiness now scores validated
+  // requirement groups rather than raw inventory strings; without these the
+  // whole matrix would sit at almost_ready for reasons unrelated to safety.
   const readiness = checkRepairReadiness({
     tasks,
-    availableTools: "socket set",
-    availableParts: "the part",
     skillLevel: "advanced",
+    requirements: {
+      tools: { status: "satisfied", required: ["socket set"], satisfied: ["socket set"], missing: [] },
+      parts: { status: "satisfied", required: ["the part"], satisfied: ["the part"], missing: [] },
+    },
+    evidenceStatus: "verified",
   });
   const { checklist } = buildOwnerChecklist({ tasks, skillLevel: "advanced" });
 
@@ -185,10 +192,15 @@ test("acknowledging safety clears the block but keeps the warnings", () => {
   const { tasks } = extractRepairTasks({ brief: "Replace the front brake pads carefully" });
   const readiness = checkRepairReadiness({
     tasks,
-    availableTools: "socket set",
-    availableParts: "pads",
     skillLevel: "advanced",
     ackSafety: true,
+    // Isolating the acknowledgment dimension: tool and part groups are handed
+    // in satisfied so the only thing under test is the safety row.
+    requirements: {
+      tools: { status: "satisfied", required: ["socket set"], satisfied: ["socket set"], missing: [] },
+      parts: { status: "satisfied", required: ["pads"], satisfied: ["pads"], missing: [] },
+    },
+    evidenceStatus: "verified",
   });
   const { checklist } = buildOwnerChecklist({
     tasks,
