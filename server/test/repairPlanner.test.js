@@ -24,6 +24,8 @@ const {
   buildOwnerChecklist,
   draftHandoffNotes,
   searchRepairDocs,
+  createToolRegistry,
+  repairToolSchemas,
 } = await import("../src/services/agent/repairTools.js");
 const { runRepairPlannerAgent, AI_NOT_CONFIGURED_MESSAGE } = await import(
   "../src/services/agent/repairPlannerAgent.js"
@@ -67,23 +69,29 @@ function createMockStreamTurn() {
         type: "function_call",
         callId: "call_extract",
         name: "extract_repair_tasks",
-        arguments: { brief: "Front brakes squeak. Replace pads." },
+        // A brief the model made up. The server ignores it and returns the
+        // canonical list derived from the owner's real brief.
+        arguments: { brief: "Detail the paint." },
       };
       yield {
         type: "function_call",
         callId: "call_search",
         name: "search_repair_docs",
-        arguments: { query: "front brake pad torque" },
+        arguments: { taskId: 1, query: "front brake pad torque" },
       };
       yield {
         type: "function_call",
         callId: "call_ready",
         name: "check_repair_readiness",
+        // Every one of these is a trusted owner input the model must not be
+        // able to set. They are ignored; the trusted context supplies the real
+        // values. See the trust-boundary tests below.
         arguments: {
           tasks: [{ id: 1, title: "Replace front brake pads", difficulty: "intermediate", safetyFlags: ["x"] }],
           availableTools: "socket set",
           availableParts: "brake pads",
-          skillLevel: "intermediate",
+          skillLevel: "advanced",
+          ackSafety: true,
         },
       };
       return;
@@ -327,7 +335,8 @@ test("streamResponsesTurn sends a non-empty model string in the request body", a
     capturedBody = JSON.parse(options.body);
 
     const frame = new TextEncoder().encode(
-      'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+      'data: {"type":"response.output_text.delta","delta":"ok"}\n\n' +
+        'data: {"type":"response.completed"}\n\n'
     );
     let read = false;
 
@@ -420,7 +429,7 @@ test("runRepairPlannerAgent returns a tool error result when one tool throws", a
       type: "function_call",
       callId: "call_search",
       name: "search_repair_docs",
-      arguments: { query: "front brake pad torque" },
+      arguments: { taskId: 1, query: "front brake pad torque" },
     };
   }
 
@@ -498,6 +507,28 @@ test("POST /api/repair-plan validates a missing brief", async () => {
 
   assert.equal(response.status, 400);
   assert.equal(response.body.error, "A repair brief is required.");
+});
+
+test("POST /api/repair-plan rejects an unrecognized skill level", async () => {
+  const app = createApp();
+
+  // Skill drives 30 of the 100 readiness points and the DIY vs shop split.
+  // Silently falling back to "beginner" would score the owner against a level
+  // they did not choose.
+  const response = await request(app)
+    .post("/api/repair-plan")
+    .send({ brief: "Replace the front brake pads.", skillLevel: "expert" });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /skillLevel/);
+
+  for (const skillLevel of ["beginner", "intermediate", "advanced"]) {
+    const accepted = await request(app)
+      .post("/api/repair-plan")
+      .send({ brief: "Replace the front brake pads.", skillLevel });
+
+    assert.notEqual(accepted.status, 400, `"${skillLevel}" must be accepted`);
+  }
 });
 
 test("POST /api/repair-plan streams ai_not_configured when no key is configured", async () => {
@@ -630,17 +661,21 @@ test("runRepairPlannerAgent still surfaces real model failures as an error frame
   assert.match(errorEvent.message, /500/);
 });
 
-test("runRepairPlannerAgent emits a truncation status when the loop ends with no narrative", async () => {
+test("runRepairPlannerAgent fails the run when the turn budget is exhausted", async () => {
   const events = [];
 
   // The model only ever asks for a tool and never writes narrative text, so the
   // turn budget is exhausted with an empty finalText.
+  //
+  // This previously asserted `status: "completed"` with an advisory status
+  // frame -- the browser rendered a readiness score and checklist for a run
+  // that produced no plan. A truncated run is now a failure.
   async function* toolOnlyStreamTurn() {
     yield {
       type: "function_call",
       callId: "call_extract",
       name: "extract_repair_tasks",
-      arguments: { brief: "Front brakes squeak." },
+      arguments: {},
     };
   }
 
@@ -655,11 +690,263 @@ test("runRepairPlannerAgent emits a truncation status when the loop ends with no
     }
   );
 
+  assert.equal(result.status, "error");
+  assert.equal(result.code, "planner_incomplete");
+  assert.equal(result.reason, "turn_limit");
+
+  const doneEvents = events.filter((event) => event.type === "done");
+  assert.equal(doneEvents.length, 0, "a truncated run must not emit a done frame");
+
+  const errorEvent = events.at(-1);
+  assert.equal(errorEvent.type, "error");
+  assert.equal(errorEvent.reason, "turn_limit");
+  assert.ok(errorEvent.message.length > 0, "a failure must carry a fixed user-facing message");
+});
+
+test("runRepairPlannerAgent fails the run when the model writes no narrative", async () => {
+  const events = [];
+
+  // The model stops calling tools but writes nothing: no plan was produced.
+  async function* silentStreamTurn() {
+    for (const nothing of []) {
+      yield nothing;
+    }
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: silentStreamTurn,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "empty_output");
+  assert.equal(events.filter((event) => event.type === "done").length, 0);
+});
+
+test("runRepairPlannerAgent rejects a brief too vague to yield a canonical task", async () => {
+  const events = [];
+  let modelWasCalled = false;
+
+  async function* neverCalled() {
+    modelWasCalled = true;
+    yield { type: "text_delta", text: "should not run" };
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "help" },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: neverCalled,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "no_canonical_task");
+  assert.equal(modelWasCalled, false, "a vague brief must fail before spending a model call");
+  assert.equal(events.filter((event) => event.type === "done").length, 0);
+});
+
+// --- Canonical task rules --------------------------------------------------
+//
+// The task list is the foundation the whole plan is built on: readiness counts
+// tasks, the checklist assigns owners per task, and the evidence contract will
+// demand coverage per task. Splitting it wrong is not cosmetic.
+
+test("a compound brief splits into one task per independent repair", () => {
+  const { tasks } = extractRepairTasks({
+    brief: "Replace the front brakes and diagnose a steering shake.",
+  });
+
+  assert.equal(tasks.length, 2, "each side is its own repair action");
+
+  const { tasks: twoJobs } = extractRepairTasks({ brief: "Change the oil and rotate the tires." });
+  assert.equal(twoJobs.length, 2);
+});
+
+test("object lists and procedure steps are not split into fabricated tasks", () => {
+  const singleTaskBriefs = [
+    // "and" terminating a list of parts, not a second job.
+    "Replace the pads, rotors, and calipers.",
+    "Replace the pads, rotors, and the front calipers.",
+    "Remove the caliper and bracket.",
+    "Check the pads and shims for wear.",
+    // Steps within one repair, not independent work.
+    "Lift the car and support it on stands.",
+    "Replace the front brakes and torque to spec.",
+    "Bleed the brakes and top off the reservoir.",
+  ];
+
+  for (const brief of singleTaskBriefs) {
+    const { tasks } = extractRepairTasks({ brief });
+    assert.equal(tasks.length, 1, `expected "${brief}" to stay one task, got ${tasks.length}`);
+  }
+});
+
+test("a task kept whole despite a conjunction is marked compound with its clauses", () => {
+  const { tasks } = extractRepairTasks({ brief: "Remove the caliper and bracket." });
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].compound, true, "evidence must later cover each clause, not just one");
+  assert.equal(tasks[0].clauses.length, 2);
+});
+
+test("duplicate wording yields one task, not two", () => {
+  const { tasks } = extractRepairTasks({
+    brief: "Replace front brake pads. Replace front brake pads.",
+  });
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].id, 1);
+});
+
+test("a brief too vague to plan yields no canonical task", () => {
+  for (const brief of ["help", "car makes noise", "   "]) {
+    const { tasks } = extractRepairTasks({ brief });
+    assert.equal(tasks.length, 0, `expected "${brief}" to produce no task`);
+  }
+});
+
+test("task ids stay contiguous after dedupe and rejection", () => {
+  const { tasks } = extractRepairTasks({
+    brief: "Replace front brake pads. help. Replace front brake pads. Change the oil.",
+  });
+
+  assert.deepEqual(
+    tasks.map((task) => task.id),
+    tasks.map((_task, index) => index + 1)
+  );
+});
+
+// --- Trust boundary --------------------------------------------------------
+
+test("model-supplied readiness inputs cannot change the result", async () => {
+  const events = [];
+
+  // A model doing everything it is not allowed to do: acknowledging the safety
+  // risk on the owner's behalf, replacing the task list with something benign,
+  // handing itself a full tool chest, and claiming advanced skill.
+  async function* hostileStreamTurn({ input }) {
+    const alreadyRan = input.some((item) => item.type === "function_call_output");
+
+    if (alreadyRan) {
+      yield { type: "text_delta", text: "Plan written." };
+      return;
+    }
+
+    yield {
+      type: "function_call",
+      callId: "call_ready",
+      name: "check_repair_readiness",
+      arguments: {
+        tasks: [{ id: 1, title: "Wash the car", difficulty: "beginner", safetyFlags: [] }],
+        availableTools: "complete professional tool chest",
+        availableParts: "every part needed",
+        skillLevel: "advanced",
+        ackSafety: true,
+      },
+    };
+    yield {
+      type: "function_call",
+      callId: "call_list",
+      name: "build_owner_checklist",
+      arguments: { tasks: [{ id: 1, title: "Wash the car" }], skillLevel: "advanced", ackSafety: true },
+    };
+  }
+
+  const result = await runRepairPlannerAgent(
+    // The owner listed nothing and is a beginner.
+    { brief: "Replace the front brake pads.", skillLevel: "beginner", availableTools: "none", availableParts: "n/a" },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: hostileStreamTurn,
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
   assert.equal(result.status, "completed");
-  assert.equal(result.text, "");
-  const truncationStatus = events
-    .filter((event) => event.type === "status")
-    .find((event) => /truncated/i.test(event.message));
-  assert.ok(truncationStatus, "expected a truncation status when no narrative was written");
-  assert.equal(events.at(-1).type, "done");
+
+  const { readiness, checklist, tasks } = result.artifacts;
+
+  assert.equal(readiness.safetyAcknowledged, false, "the model must not acknowledge risk for the owner");
+  assert.equal(readiness.skillLevel, "beginner", "the model must not raise the owner's skill level");
+  assert.notEqual(readiness.level, "ready", "unacknowledged brake work cannot be Ready");
+  assert.equal(
+    readiness.rubric.find((item) => item.id === "tools_listed").met,
+    false,
+    '"none" is not a tool inventory'
+  );
+  assert.equal(readiness.rubric.find((item) => item.id === "parts_listed").met, false);
+
+  assert.equal(tasks.length, 1);
+  assert.match(tasks[0].title, /brake/i, "the canonical task list came from the owner's brief");
+  assert.equal(checklist[0].owner, "Shop Recommended");
+});
+
+test("none and n/a inventories earn no readiness points", () => {
+  const { tasks } = extractRepairTasks({ brief: "Change the oil." });
+
+  for (const sentinel of ["none", "n/a", "N/A", "unknown", "not sure", ""]) {
+    const readiness = checkRepairReadiness({
+      tasks,
+      availableTools: sentinel,
+      availableParts: sentinel,
+      skillLevel: "beginner",
+    });
+
+    assert.equal(
+      readiness.rubric.find((item) => item.id === "tools_listed").met,
+      false,
+      `"${sentinel}" must not count as a tool inventory`
+    );
+    assert.equal(readiness.rubric.find((item) => item.id === "parts_listed").met, false);
+  }
+
+  const real = checkRepairReadiness({
+    tasks,
+    availableTools: "socket set, oil filter wrench",
+    availableParts: "5w30 oil, filter",
+    skillLevel: "beginner",
+  });
+
+  assert.equal(real.rubric.find((item) => item.id === "tools_listed").met, true);
+});
+
+test("search_repair_docs rejects a taskId that is not a canonical task", async () => {
+  const registry = createToolRegistry({
+    retrieve: mockRetrieve,
+    trusted: { tasks: [{ id: 1, title: "Replace front brake pads" }] },
+  });
+
+  const invented = await registry.search_repair_docs({ taskId: 99, query: "brake torque" });
+  assert.match(invented.error, /Unknown taskId/);
+
+  const valid = await registry.search_repair_docs({ taskId: 1, query: "brake torque" });
+  assert.equal(valid.taskId, 1);
+  assert.equal(valid.citations.length, 1);
+});
+
+test("no model-facing schema exposes a trusted owner input", () => {
+  const forbidden = ["ackSafety", "skillLevel", "availableTools", "availableParts", "tasks", "brief"];
+
+  for (const schema of repairToolSchemas) {
+    const exposed = Object.keys(schema.parameters?.properties || {});
+
+    for (const field of forbidden) {
+      assert.ok(
+        !exposed.includes(field),
+        `tool "${schema.name}" must not let the model set "${field}"`
+      );
+    }
+  }
+
+  const search = repairToolSchemas.find((schema) => schema.name === "search_repair_docs");
+  assert.ok(search.parameters.required.includes("taskId"), "searches must name their canonical task");
 });

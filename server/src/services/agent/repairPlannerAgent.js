@@ -1,32 +1,56 @@
 import { config } from "../../config.js";
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
-import { createToolRegistry, repairToolSchemas } from "./repairTools.js";
+import { createToolRegistry, extractRepairTasks, repairToolSchemas } from "./repairTools.js";
 import { streamResponsesTurn } from "./openAiResponsesClient.js";
 import { createTracer } from "./tracing.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable the Repair Planner.";
 
+export const SKILL_LEVELS = ["beginner", "intermediate", "advanced"];
+
+// Fixed, safe user-facing text. A failure never echoes model output back to the
+// owner, so nothing unvalidated can reach the page through an error frame.
+export const PLANNER_FAILURE_MESSAGES = {
+  no_canonical_task:
+    "That brief is too vague to plan. Name the part or the symptom — for example \"replace the front brake pads\" or \"grinding noise when braking\".",
+  turn_limit:
+    "The planner ran out of steps before finishing a plan. Narrow the brief to fewer repairs and try again.",
+  empty_output: "The planner stopped before writing a plan. Please try again.",
+  provider_incomplete: "The AI model stopped early and the plan is incomplete. Please try again.",
+  missing_terminal_event: "The AI model's response ended unexpectedly. Please try again.",
+  malformed_tool_arguments: "The AI model sent an unreadable tool request. Please try again.",
+};
+
 const AGENT_INSTRUCTIONS = [
   "You are the Repair Planner agent for a 2009 Toyota Corolla LE 1.8L repair workspace.",
-  "Turn the owner's rough repair brief into an actionable plan. Work in this order using the tools:",
-  "1. Call extract_repair_tasks on the full brief to break it into tasks.",
-  "2. For each task, call search_repair_docs with its keywords to ground steps and torque specs in the owner's uploaded manuals.",
-  "3. Call check_repair_readiness with the tasks, available tools, available parts, and skill level.",
+  "Turn the owner's repair brief into an actionable plan. Work in this order using the tools:",
+  "1. Call extract_repair_tasks (no arguments) to read the canonical task list for this run.",
+  "2. For each task, call search_repair_docs with that task's id and keywords to ground steps and torque specs in the owner's uploaded manuals.",
+  "3. Call check_repair_readiness (no arguments) for the readiness score.",
   "4. Call build_owner_checklist and draft_handoff_notes to produce the checklist and copy.",
+  "The task list, the owner's skill level, tool and part inventories, and the safety-acknowledgment state are fixed by the server. You cannot set them; arguments attempting to do so are ignored.",
   "Then write a concise, prioritized plan as plain text. Cite document facts only from search_repair_docs results; never invent torque specs or capacities.",
   "End with a short 'Follow-up questions:' section listing what is missing when key details (symptoms, mileage, tools, parts, budget) are absent.",
   "Keep the narrative tight and skimmable. The structured checklist, readiness, and notes are shown separately, so do not repeat them verbatim.",
 ].join("\n");
 
-function buildInitialInput({ brief, vehicle, constraints, availableTools, availableParts, skillLevel }) {
+function buildInitialInput(trusted) {
   const lines = [
-    `Vehicle: ${vehicle}`,
-    `Repair brief: ${brief}`,
-    `Skill level: ${skillLevel || "not specified"}`,
-    `Available tools: ${availableTools || "not specified"}`,
-    `Available parts: ${availableParts || "not specified"}`,
-    `Constraints (budget/time/etc.): ${constraints || "not specified"}`,
+    `Vehicle: ${trusted.vehicle}`,
+    `Repair brief: ${trusted.brief}`,
+    `Skill level: ${trusted.skillLevel}`,
+    `Available tools: ${trusted.availableTools || "not specified"}`,
+    `Available parts: ${trusted.availableParts || "not specified"}`,
+    `Constraints (budget/time/etc.): ${trusted.constraints || "not specified"}`,
+    "",
+    "Canonical tasks (server-derived, fixed for this run):",
+    ...trusted.tasks.map(
+      (task) =>
+        `- id ${task.id}: ${task.title} [system: ${task.system}, difficulty: ${task.difficulty}${
+          task.compound ? ", covers multiple clauses" : ""
+        }]`
+    ),
   ];
 
   return [
@@ -35,6 +59,33 @@ function buildInitialInput({ brief, vehicle, constraints, availableTools, availa
       content: lines.join("\n"),
     },
   ];
+}
+
+/**
+ * The server-owned planning context.
+ *
+ * Frozen because every readiness-relevant value in it is an OWNER fact, not a
+ * model opinion: the brief, the canonical tasks derived from it, the stated
+ * inventories and skill, and the safety-acknowledgment state. The tool registry
+ * reads these instead of the model's arguments, so a model that sends
+ * `ackSafety: true` or a replacement task list changes nothing.
+ */
+function buildTrustedContext(request, { brief, vehicle, tasks }) {
+  return Object.freeze({
+    brief,
+    vehicle,
+    // An unrecognized skill level is rejected at the route; defaulting here is
+    // the belt-and-braces path for direct agent callers.
+    skillLevel: SKILL_LEVELS.includes(request?.skillLevel) ? request.skillLevel : "beginner",
+    availableTools: typeof request?.availableTools === "string" ? request.availableTools : "",
+    availableParts: typeof request?.availableParts === "string" ? request.availableParts : "",
+    constraints: typeof request?.constraints === "string" ? request.constraints : "",
+    tasks: Object.freeze(tasks.map((task) => Object.freeze({ ...task }))),
+    // Server-owned and always false in this milestone. There is no request
+    // field and no model-facing schema that can set it, so safety-critical work
+    // stays Shop Recommended until an informed-consent flow is designed.
+    safetyAcknowledged: false,
+  });
 }
 
 function mergeCitations(existing, incoming) {
@@ -77,11 +128,19 @@ export async function runRepairPlannerAgent(request, options = {}) {
     retrieve = retrieveRelevantChunks,
     isAiConfigured = Boolean(config.openAiApiKey),
     vehicleLabel = "2009 Toyota Corolla LE 1.8L",
-    maxTurns = 6,
+    // Raised from 6: the loop must now END in a usable plan rather than silently
+    // reporting success when the budget runs out, so the budget has to be big
+    // enough for a multi-task brief to search and still write its narrative.
+    maxTurns = 8,
     signal,
   } = options;
 
   const brief = typeof request?.brief === "string" ? request.brief.trim() : "";
+
+  const failRun = (code, reason, artifacts = {}) => {
+    emit({ type: "error", code, reason, message: PLANNER_FAILURE_MESSAGES[reason] });
+    return { status: "error", code, reason, text: "", artifacts };
+  };
 
   if (!brief) {
     emit({ type: "error", message: "A repair brief is required." });
@@ -94,12 +153,29 @@ export async function runRepairPlannerAgent(request, options = {}) {
     return { status: "ai_not_configured", text: "", artifacts: {} };
   }
 
+  // Canonical tasks are derived from the TRUSTED brief before the model runs,
+  // so the task list the plan is built on can never be replaced by tool
+  // arguments. A brief too vague to yield one is a failure, not a plan built on
+  // a placeholder task.
+  const { tasks: canonicalTasks } = extractRepairTasks({ brief });
+
+  if (!canonicalTasks.length) {
+    return failRun("planner_invalid_output", "no_canonical_task");
+  }
+
+  const trusted = buildTrustedContext(request, {
+    brief,
+    vehicle: vehicleLabel,
+    tasks: canonicalTasks,
+  });
+
   const tracer = createTracer({ onSpan: (span) => emit({ type: "trace", span }) });
-  const registry = createToolRegistry({ retrieve });
-  const vehicle = vehicleLabel;
+  const registry = createToolRegistry({ retrieve, trusted });
 
   const artifacts = {
-    tasks: [],
+    // Canonical from the start: the UI shows the server's task list whether or
+    // not the model ever calls extract_repair_tasks.
+    tasks: trusted.tasks,
     citations: [],
     readiness: null,
     checklist: [],
@@ -107,16 +183,10 @@ export async function runRepairPlannerAgent(request, options = {}) {
   };
 
   /** @type {any[]} */
-  let inputItems = buildInitialInput({
-    brief,
-    vehicle,
-    constraints: request.constraints,
-    availableTools: request.availableTools,
-    availableParts: request.availableParts,
-    skillLevel: request.skillLevel,
-  });
+  let inputItems = buildInitialInput(trusted);
 
   let finalText = "";
+  let modelFinishedWriting = false;
 
   try {
     emit({ type: "status", message: "Analyzing repair brief..." });
@@ -145,6 +215,8 @@ export async function runRepairPlannerAgent(request, options = {}) {
       turnSpan.end({ toolCalls: pendingToolCalls.length });
 
       if (!pendingToolCalls.length) {
+        // The model stopped calling tools: this turn was its final answer.
+        modelFinishedWriting = true;
         break;
       }
 
@@ -167,10 +239,10 @@ export async function runRepairPlannerAgent(request, options = {}) {
           }
         }
 
-        // Accumulate structured artifacts for the UI.
-        if (toolCall.name === "extract_repair_tasks" && Array.isArray(result.tasks)) {
-          artifacts.tasks = result.tasks;
-        } else if (toolCall.name === "search_repair_docs" && Array.isArray(result.citations)) {
+        // Accumulate structured artifacts for the UI. `tasks` is deliberately
+        // absent: the canonical list is set before the loop and the model
+        // cannot replace it.
+        if (toolCall.name === "search_repair_docs" && Array.isArray(result.citations)) {
           artifacts.citations = mergeCitations(artifacts.citations, result.citations);
         } else if (toolCall.name === "check_repair_readiness") {
           artifacts.readiness = result;
@@ -205,16 +277,17 @@ export async function runRepairPlannerAgent(request, options = {}) {
 
     const trimmedFinal = finalText.trim();
 
-    // The loop is bounded by `maxTurns`. With several tasks and sequential tool
-    // calls the model can exhaust that budget before writing the final
-    // narrative, leaving an empty panel. Surface a clear status instead of a
-    // silent blank so the owner knows to narrow the brief.
+    // A run that spends its whole budget on tool calls, or stops without
+    // writing anything, produced no plan. It used to emit
+    // `done.status: "completed"` with an advisory status frame, so the browser
+    // rendered a readiness score and checklist as if the run had succeeded.
+    // Incomplete generation is a failure: no `done`, no artifacts.
+    if (!modelFinishedWriting) {
+      return failRun("planner_incomplete", "turn_limit");
+    }
+
     if (!trimmedFinal) {
-      emit({
-        type: "status",
-        message:
-          "The plan was truncated before a written summary — narrow the brief to fewer repairs and try again. The structured checklist and readiness below are still based on what was gathered.",
-      });
+      return failRun("planner_incomplete", "empty_output");
     }
 
     emit({ type: "done", status: "completed", text: trimmedFinal, artifacts });
@@ -226,6 +299,13 @@ export async function runRepairPlannerAgent(request, options = {}) {
     // network failures (4xx/5xx, parse errors) keep surfacing via `error`.
     if (error?.name === "AbortError") {
       return { status: "aborted", text: finalText.trim(), artifacts };
+    }
+
+    // Typed provider failures (truncated response, missing terminal event,
+    // unparseable tool arguments) carry a code/reason so the browser can tell
+    // an incomplete run from a completed one. No artifacts are returned.
+    if (error?.code && error?.reason) {
+      return failRun(error.code, error.reason);
     }
 
     emit({ type: "error", message: error.message || "The repair planner failed." });
