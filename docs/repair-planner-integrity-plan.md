@@ -186,7 +186,8 @@ canonical; PR 2's evidence contract consumes the result.
 - Immutable, server-owned planning context built from the request.
 - Canonical tasks extracted server-side from the trusted brief, with conjunction splitting,
   deduplication, and degenerate-task rejection.
-- Safety classifier recognizes bare "pads" / "shoes".
+- Safety classifier recognizes "pads" / "shoes" in brake context, without mis-filing seat, pedal,
+  or polishing pads.
 - Inventory sentinels (`none`, `n/a`, …) treated as empty.
 - Model-facing tools reduced to `search_repair_docs` and `finalize_repair_plan`.
 - Structured claims validated against exact retrieved source text.
@@ -271,7 +272,8 @@ The narrative ships in `done.text` only — no synthetic `text_delta`.
 A claim is **accepted** only when it passes every check in §8 rule 2. Otherwise it is **rejected**.
 
 A canonical task is **covered** when it has ≥1 accepted technical claim **and** zero rejected
-claims.
+claims. A task marked `compound: true` (§9.1) is covered only when **each** of its action clauses
+has ≥1 accepted claim.
 
 | Status | Condition |
 | --- | --- |
@@ -321,11 +323,76 @@ Binding sub-rules:
 
 ### 9.1 Splitting and deduplication
 
-- Split on the existing delimiters **plus** coordinating conjunctions joining two repair clauses
-  (`and`, `then`, `also`, `plus`, `as well as`) where each side independently yields ≥3 words.
-- Normalize titles (lowercase, collapse whitespace, strip terminal punctuation) and **deduplicate**;
-  a duplicate does not receive a second task ID.
+Existing delimiters (`\r?\n`, sentence-ending punctuation, `;`, `•`, ` - `) are unchanged.
+
+#### Conjunction splitting
+
+A fragment splits at a coordinating conjunction (`and`, `then`, `also`, `plus`, `as well as`) only
+when **every** test passes. Word count and an automotive noun are not sufficient — an object list
+and a procedure step both satisfy those and must not become tasks.
+
+1. **Both sides ≥3 words** after trimming the conjunction and leading articles.
+2. **Each side independently reads as a repair, inspection, or diagnostic action.** It must carry
+   its own action verb — repair (`replace`, `swap`, `change`, `install`, `rebuild`, `bleed`,
+   `flush`, `service`, `repair`, `fix`, `adjust`, `align`, `rotate`), inspection (`inspect`,
+   `check`, `measure`, `test`), or diagnostic (`diagnose`, `troubleshoot`, `trace`, `scan`) — or a
+   nominalized job (`oil change`, `brake job`, `alignment`, `tune-up`). A side made only of nouns is
+   a continuation of the left side's verb.
+3. **Each side has its own object** — an automotive component noun or a symptom phrase. A verb with
+   no object of its own is a step, not a task.
+
+Vehicle-handling verbs (`lift`, `raise`, `lower`, `support`, `secure`, `place`, `set`, `park`) are
+deliberately **excluded** from the action set: they are setup steps within one repair, never
+independent tasks.
+
+**Default: do not split.** When any test is inconclusive, keep one task.
+
+#### Required tests
+
+Must split:
+
+| Input | Result |
+| --- | --- |
+| `Replace the front brakes and diagnose a steering shake.` | 2 tasks — both sides have own verb + object, different systems |
+| `Change the oil and rotate the tires.` | 2 tasks |
+
+Must **not** split — object lists:
+
+| Input | Why |
+| --- | --- |
+| `Replace the pads, rotors, and calipers.` | `and` terminates a noun list; right side has no verb (test 2) |
+| `Replace the pads, rotors, and the front calipers.` | right side reaches 3 words but still has no verb (test 2) |
+| `Remove the caliper and bracket.` | right side is a bare object (tests 1, 2) |
+| `Check the pads and shims for wear.` | right side is a bare object (test 2) |
+
+Must **not** split — procedure phrases:
+
+| Input | Why |
+| --- | --- |
+| `Lift the car and support it on stands.` | `support` is a handling verb, object is a pronoun (tests 2, 3) |
+| `Replace the front brakes and torque to spec.` | `torque to spec` is a step with no component object (tests 2, 3) |
+| `Bleed the brakes and top off the reservoir.` | second clause is a step of the same job (test 2) |
+
+#### Deduplication and IDs
+
+- Normalize titles (lowercase, collapse whitespace, strip terminal punctuation) and
+  **deduplicate**; a duplicate does not receive a second task ID.
 - Task IDs remain stable, contiguous, and server-assigned.
+
+#### Compound tasks: closing the hole strictness reopens
+
+Strict splitting has a cost that must be paid explicitly. Under-splitting is **not** the safe
+direction for evidence: an unsplit `"...brakes and...steering shake"` is one task, so §7 needs only
+one accepted claim to mark it covered — the exact cherry-picking §1.3 identified. Over-splitting is
+merely noisy (more gaps, lower readiness); under-splitting is unsound.
+
+So when a fragment is **not** split but still contains a coordinating conjunction joining two action
+clauses, mark the task `compound: true` and record its clauses. A compound task counts as
+**covered** only when each of its action clauses has ≥1 accepted claim.
+
+This keeps the displayed task list conservative and honest while preventing a single brake citation
+from certifying an ungrounded steering diagnosis. Add a test: a compound task with evidence for only
+one clause yields `partial`, never `verified`.
 
 ### 9.2 Degenerate-task rejection
 
@@ -337,16 +404,73 @@ A fragment becomes a canonical task only when it survives a validity test: it co
   the part or symptom.
 - This is what makes §8 rule 7's zero-task branch reachable rather than dead code.
 
-### 9.3 Safety classifier
+### 9.3 Safety classifier — context-aware `pads` / `shoes`
 
-Extend the brakes rule at [safetyClassifier.js:53](../server/src/services/safetyClassifier.js#L53)
-so bare `pads` / `shoes` match, not only `brake pads` / `brake shoes`.
+A global bare `\bpads?\b` was considered and **rejected**: it mis-files seat pads, pedal pads, and
+polishing pads as brake work, which is exactly the substring over-matching the `\babs\b` comment in
+that file warns against. Use a context-aware cue instead.
 
-Judgment call, stated explicitly: bare `\bpads?\b` can over-match (e.g. non-brake pads). In this
-single-vehicle repair domain the failure direction is safe — over-classification yields
-`Shop Recommended`, which is conservative. This is the opposite trade-off from the deliberate
-`\babs\b` narrowing documented in that file, and the difference is intentional: `abs` mis-filed
-*away* from a hazard's true system, whereas over-matching `pads` only adds caution.
+#### What the current rule already covers
+
+Measured against `4e95ebf`, the existing pattern at
+[safetyClassifier.js:53](../server/src/services/safetyClassifier.js#L53) already matches
+`rear brake shoes`, `brake pads`, `pads and rotor`, and `caliper and pads` — because `brake`,
+`rotor`, and `caliper` are standalone alternatives. The genuinely uncovered cases are **`front
+pads`, `replace the pads`, `swap the pads`, and anything qualified only by `drum`** (which is not in
+the pattern at all).
+
+#### The rule
+
+A `pads?` / `shoes?` token counts as brake friction work when the exclusion test passes **and** at
+least one qualifier applies.
+
+**Step 1 — exclusion (immediate left neighbour).** If the token directly preceding `pads`/`shoes` is
+`seat`, `pedal`, `jack`, `lift`, `polishing`, `buffing`, `sanding`, `floor`, `knee`, or `elbow`, the
+cue does not fire. Exclusion always wins over Step 2.
+
+**Step 2 — qualifier (any one).**
+
+| # | Qualifier | Example |
+| --- | --- | --- |
+| a | Positional word immediately left: `front`, `rear`, `left`, `right`, `inner`, `outer`, `driver`, `passenger` | `front pads`, `rear shoes` |
+| b | Repair verb within 3 tokens to the left (articles allowed): `replace`, `swap`, `change`, `install`, `inspect`, `check`, `measure` | `replace the pads`, `swap the pads` |
+| c | Brake-context term anywhere in the fragment: `brake(s)`, `braking`, `rotor(s)`, `caliper(s)`, `drum(s)`, `abs` | `pads on the drum` |
+
+Also add `\bdrums?\b` as its own alternative in the brakes rule — "drum" has no competing
+automotive sense on this vehicle.
+
+**Scope:** the exclusion suppresses only the pads/shoes cue. It never suppresses other rules or
+other alternatives. `"replace the seat pads and bleed the brakes"` is still brake-critical, because
+standalone `\bbrakes?\b` fires on its own.
+
+#### Required tests
+
+Positive — must classify as **Brakes** / safety-critical:
+
+| Input | Covered today? |
+| --- | --- |
+| `front pads` | no — new |
+| `replace the pads` | no — new |
+| `swap the pads` | no — new |
+| `pads on the drum` | no — new |
+| `rear brake shoes` | yes — regression guard |
+| `pads and rotor` | yes — regression guard |
+| `caliper and pads` | yes — regression guard |
+
+Negative — the **brakes** rule must not fire:
+
+| Input | Expected |
+| --- | --- |
+| `seat pads` | not safety-critical |
+| `pedal pads` | not safety-critical |
+| `polishing pads` | not safety-critical |
+| `jack pads` | **safety-critical via the `lifting` rule, not `brakes`** |
+
+> `jack pads` is a measured exception. It already resolves to `safetyCritical: true` with hazard
+> `vehicle lifting` on `4e95ebf` — a correct result for a different hazard, since jacking a car is
+> genuinely dangerous. Assert on the **matched rule id**, not on `safetyCritical`. A test asserting
+> `safetyCritical === false` for `jack pads` would fail, and making it pass would mean weakening the
+> lifting rule — a safety regression.
 
 ---
 
@@ -393,8 +517,8 @@ right seam, since PR 2's per-task coverage model is meaningless without them.
   `search_repair_docs`. Add conjunction splitting, title dedupe, and degenerate-task rejection to
   `extractRepairTasks`. Treat `none` / `n/a` / `unknown` / `not sure` / blank as no inventory at
   [:263-264](../server/src/services/agent/repairTools.js#L263).
-- **[safetyClassifier.js](../server/src/services/safetyClassifier.js)** — bare `pads` / `shoes`
-  match the brakes rule.
+- **[safetyClassifier.js](../server/src/services/safetyClassifier.js)** — context-aware `pads` /
+  `shoes` cue plus standalone `drums?`, per §9.3. No global bare `pads` match.
 - **[repairPlannerAgent.js](../server/src/services/agent/repairPlannerAgent.js)** — build and
   `Object.freeze` a trusted context (`brief`, `skillLevel`, `availableTools`, `availableParts`,
   `vehicle`, `safetyAcknowledged: false`); call `extractRepairTasks` server-side from the trusted
@@ -411,11 +535,28 @@ right seam, since PR 2's per-task coverage model is meaningless without them.
   recognized terminal event arrived; bare EOF becomes an error; only `done.status === "completed"`
   renders results.
 
-**PR 1 exit state, stated honestly:** the trust boundary is closed, completion integrity is
-enforced, `"none"` inventories score zero, and safety-critical brake work can no longer be
-model-unlocked to `ready`. Readiness is still **provisional** — points are not yet matched against
-what the repair actually requires, and technical prose is suppressed rather than verified. Label it
-provisional in the UI until PR 2 lands.
+**PR 1 exit state, stated honestly. PR 1 is not release-complete.**
+
+What PR 1 fixes: the trust boundary is closed, completion integrity is enforced, the canonical task
+list is server-owned and sane, `"none"` inventories score zero, and safety-critical brake work can
+no longer be model-unlocked to `ready`.
+
+What PR 1 does **not** fix:
+
+- **Raw model prose still streams to the browser, unvalidated.** `text_delta` suppression is a PR 2
+  change ([repairPlannerAgent.js:137-139](../server/src/services/agent/repairPlannerAgent.js#L137)
+  is untouched by PR 1). After PR 1 the owner still reads an ungrounded narrative that may contain
+  invented torque specs and capacities, rendered with the same authority as sourced text. Nothing
+  in PR 1 verifies, suppresses, or marks that prose.
+- **Readiness points are still not matched against what the repair requires.** The rubric awards
+  tools/parts credit for any non-sentinel inventory string; requirement-to-inventory matching
+  arrives in PR 2.
+- **There is no evidence status.** `verified` / `partial` / `not_found` does not exist until PR 2,
+  so nothing tells the owner how much of the plan is grounded.
+
+Until PR 2 lands, label readiness **provisional** in the UI and do not present the narrative as
+document-grounded. This is why the two PRs are one milestone and why no release is cut between
+them.
 
 ### PR 2 — Evidence contract and real readiness
 
@@ -473,7 +614,21 @@ cripple grounding coverage. `buildSnippet` stays for the citation UI.
 - `"help"` and `"car makes noise"` → `error` / `no_canonical_task`, not a vague completed task.
 - A 7-clause brief → all tasks extracted; run completes within `maxTurns` 8 using batched
   per-turn tool calls; status is `partial` rather than a failure when coverage is incomplete.
-- `"Swap the front pads."` → classified safety-critical (regression test for §9.3).
+- **Split negatives (§9.1)** — each stays **1** task: `"Replace the pads, rotors, and calipers."`,
+  `"Replace the pads, rotors, and the front calipers."`, `"Remove the caliper and bracket."`,
+  `"Check the pads and shims for wear."`, `"Lift the car and support it on stands."`,
+  `"Replace the front brakes and torque to spec."`,
+  `"Bleed the brakes and top off the reservoir."`
+- **Compound coverage (§9.1)** — an unsplit compound task with evidence for only one clause yields
+  `partial`, never `verified`.
+
+**New — safety classifier tests (§9.3)**
+- Positive, must be Brakes / safety-critical: `front pads`, `replace the pads`, `swap the pads`,
+  `pads on the drum` (all new), plus regression guards `rear brake shoes`, `pads and rotor`,
+  `caliper and pads`, `brake pads`.
+- Negative, brakes rule must not fire: `seat pads`, `pedal pads`, `polishing pads`.
+- `jack pads` → assert the matched rule is `lifting`, **not** `brakes`. Do not assert
+  `safetyCritical === false`; it is legitimately critical for a different hazard (§9.3).
 
 **Extend [repairPlanner.test.js](../server/test/repairPlanner.test.js)**
 - A mock model sending `ackSafety: true`, replacement tasks, inflated inventories, and
@@ -552,8 +707,14 @@ Run `npm run dev`, open `/repair-planner` (use a sample PDF so there is somethin
   will notice.
 - **Degenerate briefs now fail instead of producing a vague plan.** Better than false confidence,
   but it is a new user-facing rejection path; the message must name what to add.
-- **Conjunction splitting may over-split** an unusual brief into two thin tasks. Failure direction is
-  safe (more coverage demanded, lower readiness), and dedupe absorbs the common cases.
+- **Strict conjunction splitting risks *under*-splitting**, which is the unsound direction: one task
+  needs only one accepted claim, so a merged "brakes and steering" task could be certified by brake
+  evidence alone. The `compound` coverage rule (§9.1) is what contains this, and it is load-bearing
+  — if it is dropped during implementation, the strictness in §9.1 becomes a safety regression
+  rather than a precision improvement.
+- **The context-aware `pads` cue will still miss unusual phrasings** (e.g. "friction material" with
+  no brake noun nearby). It is a precision/recall trade chosen to avoid mis-filing seat and
+  polishing pads; the residual misses are narrower than the class it fixes.
 - **Progressive narrative is gone** (user-confirmed). `status` / `tool_call` / `tool_result` still
   stream, so the run is not silent, but `QA_CHECKLIST.md:130` must be updated rather than left to
   fail.
@@ -571,10 +732,13 @@ The milestone — **both PRs** — is complete when:
 
 - No model-facing schema can set acknowledgment or any trusted owner readiness input.
 - Safety-critical work cannot become `Ready` or `DIY` under the server-owned false acknowledgment,
-  **including** briefs phrased as bare "pads" / "shoes".
+  **including** briefs phrased as `front pads` or `swap the pads` — while `seat pads`,
+  `pedal pads`, and `polishing pads` are not mis-filed as brake work.
 - `"none"` / `"n/a"` / blank inventories earn zero readiness points.
-- Compound briefs produce one canonical task per repair; duplicates collapse; degenerate briefs are
-  rejected rather than silently planned.
+- Compound briefs split only when each side is an independent repair, inspection, or diagnostic
+  action; object lists and procedure steps stay one task; an unsplit compound task requires
+  evidence for every clause. Duplicates collapse; degenerate briefs are rejected rather than
+  silently planned.
 - Tools and parts earn points only through validated requirements matched to trusted inventory.
 - Every displayed technical claim is backed by an accepted source and quote; rejected claims and
   their numbers never appear as verified content, and every rejection produces a gap.
