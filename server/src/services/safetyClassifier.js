@@ -34,6 +34,34 @@
  *                                 blocks readiness the text must say why.
  */
 
+// Brake friction parts named without the word "brake".
+//
+// "brake pads" was already covered; a bare "front pads" or "swap the pads" was
+// NOT, so a real brake job scored Ready with no safety flag. A global \bpads?\b
+// would fix that and re-introduce exactly the substring problem the \babs\b
+// comment above warns about -- it mis-files seat pads, pedal pads, jack pads,
+// and polishing pads as brake work.
+//
+// Instead the cue requires context immediately around the noun:
+//   - a positional qualifier directly before it ("front pads", "rear shoes"), or
+//   - a repair verb before it, with only determiners in between
+//     ("replace the pads", "swap out the worn pads").
+//
+// Requiring adjacency is what excludes the unrelated pads: in "front seat pads"
+// and "replace the polishing pads" another noun sits between the qualifier and
+// "pads", so neither cue fires. Anything with a real brake noun elsewhere
+// ("pads and rotor", "pads on the drum") is already matched by the brake, rotor,
+// caliper, and drum alternatives, so no whole-string context scan is needed.
+const BRAKE_POSITION = "front|rear|left|right|inner|outer|driver|passenger";
+const BRAKE_SERVICE_VERB = "replace|swap|change|install|inspect|check|measure";
+const BRAKE_DETERMINER = `the|my|both|all|two|four|out|worn|old|new|${BRAKE_POSITION}`;
+const BRAKE_FRICTION_NOUN = "pads?|shoes?";
+
+const BRAKE_FRICTION_CUE = [
+  `\\b(?:${BRAKE_POSITION})\\s+(?:${BRAKE_FRICTION_NOUN})\\b`,
+  `\\b(?:${BRAKE_SERVICE_VERB})\\s+(?:(?:${BRAKE_DETERMINER})\\s+)*(?:${BRAKE_FRICTION_NOUN})\\b`,
+].join("|");
+
 /**
  * Every rule currently blocks readiness: on a single-owner DIY car, each of
  * these hazards can injure the owner or someone on the road. `blocksReadiness`
@@ -49,8 +77,22 @@ export const SAFETY_RULES = [
     system: "Brakes",
     hazard: "brake system",
     // \babs\b, not a bare "abs" substring: the old rule fired on "shock absorber".
-    pattern:
-      /\bbrakes?\b|\bbraking\b|\babs\b|\bcalipers?\b|\brotors?\b|\bmaster cylinder\b|\bbrake booster\b|\bbrake (line|fluid|pads?|shoes?)\b/,
+    // \bdrums?\b is safe standalone -- on this vehicle a "drum" is always a brake
+    // drum. "pads"/"shoes" are not, hence BRAKE_FRICTION_CUE.
+    pattern: new RegExp(
+      [
+        "\\bbrakes?\\b",
+        "\\bbraking\\b",
+        "\\babs\\b",
+        "\\bcalipers?\\b",
+        "\\brotors?\\b",
+        "\\bdrums?\\b",
+        "\\bmaster cylinder\\b",
+        "\\bbrake booster\\b",
+        "\\bbrake (line|fluid|pads?|shoes?)\\b",
+        BRAKE_FRICTION_CUE,
+      ].join("|")
+    ),
     blocksReadiness: true,
     flag:
       "Brake work affects stopping safety. Bleed the system and test at low speed before driving. This is why the task cannot be marked Ready without acknowledging the risk.",

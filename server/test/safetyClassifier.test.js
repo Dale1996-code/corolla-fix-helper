@@ -197,3 +197,66 @@ test("flag order is deterministic and follows the rule table", () => {
 
   assert.deepEqual(flags, sorted);
 });
+
+// ---- Brake friction parts named without the word "brake" ----
+//
+// "brake pads" always matched; a bare "front pads" or "swap the pads" did not,
+// so a real brake job scored Ready with no safety flag. The fix cannot be a
+// global \bpads?\b -- that re-creates the substring problem that once made
+// "shock ABSorber" a brake job, this time via seat, pedal, and polishing pads.
+
+test("brake friction parts are recognized without the word brake", () => {
+  const brakeWork = [
+    "front pads",
+    "rear shoes",
+    "replace the pads",
+    "swap the pads",
+    "swap out the worn pads",
+    "pads on the drum",
+  ];
+
+  for (const task of brakeWork) {
+    assert.ok(
+      matchedSafetyRuleIds(task).includes("brakes"),
+      `expected "${task}" to be recognized as brake work`
+    );
+    assert.equal(
+      isSafetyCriticalTask({ title: task }),
+      true,
+      `expected "${task}" to block Ready`
+    );
+  }
+});
+
+test("phrasings that already worked keep working", () => {
+  for (const task of ["brake pads", "rear brake shoes", "pads and rotor", "caliper and pads"]) {
+    assert.ok(matchedSafetyRuleIds(task).includes("brakes"), `regression: "${task}"`);
+  }
+});
+
+test("unrelated pads are not filed as brake work", () => {
+  for (const task of [
+    "seat pads",
+    "pedal pads",
+    "polishing pads",
+    "front seat pads",
+    "replace the polishing pads",
+    "replace the front seat pads",
+  ]) {
+    assert.ok(
+      !matchedSafetyRuleIds(task).includes("brakes"),
+      `expected "${task}" NOT to be filed as brake work`
+    );
+  }
+});
+
+test("jack pads are a lifting hazard, not a brake job", () => {
+  const ruleIds = matchedSafetyRuleIds("jack pads");
+
+  assert.ok(!ruleIds.includes("brakes"), "jack pads must not match the brakes rule");
+  // It IS safety-critical -- jacking a car is genuinely dangerous -- just for a
+  // different hazard. Asserting `isSafetyCriticalTask === false` here would be
+  // wrong, and "fixing" that assertion would mean weakening lifting detection.
+  assert.ok(ruleIds.includes("lifting"), "jack pads must still raise the lifting hazard");
+  assert.equal(isSafetyCriticalTask({ title: "jack pads" }), true);
+});

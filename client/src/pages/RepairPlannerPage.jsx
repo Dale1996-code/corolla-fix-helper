@@ -20,7 +20,15 @@ const initialRun = {
   narrative: "",
   artifacts: null,
   message: "",
+  // Whether the server sent a frame that actually ends a run (`done`, `error`,
+  // or `ai_not_configured`). A stream that just stops -- a dropped connection,
+  // a killed server, a proxy timeout -- used to be treated as success, so the
+  // page showed a half-built plan as finished.
+  sawTerminalEvent: false,
 };
+
+const INCOMPLETE_STREAM_MESSAGE =
+  "The connection ended before the plan was finished. Nothing below is a complete plan — run it again.";
 
 const READINESS_LABELS = {
   ready: { label: "Ready", className: "bg-emerald-100 text-emerald-800" },
@@ -339,16 +347,51 @@ export function RepairPlannerPage() {
     } else if (event.type === "text_delta") {
       updateRun((current) => ({ ...current, narrative: current.narrative + event.text }));
     } else if (event.type === "ai_not_configured") {
-      updateRun((current) => ({ ...current, status: "ai_not_configured", message: event.message || "" }));
-    } else if (event.type === "error") {
-      updateRun((current) => ({ ...current, status: "error", message: event.message || "" }));
-    } else if (event.type === "done") {
       updateRun((current) => ({
         ...current,
-        status: current.status === "error" || current.status === "ai_not_configured" ? current.status : "done",
-        artifacts: event.artifacts || current.artifacts,
-        statusMessage: "",
+        status: "ai_not_configured",
+        message: event.message || "",
+        sawTerminalEvent: true,
       }));
+    } else if (event.type === "error") {
+      updateRun((current) => ({
+        ...current,
+        status: "error",
+        message: event.message || "",
+        sawTerminalEvent: true,
+      }));
+    } else if (event.type === "done") {
+      // Only a run the server marked completed may render results. A `done`
+      // frame with any other status (or none) reports a run that ended without
+      // a usable plan, so it must not paint readiness and checklist cards.
+      const completed = event.status === "completed";
+
+      updateRun((current) => {
+        const settled = current.status === "error" || current.status === "ai_not_configured";
+
+        if (settled) {
+          return { ...current, statusMessage: "", sawTerminalEvent: true };
+        }
+
+        if (!completed) {
+          return {
+            ...current,
+            status: "error",
+            message: INCOMPLETE_STREAM_MESSAGE,
+            artifacts: null,
+            statusMessage: "",
+            sawTerminalEvent: true,
+          };
+        }
+
+        return {
+          ...current,
+          status: "done",
+          artifacts: event.artifacts || current.artifacts,
+          statusMessage: "",
+          sawTerminalEvent: true,
+        };
+      });
     }
   }
 
@@ -427,9 +470,26 @@ export function RepairPlannerPage() {
         handleEvent(parseSseFrame(buffer));
       }
 
-      updateRun((current) =>
-        current.status === "running" ? { ...current, status: "done", statusMessage: "" } : current
-      );
+      // The stream ended. If no terminal frame ever arrived the run did not
+      // finish -- it was cut off. Reporting that as "done" rendered whatever
+      // partial artifacts had accumulated as a finished plan.
+      updateRun((current) => {
+        if (current.status !== "running") {
+          return current;
+        }
+
+        if (!current.sawTerminalEvent) {
+          return {
+            ...current,
+            status: "error",
+            message: INCOMPLETE_STREAM_MESSAGE,
+            artifacts: null,
+            statusMessage: "",
+          };
+        }
+
+        return { ...current, status: "done", statusMessage: "" };
+      });
     } catch (error) {
       // An aborted stream (unmount, or a newer run superseding this one) is not a
       // user-facing failure — leave the run state alone.
