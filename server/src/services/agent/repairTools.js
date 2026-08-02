@@ -123,6 +123,176 @@ function splitBriefIntoFragments(brief) {
     .filter((fragment) => fragment.split(/\s+/).length >= 3);
 }
 
+// --- Canonical task rules --------------------------------------------------
+//
+// The delimiters above never split on a conjunction, so "replace the front
+// brakes and diagnose a steering shake" arrived as ONE task. That matters
+// beyond tidiness: a task needs only one accepted claim to count as covered, so
+// a single brake citation could certify an ungrounded steering diagnosis.
+//
+// Splitting on every "and" is worse -- it turns object lists ("pads, rotors,
+// and calipers") and procedure steps ("lift the car and support it on stands")
+// into fabricated tasks. So a split requires affirmative evidence on BOTH
+// sides: each must carry its own action verb and its own object. When that
+// evidence is missing the fragment stays whole and is marked `compound`, which
+// the evidence contract uses to demand a claim per clause rather than one claim
+// for the pair.
+
+const REPAIR_ACTION_VERBS = [
+  // Repair
+  "replace", "swap", "change", "install", "rebuild", "bleed", "flush", "service",
+  "repair", "fix", "adjust", "align", "rotate", "refill", "reseal", "resurface",
+  // Inspection
+  "inspect", "check", "measure", "test",
+  // Diagnostic
+  "diagnose", "troubleshoot", "trace", "scan",
+];
+
+// Setup verbs that describe positioning the car, never an independent job.
+// Excluded deliberately: "lift the car and support it on stands" is one repair.
+const HANDLING_VERBS = ["lift", "raise", "lower", "support", "secure", "place", "set", "park", "jack", "hold"];
+
+// Jobs named as nouns rather than verb phrases.
+const NOMINALIZED_JOBS = ["oil change", "brake job", "alignment", "tune-up", "tune up", "coolant flush"];
+
+// Backstop for degenerate-task rejection when the system classifier returns
+// "General" and no action verb is present. Deliberately excludes "car" and
+// "vehicle" so "car makes noise" is still rejected as too vague to plan.
+const COMPONENT_NOUNS = [
+  "oil", "filter", "fluid", "belt", "hose", "battery", "tire", "tyre", "wheel", "bulb",
+  "wiper", "mirror", "bumper", "door", "window", "mount", "bushing", "gasket", "seal",
+  "pump", "pulley", "thermostat", "muffler", "exhaust", "axle", "bearing", "rotor",
+  "drum", "pad", "shoe", "spark", "plug", "coil", "sensor", "fuse", "relay",
+  "alternator", "starter", "radiator", "coolant", "transmission", "clutch", "brake",
+  "caliper", "strut", "shock", "suspension", "steering", "engine", "injector",
+];
+
+// Words that cannot serve as a task's object.
+const OBJECTLESS_WORDS = new Set([
+  "the", "a", "an", "my", "its", "it", "them", "they", "this", "that", "these", "those",
+  "and", "or", "then", "also", "plus", "for", "with", "to", "on", "in", "at", "of",
+  "from", "into", "onto", "off", "out", "up", "down", "again", "spec", "specs", "both",
+  "all", "car", "vehicle", "side", "sides",
+]);
+
+const CONJUNCTION_PATTERN = /\s+(?:as well as|and also|and then|and|then|also|plus)\s+/i;
+
+const wordCount = (text) => (text.trim() ? text.trim().split(/\s+/).length : 0);
+
+const buildWordListPattern = (words) => new RegExp(`\\b(?:${words.join("|")})\\b`, "i");
+
+// Handling verbs need no pattern of their own: they are excluded simply by not
+// appearing in REPAIR_ACTION_VERBS, so `hasRepairAction` never fires for them.
+// The list is still used to keep them from counting as a task's object.
+const ACTION_VERB_PATTERN = buildWordListPattern(REPAIR_ACTION_VERBS);
+const NOMINALIZED_JOB_PATTERN = new RegExp(
+  `(?:${NOMINALIZED_JOBS.map((job) => job.replace(/[-\s]/g, "[-\\s]")).join("|")})`,
+  "i"
+);
+const COMPONENT_NOUN_PATTERN = buildWordListPattern(COMPONENT_NOUNS.map((noun) => `${noun}s?`));
+
+/**
+ * Does this text describe a repair, inspection, or diagnostic ACTION of its own?
+ * A side made only of nouns is a continuation of the other side's verb.
+ */
+function hasRepairAction(text) {
+  return ACTION_VERB_PATTERN.test(text) || NOMINALIZED_JOB_PATTERN.test(text);
+}
+
+/**
+ * Does this text carry its own object? A verb aimed at a pronoun or a bare
+ * adverb ("check them thoroughly", "torque to spec") is a step, not a task.
+ */
+function hasOwnObject(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .some(
+      (word) =>
+        word.length >= 3 &&
+        !OBJECTLESS_WORDS.has(word) &&
+        !word.endsWith("ly") &&
+        !REPAIR_ACTION_VERBS.includes(word) &&
+        !HANDLING_VERBS.includes(word)
+    );
+}
+
+/** All three split tests. Both sides must pass or the fragment stays whole. */
+function isIndependentRepairClause(side) {
+  return wordCount(side) >= 3 && hasRepairAction(side) && hasOwnObject(side);
+}
+
+/**
+ * Splits on a coordinating conjunction only when both sides independently read
+ * as repair work. Default is NOT to split.
+ */
+function splitOnConjunctions(fragment, depth = 0) {
+  if (depth >= 4) {
+    return [fragment];
+  }
+
+  let searchFrom = 0;
+
+  while (searchFrom < fragment.length) {
+    const match = CONJUNCTION_PATTERN.exec(fragment.slice(searchFrom));
+
+    if (!match) {
+      break;
+    }
+
+    const splitAt = searchFrom + match.index;
+    const left = fragment.slice(0, splitAt).trim();
+    const right = fragment.slice(splitAt + match[0].length).trim();
+
+    if (isIndependentRepairClause(left) && isIndependentRepairClause(right)) {
+      return [...splitOnConjunctions(left, depth + 1), ...splitOnConjunctions(right, depth + 1)];
+    }
+
+    searchFrom = splitAt + match[0].length;
+  }
+
+  return [fragment];
+}
+
+/**
+ * A fragment kept whole despite containing a conjunction may still cover two
+ * things. Recording the clauses lets the evidence contract require a claim for
+ * each instead of accepting one claim for the pair.
+ */
+function describeClauses(text) {
+  const clauses = text
+    .split(new RegExp(CONJUNCTION_PATTERN.source, "gi"))
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length > 0);
+
+  return clauses.length > 1 ? clauses : [];
+}
+
+/** Normalized form used only for duplicate detection. */
+function taskDedupeKey(title) {
+  return title.toLowerCase().replace(/[.!?]+$/, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Is this fragment specific enough to plan against? "help" and "car makes
+ * noise" are not: planning them produces a confident-looking task built on
+ * nothing. Rejecting them is what makes the "no canonical tasks" readiness
+ * branch reachable instead of dead code.
+ */
+function isPlannableTask(text, classification) {
+  if (wordCount(text) < 3) {
+    return false;
+  }
+
+  return (
+    classification.system !== "General" ||
+    classification.safetyCritical ||
+    hasRepairAction(text) ||
+    COMPONENT_NOUN_PATTERN.test(text)
+  );
+}
+
 // --- Tool: extract_repair_tasks -------------------------------------------
 
 /**
@@ -135,27 +305,52 @@ export function extractRepairTasks({ brief } = {}) {
     return { tasks: [] };
   }
 
-  const fragments = splitBriefIntoFragments(normalizedBrief);
-  const source = fragments.length ? fragments : [normalizedBrief];
+  // No fallback to the whole brief when nothing survives the fragment filter.
+  // The old fallback guaranteed at least one task for ANY non-blank brief, so
+  // "help" became a task titled "help" and the zero-task readiness branch could
+  // never be reached.
+  const fragments = splitBriefIntoFragments(normalizedBrief).flatMap((fragment) =>
+    splitOnConjunctions(fragment)
+  );
 
-  const tasks = source.map((fragment, index) => {
+  const tasks = [];
+  const seen = new Set();
+
+  for (const fragment of fragments) {
     const classification = classifyTask(fragment);
-    const { system } = classification;
-    const difficulty = detectDifficulty(fragment);
 
-    return {
-      id: index + 1,
-      title: fragment.length > 120 ? `${fragment.slice(0, 117)}...` : fragment,
+    if (!isPlannableTask(fragment, classification)) {
+      continue;
+    }
+
+    const title = fragment.length > 120 ? `${fragment.slice(0, 117)}...` : fragment;
+    const key = taskDedupeKey(title);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+
+    const { system } = classification;
+    const clauses = describeClauses(fragment);
+
+    tasks.push({
+      id: tasks.length + 1,
+      title,
       system,
-      difficulty,
+      difficulty: detectDifficulty(fragment),
       safetyFlags: classification.flags,
       // Carried on the task so readiness and the checklist reuse THIS decision
       // instead of re-classifying the (possibly truncated) title and reaching a
       // different answer.
       safetyCritical: classification.safetyCritical,
+      // Kept whole despite joining two clauses: evidence must cover each.
+      compound: clauses.length > 1,
+      clauses,
       keywords: buildKeywords(fragment, system),
-    };
-  });
+    });
+  }
 
   return { tasks };
 }
@@ -173,14 +368,17 @@ function buildSnippet(text) {
 }
 
 /**
- * @param {{ query?: string, limit?: number }} [args]
+ * @param {{ query?: string, limit?: number, taskId?: number }} [args]
  * @param {{ retrieve?: typeof retrieveRelevantChunks }} [deps]
  */
-export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = retrieveRelevantChunks } = {}) {
+export async function searchRepairDocs(
+  { query, limit = 4, taskId } = {},
+  { retrieve = retrieveRelevantChunks } = {}
+) {
   const normalizedQuery = normalizeText(query);
 
   if (!normalizedQuery) {
-    return { query: "", citations: [], context: "" };
+    return { query: "", taskId, citations: [], context: "" };
   }
 
   const rawChunks = await retrieve(normalizedQuery, { limit });
@@ -204,10 +402,38 @@ export async function searchRepairDocs({ query, limit = 4 } = {}, { retrieve = r
     )
     .join("\n");
 
-  return { query: normalizedQuery, citations, context };
+  return { query: normalizedQuery, taskId, citations, context };
 }
 
 // --- Tool: check_repair_readiness -----------------------------------------
+
+// Owner inventories written as a denial. Treating these as "tools listed" is
+// what let a brake job with "none" for both fields score 100/100.
+const INVENTORY_SENTINELS = new Set([
+  "none", "n/a", "na", "n a", "nil", "nothing", "no", "unknown", "not sure",
+  "none yet", "dont know", "don't know", "tbd",
+]);
+
+/**
+ * Splits a trusted owner inventory into normalized entries, dropping sentinels.
+ * Exported because the evidence contract matches required items against these
+ * same entries.
+ *
+ * @param {string} [value]
+ * @returns {string[]}
+ */
+export function parseInventory(value) {
+  return String(value || "")
+    .split(/[,;\n]/)
+    .map((entry) =>
+      entry
+        .toLowerCase()
+        .replace(/[.!?]+$/, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter((entry) => entry.length > 0 && !INVENTORY_SENTINELS.has(entry));
+}
 
 /**
  * Safety assessment for a task arriving at readiness / checklist generation.
@@ -260,8 +486,11 @@ export function checkRepairReadiness({
 } = {}) {
   const normalizedSkill = SKILL_RANK[skillLevel] ? skillLevel : "beginner";
   const skillRank = SKILL_RANK[normalizedSkill];
-  const hasTools = normalizeText(availableTools).length > 0;
-  const hasParts = normalizeText(availableParts).length > 0;
+  // Any non-empty string used to earn the full 25 points, so "none" and "n/a"
+  // scored the same as a full tool chest. Parsed entries with the sentinels
+  // removed is what a real inventory means.
+  const hasTools = parseInventory(availableTools).length > 0;
+  const hasParts = parseInventory(availableParts).length > 0;
 
   // One classification per task, reused for both the critical verdict and the
   // warnings. Previously these came from different places: safetyFlags were
@@ -451,18 +680,25 @@ export function draftHandoffNotes({ tasks = [], vehicle = "the vehicle", partsNe
 
 // --- Tool registry --------------------------------------------------------
 
+// Model-facing schemas.
+//
+// TRUST BOUNDARY: nothing the owner's readiness depends on appears here. The
+// model previously supplied `tasks`, `availableTools`, `availableParts`,
+// `skillLevel`, and `ackSafety` as tool arguments, and the registry ran them
+// verbatim -- so the model could declare the safety risk acknowledged and hand
+// itself a full tool chest. Those values now come only from the frozen trusted
+// context the server builds from the request, and the registry below ignores
+// any the model sends anyway. `brief` is trusted for the same reason: canonical
+// tasks are extracted from the owner's brief before the loop starts.
 export const repairToolSchemas = [
   {
     type: "function",
     name: "extract_repair_tasks",
     description:
-      "Split a free-text repair brief into discrete, system-tagged repair tasks with difficulty, safety flags, and document-search keywords.",
+      "Return the canonical, server-derived repair tasks for this run (id, title, system, difficulty, safety flags, keywords). Takes no arguments: the task list comes from the owner's brief and cannot be replaced.",
     parameters: {
       type: "object",
-      properties: {
-        brief: { type: "string", description: "The full repair brief from the owner." },
-      },
-      required: ["brief"],
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -470,14 +706,18 @@ export const repairToolSchemas = [
     type: "function",
     name: "search_repair_docs",
     description:
-      "Retrieve the most relevant chunks from the owner's uploaded PDF manuals to ground repair steps and torque specs. Returns citations.",
+      "Retrieve the most relevant chunks from the owner's uploaded PDF manuals to ground repair steps and torque specs. Returns citations. Every search must name the canonical task it is for.",
     parameters: {
       type: "object",
       properties: {
+        taskId: {
+          type: "integer",
+          description: "The id of the canonical task from extract_repair_tasks that this search supports.",
+        },
         query: { type: "string", description: "Keywords describing what to look up." },
         limit: { type: "integer", description: "Maximum chunks to return (default 4)." },
       },
-      required: ["query"],
+      required: ["taskId", "query"],
       additionalProperties: false,
     },
   },
@@ -485,21 +725,10 @@ export const repairToolSchemas = [
     type: "function",
     name: "check_repair_readiness",
     description:
-      "Score a set of tasks against a readiness rubric (tools, parts, skill match, safety) and report gaps and blockers.",
+      "Score the canonical tasks against the readiness rubric (tools, parts, skill match, safety) using the owner's stated inventory and skill. Takes no arguments: every input is owner-supplied and server-held.",
     parameters: {
       type: "object",
-      properties: {
-        tasks: { type: "array", items: { type: "object" }, description: "Tasks from extract_repair_tasks." },
-        availableTools: { type: "string" },
-        availableParts: { type: "string" },
-        skillLevel: { type: "string", enum: ["beginner", "intermediate", "advanced"] },
-        ackSafety: {
-          type: "boolean",
-          description:
-            "Set true only when the owner has explicitly acknowledged the risk of safety-critical work (brakes, fuel, electrical, lifting, suspension). Required before such work can be marked Ready.",
-        },
-      },
-      required: ["tasks"],
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -507,19 +736,10 @@ export const repairToolSchemas = [
     type: "function",
     name: "build_owner_checklist",
     description:
-      "Turn tasks into a prioritized owner checklist with DIY vs professional-shop assignment and step placeholders. Safety-critical work is recommended to a shop unless ackSafety is true.",
+      "Turn the canonical tasks into a prioritized owner checklist with DIY vs professional-shop assignment. Takes no arguments. Safety-critical work is labeled Shop Recommended.",
     parameters: {
       type: "object",
-      properties: {
-        tasks: { type: "array", items: { type: "object" } },
-        skillLevel: { type: "string", enum: ["beginner", "intermediate", "advanced"] },
-        ackSafety: {
-          type: "boolean",
-          description:
-            "Set true only when the owner has explicitly acknowledged the risk of safety-critical work. Otherwise safety-critical tasks are labeled Shop Recommended.",
-        },
-      },
-      required: ["tasks"],
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -531,22 +751,67 @@ export const repairToolSchemas = [
     parameters: {
       type: "object",
       properties: {
-        tasks: { type: "array", items: { type: "object" } },
-        vehicle: { type: "string" },
-        partsNeeded: { type: "string" },
+        partsNeeded: {
+          type: "string",
+          description: "Parts the cited procedures call for, to list on the shopping copy.",
+        },
       },
-      required: ["tasks"],
       additionalProperties: false,
     },
   },
 ];
 
-export function createToolRegistry({ retrieve = retrieveRelevantChunks } = {}) {
+/**
+ * Builds the executors the agent loop calls.
+ *
+ * `trusted` is the server-owned planning context. Executors read every
+ * readiness-relevant value from it and never from `args`, so a model that sends
+ * `ackSafety: true` or a replacement task list changes nothing. Only genuinely
+ * model-chosen values (a search query, parts copy) come from `args`.
+ *
+ * @param {{ retrieve?: typeof retrieveRelevantChunks, trusted?: any }} [deps]
+ */
+export function createToolRegistry({ retrieve = retrieveRelevantChunks, trusted = {} } = {}) {
+  const tasks = Array.isArray(trusted.tasks) ? trusted.tasks : [];
+  const validTaskIds = new Set(tasks.map((task) => task.id));
+
   return {
-    extract_repair_tasks: (args) => extractRepairTasks(args),
-    search_repair_docs: (args) => searchRepairDocs(args, { retrieve }),
-    check_repair_readiness: (args) => checkRepairReadiness(args),
-    build_owner_checklist: (args) => buildOwnerChecklist(args),
-    draft_handoff_notes: (args) => draftHandoffNotes(args),
+    extract_repair_tasks: () => ({ tasks }),
+    search_repair_docs: (args) => {
+      // `taskId` is required so PR 2 can tie each retrieved source to the task
+      // it was fetched for. Rejecting an unknown id here keeps that association
+      // trustworthy rather than letting the model invent one.
+      const taskId = Number(args?.taskId);
+
+      if (!validTaskIds.has(taskId)) {
+        return Promise.resolve({
+          error: `Unknown taskId ${args?.taskId}. Call extract_repair_tasks and use one of: ${
+            [...validTaskIds].join(", ") || "(no tasks)"
+          }.`,
+        });
+      }
+
+      return searchRepairDocs({ query: args?.query, limit: args?.limit, taskId }, { retrieve });
+    },
+    check_repair_readiness: () =>
+      checkRepairReadiness({
+        tasks,
+        availableTools: trusted.availableTools,
+        availableParts: trusted.availableParts,
+        skillLevel: trusted.skillLevel,
+        ackSafety: trusted.safetyAcknowledged,
+      }),
+    build_owner_checklist: () =>
+      buildOwnerChecklist({
+        tasks,
+        skillLevel: trusted.skillLevel,
+        ackSafety: trusted.safetyAcknowledged,
+      }),
+    draft_handoff_notes: (args) =>
+      draftHandoffNotes({
+        tasks,
+        vehicle: trusted.vehicle,
+        partsNeeded: args?.partsNeeded,
+      }),
   };
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { runRepairPlannerAgent } from "../services/agent/repairPlannerAgent.js";
+import { runRepairPlannerAgent, SKILL_LEVELS } from "../services/agent/repairPlannerAgent.js";
 
 // Cap the brief (and each optional field) so a giant pasted payload cannot be
 // forwarded to the model. Briefs are longer-form than an Ask question, hence the
@@ -47,6 +47,19 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
       return;
     }
 
+    // Reject an unrecognized skill level instead of silently treating it as
+    // "beginner". Skill drives 30 of the 100 readiness points and the DIY vs
+    // shop split, so quietly substituting a value hides a real mismatch between
+    // what the owner selected and what they were scored against.
+    const skillLevel = request.body?.skillLevel;
+
+    if (skillLevel !== undefined && !SKILL_LEVELS.includes(skillLevel)) {
+      response.status(400).json({
+        error: `Field "skillLevel" must be one of: ${SKILL_LEVELS.join(", ")}.`,
+      });
+      return;
+    }
+
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
@@ -84,7 +97,7 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
           constraints: request.body?.constraints,
           availableTools: request.body?.availableTools,
           availableParts: request.body?.availableParts,
-          skillLevel: request.body?.skillLevel,
+          skillLevel,
         },
         { emit: send, signal: abortController.signal }
       );
@@ -93,8 +106,16 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
       // longer anyone to receive a frame, so end quietly instead of writing a
       // user-facing error to a dead socket. Real model/network failures still
       // surface verbatim.
+      // Typed planner failures keep their code/reason so the browser can tell
+      // an incomplete run from a completed one. `send` serializes the whole
+      // event, so agent-emitted frames already carry these through untouched.
       if (error?.name !== "AbortError") {
-        send({ type: "error", message: error.message || "The repair planner failed." });
+        send({
+          type: "error",
+          ...(error?.code ? { code: error.code } : {}),
+          ...(error?.reason ? { reason: error.reason } : {}),
+          message: error.message || "The repair planner failed.",
+        });
       }
     } finally {
       response.end();

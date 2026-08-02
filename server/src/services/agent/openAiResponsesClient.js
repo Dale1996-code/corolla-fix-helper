@@ -5,6 +5,26 @@ import { reserveAiCall } from "../aiUsageBudget.js";
 export const OPENAI_STREAM_IDLE_MESSAGE =
   "The AI model stopped responding and the request was cancelled. Please try again.";
 
+/**
+ * A provider-side failure the planner can classify rather than guess at.
+ *
+ * Carries the `code`/`reason` pair the agent forwards to the browser, so an
+ * incomplete or unparseable turn is reported as a failed run instead of being
+ * silently absorbed into a "completed" plan.
+ */
+export class ResponsesStreamError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ code: string, reason: string }} classification
+   */
+  constructor(message, { code, reason }) {
+    super(message);
+    this.name = "ResponsesStreamError";
+    this.code = code;
+    this.reason = reason;
+  }
+}
+
 // Streaming client for the OpenAI Responses API (current, non-deprecated API).
 //
 // We talk to the Responses endpoint directly with `fetch`, matching this repo's
@@ -134,8 +154,19 @@ export async function* streamResponsesTurn({
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // Function calls are held back until the provider says the response is
+    // complete.
+    //
+    // A truncated response can still contain a syntactically valid function
+    // call -- the model was cut off mid-plan, but the call it had already
+    // emitted looks fine. Executing it would apply half a plan and then report
+    // the run as finished. Buffering means a turn that never completes executes
+    // nothing. Text deltas still stream as they arrive; they are display-only.
+    const pendingCalls = [];
+    let sawCompleted = false;
+
     try {
-      while (true) {
+      reading: while (true) {
         const { value, done } = await reader.read();
 
         if (done) {
@@ -156,21 +187,40 @@ export async function* streamResponsesTurn({
           }
 
           if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
-            let parsedArguments = {};
+            let parsedArguments;
 
             try {
               parsedArguments = event.item.arguments ? JSON.parse(event.item.arguments) : {};
             } catch {
-              parsedArguments = {};
+              // Previously this became `{}` and the tool ran with no arguments,
+              // turning a garbled request into a silently wrong result.
+              throw new ResponsesStreamError(
+                `Could not parse arguments for tool "${event.item.name}".`,
+                { code: "planner_invalid_output", reason: "malformed_tool_arguments" }
+              );
             }
 
-            yield {
+            pendingCalls.push({
               type: "function_call",
               callId: event.item.call_id,
               name: event.item.name,
               arguments: parsedArguments,
-            };
+            });
             continue;
+          }
+
+          if (event.type === "response.completed") {
+            sawCompleted = true;
+            break reading;
+          }
+
+          if (event.type === "response.incomplete") {
+            throw new ResponsesStreamError(
+              event.response?.incomplete_details?.reason
+                ? `OpenAI response incomplete: ${event.response.incomplete_details.reason}`
+                : "OpenAI response incomplete.",
+              { code: "planner_incomplete", reason: "provider_incomplete" }
+            );
           }
 
           if (event.type === "response.failed" || event.type === "error") {
@@ -181,6 +231,17 @@ export async function* streamResponsesTurn({
     } finally {
       reader.releaseLock?.();
     }
+
+    // The stream ended without the provider ever confirming the response was
+    // complete. Treat it as truncation rather than as a finished turn.
+    if (!sawCompleted) {
+      throw new ResponsesStreamError("OpenAI stream ended without a completion event.", {
+        code: "planner_incomplete",
+        reason: "missing_terminal_event",
+      });
+    }
+
+    yield* pendingCalls;
   } catch (error) {
     // An idle-timeout abort is a stalled stream, not a client disconnect: surface
     // a clear message. A caller-initiated abort keeps its AbortError so the route
