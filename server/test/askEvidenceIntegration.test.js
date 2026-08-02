@@ -42,6 +42,7 @@ const oilChunk = {
   totalQueryTerms: 4,
   chunkMatchedTerms: 4,
 };
+const oilTorqueQuote = oilChunk.chunkText;
 
 const otherChunk = {
   ...oilChunk,
@@ -72,7 +73,7 @@ test("a verified claim yields answered and cites ONLY the backing chunk", async 
       {
         claim: "The oil drain plug torque is 37 Nm.",
         sourceId: "S1",
-        evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+        evidenceQuote: oilTorqueQuote,
       },
     ],
   });
@@ -83,7 +84,33 @@ test("a verified claim yields answered and cites ONLY the backing chunk", async 
   assert.equal(result.citations.length, 1);
   assert.equal(result.citations[0].documentTitle, "Oil and Oil Filter Replacement");
   assert.equal(result.evidence.documentSupported.length, 1);
+  assert.match(result.evidence.documentSupported[0].evidenceId, /^ask_ev_v1_[a-f0-9]{24}$/);
+  assert.equal(
+    result.citations[0].evidenceId,
+    result.evidence.documentSupported[0].evidenceId
+  );
   assert.match(result.answer, /37 Nm/);
+});
+
+test("evidence identifiers are stable for the same source passage", async () => {
+  const evidencePayload = {
+    ...emptyPayload,
+    documentSupported: [
+      {
+        claim: "The oil drain plug torque is 37 Nm.",
+        sourceId: "S1",
+        evidenceQuote: oilTorqueQuote,
+      },
+    ],
+  };
+
+  const first = await ask(evidencePayload);
+  const second = await ask(evidencePayload);
+
+  assert.equal(
+    first.evidence.documentSupported[0].evidenceId,
+    second.evidence.documentSupported[0].evidenceId
+  );
 });
 
 test("duplicate copies of one backing chunk produce one citation", async () => {
@@ -94,7 +121,7 @@ test("duplicate copies of one backing chunk produce one citation", async () => {
         {
           claim: "The oil drain plug torque is 37 Nm.",
           sourceId: "S1",
-          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          evidenceQuote: oilTorqueQuote,
         },
       ],
     },
@@ -109,6 +136,10 @@ test("duplicate copies of one backing chunk produce one citation", async () => {
   assert.equal(result.status, "answered");
   assert.equal(result.citations.length, 1);
   assert.equal(result.evidence.documentSupported.length, 1);
+  assert.equal(
+    result.citations[0].evidenceId,
+    result.evidence.documentSupported[0].evidenceId
+  );
 });
 
 test("two distinct claims from one chunk keep one evidence citation per quote", async () => {
@@ -124,7 +155,7 @@ test("two distinct claims from one chunk keep one evidence citation per quote", 
         {
           claim: "The oil drain plug torque is 37 Nm.",
           sourceId: "S1",
-          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          evidenceQuote: oilTorqueQuote,
         },
       ],
     },
@@ -135,17 +166,21 @@ test("two distinct claims from one chunk keep one evidence citation per quote", 
 
   assert.equal(result.status, "answered");
   assert.equal(result.evidence.documentSupported.length, 2);
+  assert.notEqual(
+    result.evidence.documentSupported[0].evidenceId,
+    result.evidence.documentSupported[1].evidenceId
+  );
   assert.deepEqual(
     result.citations.map((citation) => citation.snippet),
     [
       "Clean and install the oil drain plug with a new gasket.",
-      "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+      oilTorqueQuote,
     ]
   );
 });
 
 test("an evidence citation snippet is the verified quote, not an unused chunk prefix", async () => {
-  const usedQuote = "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+  const usedQuote = oilTorqueQuote;
   const unrelatedPrefix = "Unrelated maintenance note. ".repeat(12);
   const result = await ask(
     {
@@ -211,7 +246,7 @@ test("a text passage with no valid document id cannot become a document-backed a
         {
           claim: "The oil drain plug torque is 37 Nm.",
           sourceId: "S1",
-          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          evidenceQuote: oilTorqueQuote,
         },
       ],
     },
@@ -264,7 +299,7 @@ test("invalid retrieval rows are removed before the model receives source labels
       {
         claim: "The oil drain plug torque is 37 Nm.",
         sourceId: "S1",
-        evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+        evidenceQuote: oilTorqueQuote,
       },
     ],
   };
@@ -335,7 +370,7 @@ test("a partially verified answer is reported as partial, not answered", async (
       {
         claim: "The oil drain plug torque is 37 Nm.",
         sourceId: "S1",
-        evidenceQuote: "Torque : 37 Nm",
+        evidenceQuote: oilTorqueQuote,
       },
       {
         claim: "The filter torque is 25 Nm.",
@@ -357,7 +392,7 @@ test("an ungrounded spec in general guidance never renders", async () => {
       {
         claim: "The oil drain plug torque is 37 Nm.",
         sourceId: "S1",
-        evidenceQuote: "Torque : 37 Nm",
+        evidenceQuote: oilTorqueQuote,
       },
     ],
     generalGuidance: ["Most filters torque to about 18 Nm."],
@@ -375,7 +410,7 @@ test("safe general guidance is kept and clearly labeled", async () => {
       {
         claim: "The oil drain plug torque is 37 Nm.",
         sourceId: "S1",
-        evidenceQuote: "Torque : 37 Nm",
+        evidenceQuote: oilTorqueQuote,
       },
     ],
     generalGuidance: ["Let the engine cool before draining the oil."],
@@ -387,10 +422,10 @@ test("safe general guidance is kept and clearly labeled", async () => {
   assert.match(result.answer, /General guidance — not from your documents/);
 });
 
-test("the flag OFF path is unchanged and emits no evidence field", async () => {
+test("the flag OFF service path remains available and emits no evidence field", async () => {
   const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
     isAiConfigured: true,
-    // evidenceContract defaults to config (false)
+    // This test process pins the compatibility flag false above.
     retrieveChunks: async () => [oilChunk, otherChunk],
     generateAnswerText: async () => "The oil drain plug torque is 37 Nm.",
     generateEvidenceAnswer: async () => {

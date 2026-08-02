@@ -915,7 +915,7 @@ test("Goal B POST /api/ask accepts conversation history and returns rewritten qu
     response.body.standaloneQuestion,
     "What is the rear brake caliper mounting bolt torque?"
   );
-  assert.equal(response.body.status, "answered");
+  assert.equal(response.body.status, "unverified");
 });
 
 test("Goal B ask rewrites follow-up before rerunning retrieval", async () => {
@@ -1026,7 +1026,7 @@ test("Goal A ask reports ai_not_configured without a key even when no chunks mat
   assert.equal(retrievalCalls, 0);
 });
 
-test("Goal A citation matching returns server-built citations from retrieved chunks", async () => {
+test("Goal A legacy answers expose retrieved chunks as unverified context, not citations", async () => {
   const uniqueTag = nextUniqueTag("ask-citations");
   const documentId = insertFakeDocument({
     title: `Citation ${uniqueTag}`,
@@ -1057,15 +1057,15 @@ test("Goal A citation matching returns server-built citations from retrieved chu
     .send({ question: `${uniqueTag} oil drain plug torque` });
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.status, "answered");
+  assert.equal(response.body.status, "unverified");
   assert.equal(typeof response.body.answer, "string");
   assert.ok(response.body.answer.includes("torque"));
-  assert.ok(Array.isArray(response.body.citations));
-  assert.ok(response.body.citations.length >= 1);
-  assert.equal(response.body.citations[0].documentId, documentId);
-  assert.equal(response.body.citations[0].pageNumber, 3);
-  assert.equal(response.body.citations[0].chunkIndex, 0);
-  assert.ok(response.body.citations[0].snippet.includes("27 ft-lb"));
+  assert.deepEqual(response.body.citations, []);
+  assert.ok(Array.isArray(response.body.retrievedContext));
+  assert.equal(response.body.retrievedContext[0].documentId, documentId);
+  assert.equal(response.body.retrievedContext[0].pageNumber, 3);
+  assert.equal(response.body.retrievedContext[0].chunkIndex, 0);
+  assert.ok(response.body.retrievedContext[0].snippet.includes("27 ft-lb"));
 });
 
 test("Goal A fake PDF eval set returns expected citation pages and honest not-found", async () => {

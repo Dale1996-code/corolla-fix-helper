@@ -172,6 +172,12 @@ function buildCitationsFromChunks(chunks, { distinguishSnippets = false } = {}) 
       // server-verified passage so clients do not have to trust a shared prefix.
       citation.evidenceQuote = fullEvidenceQuote;
     }
+    if (
+      typeof chunk.evidenceId === "string" &&
+      /^ask_ev_v1_[a-f0-9]{24}$/.test(chunk.evidenceId)
+    ) {
+      citation.evidenceId = chunk.evidenceId;
+    }
     const chunkId = chunk.chunkId ?? chunk.id;
     const hasChunkId = chunkId !== undefined && chunkId !== null;
     const hasStableLocation =

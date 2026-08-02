@@ -186,7 +186,8 @@ test("a verified claim survives and cites the mapped chunk", () => {
         {
           claim: "The oil drain plug torque is 37 Nm.",
           sourceId: "S1",
-          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          evidenceQuote:
+            "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
         },
       ],
     }),
@@ -254,6 +255,46 @@ test("a real quote with an invented number is rejected as a numeric anomaly", ()
   assert.match(result.gaps[0], /\[unverified value\]/);
   // The detail is retained server-side for diagnosis.
   assert.ok(result.rejected[0].unsupported.some((entry) => entry.includes("54")));
+});
+
+test("a torque claim citing a different subject with the same value is rejected", () => {
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "Torque the oil filter cap to 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote:
+            "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+      ],
+    }),
+    [chunk()]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.doesNotMatch(result.gaps.join(" "), /37 Nm/);
+});
+
+test("the subject guard also covers asterisk-formatted torque units from PDF text", () => {
+  const quote = "The oil drain plug torque is 37 N*m.";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "Torque the oil filter cap to 37 N*m.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(extractSpecNumbers("37 N*m").length, 1);
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {

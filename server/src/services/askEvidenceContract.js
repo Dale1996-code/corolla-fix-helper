@@ -1,4 +1,6 @@
-// Ask evidence contract (Milestone 2), behind config.askEvidenceContract.
+import { createHash } from "node:crypto";
+
+// Ask evidence contract (Milestone 2), controlled by config.askEvidenceContract.
 //
 // The problem this exists for: without it, the model returns one undifferentiated
 // prose blob, every retrieved chunk becomes a citation, and nothing checks that
@@ -17,7 +19,8 @@
 // re-extraction (documentChunkService rebuilds them), so a row id in a model
 // reply would be meaningless the moment a document is re-extracted.
 //
-// A leaf module: it imports nothing.
+// This module imports only Node's built-in crypto helper. The identifier it
+// creates is server-owned; the model never supplies it.
 
 /** Max claims/guidance/gaps we will accept, so a runaway reply stays bounded. */
 const MAX_ITEMS = 40;
@@ -98,6 +101,8 @@ export function buildEvidencePromptLines({ question, originalQuestion, hasImage 
     "  - sourceId: the S-label of the source it came from.",
     "  - evidenceQuote: text copied EXACTLY, character for character, from that",
     "    source. It must contain the specific value or instruction the claim makes.",
+    "    For a specification, include the named part and its value in the quote;",
+    "    a value by itself is not enough to prove which part it belongs to.",
     "    Never paraphrase a quote. Never combine text from two sources into one quote.",
     "generalGuidance: general mechanical advice NOT found in the sources. Never put",
     "  a torque figure, capacity, pressure, clearance, or other specification here.",
@@ -267,10 +272,10 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // and push the model toward vaguer, less useful text.
 
 const UNIT_PATTERN =
-  "n\\s*[·.\\-]?\\s*m|nm|newton\\s*met(?:er|re)s?|" +
-  "ft\\s*[-·.]?\\s*lbf?|lb\\s*[-·.]?\\s*ft|foot\\s*pounds?|" +
-  "in\\s*[-·.]?\\s*lbf?|inch\\s*pounds?|" +
-  "kgf\\s*[-·.\\/]?\\s*cm|kgf\\s*[-·.\\/]?\\s*m|kg\\s*[-·.]?\\s*cm|" +
+  "n\\s*[·.*\\-]?\\s*m|nm|newton\\s*met(?:er|re)s?|" +
+  "ft\\s*[-·.*]?\\s*lbf?|lb\\s*[-·.*]?\\s*ft|foot\\s*pounds?|" +
+  "in\\s*[-·.*]?\\s*lbf?|inch\\s*pounds?|" +
+  "kgf\\s*[-·.*\\/]?\\s*cm|kgf\\s*[-·.*\\/]?\\s*m|kg\\s*[-·.*]?\\s*cm|" +
   "kpa|mpa|psi|bar|" +
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
   "lit(?:er|re)s?|ml|millilit(?:er|re)s?|qt|quarts?|pints?|gal(?:lons?)?|fl\\s*oz|" +
@@ -326,11 +331,11 @@ const UNIT_FAMILIES = [
   {
     family: "torque",
     units: [
-      { match: /^(n\s*[·.-]?\s*m|nm|newton\s*met(er|re)s?)$/i, factor: 1 },
-      { match: /^(ft\s*[-·.]?\s*lbf?|lb\s*[-·.]?\s*ft|foot\s*pounds?)$/i, factor: 1.355818 },
-      { match: /^(in\s*[-·.]?\s*lbf?|inch\s*pounds?)$/i, factor: 0.1129848 },
-      { match: /^(kgf\s*[-·./]?\s*cm|kg\s*[-·.]?\s*cm)$/i, factor: 0.0980665 },
-      { match: /^(kgf\s*[-·./]?\s*m)$/i, factor: 9.80665 },
+      { match: /^(n\s*[·.*-]?\s*m|nm|newton\s*met(er|re)s?)$/i, factor: 1 },
+      { match: /^(ft\s*[-·.*]?\s*lbf?|lb\s*[-·.*]?\s*ft|foot\s*pounds?)$/i, factor: 1.355818 },
+      { match: /^(in\s*[-·.*]?\s*lbf?|inch\s*pounds?)$/i, factor: 0.1129848 },
+      { match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i, factor: 0.0980665 },
+      { match: /^(kgf\s*[-·.*/]?\s*m)$/i, factor: 9.80665 },
     ],
   },
   {
@@ -478,6 +483,126 @@ export function checkClaimNumbers(claimText, evidenceText) {
   return { grounded: unsupported.length === 0, unsupported };
 }
 
+function normalizeSubjectToken(token) {
+  const normalized = String(token || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+
+  if (normalized.length > 3 && normalized.endsWith("s") && !normalized.endsWith("ss")) {
+    return normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+function subjectTokens(text) {
+  const ignored = new Set(["a", "an", "the", "this", "that"]);
+
+  return String(text || "")
+    .replace(/[-_/]+/g, " ")
+    .split(/\s+/)
+    .map(normalizeSubjectToken)
+    .filter((token) => token && !ignored.has(token));
+}
+
+/**
+ * Extract the named part from common torque-claim shapes.
+ *
+ * This is intentionally conservative. If the claim uses a shape the server
+ * cannot parse, this check does not pretend to understand it; the quote and
+ * numeric checks still run. When a subject is parsed, however, its complete
+ * normalized token sequence must occur in the evidence quote.
+ */
+function extractTorqueSubject(text) {
+  const normalized = normalizeForMatch(text);
+  const imperative = normalized.match(
+    /\b(?:torque|tighten)\s+(?:the\s+)?([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
+  );
+
+  if (imperative) {
+    return subjectTokens(imperative[1]);
+  }
+
+  for (const clause of normalized.split(/[.!?;,:]/)) {
+    const torqueIndex = clause.lastIndexOf(" torque");
+
+    if (torqueIndex < 0) {
+      continue;
+    }
+
+    let prefix = clause.slice(0, torqueIndex).trim();
+    const lastDeterminer = prefix.lastIndexOf(" the ");
+
+    if (lastDeterminer >= 0) {
+      prefix = prefix.slice(lastDeterminer + 5);
+    }
+
+    const tokens = subjectTokens(prefix);
+    return tokens.slice(-6);
+  }
+
+  return [];
+}
+
+function containsTokenSequence(haystack, needle) {
+  if (!needle.length || needle.length > haystack.length) {
+    return false;
+  }
+
+  for (let start = 0; start <= haystack.length - needle.length; start += 1) {
+    if (needle.every((token, offset) => token === haystack[start + offset])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Deterministic subject guard for torque specifications.
+ *
+ * A matching number is not enough: "oil filter cap, 37 Nm" must not be
+ * certified by a quote about an "oil drain plug, 37 Nm". This lexical check is
+ * deliberately fail-closed for recognized torque-claim shapes. It is not a
+ * general semantic-entailment engine, which is documented as a remaining limit.
+ */
+export function checkClaimSubject(claimText, evidenceText) {
+  const hasTorqueSpec = extractSpecNumbers(claimText).some(
+    (spec) => spec.unit !== "viscosity" && canonicalize(spec.value, spec.unit)?.family === "torque"
+  );
+
+  if (!hasTorqueSpec) {
+    return { grounded: true, checked: false, subject: "" };
+  }
+
+  const subject = extractTorqueSubject(claimText);
+
+  if (!subject.length) {
+    return { grounded: true, checked: false, subject: "" };
+  }
+
+  return {
+    grounded: containsTokenSequence(subjectTokens(evidenceText), subject),
+    checked: true,
+    subject: subject.join(" "),
+  };
+}
+
+function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote }) {
+  const digest = createHash("sha256")
+    .update(
+      [
+        "ask-evidence-v1",
+        documentId,
+        pageNumber,
+        chunkIndex,
+        normalizeForMatch(evidenceQuote),
+      ].join("\u0000")
+    )
+    .digest("hex")
+    .slice(0, 24);
+
+  return `ask_ev_v1_${digest}`;
+}
+
 /**
  * Replace unit-bearing specifications with a placeholder.
  *
@@ -562,7 +687,29 @@ export function verifyEvidence(validated, chunks) {
       continue;
     }
 
+    const subject = checkClaimSubject(claim.claim, claim.evidenceQuote);
+
+    if (!subject.grounded) {
+      rejected.push({
+        claim: claim.claim,
+        reason: "subject_mismatch",
+        subject: subject.subject,
+      });
+      gaps.push(
+        `Unverified (the cited text does not name the same part): ${redactSpecNumbers(
+          claim.claim
+        )}`
+      );
+      continue;
+    }
+
     supported.push({
+      evidenceId: createEvidenceId({
+        documentId: mapped.chunk.documentId,
+        pageNumber: mapped.chunk.pageNumber,
+        chunkIndex: mapped.chunk.chunkIndex,
+        evidenceQuote: claim.evidenceQuote,
+      }),
       claim: claim.claim,
       evidenceQuote: claim.evidenceQuote,
       documentId: mapped.chunk.documentId,
