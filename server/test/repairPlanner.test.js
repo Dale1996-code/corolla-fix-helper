@@ -57,8 +57,18 @@ const mockRetrieve = async () => [
   },
 ];
 
-function createMockStreamTurn() {
-  // Turn 1: request tool calls. Turn 2: stream the final narrative text.
+// A claim the mock chunk genuinely supports, quoted verbatim.
+const GROUNDED_CLAIM = {
+  taskId: 1,
+  kind: "numeric_spec",
+  claim: "torque caliper bolts to 25 ft-lb",
+  sourceId: "S1",
+  evidenceQuote: "torque caliper bolts to 25 ft-lb and bleed the system",
+};
+
+function createMockStreamTurn(finalizerArguments = { claims: [GROUNDED_CLAIM] }) {
+  // Turn 1: gather. Turn 2: submit the finalizer. Model prose is discarded, so
+  // the plan text the owner sees is rendered by the server from these claims.
   let turn = 0;
 
   return async function* mockStreamTurn() {
@@ -97,9 +107,15 @@ function createMockStreamTurn() {
       return;
     }
 
-    for (const piece of ["The brake job is the priority. ", "Torque to 25 ft-lb. ", "\nFollow-up questions: What is the mileage?"]) {
-      yield { type: "text_delta", text: piece };
-    }
+    // Prose the owner must never see: an invented torque value alongside real
+    // work. It is discarded because it did not arrive through the finalizer.
+    yield { type: "text_delta", text: "The brake job is the priority. Torque to 54 Nm." };
+    yield {
+      type: "function_call",
+      callId: "call_finalize",
+      name: "finalize_repair_plan",
+      arguments: finalizerArguments,
+    };
   };
 }
 
@@ -175,6 +191,14 @@ test("check_repair_readiness scores against the rubric and reports gaps", () => 
     availableTools: "screwdriver",
     availableParts: "cabin filter",
     skillLevel: "beginner",
+    // Readiness now scores VALIDATED requirement groups. Listing a tool proves
+    // nothing about whether it is the tool the repair needs, so the tool and
+    // part rows cannot be earned without these.
+    requirements: {
+      tools: { status: "satisfied", required: ["screwdriver"], satisfied: ["screwdriver"], missing: [] },
+      parts: { status: "satisfied", required: ["cabin filter"], satisfied: ["cabin filter"], missing: [] },
+    },
+    evidenceStatus: "verified",
   });
 
   assert.equal(readyResult.score, 100);
@@ -254,6 +278,13 @@ test("acknowledging safety-critical work unlocks Ready + DIY", () => {
     availableParts: "brake pads",
     skillLevel: "beginner",
     ackSafety: true,
+    // Isolating the acknowledgment dimension: readiness now scores validated
+    // requirement groups, so hand them in satisfied.
+    requirements: {
+      tools: { status: "satisfied", required: ["torque wrench"], satisfied: ["torque wrench"], missing: [] },
+      parts: { status: "satisfied", required: ["brake pads"], satisfied: ["brake pads"], missing: [] },
+    },
+    evidenceStatus: "verified",
   });
 
   const { checklist } = buildOwnerChecklist({
@@ -382,7 +413,7 @@ test("streamResponsesTurn sends a non-empty model string in the request body", a
 
 // --- Agent loop tests ------------------------------------------------------
 
-test("runRepairPlannerAgent emits tool events and text deltas and assembles artifacts", async () => {
+test("runRepairPlannerAgent emits tool events and a server-rendered plan", async () => {
   const events = [];
 
   const result = await runRepairPlannerAgent(
@@ -396,16 +427,24 @@ test("runRepairPlannerAgent emits tool events and text deltas and assembles arti
   );
 
   const toolCallEvents = events.filter((event) => event.type === "tool_call");
-  const textDeltaEvents = events.filter((event) => event.type === "text_delta");
 
   assert.ok(toolCallEvents.length >= 1, "expected at least one tool_call event");
-  assert.ok(textDeltaEvents.length >= 1, "expected at least one text_delta event");
+  assert.equal(
+    events.filter((event) => event.type === "text_delta").length,
+    0,
+    "model prose must never reach the browser"
+  );
 
   assert.equal(result.status, "completed");
-  assert.match(result.text, /brake job/);
+  // The mock streams "Torque to 54 Nm" as prose. It is not in the plan, because
+  // the plan is rendered from validated claims and 54 Nm was never grounded.
+  assert.doesNotMatch(result.text, /54 Nm/);
+  assert.match(result.text, /25 ft-lb/, "the grounded value is rendered");
   assert.equal(result.artifacts.tasks.length >= 1, true);
   assert.equal(result.artifacts.citations.length, 1);
   assert.ok(result.artifacts.readiness);
+  assert.ok(result.artifacts.evidence);
+  assert.ok(["verified", "partial", "not_found"].includes(result.evidenceStatus));
   assert.ok(events.some((event) => event.type === "trace"));
   assert.equal(events.at(-1).type, "done");
 });
@@ -421,7 +460,14 @@ test("runRepairPlannerAgent returns a tool error result when one tool throws", a
 
     if (toolOutput) {
       sawToolErrorOutput = JSON.parse(toolOutput.output).error.includes("database timeout");
-      yield { type: "text_delta", text: "The document search failed, but planning continued." };
+      // A failed search cannot be dressed up as "nothing required": the honest
+      // finalizer is an empty claims array, which yields not_found.
+      yield {
+        type: "function_call",
+        callId: "call_finalize",
+        name: "finalize_repair_plan",
+        arguments: { claims: [] },
+      };
       return;
     }
 
@@ -452,7 +498,10 @@ test("runRepairPlannerAgent returns a tool error result when one tool throws", a
   assert.ok(toolResult);
   assert.match(toolResult.summary, /database timeout/);
   assert.equal(sawToolErrorOutput, true);
-  assert.match(result.text, /planning continued/);
+  // The plan is server-rendered, so a failed search shows up as an absence of
+  // verified content, not as the model's reassuring prose about it.
+  assert.equal(result.evidenceStatus, "not_found");
+  assert.doesNotMatch(result.text, /planning continued/);
   assert.equal(events.at(-1).type, "done");
 });
 
@@ -471,7 +520,7 @@ test("runRepairPlannerAgent reports ai_not_configured when no key is set", async
 
 // --- End-to-end SSE route test --------------------------------------------
 
-test("POST /api/repair-plan streams >=1 tool event and >=1 text delta end-to-end", async () => {
+test("POST /api/repair-plan streams tool events and a server-rendered plan end-to-end", async () => {
   const runRepairPlan = (req, opts) =>
     runRepairPlannerAgent(req, {
       ...opts,
@@ -495,10 +544,15 @@ test("POST /api/repair-plan streams >=1 tool event and >=1 text delta end-to-end
   const doneEvent = events.find((event) => event.type === "done");
 
   assert.ok(toolEvents.length >= 1, "expected at least one tool event in the stream");
-  assert.ok(textDeltas.length >= 1, "expected at least one text delta in the stream");
+  assert.equal(textDeltas.length, 0, "no unvalidated model prose may cross the wire");
   assert.ok(doneEvent, "expected a done event");
   assert.equal(doneEvent.status, "completed");
+  assert.ok(["verified", "partial", "not_found"].includes(doneEvent.evidenceStatus));
+  assert.ok(doneEvent.text.length > 0, "the plan text ships in the done frame");
+  assert.doesNotMatch(doneEvent.text, /54 Nm/, "ungrounded prose is not rendered");
   assert.ok(doneEvent.artifacts.citations.length >= 1);
+  assert.ok(doneEvent.artifacts.requirements, "requirement groups ship with the plan");
+  assert.ok(Array.isArray(doneEvent.artifacts.evidence.gaps));
 });
 
 test("POST /api/repair-plan validates a missing brief", async () => {
@@ -703,14 +757,13 @@ test("runRepairPlannerAgent fails the run when the turn budget is exhausted", as
   assert.ok(errorEvent.message.length > 0, "a failure must carry a fixed user-facing message");
 });
 
-test("runRepairPlannerAgent fails the run when the model writes no narrative", async () => {
+test("runRepairPlannerAgent fails the run when the model never finalizes", async () => {
   const events = [];
 
-  // The model stops calling tools but writes nothing: no plan was produced.
+  // The model stops calling tools without submitting a finalizer, so nothing
+  // was ever validated. Prose alone is not a plan.
   async function* silentStreamTurn() {
-    for (const nothing of []) {
-      yield nothing;
-    }
+    yield { type: "text_delta", text: "Here is my plan: torque everything to 54 Nm." };
   }
 
   const result = await runRepairPlannerAgent(
@@ -724,7 +777,7 @@ test("runRepairPlannerAgent fails the run when the model writes no narrative", a
   );
 
   assert.equal(result.status, "error");
-  assert.equal(result.reason, "empty_output");
+  assert.equal(result.reason, "invalid_final_contract");
   assert.equal(events.filter((event) => event.type === "done").length, 0);
 });
 
@@ -836,10 +889,21 @@ test("model-supplied readiness inputs cannot change the result", async () => {
     const alreadyRan = input.some((item) => item.type === "function_call_output");
 
     if (alreadyRan) {
-      yield { type: "text_delta", text: "Plan written." };
+      yield {
+        type: "function_call",
+        callId: "call_finalize",
+        name: "finalize_repair_plan",
+        arguments: { claims: [GROUNDED_CLAIM] },
+      };
       return;
     }
 
+    yield {
+      type: "function_call",
+      callId: "call_search",
+      name: "search_repair_docs",
+      arguments: { taskId: 1, query: "front brake pad torque" },
+    };
     yield {
       type: "function_call",
       callId: "call_ready",
@@ -879,11 +943,11 @@ test("model-supplied readiness inputs cannot change the result", async () => {
   assert.equal(readiness.skillLevel, "beginner", "the model must not raise the owner's skill level");
   assert.notEqual(readiness.level, "ready", "unacknowledged brake work cannot be Ready");
   assert.equal(
-    readiness.rubric.find((item) => item.id === "tools_listed").met,
+    readiness.rubric.find((item) => item.id === "tools_available").met,
     false,
     '"none" is not a tool inventory'
   );
-  assert.equal(readiness.rubric.find((item) => item.id === "parts_listed").met, false);
+  assert.equal(readiness.rubric.find((item) => item.id === "parts_available").met, false);
 
   assert.equal(tasks.length, 1);
   assert.match(tasks[0].title, /brake/i, "the canonical task list came from the owner's brief");
@@ -902,21 +966,45 @@ test("none and n/a inventories earn no readiness points", () => {
     });
 
     assert.equal(
-      readiness.rubric.find((item) => item.id === "tools_listed").met,
+      readiness.rubric.find((item) => item.id === "tools_available").met,
       false,
       `"${sentinel}" must not count as a tool inventory`
     );
-    assert.equal(readiness.rubric.find((item) => item.id === "parts_listed").met, false);
+    assert.equal(readiness.rubric.find((item) => item.id === "parts_available").met, false);
   }
 
-  const real = checkRepairReadiness({
+  // A real inventory alone still earns nothing: readiness credits an inventory
+  // only against requirements the documents actually established.
+  const listedButUnverified = checkRepairReadiness({
     tasks,
     availableTools: "socket set, oil filter wrench",
     availableParts: "5w30 oil, filter",
     skillLevel: "beginner",
   });
 
-  assert.equal(real.rubric.find((item) => item.id === "tools_listed").met, true);
+  assert.equal(
+    listedButUnverified.rubric.find((item) => item.id === "tools_available").met,
+    false,
+    "listing tools proves nothing about whether they are the right tools"
+  );
+
+  const verified = checkRepairReadiness({
+    tasks,
+    availableTools: "socket set, oil filter wrench",
+    availableParts: "5w30 oil, filter",
+    skillLevel: "beginner",
+    requirements: {
+      tools: {
+        status: "satisfied",
+        required: ["oil filter wrench"],
+        satisfied: ["oil filter wrench"],
+        missing: [],
+      },
+      parts: { status: "satisfied", required: ["filter"], satisfied: ["filter"], missing: [] },
+    },
+  });
+
+  assert.equal(verified.rubric.find((item) => item.id === "tools_available").met, true);
 });
 
 test("search_repair_docs rejects a taskId that is not a canonical task", async () => {

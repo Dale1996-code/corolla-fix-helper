@@ -19,6 +19,7 @@ const initialRun = {
   activity: [],
   narrative: "",
   artifacts: null,
+  evidenceStatus: "",
   message: "",
   // Whether the server sent a frame that actually ends a run (`done`, `error`,
   // or `ai_not_configured`). A stream that just stops -- a dropped connection,
@@ -86,6 +87,70 @@ function NarrativePanel({ narrative }) {
   return (
     <SectionCard title="Prioritized plan">
       <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{narrative}</p>
+    </SectionCard>
+  );
+}
+
+// What each status means, in the owner's terms.
+//
+// "Verified" describes THIS RUN, not the manuals: every statement shown passed
+// an exact quote-and-number check against the uploaded PDFs. It does not mean
+// the PDFs cover the whole repair, and the wording has to say so -- otherwise
+// the badge reads as an assurance the app cannot give.
+const EVIDENCE_STATUS = {
+  verified: {
+    label: "Verified against your documents",
+    className: "bg-emerald-100 text-emerald-800",
+    detail:
+      "Every statement below was matched word-for-word to a cited page of your uploaded manuals. That is a check on this plan, not a promise that your manuals cover the whole repair.",
+  },
+  partial: {
+    label: "Partly verified",
+    className: "bg-amber-100 text-amber-800",
+    detail:
+      "Some of this plan is grounded in your documents and some is not. Read the gaps before ordering parts or starting work.",
+  },
+  not_found: {
+    label: "Not found in your documents",
+    className: "bg-red-100 text-red-800",
+    detail:
+      "Nothing in this plan could be verified against your uploaded manuals. Treat it as a starting point for research, not as repair guidance.",
+  },
+};
+
+function EvidencePanel({ evidenceStatus, evidence }) {
+  const status = EVIDENCE_STATUS[evidenceStatus];
+
+  if (!status) {
+    return null;
+  }
+
+  const gaps = evidence?.gaps || [];
+
+  return (
+    <SectionCard title="Evidence">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.className}`}>
+          {status.label}
+        </span>
+        {evidence?.verifiedClaims?.length ? (
+          <span className="text-xs text-slate-500">
+            {evidence.verifiedClaims.length} verified statement
+            {evidence.verifiedClaims.length === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{status.detail}</p>
+      {gaps.length ? (
+        <div className="mt-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Gaps</h4>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-700">
+            {gaps.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </SectionCard>
   );
 }
@@ -344,8 +409,6 @@ export function RepairPlannerPage() {
         ...current,
         activity: [...current.activity, { kind: "tool_result", text: event.summary || event.name }],
       }));
-    } else if (event.type === "text_delta") {
-      updateRun((current) => ({ ...current, narrative: current.narrative + event.text }));
     } else if (event.type === "ai_not_configured") {
       updateRun((current) => ({
         ...current,
@@ -387,6 +450,11 @@ export function RepairPlannerPage() {
         return {
           ...current,
           status: "done",
+          // The plan text is rendered by the server from validated claims and
+          // ships whole in the done frame. Nothing is assembled from model
+          // deltas any more -- the planner no longer emits them.
+          narrative: event.text || "",
+          evidenceStatus: event.evidenceStatus || "",
           artifacts: event.artifacts || current.artifacts,
           statusMessage: "",
           sawTerminalEvent: true,
@@ -631,6 +699,10 @@ export function RepairPlannerPage() {
 
         <StatusBanner status={run.status} message={run.message} />
         <ActivityLog activity={run.activity} statusMessage={run.statusMessage} isRunning={isRunning} />
+        <EvidencePanel
+          evidenceStatus={run.evidenceStatus}
+          evidence={run.artifacts?.evidence}
+        />
         <NarrativePanel narrative={run.narrative} />
         <ReadinessPanel readiness={artifacts?.readiness} />
         <ChecklistPanel checklist={artifacts?.checklist} />

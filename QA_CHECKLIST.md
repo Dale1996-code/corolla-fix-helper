@@ -127,7 +127,13 @@ Use a fake or sample PDF so the agent has manuals to cite.
 Check:
 
 - The agent activity log shows tool calls and results while it runs.
-- The prioritized plan text streams in progressively.
+- The prioritized plan appears when the run finishes (it does not stream in
+  progressively — model prose is discarded and the plan is rendered by the
+  server from verified claims).
+- An evidence banner reads `Verified against your documents`, `Partly verified`,
+  or `Not found in your documents`, with any gaps listed beneath it.
+- With no PDFs uploaded, the run reports `Not found in your documents` and
+  `Not ready` rather than a confident-looking plan.
 - Readiness, owner checklist, extracted tasks, handoff drafts, and sources cards appear when finished.
 - Source cards open the matching document page.
 - If `OPENAI_API_KEY` is not configured, an AI-not-configured banner appears and nothing crashes.

@@ -42,22 +42,77 @@ artifacts the UI renders never depend on model randomness.
 
 | Tool | What it does |
 | --- | --- |
-| `extract_repair_tasks` | Splits the brief into system-tagged tasks with difficulty, safety flags, and search keywords |
-| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`) and returns citations |
-| `check_repair_readiness` | Scores tasks against a rubric (tools / parts / skill match / safety) and reports gaps |
-| `build_owner_checklist` | Produces a prioritized checklist with DIY vs professional-shop assignment |
+| `extract_repair_tasks` | Returns the canonical, server-derived task list. Takes **no arguments** |
+| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`). Requires a canonical `taskId` |
+| `check_repair_readiness` | Skill and safety picture for the canonical tasks. Takes **no arguments** |
+| `build_owner_checklist` | Produces a prioritized checklist with DIY vs professional-shop assignment. Takes **no arguments** |
 | `draft_handoff_notes` | Drafts channel-specific copy: a parts shopping list, a mechanic handoff, and a maintenance-log entry |
+| `finalize_repair_plan` | Submits the finished plan as atomic, individually-cited claims. Required before a run can complete |
+
+### Trust boundary
+
+No model-facing schema exposes `brief`, `tasks`, `skillLevel`, `availableTools`,
+`availableParts`, or `ackSafety`. Those are owner facts: the server builds a
+frozen trusted context from the request, derives canonical tasks from the
+trusted brief before the loop starts, and the executors read that context
+instead of the model's arguments. Arguments attempting to set them are ignored.
+Safety acknowledgment is server-owned and always `false`, so safety-critical
+work stays `Shop Recommended`.
+
+### Canonical tasks
+
+Tasks come from the brief, split on sentence punctuation **and** on coordinating
+conjunctions — but only when both sides independently carry their own action
+verb and object, so object lists ("pads, rotors, and calipers") and procedure
+steps ("lift the car and support it on stands") stay one task. A fragment kept
+whole despite a conjunction is marked `compound` with its `clauses`, and the
+evidence contract then requires a claim per clause. Titles are deduplicated, and
+a brief too vague to yield a task fails the run with `no_canonical_task` rather
+than becoming a task named after the brief.
+
+### Evidence contract
+
+`finalize_repair_plan` takes `claims[]`, each with a `taskId`, a `kind`, the
+`claim` text, a `sourceId` (`S1`, `S2`, … assigned run-wide, so one chunk can
+support two tasks), and a verbatim `evidenceQuote`. Claims for a `compound` task
+also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
+
+`server/src/services/agent/repairPlanEvidenceContract.js` then checks that the
+quote appears in the text the model was shown, that the claim appears
+word-for-word inside its own quote, and that every number in the claim is
+present in the quote. Anything that fails becomes a **gap** with its numbers
+redacted — reprinting an unverified torque value inside a warning still puts it
+in front of the owner. Structural problems are handed back for at most **two**
+corrections before the run fails.
+
+| Status | Meaning |
+| --- | --- |
+| `verified` | Every canonical task is covered, every displayed claim passed, and both requirement groups resolved |
+| `partial` | At least one accepted claim, but some task, clause, or requirement is unresolved |
+| `not_found` | No technical claim was accepted. An empty `claims` array can only ever be this |
+
+`verified` describes **this run**, not the manuals: it means every displayed
+statement passed the checks, not that the uploaded PDFs cover the whole repair.
 
 ### Readiness rubric
 
 | Item | Points | Met when |
 | --- | --- | --- |
-| Required tools listed | 25 | `availableTools` is non-empty |
-| Required parts listed | 25 | `availableParts` is non-empty |
-| Skill matches difficulty | 30 | No task is rated above the stated skill level |
-| Safety steps identified | 20 | Tasks exist so safety flags can be surfaced |
+| Required tools verified and on hand | 25 | Every verified `required_tool` phrase appears in the owner's inventory, or a cited procedure states none are required |
+| Required parts verified and on hand | 25 | Same rule for `required_part` |
+| Skill matches difficulty | 30 | Canonical tasks exist and none is rated above the stated skill level |
+| Safety-critical work acknowledged | 20 | Canonical tasks exist and none is safety-critical (acknowledgment is server-owned `false`) |
 
-Score ≥ 80 → `ready`, ≥ 50 → `almost_ready`, otherwise `not_ready`.
+Score ≥ 80 → `ready`, ≥ 50 → `almost_ready`, otherwise `not_ready`, with hard
+caps: `not_found` → `not_ready`; `partial` → at most `almost_ready`;
+unacknowledged safety-critical work → at most `almost_ready`; no canonical task
+→ 0 / `not_ready`.
+
+Inventory matching is exact-phrase on normalized text — no fuzzy or embedding
+guesses, because a wrongly-awarded point tells an owner they are ready for a
+brake job they cannot finish. `none`, `n/a`, `unknown`, and `not sure` are
+treated as an empty inventory. An empty requirement list never means "none
+required"; only a grounded `no_required_tools` / `no_required_parts` claim does.
 
 ## Streaming protocol
 
@@ -69,11 +124,16 @@ one `data: <json>\n\n` frame. Event types:
 | `status` | Human-readable progress message |
 | `tool_call` | The model asked to run a tool (`name`, `arguments`) |
 | `tool_result` | A tool finished (`name`, `summary`) |
-| `text_delta` | A chunk of the model's narrative answer |
 | `trace` | A finished tracing span (observability) |
 | `ai_not_configured` | No `OPENAI_API_KEY` is set; the run stops gracefully |
-| `error` | The run failed (`message`) |
-| `done` | Final event with `status` and assembled `artifacts` |
+| `error` | The run failed (`code`, `reason`, fixed `message`) |
+| `done` | Final event with `status`, `evidenceStatus`, the server-rendered `text`, and assembled `artifacts` |
+
+`text_delta` remains in the documented protocol but **the planner no longer
+emits it**. Model prose is discarded, including prose emitted before a tool
+call: the plan the owner reads is rendered by the server from validated claims.
+`status`, `tool_call`, `tool_result`, and `trace` still stream, so a run is not
+silent.
 
 Request body: `{ brief, skillLevel, availableTools, availableParts, constraints }`.
 Only `brief` is required.
@@ -91,13 +151,26 @@ the OpenAI `fetch`; the resulting `AbortError` is treated as a quiet end (no
 `error` frame), since there is no client left to receive one. Real model/network
 failures (4xx/5xx, stream-parse errors) still surface verbatim through `error`.
 
-### Truncated runs
+### Incomplete runs
 
-The loop is bounded by `maxTurns`. If the model spends its whole budget on tool
-calls and never writes a narrative, the run still ends with `done` but emits a
-`status` frame explaining the plan was truncated (narrow the brief) so the UI
-shows guidance instead of a silent blank narrative. The structured artifacts
-gathered so far are still included.
+An incomplete run is a **failure**, not a success with less content. It emits an
+`error` frame with a `code` and `reason` and **no** `done` frame and **no**
+artifacts, so the browser can never render a readiness score for a run that
+produced no plan.
+
+| `reason` | Cause |
+| --- | --- |
+| `no_canonical_task` | The brief was too vague to yield a task. Fails before any model call |
+| `turn_limit` | `maxTurns` (8) exhausted without a validated finalizer |
+| `invalid_final_contract` | The model stopped without finalizing, or used up both correction attempts |
+| `provider_incomplete` | The provider sent `response.incomplete` |
+| `missing_terminal_event` | The stream ended without `response.completed` |
+| `malformed_tool_arguments` | Tool arguments would not parse — previously silently became `{}` |
+
+A model turn is valid only after `response.completed`. Function calls are
+buffered until then, so a truncated turn executes none of them. On the browser
+side, a stream that ends without a recognized terminal frame is treated as
+incomplete, and only `done.status === "completed"` renders results.
 
 ## Setup
 
