@@ -1,6 +1,16 @@
 import { config } from "../../config.js";
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
-import { createToolRegistry, extractRepairTasks, repairToolSchemas } from "./repairTools.js";
+import {
+  buildOwnerChecklist,
+  checkRepairReadiness,
+  createSourceRegistry,
+  createToolRegistry,
+  draftHandoffNotes,
+  extractRepairTasks,
+  parseInventory,
+  repairToolSchemas,
+} from "./repairTools.js";
+import { buildRepairPlanEvidence } from "./repairPlanEvidenceContract.js";
 import { streamResponsesTurn } from "./openAiResponsesClient.js";
 import { createTracer } from "./tracing.js";
 
@@ -8,6 +18,11 @@ export const AI_NOT_CONFIGURED_MESSAGE =
   "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable the Repair Planner.";
 
 export const SKILL_LEVELS = ["beginner", "intermediate", "advanced"];
+
+// How many times a structurally invalid finalizer is handed back for repair.
+// Bounded because an unbounded correction loop is how one request becomes
+// runaway model spend.
+export const MAX_FINALIZER_CORRECTIONS = 2;
 
 // Fixed, safe user-facing text. A failure never echoes model output back to the
 // owner, so nothing unvalidated can reach the page through an error frame.
@@ -17,6 +32,8 @@ export const PLANNER_FAILURE_MESSAGES = {
   turn_limit:
     "The planner ran out of steps before finishing a plan. Narrow the brief to fewer repairs and try again.",
   empty_output: "The planner stopped before writing a plan. Please try again.",
+  invalid_final_contract:
+    "The planner could not produce a plan backed by your documents. Please try again.",
   provider_incomplete: "The AI model stopped early and the plan is incomplete. Please try again.",
   missing_terminal_event: "The AI model's response ended unexpectedly. Please try again.",
   malformed_tool_arguments: "The AI model sent an unreadable tool request. Please try again.",
@@ -27,12 +44,14 @@ const AGENT_INSTRUCTIONS = [
   "Turn the owner's repair brief into an actionable plan. Work in this order using the tools:",
   "1. Call extract_repair_tasks (no arguments) to read the canonical task list for this run.",
   "2. For each task, call search_repair_docs with that task's id and keywords to ground steps and torque specs in the owner's uploaded manuals.",
-  "3. Call check_repair_readiness (no arguments) for the readiness score.",
-  "4. Call build_owner_checklist and draft_handoff_notes to produce the checklist and copy.",
+  "3. Call check_repair_readiness (no arguments) to see the skill and safety picture.",
+  "4. Call draft_handoff_notes for the parts and mechanic copy.",
+  "5. Call finalize_repair_plan with one atomic claim per grounded statement.",
   "The task list, the owner's skill level, tool and part inventories, and the safety-acknowledgment state are fixed by the server. You cannot set them; arguments attempting to do so are ignored.",
-  "Then write a concise, prioritized plan as plain text. Cite document facts only from search_repair_docs results; never invent torque specs or capacities.",
-  "End with a short 'Follow-up questions:' section listing what is missing when key details (symptoms, mileage, tools, parts, budget) are absent.",
-  "Keep the narrative tight and skimmable. The structured checklist, readiness, and notes are shown separately, so do not repeat them verbatim.",
+  "Your prose is NOT shown to the owner. The plan they read is rendered by the server from your validated claims, so anything you do not submit through finalize_repair_plan is discarded.",
+  "Every claim must quote its source verbatim. The server checks that the quote appears in the retrieved text, that your claim appears word-for-word inside your own quote, and that every number in the claim is present in the quote. Paraphrased claims and unsupported numbers are dropped and reported as gaps.",
+  "Name required tools and parts as required_tool / required_part claims with an itemName, or state no_required_tools / no_required_parts when a cited procedure says none are needed. Readiness cannot credit tools or parts you do not ground this way.",
+  "If nothing can be grounded, call finalize_repair_plan with an empty claims array. That is an honest result; inventing support is not.",
 ].join("\n");
 
 function buildInitialInput(trusted) {
@@ -45,12 +64,21 @@ function buildInitialInput(trusted) {
     `Constraints (budget/time/etc.): ${trusted.constraints || "not specified"}`,
     "",
     "Canonical tasks (server-derived, fixed for this run):",
-    ...trusted.tasks.map(
-      (task) =>
-        `- id ${task.id}: ${task.title} [system: ${task.system}, difficulty: ${task.difficulty}${
-          task.compound ? ", covers multiple clauses" : ""
-        }]`
-    ),
+    ...trusted.tasks.flatMap((task) => {
+      const header = `- id ${task.id}: ${task.title} [system: ${task.system}, difficulty: ${task.difficulty}]`;
+
+      if (!task.compound) {
+        return [header];
+      }
+
+      // A compound task covers more than one thing, so evidence for one clause
+      // does not cover the others. The model must say which clause each claim
+      // supports, so it needs to see them numbered.
+      return [
+        `${header} — covers ${task.clauses.length} clauses; every claim for this task needs a clauseIndex:`,
+        ...task.clauses.map((clause, index) => `    clauseIndex ${index}: ${clause}`),
+      ];
+    }),
   ];
 
   return [
@@ -88,23 +116,6 @@ function buildTrustedContext(request, { brief, vehicle, tasks }) {
   });
 }
 
-function mergeCitations(existing, incoming) {
-  const seen = new Set(
-    existing.map((citation) => `${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`)
-  );
-  const merged = [...existing];
-
-  for (const citation of incoming) {
-    const key = `${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(citation);
-    }
-  }
-
-  return merged;
-}
-
 /**
  * Runs the repair-planning agent loop.
  *
@@ -112,11 +123,13 @@ function mergeCitations(existing, incoming) {
  *   { type: "status", message }
  *   { type: "tool_call", name, arguments }
  *   { type: "tool_result", name, summary }
- *   { type: "text_delta", text }
  *   { type: "trace", span }
- *   { type: "done", text, artifacts }
+ *   { type: "done", status, evidenceStatus, text, artifacts }
  *   { type: "ai_not_configured", message }
- *   { type: "error", message }
+ *   { type: "error", code, reason, message }
+ *
+ * `text_delta` is NOT emitted. Model prose is discarded; the plan the owner
+ * reads is rendered by the server from validated claims.
  *
  * `streamTurn` and `retrieve` are injectable so the whole loop is testable
  * without a live model or database.
@@ -170,7 +183,10 @@ export async function runRepairPlannerAgent(request, options = {}) {
   });
 
   const tracer = createTracer({ onSpan: (span) => emit({ type: "trace", span }) });
-  const registry = createToolRegistry({ retrieve, trusted });
+  // Run-wide so one chunk keeps one id across every search: a torque table
+  // cited for the front brakes is the same evidence for the rear brakes.
+  const sources = createSourceRegistry();
+  const registry = createToolRegistry({ retrieve, trusted, sources });
 
   const artifacts = {
     // Canonical from the start: the UI shows the server's task list whether or
@@ -185,8 +201,10 @@ export async function runRepairPlannerAgent(request, options = {}) {
   /** @type {any[]} */
   let inputItems = buildInitialInput(trusted);
 
-  let finalText = "";
-  let modelFinishedWriting = false;
+  let modelStoppedCallingTools = false;
+  /** @type {any} */
+  let finalizedPlan = null;
+  let correctionsUsed = 0;
 
   try {
     emit({ type: "status", message: "Analyzing repair brief..." });
@@ -204,10 +222,11 @@ export async function runRepairPlannerAgent(request, options = {}) {
       });
 
       for await (const event of stream) {
-        if (event.type === "text_delta") {
-          finalText += event.text;
-          emit({ type: "text_delta", text: event.text });
-        } else if (event.type === "function_call") {
+        // Model prose is DISCARDED, including prose emitted before a tool call.
+        // It used to stream straight to the browser, where an invented torque
+        // value rendered exactly like a sourced one. The only text the owner
+        // sees is rendered by the server from validated claims.
+        if (event.type === "function_call") {
           pendingToolCalls.push(event);
         }
       }
@@ -215,8 +234,8 @@ export async function runRepairPlannerAgent(request, options = {}) {
       turnSpan.end({ toolCalls: pendingToolCalls.length });
 
       if (!pendingToolCalls.length) {
-        // The model stopped calling tools: this turn was its final answer.
-        modelFinishedWriting = true;
+        // The model stopped calling tools without submitting a finalizer.
+        modelStoppedCallingTools = true;
         break;
       }
 
@@ -227,7 +246,33 @@ export async function runRepairPlannerAgent(request, options = {}) {
         const toolSpan = tracer.startSpan("tool_call", { tool: toolCall.name });
         let result;
 
-        if (!executor) {
+        if (toolCall.name === "finalize_repair_plan") {
+          const evidence = buildRepairPlanEvidence(toolCall.arguments || {}, {
+            tasks: trusted.tasks,
+            sources: sources.list(),
+            availableTools: parseInventory(trusted.availableTools),
+            availableParts: parseInventory(trusted.availableParts),
+          });
+
+          if (evidence.valid) {
+            finalizedPlan = evidence;
+            result = {
+              accepted: true,
+              evidenceStatus: evidence.evidenceStatus,
+              verifiedClaims: evidence.verifiedClaims.length,
+              droppedClaims: evidence.rejectedCount,
+            };
+          } else {
+            // Structural problems go back to the model so it can correct them,
+            // but only a bounded number of times -- an unbounded repair loop is
+            // how a single request turns into runaway model spend.
+            correctionsUsed += 1;
+            result = {
+              error: "finalize_repair_plan was rejected. Fix these problems and call it again.",
+              problems: evidence.errors,
+            };
+          }
+        } else if (!executor) {
           result = { error: `Unknown tool: ${toolCall.name}` };
         } else {
           try {
@@ -239,19 +284,11 @@ export async function runRepairPlannerAgent(request, options = {}) {
           }
         }
 
-        // Accumulate structured artifacts for the UI. `tasks` is deliberately
-        // absent: the canonical list is set before the loop and the model
-        // cannot replace it.
-        if (toolCall.name === "search_repair_docs" && Array.isArray(result.citations)) {
-          artifacts.citations = mergeCitations(artifacts.citations, result.citations);
-        } else if (toolCall.name === "check_repair_readiness") {
-          artifacts.readiness = result;
-        } else if (toolCall.name === "build_owner_checklist" && Array.isArray(result.checklist)) {
-          artifacts.checklist = result.checklist;
-        } else if (toolCall.name === "draft_handoff_notes") {
-          artifacts.handoffNotes = result;
-        }
-
+        // Nothing is accumulated into artifacts here any more. Readiness, the
+        // checklist, handoff notes, and citations are all rebuilt after the
+        // finalizer validates, from validated data only -- a mid-run readiness
+        // score has no requirement groups, and a chunk that was retrieved but
+        // never cited is not evidence for anything.
         toolSpan.end();
         emit({
           type: "tool_result",
@@ -273,32 +310,80 @@ export async function runRepairPlannerAgent(request, options = {}) {
           }
         );
       }
+
+      if (finalizedPlan) {
+        break;
+      }
+
+      if (correctionsUsed > MAX_FINALIZER_CORRECTIONS) {
+        return failRun("planner_invalid_output", "invalid_final_contract");
+      }
     }
 
-    const trimmedFinal = finalText.trim();
-
-    // A run that spends its whole budget on tool calls, or stops without
-    // writing anything, produced no plan. It used to emit
+    // A run without a validated finalizer produced no plan. It used to emit
     // `done.status: "completed"` with an advisory status frame, so the browser
     // rendered a readiness score and checklist as if the run had succeeded.
     // Incomplete generation is a failure: no `done`, no artifacts.
-    if (!modelFinishedWriting) {
-      return failRun("planner_incomplete", "turn_limit");
+    if (!finalizedPlan) {
+      return failRun(
+        modelStoppedCallingTools ? "planner_invalid_output" : "planner_incomplete",
+        modelStoppedCallingTools ? "invalid_final_contract" : "turn_limit"
+      );
     }
 
-    if (!trimmedFinal) {
-      return failRun("planner_incomplete", "empty_output");
-    }
+    // Every artifact the owner sees is rebuilt here from validated data. The
+    // readiness the model saw mid-run had no requirement groups; this is the
+    // authoritative copy, and the only one that reaches the browser.
+    const readiness = checkRepairReadiness({
+      tasks: trusted.tasks,
+      skillLevel: trusted.skillLevel,
+      ackSafety: trusted.safetyAcknowledged,
+      requirements: finalizedPlan.requirements,
+      evidenceStatus: finalizedPlan.evidenceStatus,
+    });
 
-    emit({ type: "done", status: "completed", text: trimmedFinal, artifacts });
-    return { status: "completed", text: trimmedFinal, artifacts };
+    artifacts.readiness = readiness;
+    artifacts.checklist = buildOwnerChecklist({
+      tasks: trusted.tasks,
+      skillLevel: trusted.skillLevel,
+      ackSafety: trusted.safetyAcknowledged,
+    }).checklist;
+    artifacts.handoffNotes = draftHandoffNotes({
+      tasks: trusted.tasks,
+      vehicle: trusted.vehicle,
+      // Parts copy comes from VERIFIED part requirements, not from whatever the
+      // model typed into draft_handoff_notes.
+      partsNeeded: finalizedPlan.requirements.parts.required.join(", "),
+    });
+    artifacts.citations = finalizedPlan.citations;
+    artifacts.requirements = finalizedPlan.requirements;
+    artifacts.evidence = {
+      verifiedClaims: finalizedPlan.verifiedClaims,
+      gaps: finalizedPlan.gaps,
+    };
+
+    const done = {
+      type: "done",
+      status: "completed",
+      evidenceStatus: finalizedPlan.evidenceStatus,
+      text: finalizedPlan.text,
+      artifacts,
+    };
+
+    emit(done);
+    return {
+      status: "completed",
+      evidenceStatus: finalizedPlan.evidenceStatus,
+      text: finalizedPlan.text,
+      artifacts,
+    };
   } catch (error) {
     // An AbortError means the client disconnected mid-stream (see the route's
     // response "close" handling). There is no client left to receive a frame,
     // so end quietly rather than emitting a user-facing error. Real model and
     // network failures (4xx/5xx, parse errors) keep surfacing via `error`.
     if (error?.name === "AbortError") {
-      return { status: "aborted", text: finalText.trim(), artifacts };
+      return { status: "aborted", text: "", artifacts };
     }
 
     // Typed provider failures (truncated response, missing terminal event,
@@ -309,7 +394,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
     }
 
     emit({ type: "error", message: error.message || "The repair planner failed." });
-    return { status: "error", text: finalText.trim(), artifacts };
+    return { status: "error", text: "", artifacts };
   }
 }
 

@@ -1,5 +1,6 @@
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import { normalizeText } from "../../utils/text.js";
+import { CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
 // The safety rubric lives in its own module so the "is this safety critical"
 // keyword list and the "which warnings apply" rule table stay in sync.
 import { classifyRepairTask } from "../safetyClassifier.js";
@@ -367,13 +368,78 @@ function buildSnippet(text) {
   return normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized;
 }
 
+// How much of a chunk the model is shown per source.
+//
+// Deliberately far larger than the 220-character citation snippet: the model
+// must quote VERBATIM from what it can see, and quotes are verified against
+// exactly that text. Showing snippets would make grounding impossible for any
+// procedure longer than two sentences, which is most of them.
+export const EVIDENCE_CONTEXT_CHAR_LIMIT = 1500;
+
+function buildEvidenceText(text) {
+  const normalized = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+
+  return normalized.length > EVIDENCE_CONTEXT_CHAR_LIMIT
+    ? normalized.slice(0, EVIDENCE_CONTEXT_CHAR_LIMIT)
+    : normalized;
+}
+
+/**
+ * Run-wide registry of retrieved sources.
+ *
+ * Source ids are assigned across the WHOLE run, not per search, because one
+ * chunk can legitimately support two tasks -- a torque table cited for the
+ * front brakes is the same evidence when the rear brakes need it. Scoping ids
+ * per search would force the model to re-cite the same text under a new name
+ * and would reject honest cross-task citations.
+ *
+ * The full retrieved text stays here on the server. The model sees
+ * `evidenceText`; quotes are verified against that same string.
+ */
+export function createSourceRegistry() {
+  const sources = [];
+  const byKey = new Map();
+  const byId = new Map();
+
+  return {
+    register(chunk) {
+      const key = `${chunk.documentId}-${chunk.pageNumber}-${chunk.chunkIndex}`;
+      const existing = byKey.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const source = {
+        id: `S${sources.length + 1}`,
+        documentId: chunk.documentId,
+        documentTitle: chunk.documentTitle,
+        originalFilename: chunk.originalFilename,
+        pageNumber: chunk.pageNumber,
+        chunkIndex: chunk.chunkIndex,
+        chunkText: chunk.chunkText,
+        evidenceText: buildEvidenceText(chunk.chunkText),
+        snippet: buildSnippet(chunk.chunkText),
+      };
+
+      sources.push(source);
+      byKey.set(key, source);
+      byId.set(source.id, source);
+
+      return source;
+    },
+    get: (id) => byId.get(id),
+    list: () => [...sources],
+  };
+}
+
 /**
  * @param {{ query?: string, limit?: number, taskId?: number }} [args]
- * @param {{ retrieve?: typeof retrieveRelevantChunks }} [deps]
+ * @param {{ retrieve?: typeof retrieveRelevantChunks, sources?: any }} [deps]
  */
 export async function searchRepairDocs(
   { query, limit = 4, taskId } = {},
-  { retrieve = retrieveRelevantChunks } = {}
+  { retrieve = retrieveRelevantChunks, sources = null } = {}
 ) {
   const normalizedQuery = normalizeText(query);
 
@@ -383,24 +449,27 @@ export async function searchRepairDocs(
 
   const rawChunks = await retrieve(normalizedQuery, { limit });
   const chunks = Array.isArray(rawChunks) ? rawChunks : [];
+  const registry = sources || createSourceRegistry();
+  const registered = chunks.map((chunk) => registry.register(chunk));
 
-  const citations = chunks.map((chunk) => ({
-    documentId: chunk.documentId,
-    documentTitle: chunk.documentTitle,
-    originalFilename: chunk.originalFilename,
-    pageNumber: chunk.pageNumber,
-    chunkIndex: chunk.chunkIndex,
-    snippet: buildSnippet(chunk.chunkText),
+  const citations = registered.map((source) => ({
+    sourceId: source.id,
+    documentId: source.documentId,
+    documentTitle: source.documentTitle,
+    originalFilename: source.originalFilename,
+    pageNumber: source.pageNumber,
+    chunkIndex: source.chunkIndex,
+    snippet: source.snippet,
   }));
 
-  const context = chunks
+  // The model gets the full (capped) text, labeled with the run-wide source id
+  // it must cite. Quotes are checked against this exact string.
+  const context = registered
     .map(
-      (chunk, index) =>
-        `[${index + 1}] ${chunk.documentTitle} (page ${chunk.pageNumber}): ${buildSnippet(
-          chunk.chunkText
-        )}`
+      (source) =>
+        `[${source.id}] ${source.documentTitle} (page ${source.pageNumber}): ${source.evidenceText}`
     )
-    .join("\n");
+    .join("\n\n");
 
   return { query: normalizedQuery, taskId, citations, context };
 }
@@ -477,20 +546,39 @@ function resolveTaskSafety(task) {
   };
 }
 
+/**
+ * Scores readiness.
+ *
+ * `requirements` are the VALIDATED requirement groups from the evidence
+ * contract. Without them the tool and part rows cannot be earned: listing a
+ * tool chest proves nothing about whether it contains what this repair needs,
+ * and an empty requirement list is not evidence that nothing is required.
+ *
+ * Raw inventory strings are deliberately NOT read here. Whether the owner has
+ * what the repair needs is decided in `buildRequirementGroups`, which matches
+ * verified requirement names against the parsed inventory; by the time a group
+ * arrives its status already encodes that answer. Callers may still pass
+ * `availableTools` / `availableParts` — they are ignored.
+ *
+ * @param {{
+ *   tasks?: any[], skillLevel?: string, ackSafety?: boolean,
+ *   requirements?: { tools: any, parts: any } | null,
+ *   evidenceStatus?: string | null,
+ * }} [args]
+ */
 export function checkRepairReadiness({
   tasks = [],
-  availableTools = "",
-  availableParts = "",
   skillLevel = "beginner",
   ackSafety = false,
+  requirements = null,
+  evidenceStatus = null,
 } = {}) {
   const normalizedSkill = SKILL_RANK[skillLevel] ? skillLevel : "beginner";
   const skillRank = SKILL_RANK[normalizedSkill];
-  // Any non-empty string used to earn the full 25 points, so "none" and "n/a"
-  // scored the same as a full tool chest. Parsed entries with the sentinels
-  // removed is what a real inventory means.
-  const hasTools = parseInventory(availableTools).length > 0;
-  const hasParts = parseInventory(availableParts).length > 0;
+  const toolGroup = requirements?.tools || { status: "unknown", required: [], missing: [] };
+  const partGroup = requirements?.parts || { status: "unknown", required: [], missing: [] };
+  const toolsReady = toolGroup.status === "satisfied" || toolGroup.status === "none_required";
+  const partsReady = partGroup.status === "satisfied" || partGroup.status === "none_required";
 
   // One classification per task, reused for both the critical verdict and the
   // warnings. Previously these came from different places: safetyFlags were
@@ -510,14 +598,26 @@ export function checkRepairReadiness({
     (task) => (DIFFICULTY_RANK[task.difficulty] || 1) > skillRank
   );
 
+  const hasTasks = tasks.length > 0;
+
   const rubric = [
-    { id: "tools_listed", label: "Required tools listed", points: 25, met: hasTools },
-    { id: "parts_listed", label: "Required parts listed", points: 25, met: hasParts },
+    {
+      id: "tools_available",
+      label: "Required tools verified and on hand",
+      points: 25,
+      met: toolsReady,
+    },
+    {
+      id: "parts_available",
+      label: "Required parts verified and on hand",
+      points: 25,
+      met: partsReady,
+    },
     {
       id: "skill_match",
       label: "Skill level matches task difficulty",
       points: 30,
-      met: overSkillTasks.length === 0,
+      met: hasTasks && overSkillTasks.length === 0,
     },
     {
       id: "safety_reviewed",
@@ -525,18 +625,22 @@ export function checkRepairReadiness({
       points: 20,
       // Only earned when there is no safety-critical work, or the owner has
       // explicitly acknowledged the risk. Listing tools/parts does not count.
-      met: !hasSafetyCritical || safetyAcknowledged,
+      met: hasTasks && (!hasSafetyCritical || safetyAcknowledged),
     },
   ];
 
   const score = rubric.reduce((total, item) => total + (item.met ? item.points : 0), 0);
 
   const gaps = [];
-  if (!hasTools) {
-    gaps.push("No tools listed. Add the tools you have so missing tools can be flagged.");
+  if (toolGroup.status === "unknown") {
+    gaps.push("Required tools have not been verified against your documents.");
+  } else if (toolGroup.status === "unmet") {
+    gaps.push(`Missing verified tools: ${toolGroup.missing.join(", ")}.`);
   }
-  if (!hasParts) {
-    gaps.push("No parts listed. Add the parts on hand to confirm what still needs ordering.");
+  if (partGroup.status === "unknown") {
+    gaps.push("Required parts have not been verified against your documents.");
+  } else if (partGroup.status === "unmet") {
+    gaps.push(`Missing verified parts: ${partGroup.missing.join(", ")}.`);
   }
   for (const task of overSkillTasks) {
     gaps.push(
@@ -568,6 +672,29 @@ export function checkRepairReadiness({
   // the numeric score, so a beginner is not nudged into an unsafe DIY repair.
   if (hasSafetyCritical && !safetyAcknowledged && level === "ready") {
     level = "almost_ready";
+  }
+
+  // Evidence caps. Readiness describes preparation for a repair the documents
+  // actually describe; a score built on unverified content cannot outrank the
+  // evidence it rests on.
+  if (evidenceStatus === "not_found") {
+    level = "not_ready";
+  } else if (evidenceStatus === "partial" && level === "ready") {
+    level = "almost_ready";
+  }
+
+  // No canonical task means there is nothing to be ready for.
+  if (!hasTasks) {
+    return {
+      score: 0,
+      level: "not_ready",
+      skillLevel: normalizedSkill,
+      rubric: rubric.map((item) => ({ ...item, met: false })),
+      gaps: ["No canonical repair task could be derived from the brief."],
+      safetyCritical: false,
+      safetyAcknowledged: true,
+      safetyFlags: [],
+    };
   }
 
   return {
@@ -745,6 +872,54 @@ export const repairToolSchemas = [
   },
   {
     type: "function",
+    name: "finalize_repair_plan",
+    description:
+      "Submit the finished plan as atomic claims. Every claim must quote its source verbatim: the server verifies each quote against the retrieved text, checks that the claim itself appears within its own quote, and drops anything it cannot confirm. Send an empty claims array when nothing could be grounded — that is an honest result, and inventing support is not.",
+    parameters: {
+      type: "object",
+      properties: {
+        claims: {
+          type: "array",
+          description: "One entry per grounded statement. May be empty.",
+          items: {
+            type: "object",
+            properties: {
+              taskId: {
+                type: "integer",
+                description: "Canonical task id this claim supports.",
+              },
+              clauseIndex: {
+                type: "integer",
+                description:
+                  "Required only for tasks marked as covering multiple clauses: which clause (0-based) this claim supports.",
+              },
+              kind: { type: "string", enum: CLAIM_KINDS },
+              claim: {
+                type: "string",
+                description:
+                  "The technical statement, copied from the quote below. Do not paraphrase — it must appear word-for-word inside evidenceQuote.",
+              },
+              sourceId: { type: "string", description: "Source id from search_repair_docs, e.g. S1." },
+              evidenceQuote: {
+                type: "string",
+                description: "Verbatim excerpt from that source containing the claim.",
+              },
+              itemName: {
+                type: "string",
+                description: "Required for required_tool and required_part: the item's name.",
+              },
+            },
+            required: ["taskId", "kind", "claim", "sourceId", "evidenceQuote"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["claims"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "draft_handoff_notes",
     description:
       "Draft channel-specific copy: a parts-store shopping list, a mechanic handoff summary, and a maintenance-log entry.",
@@ -769,11 +944,16 @@ export const repairToolSchemas = [
  * `ackSafety: true` or a replacement task list changes nothing. Only genuinely
  * model-chosen values (a search query, parts copy) come from `args`.
  *
- * @param {{ retrieve?: typeof retrieveRelevantChunks, trusted?: any }} [deps]
+ * @param {{ retrieve?: typeof retrieveRelevantChunks, trusted?: any, sources?: any }} [deps]
  */
-export function createToolRegistry({ retrieve = retrieveRelevantChunks, trusted = {} } = {}) {
+export function createToolRegistry({
+  retrieve = retrieveRelevantChunks,
+  trusted = {},
+  sources = null,
+} = {}) {
   const tasks = Array.isArray(trusted.tasks) ? trusted.tasks : [];
   const validTaskIds = new Set(tasks.map((task) => task.id));
+  const sourceRegistry = sources || createSourceRegistry();
 
   return {
     extract_repair_tasks: () => ({ tasks }),
@@ -791,13 +971,18 @@ export function createToolRegistry({ retrieve = retrieveRelevantChunks, trusted 
         });
       }
 
-      return searchRepairDocs({ query: args?.query, limit: args?.limit, taskId }, { retrieve });
+      return searchRepairDocs(
+        { query: args?.query, limit: args?.limit, taskId },
+        { retrieve, sources: sourceRegistry }
+      );
     },
+    // Readiness the model can see mid-run is the SKILL and SAFETY picture only:
+    // tool and part rows depend on requirements that do not exist until the
+    // finalizer is validated. The authoritative readiness is recomputed
+    // server-side after that, and only that copy reaches the browser.
     check_repair_readiness: () =>
       checkRepairReadiness({
         tasks,
-        availableTools: trusted.availableTools,
-        availableParts: trusted.availableParts,
         skillLevel: trusted.skillLevel,
         ackSafety: trusted.safetyAcknowledged,
       }),
