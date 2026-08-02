@@ -86,6 +86,209 @@ test("a verified claim yields answered and cites ONLY the backing chunk", async 
   assert.match(result.answer, /37 Nm/);
 });
 
+test("duplicate copies of one backing chunk produce one citation", async () => {
+  const result = await ask(
+    {
+      ...emptyPayload,
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+        },
+      ],
+    },
+    {
+      retrieveChunks: async () => [
+        { ...oilChunk, chunkId: 101 },
+        { ...oilChunk, chunkId: 101 },
+      ],
+    }
+  );
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.evidence.documentSupported.length, 1);
+});
+
+test("two distinct claims from one chunk keep one evidence citation per quote", async () => {
+  const result = await ask(
+    {
+      ...emptyPayload,
+      documentSupported: [
+        {
+          claim: "Install the oil drain plug with a new gasket.",
+          sourceId: "S1",
+          evidenceQuote: "Clean and install the oil drain plug with a new gasket.",
+        },
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+        },
+      ],
+    },
+    {
+      retrieveChunks: async () => [oilChunk],
+    }
+  );
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.evidence.documentSupported.length, 2);
+  assert.deepEqual(
+    result.citations.map((citation) => citation.snippet),
+    [
+      "Clean and install the oil drain plug with a new gasket.",
+      "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+    ]
+  );
+});
+
+test("an evidence citation snippet is the verified quote, not an unused chunk prefix", async () => {
+  const usedQuote = "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+  const unrelatedPrefix = "Unrelated maintenance note. ".repeat(12);
+  const result = await ask(
+    {
+      ...emptyPayload,
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: usedQuote,
+        },
+      ],
+    },
+    {
+      retrieveChunks: async () => [
+        {
+          ...oilChunk,
+          chunkText: unrelatedPrefix + usedQuote,
+        },
+      ],
+    }
+  );
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0].snippet, usedQuote);
+});
+
+test("a long evidence citation carries the full verified quote behind its preview", async () => {
+  const longQuote =
+    "Inspect the drain plug threads, sealing surface, surrounding oil pan area, and gasket seating position before installation; clean away residue and confirm that no damaged material remains before continuing with the repair procedure.";
+  const result = await ask(
+    {
+      ...emptyPayload,
+      documentSupported: [
+        {
+          claim: "Inspect and clean the drain plug area before continuing.",
+          sourceId: "S1",
+          evidenceQuote: longQuote,
+        },
+      ],
+    },
+    {
+      retrieveChunks: async () => [
+        {
+          ...oilChunk,
+          chunkText: longQuote,
+        },
+      ],
+    }
+  );
+
+  assert.equal(result.status, "answered");
+  assert.equal(result.citations[0].evidenceQuote, longQuote);
+  assert.match(result.citations[0].snippet, /\.\.\.$/);
+});
+
+test("a text passage with no valid document id cannot become a document-backed answer", async () => {
+  let modelCalls = 0;
+  const result = await ask(
+    {
+      ...emptyPayload,
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+        },
+      ],
+    },
+    {
+      retrieveChunks: async () => [
+        {
+          ...oilChunk,
+          documentId: undefined,
+        },
+      ],
+      generateEvidenceAnswer: async () => {
+        modelCalls += 1;
+        return emptyPayload;
+      },
+    }
+  );
+
+  assert.equal(result.status, "not_found");
+  assert.deepEqual(result.citations, []);
+  assert.equal(modelCalls, 0);
+});
+
+test("boolean source identifiers cannot become document-backed citations", async () => {
+  let modelCalls = 0;
+  const result = await ask(emptyPayload, {
+    retrieveChunks: async () => [
+      {
+        ...oilChunk,
+        documentId: true,
+        pageNumber: true,
+        chunkIndex: false,
+      },
+    ],
+    generateEvidenceAnswer: async () => {
+      modelCalls += 1;
+      return emptyPayload;
+    },
+  });
+
+  assert.equal(result.status, "not_found");
+  assert.deepEqual(result.citations, []);
+  assert.equal(modelCalls, 0);
+});
+
+test("invalid retrieval rows are removed before the model receives source labels", async () => {
+  let chunksGivenToModel = [];
+  const evidencePayload = {
+    ...emptyPayload,
+    documentSupported: [
+      {
+        claim: "The oil drain plug torque is 37 Nm.",
+        sourceId: "S1",
+        evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+      },
+    ],
+  };
+
+  const result = await ask(evidencePayload, {
+    retrieveChunks: async () => [
+      oilChunk,
+      {
+        ...otherChunk,
+        documentId: undefined,
+      },
+    ],
+    generateEvidenceAnswer: async ({ chunks }) => {
+      chunksGivenToModel = chunks;
+      return evidencePayload;
+    },
+  });
+
+  assert.equal(result.status, "answered");
+  assert.equal(chunksGivenToModel.length, 1);
+  assert.equal(chunksGivenToModel[0].documentTitle, "Oil and Oil Filter Replacement");
+  assert.equal(result.citations.length, 1);
+});
+
 test("a claim with a fabricated quote is not shown and the status is not_found", async () => {
   const result = await ask({
     ...emptyPayload,

@@ -1064,6 +1064,7 @@ test("Goal A citation matching returns server-built citations from retrieved chu
   assert.ok(response.body.citations.length >= 1);
   assert.equal(response.body.citations[0].documentId, documentId);
   assert.equal(response.body.citations[0].pageNumber, 3);
+  assert.equal(response.body.citations[0].chunkIndex, 0);
   assert.ok(response.body.citations[0].snippet.includes("27 ft-lb"));
 });
 

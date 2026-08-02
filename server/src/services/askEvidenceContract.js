@@ -135,10 +135,6 @@ function readString(value) {
 }
 
 function readStringArray(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
   return value
     .map(readString)
     .filter(Boolean)
@@ -161,15 +157,42 @@ export function validateEvidencePayload(payload) {
     return { ok: false, reason: "not_an_object" };
   }
 
+  const payloadFields = new Set(["documentSupported", "generalGuidance", "gaps"]);
+
+  if (Object.keys(payload).some((field) => !payloadFields.has(field))) {
+    return { ok: false, reason: "unexpected_payload_field" };
+  }
+
   if (!Array.isArray(payload.documentSupported)) {
     return { ok: false, reason: "documentSupported_not_an_array" };
   }
 
+  if (!Array.isArray(payload.generalGuidance)) {
+    return { ok: false, reason: "generalGuidance_not_an_array" };
+  }
+
+  if (!Array.isArray(payload.gaps)) {
+    return { ok: false, reason: "gaps_not_an_array" };
+  }
+
+  if (payload.generalGuidance.some((item) => typeof item !== "string")) {
+    return { ok: false, reason: "generalGuidance_item_not_a_string" };
+  }
+
+  if (payload.gaps.some((item) => typeof item !== "string")) {
+    return { ok: false, reason: "gaps_item_not_a_string" };
+  }
+
   const documentSupported = [];
+  const claimFields = new Set(["claim", "sourceId", "evidenceQuote"]);
 
   for (const raw of payload.documentSupported.slice(0, MAX_ITEMS)) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       return { ok: false, reason: "claim_not_an_object" };
+    }
+
+    if (Object.keys(raw).some((field) => !claimFields.has(field))) {
+      return { ok: false, reason: "claim_unexpected_field" };
     }
 
     const claim = readString(raw.claim);
@@ -373,31 +396,41 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
     return false;
   }
 
-  // 1. The numeral appears somewhere in the evidence.
-  if (evidenceNumbers.some((candidate) => withinTolerance(candidate, spec.value))) {
-    return true;
-  }
-
-  // 2. Or an evidence spec in the SAME family converts to it.
+  // Prefer unit-aware comparison whenever the evidence names any technical
+  // units. A matching numeral alone is not enough: "37 psi" must never be
+  // grounded by an unrelated "37 N·m" torque passage.
   const claimCanonical = canonicalize(spec.value, spec.unit);
-
-  if (!claimCanonical) {
-    return false;
-  }
 
   for (const evidenceSpec of evidenceSpecs) {
     const evidenceCanonical = canonicalize(evidenceSpec.value, evidenceSpec.unit);
 
     if (
+      claimCanonical &&
       evidenceCanonical &&
       evidenceCanonical.family === claimCanonical.family &&
       withinTolerance(evidenceCanonical.canonical, claimCanonical.canonical)
     ) {
       return true;
     }
+
+    if (
+      !claimCanonical &&
+      !evidenceCanonical &&
+      normalizeForMatch(evidenceSpec.unit) === normalizeForMatch(spec.unit) &&
+      withinTolerance(evidenceSpec.value, spec.value)
+    ) {
+      return true;
+    }
   }
 
-  return false;
+  if (evidenceSpecs.length) {
+    return false;
+  }
+
+  // Some extracted manual tables put units in a header and only numbers in the
+  // row. Preserve that fallback only when the quote contains no other explicit
+  // unit-bearing specification to contradict the claim's unit family.
+  return evidenceNumbers.some((candidate) => withinTolerance(candidate, spec.value));
 }
 
 /** All numbers appearing anywhere in the evidence text, unit or not. */
@@ -472,8 +505,27 @@ export function redactSpecNumbers(text) {
 export function verifyEvidence(validated, chunks) {
   const byLabel = new Map(chunks.map((chunk, index) => [sourceLabel(index), { chunk, index }]));
   const supported = [];
-  const gaps = [...validated.gaps];
+  const gaps = [];
   const rejected = [];
+
+  // Gaps are model-authored too. They describe missing evidence, so a technical
+  // value inside one is unsupported by definition and must not leak back onto
+  // the screen under a safer-sounding heading.
+  for (const gap of validated.gaps) {
+    const specs = extractSpecNumbers(gap);
+
+    if (specs.length) {
+      rejected.push({
+        claim: gap,
+        reason: "unsourced_gap_specification",
+        unsupported: specs.map((spec) => spec.raw),
+      });
+      gaps.push("Unverified gap: " + redactSpecNumbers(gap));
+      continue;
+    }
+
+    gaps.push(gap);
+  }
 
   for (const claim of validated.documentSupported) {
     const mapped = byLabel.get(claim.sourceId.toUpperCase());

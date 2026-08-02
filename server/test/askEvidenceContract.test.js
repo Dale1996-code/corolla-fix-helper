@@ -53,6 +53,17 @@ test("the validator rejects malformed payloads instead of coercing them", () => 
     [{}, "documentSupported_not_an_array"],
     [payload({ documentSupported: ["nope"] }), "claim_not_an_object"],
     [payload({ documentSupported: [{ claim: "x", sourceId: "S1" }] }), "claim_missing_fields"],
+    [{ documentSupported: [], gaps: [] }, "generalGuidance_not_an_array"],
+    [{ documentSupported: [], generalGuidance: [] }, "gaps_not_an_array"],
+    [payload({ unexpected: "field" }), "unexpected_payload_field"],
+    [
+      payload({
+        documentSupported: [
+          { claim: "x", sourceId: "S1", evidenceQuote: "q", chunkId: 999 },
+        ],
+      }),
+      "claim_unexpected_field",
+    ],
     [
       payload({ documentSupported: [{ claim: "", sourceId: "S1", evidenceQuote: "q" }] }),
       "claim_missing_fields",
@@ -66,13 +77,15 @@ test("the validator rejects malformed payloads instead of coercing them", () => 
   }
 });
 
-test("the validator drops non-string guidance and gap entries", () => {
-  const result = validateEvidencePayload(
-    payload({ generalGuidance: ["ok", 42, null, "  "], gaps: [{}, "real gap"] })
+test("the validator rejects non-string guidance and gap entries", () => {
+  assert.deepEqual(
+    validateEvidencePayload(payload({ generalGuidance: ["ok", 42], gaps: [] })),
+    { ok: false, reason: "generalGuidance_item_not_a_string" }
   );
-
-  assert.deepEqual(result.value.generalGuidance, ["ok"]);
-  assert.deepEqual(result.value.gaps, ["real gap"]);
+  assert.deepEqual(
+    validateEvidencePayload(payload({ generalGuidance: [], gaps: [{}, "real gap"] })),
+    { ok: false, reason: "gaps_item_not_a_string" }
+  );
 });
 
 // ---- Quote verification ----
@@ -150,6 +163,13 @@ test("an invented spec is flagged even when the quote is real", () => {
 
   assert.equal(result.grounded, false);
   assert.ok(result.unsupported.some((entry) => entry.includes("54")));
+});
+
+test("the same number with an unrelated unit is not treated as grounded", () => {
+  const result = checkClaimNumbers("Set tire pressure to 37 psi.", "Torque : 37 N·m");
+
+  assert.equal(result.grounded, false);
+  assert.ok(result.unsupported.some((entry) => entry.includes("37 psi")));
 });
 
 test("a viscosity grade must literally appear", () => {
@@ -249,6 +269,17 @@ test("an ungrounded torque value in general guidance surfaces as a gap, not text
   assert.match(result.gaps[0], /Removed unsourced specification/);
   assert.doesNotMatch(result.gaps[0], /30 Nm/);
   assert.match(result.gaps[0], /\[unverified value\]/);
+});
+
+test("an unsupported specification supplied in a gap is redacted before rendering", () => {
+  const result = verifyEvidence(
+    payload({ gaps: ["The oil filter cap torque is 54 Nm."] }),
+    [chunk()]
+  );
+
+  assert.equal(result.rejected[0].reason, "unsourced_gap_specification");
+  assert.doesNotMatch(result.gaps.join(" "), /54 Nm/);
+  assert.match(result.gaps.join(" "), /\[unverified value\]/);
 });
 
 test("non-numeric general guidance is kept", () => {
