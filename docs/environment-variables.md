@@ -46,6 +46,7 @@ OPENAI_VISION_MODEL=
 # result and the /api/ask response, and `npm run eval:answers` prints per-case
 # timings. Off by default so the response shape is unchanged in normal use.
 ASK_DEBUG_METRICS=false
+ASK_EVIDENCE_CONTRACT=true
 RERANK_ENABLED=false
 RERANK_CANDIDATE_LIMIT=20
 OPENAI_RERANK_MODEL=
@@ -73,6 +74,7 @@ What each one means:
 - `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is the pinned snapshot `gpt-5.5-2026-04-23`.
 - `OPENAI_VISION_MODEL` is the OpenAI model used only when Ask includes one already-saved image attachment. Leave it blank to reuse `OPENAI_ANSWER_MODEL`.
 - `ASK_DEBUG_METRICS` enables development-only Ask visibility when set to `true`. It adds a log-safe metrics object to `/api/ask` responses and answer-eval output. The object contains durations, counts, sizes, and numeric identifiers, never document text. The default is `false`.
+- `ASK_EVIDENCE_CONTRACT` enables Ask's verified, structured evidence response. The default is `true`: document-supported claims need a real source, a verbatim quote, supported technical numbers, and a matching subject for recognized torque statements. Set it to `false` only when an older integration cannot yet consume the additive `evidence` fields. The compatibility response is deliberately `status: "unverified"`, returns `citations: []`, and exposes retrieved passages only as `retrievedContext`, so neither the API nor UI presents unchecked prose as document-backed.
 - `RERANK_ENABLED` turns the optional Ask reranker on or off. The default is `false`. When `true`, Ask retrieval over-fetches a wider candidate pool and asks the model to reorder it before the final result slice. It needs an API key; with no key, a malformed reply, or any error it silently falls back to the existing hybrid order.
 - `RERANK_CANDIDATE_LIMIT` is how many fused candidates the reranker is allowed to reorder. The default is `20`.
 - `OPENAI_RERANK_MODEL` is the OpenAI model name used by the reranker. Leave blank to reuse `OPENAI_ANSWER_MODEL`.
@@ -88,7 +90,7 @@ What each one means:
 
 Because this file is normally copied to `server/.env`, the relative paths above are relative to the `server/` folder.
 
-`server/src/config.js` reads `OPENAI_API_KEY`, `OPENAI_ANSWER_MODEL`, `OPENAI_VISION_MODEL`, `ASK_DEBUG_METRICS`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE`. It still accepts the older `OPENAI_MODEL` name as a fallback for existing local env files. `server/src/services/aiAnswerService.js` uses the answer or vision model when it calls the OpenAI Responses API, and the Ask route exposes metrics only when the debug flag is enabled. `server/src/services/chunkEmbeddingService.js` uses the embedding model and dimensions when it calls the OpenAI Embeddings API.
+`server/src/config.js` reads `OPENAI_API_KEY`, `OPENAI_ANSWER_MODEL`, `OPENAI_VISION_MODEL`, `ASK_DEBUG_METRICS`, `ASK_EVIDENCE_CONTRACT`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE`. It still accepts the older `OPENAI_MODEL` name as a fallback for existing local env files. `server/src/services/aiAnswerService.js` uses the answer or vision model when it calls the OpenAI Responses API, and the Ask route exposes metrics only when the debug flag is enabled. `server/src/services/chunkEmbeddingService.js` uses the embedding model and dimensions when it calls the OpenAI Embeddings API.
 
 Keep `OPENAI_API_KEY` blank in committed examples. Put the real key only in your local `server/.env` file or in the VM/container environment.
 

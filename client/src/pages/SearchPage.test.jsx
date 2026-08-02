@@ -342,6 +342,55 @@ test("SearchPage shows retrieved context on a not-found Ask response", async () 
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });
 
+test("SearchPage labels a legacy answer as unverified and never document-backed", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil filter cap torque?",
+        // Old servers called this answered and put every retrieved passage in
+        // citations. The current UI must downgrade that shape on its own.
+        status: "answered",
+        answer: "The oil filter cap torque is 27 ft-lb.",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "The oil drain plug torque is 27 ft-lb.",
+          },
+        ],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil filter cap torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Unverified AI answer — not document-backed")
+  ).toBeInTheDocument();
+  expect(within(askSection).getByText("The oil filter cap torque is 27 ft-lb.")).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
+});
+
 test("SearchPage omits retrieved context when the response has none", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const fetchMock = vi.fn((url, options) => {
@@ -766,6 +815,67 @@ test("SearchPage hides a document-supported claim whose quote does not match its
   expect(within(askSection).queryByText(/54 Nm/)).not.toBeInTheDocument();
 });
 
+test("SearchPage rejects matching passages whose server evidence identifiers disagree", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const quote = "The oil drain plug torque is 27 ft-lb.";
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "UNSUPPORTED EVIDENCE-ID MISMATCH",
+        citations: [
+          {
+            evidenceId: "ask_ev_v1_aaaaaaaaaaaaaaaaaaaaaaaa",
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: quote,
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              evidenceId: "ask_ev_v1_bbbbbbbbbbbbbbbbbbbbbbbb",
+              claim: "The oil drain plug torque is 27 ft-lb.",
+              evidenceQuote: quote,
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(await within(askSection).findByText("Could not ask documents")).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText(/27 ft-lb/)).not.toBeInTheDocument();
+});
+
 test("SearchPage rejects a long evidence quote that only matches the citation preview", async () => {
   const sharedPrefix = "Verified manual passage ".repeat(11).slice(0, 217);
   const fabricatedQuote = `${sharedPrefix} fabricated instruction after the preview.`;
@@ -905,6 +1015,20 @@ test("SearchPage renders duplicate citation identities only once", async () => {
         status: "answered",
         answer: "The oil drain plug torque is 27 ft-lb.",
         citations: [citation, { ...citation }],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 27 ft-lb.",
+              evidenceQuote: citation.snippet,
+              documentId: citation.documentId,
+              documentTitle: citation.documentTitle,
+              pageNumber: citation.pageNumber,
+              chunkIndex: citation.chunkIndex,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
       });
     }
 
@@ -956,6 +1080,20 @@ test("SearchPage shows an answered Ask response with clickable citation cards", 
             snippet: citationSnippet,
           },
         ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 27 ft-lb.",
+              evidenceQuote: citationSnippet,
+              documentId: 42,
+              documentTitle: "Fake Torque Guide",
+              pageNumber: 3,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
       });
     }
 
@@ -980,7 +1118,7 @@ test("SearchPage shows an answered Ask response with clickable citation cards", 
   });
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
 
-  expect(await within(askSection).findByText("Answer")).toBeInTheDocument();
+  expect(await within(askSection).findByText("From your documents")).toBeInTheDocument();
   expect(
     within(askSection).getByText("The oil drain plug torque is 27 ft-lb.")
   ).toBeInTheDocument();
@@ -1027,6 +1165,20 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
               snippet: frontSnippet,
             },
           ],
+          evidence: {
+            documentSupported: [
+              {
+                claim: "The front brake caliper mounting bolt torque is 34 N*m.",
+                evidenceQuote: frontSnippet,
+                documentId: 50,
+                documentTitle: "Front Brake Manual",
+                pageNumber: 4,
+                chunkIndex: 0,
+              },
+            ],
+            generalGuidance: [],
+            gaps: [],
+          },
         });
       }
 
@@ -1045,6 +1197,20 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
             snippet: rearSnippet,
           },
         ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The rear brake caliper mounting bolt torque is 34 N*m.",
+              evidenceQuote: rearSnippet,
+              documentId: 51,
+              documentTitle: "Rear Brake Manual",
+              pageNumber: 7,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
       });
     }
 
