@@ -252,12 +252,13 @@ answer and are not endorsed as correct — the UI labels them "Retrieved context
 #### `evidence` (only when `ASK_EVIDENCE_CONTRACT=true`)
 
 With the evidence contract enabled, Ask requests atomic claims instead of prose
-and verifies each one server-side before it can render. The response gains an
-`evidence` object and `status` may additionally be `partial`:
+and applies server-side source, quote, and numeric checks before a claim can
+render. The response gains an `evidence` object and `status` may additionally be
+`partial`:
 
 | Field | Meaning |
 | --- | --- |
-| `evidence.documentSupported[]` | Verified claims. Each carries `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
+| `evidence.documentSupported[]` | Claims that passed the checks below. Each carries `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
 | `evidence.generalGuidance[]` | General mechanical advice explicitly NOT from the documents. Never contains a specification. |
 | `evidence.gaps[]` | What the documents do not answer, plus anything removed by verification. |
 
@@ -271,8 +272,21 @@ Server-side verification, in order:
 
 Anything failing a step is removed from the answer and becomes a gap. **Gap text
 never reprints the failing value**, so an ungrounded specification cannot render
-under any heading. `citations` contains only chunks that backed a verified claim,
-rather than every retrieved chunk.
+under any heading. `citations` contains only chunks that backed a claim which
+passed these checks, rather than every retrieved chunk.
+
+On this path, each citation also carries the complete verified `evidenceQuote`
+alongside its bounded `snippet` preview. The client compares the complete quote,
+not only a shared preview prefix. Exact duplicate citations collapse; distinct
+quotes from the same chunk remain separate because each may support a different
+atomic claim.
+
+**Current integrity limits:** `ASK_EVIDENCE_CONTRACT` defaults to `false`, so
+this stricter path is opt-in. Even when enabled, the checks prove that the quoted
+text exists in the selected passage and contains the claim's specifications;
+they do not prove that the passage semantically supports the claim's subject or
+action. For example, an unrelated component claim that repeats the same torque
+value still needs a stronger claim-to-passage support check.
 
 `status` values on this path: `answered` (all claims verified, no gaps),
 `partial` (some verified, some gaps), `not_found` (nothing verified).
