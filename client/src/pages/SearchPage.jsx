@@ -230,6 +230,181 @@ function SectionStatus({ loading, error, total, label, emptyMessage }) {
   return null;
 }
 
+const ASK_RESPONSE_STATUSES = new Set([
+  "answered",
+  "partial",
+  "not_found",
+  "ai_not_configured",
+]);
+const ASK_INTEGRITY_ERROR =
+  "The answer was hidden because its document evidence was missing or inconsistent.";
+
+function askSourceIdentity(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const documentId = value.documentId;
+  const pageNumber = value.pageNumber;
+  const chunkIndex = value.chunkIndex;
+
+  if (
+    !Number.isInteger(documentId) ||
+    documentId <= 0 ||
+    !Number.isInteger(pageNumber) ||
+    pageNumber <= 0 ||
+    !Number.isInteger(chunkIndex) ||
+    chunkIndex < 0
+  ) {
+    return null;
+  }
+
+  return [documentId, pageNumber, chunkIndex].join(":");
+}
+
+function normalizeAskPassages(value, { distinguishSnippets = false } = {}) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const passages = [];
+
+  for (const passage of value) {
+    const identity = askSourceIdentity(passage);
+    const hasName = Boolean(passage?.documentTitle || passage?.originalFilename);
+    const snippet = typeof passage?.snippet === "string" ? passage.snippet.trim() : "";
+    const fullEvidenceQuote =
+      typeof passage?.evidenceQuote === "string" ? passage.evidenceQuote.trim() : "";
+    const passageIdentity = distinguishSnippets
+      ? [identity, fullEvidenceQuote || snippet].join(":quote:")
+      : identity;
+
+    if (!identity || !hasName || !snippet || seen.has(passageIdentity)) {
+      continue;
+    }
+
+    seen.add(passageIdentity);
+    passages.push(passage);
+  }
+
+  return passages;
+}
+
+function evidenceQuoteMatchesCitation(evidenceQuote, citation) {
+  const normalizedQuote =
+    typeof evidenceQuote === "string" ? evidenceQuote.replace(/\s+/g, " ").trim() : "";
+  const normalizedSnippet =
+    typeof citation?.snippet === "string"
+      ? citation.snippet.replace(/\s+/g, " ").trim()
+      : "";
+  const normalizedFullQuote =
+    typeof citation?.evidenceQuote === "string"
+      ? citation.evidenceQuote.replace(/\s+/g, " ").trim()
+      : "";
+
+  if (!normalizedQuote || !normalizedSnippet) {
+    return false;
+  }
+
+  if (normalizedFullQuote) {
+    return normalizedQuote === normalizedFullQuote;
+  }
+
+  // Older/legacy responses have only the 220-character preview. It is safe to
+  // compare a complete short quote, but a truncated prefix cannot authenticate
+  // whatever text follows it, so long evidence without the full field fails.
+  return normalizedQuote.length <= 220 && normalizedSnippet === normalizedQuote;
+}
+
+function normalizeAskEvidence(value, citations) {
+  if (value === undefined || value === null) {
+    return { present: false, valid: true, evidence: null };
+  }
+
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Array.isArray(value.documentSupported) ||
+    !Array.isArray(value.generalGuidance) ||
+    !Array.isArray(value.gaps)
+  ) {
+    return { present: true, valid: false, evidence: null };
+  }
+
+  const citationsBySource = new Map();
+
+  for (const citation of citations) {
+    const identity = askSourceIdentity(citation);
+
+    if (!identity) {
+      continue;
+    }
+
+    const sourceCitations = citationsBySource.get(identity) || [];
+    sourceCitations.push(citation);
+    citationsBySource.set(identity, sourceCitations);
+  }
+  const supported = [];
+
+  for (const item of value.documentSupported) {
+    const identity = askSourceIdentity(item);
+    const claim = typeof item?.claim === "string" ? item.claim.trim() : "";
+    const evidenceQuote =
+      typeof item?.evidenceQuote === "string" ? item.evidenceQuote.trim() : "";
+    const citation = identity
+      ? (citationsBySource.get(identity) || []).find((candidate) =>
+          evidenceQuoteMatchesCitation(evidenceQuote, candidate)
+        )
+      : null;
+
+    if (!citation || !claim || !evidenceQuote) {
+      return { present: true, valid: false, evidence: null };
+    }
+
+    supported.push({
+      ...item,
+      claim,
+      evidenceQuote,
+      documentId: citation.documentId,
+      documentTitle: citation.documentTitle,
+      originalFilename: citation.originalFilename,
+      pageNumber: citation.pageNumber,
+      chunkIndex: citation.chunkIndex,
+    });
+  }
+
+  const guidance = value.generalGuidance.filter(
+    (item) => typeof item === "string" && item.trim()
+  );
+  const gaps = value.gaps.filter((item) => typeof item === "string" && item.trim());
+
+  if (
+    guidance.length !== value.generalGuidance.length ||
+    gaps.length !== value.gaps.length
+  ) {
+    return { present: true, valid: false, evidence: null };
+  }
+
+  return {
+    present: true,
+    valid: true,
+    evidence: {
+      documentSupported: supported,
+      generalGuidance: guidance,
+      gaps,
+    },
+  };
+}
+
+function buildEvidenceHistoryContent(evidence) {
+  return [
+    ...evidence.documentSupported.map((item) => item.claim),
+    ...evidence.generalGuidance.map((item) => "General guidance: " + item),
+    ...evidence.gaps.map((item) => "Not covered: " + item),
+  ].join("\n");
+}
+
 function AskCitationCard({ citation }) {
   const documentName =
     citation.documentTitle || citation.originalFilename || "Untitled document";
@@ -283,7 +458,7 @@ function AskRetrievedSnippets({ citations }) {
       <div className="space-y-2">
         {snippets.map((citation) => (
           <AskPassageCard
-            key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+            key={`snippet-${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}-${citation.snippet}`}
             passage={citation}
           />
         ))}
@@ -407,7 +582,7 @@ function AskAssistantMessage({ message }) {
             <div className="grid gap-3 md:grid-cols-2">
               {citations.map((citation) => (
                 <AskCitationCard
-                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}-${citation.snippet}`}
                   citation={citation}
                 />
               ))}
@@ -440,7 +615,7 @@ function AskAssistantMessage({ message }) {
             <div className="grid gap-3 md:grid-cols-2">
               {citations.map((citation) => (
                 <AskCitationCard
-                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}`}
+                  key={`${citation.documentId}-${citation.pageNumber}-${citation.chunkIndex}-${citation.snippet}`}
                   citation={citation}
                 />
               ))}
@@ -611,27 +786,53 @@ function AskDocumentsSection() {
         throw new Error(payload.error || "Could not answer this question.");
       }
 
+      const citations = normalizeAskPassages(payload.citations, {
+        distinguishSnippets: true,
+      });
+      const retrievedContext = normalizeAskPassages(payload.retrievedContext);
+      const normalizedEvidence = normalizeAskEvidence(payload.evidence, citations);
+      const hasKnownStatus = ASK_RESPONSE_STATUSES.has(payload.status);
+      let status = hasKnownStatus ? payload.status : "error";
+      let content = hasKnownStatus ? payload.answer || "" : ASK_INTEGRITY_ERROR;
+      let evidence = normalizedEvidence.evidence;
+      let safeCitations = citations;
+      const structuredStatus = status === "answered" || status === "partial";
+      const invalidStructuredEvidence =
+        !normalizedEvidence.valid ||
+        (status === "partial" && !normalizedEvidence.present) ||
+        (normalizedEvidence.present &&
+          structuredStatus &&
+          !normalizedEvidence.evidence?.documentSupported.length);
+      const unsupportedLegacyAnswer =
+        status === "answered" && !normalizedEvidence.present && !citations.length;
+
+      if (invalidStructuredEvidence || unsupportedLegacyAnswer) {
+        status = "error";
+        content = ASK_INTEGRITY_ERROR;
+        evidence = null;
+        safeCitations = [];
+      } else if (normalizedEvidence.present && structuredStatus) {
+        // Never keep unstructured prose beside a structured response. The safe
+        // history is rebuilt from the same verified channels the page renders.
+        content = buildEvidenceHistoryContent(normalizedEvidence.evidence);
+      }
+
       setMessages((currentMessages) => [
         ...currentMessages,
         {
           role: "assistant",
-          status: payload.status || "answered",
-          content: payload.answer || "",
+          status,
+          content,
           originalQuestion: payload.question || trimmedQuestion,
           standaloneQuestion: payload.standaloneQuestion || payload.question || trimmedQuestion,
-          citations: Array.isArray(payload.citations) ? payload.citations : [],
+          citations: safeCitations,
           // Present only when the answer cites nothing (a not-found reply). These
           // are the passages retrieval actually found, so "no answer" does not
           // have to be a dead end.
-          retrievedContext: Array.isArray(payload.retrievedContext)
-            ? payload.retrievedContext
-            : [],
+          retrievedContext,
           // Present only when ASK_EVIDENCE_CONTRACT is on. Null keeps the legacy
           // prose rendering path selected.
-          evidence:
-            payload.evidence && typeof payload.evidence === "object"
-              ? payload.evidence
-              : null,
+          evidence,
         },
       ]);
       setAskState({

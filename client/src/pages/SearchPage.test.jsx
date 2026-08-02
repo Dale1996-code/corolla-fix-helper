@@ -387,7 +387,7 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
       return jsonResponse({
         question: "What is the oil drain plug torque?",
         status: "partial",
-        answer: "The oil drain plug torque is 37 Nm. [Oil Manual, page 1]",
+        answer: "UNSUPPORTED RAW ANSWER: use 99 Nm.",
         citations: [
           {
             documentId: 7,
@@ -395,7 +395,7 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
             originalFilename: "oil.pdf",
             pageNumber: 1,
             chunkIndex: 0,
-            snippet: "Torque : 37 Nm",
+            snippet: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
           },
         ],
         evidence: {
@@ -406,11 +406,21 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
               documentId: 7,
               documentTitle: "Oil Manual",
               pageNumber: 1,
+              chunkIndex: 0,
             },
           ],
           generalGuidance: ["Let the engine cool before draining the oil."],
           gaps: ["The filter torque is not covered."],
         },
+        retrievedContext: [
+          {
+            documentId: 99,
+            documentTitle: "Unused Manual",
+            pageNumber: 8,
+            chunkIndex: 3,
+            snippet: "UNUSED PASSAGE",
+          },
+        ],
       });
     }
 
@@ -435,38 +445,126 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
 
   // Document-supported claims, with the quote shown so the owner can check it.
+  const supportedHeading = await within(askSection).findByRole("heading", {
+    name: "From your documents",
+  });
+  const supportedBlock = supportedHeading.closest("section");
   expect(
-    await within(askSection).findByRole("heading", { name: "From your documents" })
+    within(supportedBlock).getByText("The oil drain plug torque is 37 Nm.")
   ).toBeInTheDocument();
   expect(
-    within(askSection).getByText("The oil drain plug torque is 37 Nm.")
-  ).toBeInTheDocument();
-  expect(
-    within(askSection).getByText(/Torque : 37 Nm \(377 kgf-cm, 27 ft-lbf\)/)
+    within(supportedBlock).getByText(/Torque : 37 Nm \(377 kgf-cm, 27 ft-lbf\)/)
   ).toBeInTheDocument();
 
   // General guidance is a visually separate, explicitly labeled channel.
+  const guidanceHeading = within(askSection).getByRole("heading", {
+    name: "General guidance — not from your documents",
+  });
+  const guidanceBlock = guidanceHeading.closest("section");
   expect(
-    within(askSection).getByRole("heading", {
-      name: "General guidance — not from your documents",
-    })
+    within(guidanceBlock).getByText("Let the engine cool before draining the oil.")
   ).toBeInTheDocument();
+  expect(
+    within(supportedBlock).queryByText("Let the engine cool before draining the oil.")
+  ).not.toBeInTheDocument();
 
   // Gaps are shown rather than hidden.
   expect(
     within(askSection).getByRole("heading", { name: "Not covered by your documents" })
   ).toBeInTheDocument();
   expect(within(askSection).getByText("The filter torque is not covered.")).toBeInTheDocument();
+  expect(within(askSection).queryByText(/UNSUPPORTED RAW ANSWER/)).not.toBeInTheDocument();
+  expect(within(askSection).queryByText("UNUSED PASSAGE")).not.toBeInTheDocument();
 });
 
-test("SearchPage keeps the legacy prose rendering when no evidence field is present", async () => {
+test("SearchPage keeps distinct evidence quotes from the same source chunk", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "How do I reinstall the oil drain plug?",
+        status: "answered",
+        answer: "RAW STRUCTURED ANSWER IS NOT RENDERED",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Clean and install the oil drain plug with a new gasket.",
+          },
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "Install the oil drain plug with a new gasket.",
+              evidenceQuote: "Clean and install the oil drain plug with a new gasket.",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+            {
+              claim: "The oil drain plug torque is 37 Nm.",
+              evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "How do I reinstall the oil drain plug?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Install the oil drain plug with a new gasket.")
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getByText("The oil drain plug torque is 37 Nm.")
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getAllByRole("link", { name: "Open source Oil Manual Page 1" })
+  ).toHaveLength(2);
+});
+
+test("SearchPage hides an answered response that has no evidence and no citations", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const fetchMock = vi.fn((url, options) => {
     if (url === "/api/ask") {
       return jsonResponse({
         question: "What is the oil drain plug torque?",
         status: "answered",
-        answer: "The oil drain plug torque is 37 Nm.",
+        answer: "UNSUPPORTED ANSWER WITHOUT A SOURCE",
         citations: [],
       });
     }
@@ -491,10 +589,351 @@ test("SearchPage keeps the legacy prose rendering when no evidence field is pres
   });
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
 
-  expect(await within(askSection).findByText("Answer")).toBeInTheDocument();
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
   expect(
     within(askSection).queryByText("From your documents")
   ).not.toBeInTheDocument();
+  expect(
+    within(askSection).queryByText("UNSUPPORTED ANSWER WITHOUT A SOURCE")
+  ).not.toBeInTheDocument();
+});
+
+test("SearchPage hides a response whose API status is missing", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        answer: "UNSUPPORTED ANSWER WITH NO STATUS",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          },
+        ],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).queryByText("UNSUPPORTED ANSWER WITH NO STATUS")
+  ).not.toBeInTheDocument();
+});
+
+test("SearchPage hides a document-supported claim whose source does not match a citation", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "UNSUPPORTED MISMATCHED ANSWER",
+        citations: [
+          {
+            documentId: 8,
+            documentTitle: "Different Manual",
+            originalFilename: "different.pdf",
+            pageNumber: 4,
+            chunkIndex: 2,
+            snippet: "A different passage.",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 54 Nm.",
+              evidenceQuote: "Torque is 54 Nm.",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText(/54 Nm/)).not.toBeInTheDocument();
+});
+
+test("SearchPage hides a document-supported claim whose quote does not match its citation", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "UNSUPPORTED SAME-SOURCE ANSWER",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Torque : 37 Nm",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 54 Nm.",
+              evidenceQuote: "Torque is 54 Nm.",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText(/54 Nm/)).not.toBeInTheDocument();
+});
+
+test("SearchPage rejects a long evidence quote that only matches the citation preview", async () => {
+  const sharedPrefix = "Verified manual passage ".repeat(11).slice(0, 217);
+  const fabricatedQuote = `${sharedPrefix} fabricated instruction after the preview.`;
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What should I do next?",
+        status: "answered",
+        answer: "UNSUPPORTED LONG-QUOTE ANSWER",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: `${sharedPrefix}...`,
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "Follow the fabricated instruction after the preview.",
+              evidenceQuote: fabricatedQuote,
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What should I do next?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText(/fabricated instruction/)).not.toBeInTheDocument();
+});
+
+test("SearchPage rejects boolean document, page, and chunk identifiers", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "UNSUPPORTED BOOLEAN-ID ANSWER",
+        citations: [
+          {
+            documentId: true,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: true,
+            chunkIndex: false,
+            snippet: "Torque : 37 Nm",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 37 Nm.",
+              evidenceQuote: "Torque : 37 Nm",
+              documentId: true,
+              documentTitle: "Oil Manual",
+              pageNumber: true,
+              chunkIndex: false,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("Could not ask documents")
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText(/37 Nm/)).not.toBeInTheDocument();
+});
+
+test("SearchPage renders duplicate citation identities only once", async () => {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const citation = {
+    documentId: 42,
+    documentTitle: "Oil Manual",
+    originalFilename: "oil.pdf",
+    pageNumber: 3,
+    chunkIndex: 0,
+    snippet: "Oil drain plug torque is 27 ft-lb.",
+  };
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "The oil drain plug torque is 27 ft-lb.",
+        citations: [citation, { ...citation }],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  expect(
+    await within(askSection).findByText("The oil drain plug torque is 27 ft-lb.")
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getAllByRole("link", {
+      name: "Open source Oil Manual Page 3",
+    })
+  ).toHaveLength(1);
 });
 
 test("SearchPage shows an answered Ask response with clickable citation cards", async () => {
