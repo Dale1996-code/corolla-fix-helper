@@ -345,7 +345,13 @@ Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-plan `
   -ContentType "application/json" -Body $body
 ```
 
-The response is `text/event-stream`; each frame is `data: <json>\n\n` with a `type` of `status`, `tool_call`, `tool_result`, `text_delta`, `trace`, `ai_not_configured`, `error`, or `done` (the `done` frame carries the assembled `artifacts`). `Invoke-RestMethod` waits for the stream to finish and returns the concatenated `data:` frames as text — to watch frames arrive live, run the equivalent `curl.exe -N` from a POSIX shell (Bash/WSL). Full protocol, tool list, and readiness rubric: [repair-planner.md](repair-planner.md).
+`skillLevel` must be `beginner`, `intermediate`, or `advanced` when present; anything else is a 400.
+
+The response is `text/event-stream`; each frame is `data: <json>\n\n` with a `type` of `status`, `tool_call`, `tool_result`, `trace`, `ai_not_configured`, `error`, or `done`. The `done` frame carries `status: "completed"`, an `evidenceStatus` of `verified` / `partial` / `not_found`, the server-rendered plan in `text`, and the assembled `artifacts` (including `requirements` and `evidence.gaps`). The planner does **not** emit `text_delta`: model prose is discarded and the plan is rendered server-side from claims verified against the cited PDF text.
+
+A run that cannot produce a verified plan emits an `error` frame with a `code` (`planner_incomplete` or `planner_invalid_output`), a `reason` (`no_canonical_task`, `turn_limit`, `invalid_final_contract`, `provider_incomplete`, `missing_terminal_event`, `malformed_tool_arguments`), and a fixed safe `message` — and **no** `done` frame and no artifacts.
+
+`Invoke-RestMethod` waits for the stream to finish and returns the concatenated `data:` frames as text — to watch frames arrive live, run the equivalent `curl.exe -N` from a POSIX shell (Bash/WSL). Full protocol, tool list, and readiness rubric: [repair-planner.md](repair-planner.md).
 
 ---
 
