@@ -177,7 +177,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `docs/environment-variables.md` explains placeholder-only env values.
 - `docs/architecture.md` explains current app structure.
 - `docs/backup-restore.md` explains backup contents, safe restore behavior, and the round-trip drill.
-- `docs/quality-testing.md` explains `eval:retrieval`, `eval:rerank`, and `eval:answers`. It does not yet cover `eval:relevance-floor`; that script's rationale currently lives in `server/src/services/relevanceFloor.js` and `docs/evals/ask-rag-iteration-log.md`.
+- `docs/quality-testing.md` explains `eval:retrieval`, `eval:rerank`, `eval:answers`, and `eval:relevance-floor` (including how to read the threshold sweep before enabling `ASK_RELEVANCE_FLOOR`).
 - `docs/evals/ask-rag-iteration-log.md` records what was actually measured on the Ask RAG pipeline. Read it before re-litigating a retrieval or grounding decision.
 - `docs/repair-planner.md` documents the SSE event protocol, the readiness rubric, and how to add a tool.
 - `docs/mobile-access.md` explains phone access: same-Wi-Fi URLs, Tailscale (and `tailscale serve` for HTTPS), and the iPhone Home Screen install.
