@@ -60,8 +60,7 @@ npm run eval:relevance-floor
 
 Ask has an optional filter that throws away weakly-matching passages before they reach the
 answer step. It is **off by default and does nothing** — it currently just reports what it
-*would* drop. This script is how you decide whether turning it on is safe, and at what
-threshold.
+*would* drop. This script is how you decide whether turning it on is safe.
 
 Run it only if you are considering setting `ASK_RELEVANCE_FLOOR=true`. It is not part of the
 routine quality loop.
@@ -105,17 +104,43 @@ real run prints ten):
 ```
 threshold | kept+ | DROPPED+ | kept- | dropped- | noise removed | safe
 0.15      |    62 |        0 |    41 |       14 |         25.5% | yes
+0.2       |    62 |        0 |    34 |       21 |         38.2% | yes
 0.25      |    59 |        3 |    28 |       27 |         49.1% | NO
 ```
 
 The column that decides everything is **`DROPPED+`** — good evidence that threshold would
-have thrown away. A row is `safe` only when that column is zero. The script then recommends
-the highest safe threshold that actually removes noise, or tells you to leave the floor off
-because nothing can be removed safely on your corpus.
+have thrown away. A row is `safe` only when that column is zero.
 
-Treat the recommendation as a starting point, not an instruction: read the table, then set
-`ASK_RELEVANCE_FLOOR=true` only if you are satisfied that no answer you care about loses its
-source. A non-zero `DROPPED+` means real repair evidence disappears from answers.
+### Read the `0.2` row, and only the `0.2` row
+
+**The threshold is not a setting you can change.** `ASK_RELEVANCE_FLOOR` is an on/off switch,
+and when it is on Ask always uses `0.2`. The sweep prints ten thresholds because that is what
+makes the shape of your corpus visible, and it names a "recommended" one — but the only row
+that describes what you would actually get is **`0.2`**.
+
+So do this, exactly:
+
+1. Find the `0.2` row.
+2. **`DROPPED+` is not `0`?** Leave `ASK_RELEVANCE_FLOOR` off. Real repair evidence would
+   vanish from answers. Nothing else in the table changes this.
+3. **`DROPPED+` is `0` but `dropped-` is also `0`?** Leave it off. It has nothing to remove on
+   your corpus, so turning it on only adds a moving part.
+4. **`DROPPED+` is `0` and `dropped-` is above `0`?** Set `ASK_RELEVANCE_FLOOR=true` in
+   `server/.env`, then run `npm run eval:answers` and confirm every verified case still
+   passes. If any regresses, turn it back off — the answer check outranks the sweep.
+
+If the script recommends a threshold other than `0.2`, that is a finding to report, not a
+setting to change: acting on it requires a code change (`MINIMUM_SEMANTIC_SCORE` in
+`server/src/services/chunkRetrievalService.js`), so open an issue rather than editing it to
+match one calibration run.
+
+Re-run the calibration after importing a substantially different set of PDFs. The verdict is
+specific to the corpus it measured, so a much larger or more varied library can flip it.
+
+Two behaviors mean an enabled floor is less risky than it sounds, and neither is a reason to
+skip the steps above. Passages whose own body text matched your search terms are exempt
+regardless of score. And if the floor would drop *everything* for a question, it is skipped
+for that question — Ask would rather answer weakly than answer with no evidence to show.
 
 If any question errors, the script says so and exits non-zero; the sweep excludes those cases.
 
