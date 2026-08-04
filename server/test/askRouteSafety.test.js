@@ -164,7 +164,7 @@ test("a non-2xx question-rewrite body does not reach the client, and falls back"
     // Rewrite failure is SOFT: the request still succeeds using the user's own
     // wording rather than failing the whole Ask.
     assert.equal(response.status, 200);
-    assert.equal(response.body.status, "answered");
+    assert.equal(response.body.status, "unverified");
     assert.equal(seen.query, "what about the rear?");
     assertNoLeak(response);
   } finally {
@@ -268,4 +268,132 @@ test("retrieved chunks with no source and no text produce not_found with no cita
   assert.equal(response.status, 200);
   assert.equal(response.body.status, "not_found");
   assert.deepEqual(response.body.citations, []);
+});
+
+test("the legacy Ask path cannot label retrieved passages as answer citations", async () => {
+  const app = realServiceApp({
+    evidenceContract: false,
+    retrieveChunks: async () => [chunk({ id: 1 })],
+    generateAnswerText: async () => "The oil filter cap torque is 27 ft-lb.",
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil filter cap torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "unverified");
+  assert.deepEqual(response.body.citations, []);
+  assert.equal(response.body.retrievedContext.length, 1);
+  assert.equal(response.body.retrievedContext[0].documentTitle, "Engine Manual");
+  assert.ok(!("evidence" in response.body));
+});
+
+test("a partial response without a verified evidence envelope is also unverified", async () => {
+  const app = makeApp({
+    askQuestion: async () => ({
+      status: "partial",
+      answer: "One claim was allegedly supported.",
+      standaloneQuestion: "question",
+      citations: [
+        {
+          documentId: 7,
+          documentTitle: "Engine Manual",
+          originalFilename: "engine-manual.pdf",
+          pageNumber: 3,
+          chunkIndex: 0,
+          snippet: "A retrieved passage.",
+        },
+      ],
+    }),
+  });
+
+  const response = await request(app).post("/api/ask").send({ question: "question" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "unverified");
+  assert.deepEqual(response.body.citations, []);
+  assert.equal(response.body.retrievedContext.length, 1);
+});
+
+// ---- Evidence-contract HTTP boundary ----
+
+test("POST /api/ask returns only verified claims and citations for passages actually used", async () => {
+  const unusedChunk = chunk({
+    id: 2,
+    documentId: 12,
+    documentTitle: "Transmission Manual",
+    originalFilename: "transmission.pdf",
+    pageNumber: 88,
+    chunkIndex: 4,
+    chunkText: "Tighten the transaxle case bolts to 37 Nm.",
+  });
+  const app = realServiceApp({
+    evidenceContract: true,
+    retrieveChunks: async () => [chunk({ id: 1 }), unusedChunk],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 27 ft-lb.",
+          sourceId: "S1",
+          evidenceQuote: "Oil drain plug torque is 27 ft-lb.",
+        },
+        {
+          claim: "The filter cap torque is 54 Nm.",
+          sourceId: "S999",
+          evidenceQuote: "Tighten the transaxle case bolts to 37 Nm.",
+        },
+      ],
+      generalGuidance: ["Let the engine cool before working near hot oil."],
+      gaps: [],
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "partial");
+  assert.equal(response.body.evidence.documentSupported.length, 1);
+  assert.deepEqual(response.body.evidence.generalGuidance, [
+    "Let the engine cool before working near hot oil.",
+  ]);
+  assert.equal(response.body.citations.length, 1);
+  assert.equal(response.body.citations[0].documentTitle, "Engine Manual");
+  assert.match(response.body.citations[0].evidenceId, /^ask_ev_v1_[a-f0-9]{24}$/);
+  assert.equal(
+    response.body.citations[0].evidenceId,
+    response.body.evidence.documentSupported[0].evidenceId
+  );
+  assert.ok(!JSON.stringify(response.body.citations).includes("Transmission Manual"));
+  assert.ok(!JSON.stringify(response.body).includes("54 Nm"));
+  assert.ok(!("retrievedContext" in response.body));
+});
+
+test("POST /api/ask returns not_found with no citations when structured evidence is empty", async () => {
+  const app = realServiceApp({
+    evidenceContract: true,
+    retrieveChunks: async () => [chunk({ id: 1 })],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [],
+      generalGuidance: [],
+      gaps: [],
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.status, "not_found");
+  assert.equal(response.body.answer, "not in documents");
+  assert.deepEqual(response.body.citations, []);
+  assert.deepEqual(response.body.evidence, {
+    documentSupported: [],
+    generalGuidance: [],
+    gaps: [],
+  });
+  assert.equal(response.body.retrievedContext.length, 1);
 });

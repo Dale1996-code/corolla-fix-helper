@@ -86,10 +86,11 @@ export const config = {
   // it reorders a bounded candidate pool before the final limit slice.
   rerankEnabled: readBoolean(process.env.RERANK_ENABLED, false),
   // Ask evidence contract: structured atomic claims, each with a verbatim quote
-  // the server verifies against the cited chunk, plus a numeric anomaly
-  // detector. Off by default -- with the flag off the Ask response is
-  // byte-identical to before (pinned by test).
-  askEvidenceContract: readBoolean(process.env.ASK_EVIDENCE_CONTRACT, false),
+  // the server verifies against the cited chunk, plus numeric and subject
+  // checks. On by default so retrieved passages cannot be presented as proof of
+  // prose that was never verified. Explicit false keeps a labeled, unverified
+  // compatibility path for older deployments.
+  askEvidenceContract: readBoolean(process.env.ASK_EVIDENCE_CONTRACT, true),
   // Per-chunk relevance floor. SHADOW BY DEFAULT: it computes what it would drop
   // and reports that through Ask metrics, but changes nothing until the
   // threshold has been calibrated on a real corpus (npm run eval:relevance-floor).

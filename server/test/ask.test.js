@@ -342,7 +342,7 @@ test("POST /api/ask emits retrievedContext on a real not-found response", async 
   assert.match(response.body.retrievedContext[0].snippet, /Oil drain plug torque/);
 });
 
-test("POST /api/ask omits retrievedContext on an answered response", async () => {
+test("POST /api/ask moves legacy answer citations into unverified retrievedContext", async () => {
   const app = realServiceApp({
     chunks: [routeChunk],
     answerText: "The oil drain plug torque is 27 ft-lb.",
@@ -353,12 +353,10 @@ test("POST /api/ask omits retrievedContext on an answered response", async () =>
     .send({ question: "What is the oil drain plug torque?" });
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.status, "answered");
-  assert.equal(response.body.citations.length, 1);
-  assert.ok(
-    !("retrievedContext" in response.body),
-    "an answered reply already cites its sources"
-  );
+  assert.equal(response.body.status, "unverified");
+  assert.deepEqual(response.body.citations, []);
+  assert.equal(response.body.retrievedContext.length, 1);
+  assert.equal(response.body.retrievedContext[0].documentTitle, "Engine Manual");
 });
 
 test("POST /api/ask omits retrievedContext when nothing was retrieved", async () => {

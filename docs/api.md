@@ -198,20 +198,47 @@ Response:
   "question": "What is the oil drain plug torque spec?",
   "standaloneQuestion": "What is the oil drain plug torque spec?",
   "status": "answered",
-  "answer": "The oil drain plug torque is 37 N·m (27 ft·lbf). [1]",
+  "answer": "The oil drain plug torque is 37 N·m (27 ft·lbf). [Engine Repair Manual, page 14]",
   "citations": [
-    { "documentId": 3, "documentTitle": "Engine Repair Manual", "pageNumber": 14, "snippet": "..." }
-  ]
+    {
+      "evidenceId": "ask_ev_v1_0123456789abcdef01234567",
+      "documentId": 3,
+      "documentTitle": "Engine Repair Manual",
+      "originalFilename": "engine-repair.pdf",
+      "pageNumber": 14,
+      "chunkIndex": 2,
+      "snippet": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf).",
+      "evidenceQuote": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf)."
+    }
+  ],
+  "evidence": {
+    "documentSupported": [
+      {
+        "evidenceId": "ask_ev_v1_0123456789abcdef01234567",
+        "claim": "The oil drain plug torque is 37 N·m (27 ft·lbf).",
+        "evidenceQuote": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf).",
+        "documentId": 3,
+        "documentTitle": "Engine Repair Manual",
+        "originalFilename": "engine-repair.pdf",
+        "pageNumber": 14,
+        "chunkIndex": 2
+      }
+    ],
+    "generalGuidance": [],
+    "gaps": []
+  }
 }
 ```
 
 `status` values:
 
 - `answered` — answer generated from retrieved chunks, with citations
+- `partial` — at least one claim verified, but one or more requested facts were not verified
+- `unverified` — legacy compatibility mode produced prose that was not checked claim by claim; `citations` is always empty
 - `not_found` — the uploaded documents don't contain enough matching information ("not in documents"); this is deliberate refusal, not an error
 - `ai_not_configured` — matching chunks exist but no `OPENAI_API_KEY` is set
 
-#### `retrievedContext` (not-found replies only)
+#### `retrievedContext` (not-found and unverified replies only)
 
 A `not_found` reply always returns `citations: []`. When retrieval *did* find
 passages that simply were not good enough to answer from, those passages are
@@ -220,7 +247,8 @@ additionally returned as `retrievedContext` so a refusal is not a dead end. It i
 
 | Case | `citations` | `retrievedContext` |
 | --- | --- | --- |
-| `answered` | the cited chunks | absent (the answer already cites its sources) |
+| `answered` / `partial` | only passages that backed verified claims | absent (the answer already cites its sources) |
+| `unverified` | `[]` | present when passages were retrieved; they are not proof of the prose |
 | `not_found`, passages retrieved | `[]` | present, non-empty |
 | `not_found`, nothing retrieved | `[]` | absent |
 | `ai_not_configured` | `[]` | absent |
@@ -249,15 +277,16 @@ answer and are not endorsed as correct — the UI labels them "Retrieved context
 }
 ```
 
-#### `evidence` (only when `ASK_EVIDENCE_CONTRACT=true`)
+#### `evidence` (the default; `ASK_EVIDENCE_CONTRACT=true`)
 
 With the evidence contract enabled, Ask requests atomic claims instead of prose
-and verifies each one server-side before it can render. The response gains an
-`evidence` object and `status` may additionally be `partial`:
+and applies server-side source, quote, and numeric checks before a claim can
+render. The response gains an `evidence` object and `status` may additionally be
+`partial`:
 
 | Field | Meaning |
 | --- | --- |
-| `evidence.documentSupported[]` | Verified claims. Each carries `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
+| `evidence.documentSupported[]` | Claims that passed the checks below. Each carries `evidenceId`, `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
 | `evidence.generalGuidance[]` | General mechanical advice explicitly NOT from the documents. Never contains a specification. |
 | `evidence.gaps[]` | What the documents do not answer, plus anything removed by verification. |
 
@@ -267,12 +296,36 @@ Server-side verification, in order:
 2. Each `sourceId` (`S1`..`Sn`, prompt-local; never a database row id) must map to a retrieved chunk.
 3. The `evidenceQuote` must be a genuine substring of that chunk (whitespace- and case-insensitive).
 4. Every unit-bearing number in the claim must be present in the quote, allowing conversions within a unit family (37 N·m grounds a 27 ft-lbf claim).
-5. `status` is derived by the server from what actually verified — never taken from the model.
+5. For recognized torque-claim wording, the complete normalized part name from the claim must also occur in the quote. This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
+6. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
+7. `status` is derived by the server from what actually verified — never taken from the model.
 
 Anything failing a step is removed from the answer and becomes a gap. **Gap text
 never reprints the failing value**, so an ungrounded specification cannot render
-under any heading. `citations` contains only chunks that backed a verified claim,
-rather than every retrieved chunk.
+under any heading. `citations` contains only chunks that backed a claim which
+passed these checks, rather than every retrieved chunk.
+
+On this path, each citation also carries the complete verified `evidenceQuote`
+and the same `evidenceId` alongside its bounded `snippet` preview. The client
+compares the server identifier, source location, and complete quote—not only a
+shared preview prefix. Exact duplicate citations collapse; distinct quotes from
+the same chunk remain separate because each may support a different atomic claim.
+
+**Current integrity limits:** `ASK_EVIDENCE_CONTRACT` defaults to `true`. The
+checks deterministically prove source identity, quote presence, supported
+unit-bearing numbers, and lexical subject agreement for common torque wording.
+They are not a general semantic-entailment engine: unrecognized sentence shapes,
+non-numeric claims, pronouns, synonyms, and a long quote that mentions several
+parts can still require human judgment. The subject rule intentionally favors a
+safe rejection over guessing that two differently worded part names are equal.
+
+Setting `ASK_EVIDENCE_CONTRACT=false` is an explicit compatibility escape hatch.
+It changes a legacy successful reply to `status: "unverified"`, keeps the prose,
+returns `citations: []`, and moves retrieved passages to `retrievedContext`. The
+UI shows an amber "not document-backed" warning and never renders those passages
+under Sources. This is a response-contract change for consumers that deliberately
+disable verification; verified/default responses retain `answered`, `partial`,
+or `not_found` and gain the additive `evidenceId` field.
 
 `status` values on this path: `answered` (all claims verified, no gaps),
 `partial` (some verified, some gaps), `not_found` (nothing verified).

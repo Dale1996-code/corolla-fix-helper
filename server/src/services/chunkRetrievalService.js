@@ -120,13 +120,13 @@ function normalizeKeywordResult(row, terms) {
   const { score, matchedTerms, chunkMatchedTerms } = scoreChunkForTerms(row, terms);
 
   return {
-    chunkId: row.id || row.chunkId,
-    documentId: row.document_id || row.documentId,
-    pageNumber: row.page_number || row.pageNumber,
-    chunkIndex: row.chunk_index || row.chunkIndex,
-    chunkText: row.chunk_text || row.chunkText,
-    documentTitle: row.title || row.documentTitle,
-    originalFilename: row.original_filename || row.originalFilename,
+    chunkId: row.id ?? row.chunkId,
+    documentId: row.document_id ?? row.documentId,
+    pageNumber: row.page_number ?? row.pageNumber,
+    chunkIndex: row.chunk_index ?? row.chunkIndex,
+    chunkText: row.chunk_text ?? row.chunkText,
+    documentTitle: row.title ?? row.documentTitle,
+    originalFilename: row.original_filename ?? row.originalFilename,
     system: row.system,
     relevanceScore: score,
     keywordScore: score,

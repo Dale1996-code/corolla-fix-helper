@@ -119,32 +119,47 @@ export function createAskRouter({
     try {
       const result = await askQuestion(question, { history, image, includeMetrics });
 
+      const hasVerifiedEvidence = Boolean(
+        result.evidence && typeof result.evidence === "object"
+      );
+      // The old prose path cited every retrieved chunk, even though retrieval
+      // does not prove the prose used or was supported by those passages. Keep
+      // the opt-out path available, but make its lack of verification explicit
+      // and move its passages into retrievedContext instead of citations.
+      const legacyUnverified =
+        (result.status === "answered" || result.status === "partial") &&
+        !hasVerifiedEvidence;
       const payload = {
         question,
         standaloneQuestion: result.standaloneQuestion || question,
-        status: result.status,
+        status: legacyUnverified ? "unverified" : result.status,
         answer: result.answer,
-        citations: result.citations,
+        citations: legacyUnverified ? [] : result.citations,
       };
 
       // Additive: on a not-found reply the service recovers the passages
       // retrieval actually found, which `citations: []` would otherwise discard.
       // Kept behind an explicit allowlist check (not a spread of `result`) so
       // the response shape stays deliberate, and attached only when there is
-      // something to show. Answered replies already cite their sources and are
-      // left byte-identical.
+      // something to show. Verified answers already cite their sources; legacy
+      // answers use this field specifically so retrieval cannot look like proof.
+      const retrievedContext = legacyUnverified
+        ? Array.isArray(result.retrievedContext) && result.retrievedContext.length
+          ? result.retrievedContext
+          : result.citations
+        : result.retrievedContext;
+
       if (
-        result.status === "not_found" &&
-        Array.isArray(result.retrievedContext) &&
-        result.retrievedContext.length > 0
+        (payload.status === "not_found" || payload.status === "unverified") &&
+        Array.isArray(retrievedContext) &&
+        retrievedContext.length > 0
       ) {
-        payload.retrievedContext = result.retrievedContext;
+        payload.retrievedContext = retrievedContext;
       }
 
-      // Evidence contract (ASK_EVIDENCE_CONTRACT). Additive and allowlisted like
-      // retrievedContext: absent entirely with the flag off, so the default
-      // response shape is unchanged.
-      if (result.evidence && typeof result.evidence === "object") {
+      // Evidence contract (ASK_EVIDENCE_CONTRACT). Allowlisted like
+      // retrievedContext; absent only on the explicit legacy compatibility path.
+      if (hasVerifiedEvidence) {
         payload.evidence = {
           documentSupported: result.evidence.documentSupported || [],
           generalGuidance: result.evidence.generalGuidance || [],

@@ -118,35 +118,114 @@ function buildSnippet(text) {
 }
 
 /**
- * A chunk is citable only if it can point the owner at something. A row with no
- * document identity AND no text is not evidence -- it is a malformed row, and
- * rendering it as a citation would imply a source that cannot be opened.
+ * A chunk is citable only if it has both an identifiable uploaded document and
+ * a non-empty passage. Text with no source cannot be opened or checked, while a
+ * source with no passage cannot support a claim.
  *
- * This filter is what makes the "no citations could be built" guard below a
- * reachable contract rather than dead defensive code.
+ * Identifiers must already be real integers. Coercing values here would turn
+ * booleans such as true/false into a plausible-looking 1/0 source location.
  */
 function isCitableChunk(chunk) {
   if (!chunk || typeof chunk !== "object") {
     return false;
   }
 
+  const documentId = chunk.documentId;
+  const pageNumber = chunk.pageNumber;
+  const chunkIndex = chunk.chunkIndex;
   const hasSource =
-    chunk.documentId !== undefined && chunk.documentId !== null
-      ? true
-      : Boolean(chunk.documentTitle || chunk.originalFilename);
+    Number.isInteger(documentId) &&
+    documentId > 0 &&
+    Boolean(chunk.documentTitle || chunk.originalFilename) &&
+    Number.isInteger(pageNumber) &&
+    pageNumber > 0 &&
+    Number.isInteger(chunkIndex) &&
+    chunkIndex >= 0;
 
-  return hasSource || Boolean(buildSnippet(chunk.chunkText));
+  return hasSource && Boolean(buildSnippet(chunk.chunkText));
 }
 
-function buildCitationsFromChunks(chunks) {
-  return (Array.isArray(chunks) ? chunks : []).filter(isCitableChunk).map((chunk) => ({
-    documentId: chunk.documentId,
-    documentTitle: chunk.documentTitle,
-    originalFilename: chunk.originalFilename,
-    pageNumber: chunk.pageNumber,
-    chunkIndex: chunk.chunkIndex,
-    snippet: buildSnippet(chunk.chunkText),
-  }));
+function buildCitationsFromChunks(chunks, { distinguishSnippets = false } = {}) {
+  const citations = [];
+  const seen = new Set();
+
+  for (const chunk of Array.isArray(chunks) ? chunks : []) {
+    if (!isCitableChunk(chunk)) {
+      continue;
+    }
+
+    const citation = {
+      documentId: chunk.documentId,
+      documentTitle: chunk.documentTitle,
+      originalFilename: chunk.originalFilename,
+      pageNumber: chunk.pageNumber,
+      chunkIndex: chunk.chunkIndex,
+      snippet: buildSnippet(chunk.chunkText),
+    };
+    const fullEvidenceQuote =
+      distinguishSnippets && typeof chunk.evidenceQuote === "string"
+        ? chunk.evidenceQuote.replace(/\s+/g, " ").trim()
+        : "";
+
+    if (fullEvidenceQuote) {
+      // Keep the short preview for source cards, but carry the complete
+      // server-verified passage so clients do not have to trust a shared prefix.
+      citation.evidenceQuote = fullEvidenceQuote;
+    }
+    if (
+      typeof chunk.evidenceId === "string" &&
+      /^ask_ev_v1_[a-f0-9]{24}$/.test(chunk.evidenceId)
+    ) {
+      citation.evidenceId = chunk.evidenceId;
+    }
+    const chunkId = chunk.chunkId ?? chunk.id;
+    const hasChunkId = chunkId !== undefined && chunkId !== null;
+    const hasStableLocation =
+      citation.documentId !== undefined &&
+      citation.documentId !== null &&
+      citation.pageNumber !== undefined &&
+      citation.pageNumber !== null &&
+      citation.chunkIndex !== undefined &&
+      citation.chunkIndex !== null;
+    const sourceIdentity = hasChunkId
+      ? ["chunk", chunkId].join(":")
+      : hasStableLocation
+        ? ["document", citation.documentId, citation.pageNumber, citation.chunkIndex].join(":")
+      : [
+          "fallback",
+          citation.documentTitle || "",
+          citation.originalFilename || "",
+          citation.pageNumber ?? "",
+          citation.chunkIndex ?? "",
+          citation.snippet,
+        ].join(":");
+    const identity = distinguishSnippets
+      ? [sourceIdentity, fullEvidenceQuote || citation.snippet].join(":quote:")
+      : sourceIdentity;
+
+    if (seen.has(identity)) {
+      continue;
+    }
+
+    seen.add(identity);
+    citations.push(citation);
+  }
+
+  return citations;
+}
+
+function buildCitationsFromEvidence(items) {
+  return buildCitationsFromChunks(
+    (Array.isArray(items) ? items : []).map((item) => ({
+      ...item,
+      // The citation preview must be the passage that passed verification, not
+      // the beginning of a larger retrieved chunk that may be unrelated.
+      chunkText: item.evidenceQuote,
+    })),
+    // One chunk may support multiple atomic claims with different verbatim
+    // passages. Remove exact duplicates, but preserve those distinct quotes.
+    { distinguishSnippets: true }
+  );
 }
 
 function buildModelContext(chunks) {
@@ -580,12 +659,12 @@ export async function askQuestionUsingDocuments(
     limit: chunkLimit,
     mode: "hybrid",
   });
-  // Drop rows that are not objects before anything reads their fields. The
-  // relevance gate below dereferences chunks[0] directly, so a null or string
-  // row from an injected or future retriever would throw and surface as a 500
-  // instead of an honest not_found.
+  // Fail closed before assigning model-facing source labels. A malformed row
+  // must not become S1/S2 just because another row in the same retrieval result
+  // is valid: the model could otherwise claim support from a passage that the
+  // API cannot turn into a checkable citation.
   retrievedChunks = (Array.isArray(rawChunks) ? rawChunks : []).filter(
-    (chunk) => chunk && typeof chunk === "object"
+    (chunk) => isCitableChunk(chunk)
   );
   retrievalMs = performance.now() - retrievalStart;
 
@@ -640,10 +719,9 @@ export async function askQuestionUsingDocuments(
   const citations = buildCitationsFromChunks(chunks);
   builtCitations = citations;
 
-  // Reachable contract, not dead defense: buildCitationsFromChunks drops rows
-  // with no document identity and no text, so retrieval can return chunks while
-  // none of them are citable. Answering from sources we cannot show the owner
-  // would be ungrounded, so refuse instead.
+  // Defense in depth: answering from sources we cannot show the owner would be
+  // ungrounded, so refuse if citation construction ever becomes stricter than
+  // the retrieval-row filter above.
   if (!citations.length) {
     return finalize({
       status: "not_found",
@@ -653,9 +731,9 @@ export async function askQuestionUsingDocuments(
     });
   }
 
-  // Evidence contract (ASK_EVIDENCE_CONTRACT). Everything above is shared; only
-  // the answer step differs, so retrieval, the relevance gate, citations, and
-  // retrievedContext behave identically with the flag on or off.
+  // Evidence contract (ASK_EVIDENCE_CONTRACT). Retrieval and the relevance gate
+  // are shared. The answer step replaces broad retrieval citations with only
+  // the verified evidence quotes that actually backed accepted claims.
   if (evidenceContract) {
     const evidenceStart = performance.now();
     const raw = await generateEvidenceAnswer({
@@ -672,16 +750,7 @@ export async function askQuestionUsingDocuments(
     // Status is DERIVED, never taken from the model -- a model-supplied status
     // could contradict its own claims.
     const status = deriveEvidenceStatus(verified);
-    const evidenceCitations = buildCitationsFromChunks(
-      chunks.filter((_, index) =>
-        verified.documentSupported.some(
-          (item) =>
-            item.pageNumber === chunks[index].pageNumber &&
-            item.chunkIndex === chunks[index].chunkIndex &&
-            item.documentId === chunks[index].documentId
-        )
-      )
-    );
+    const evidenceCitations = buildCitationsFromEvidence(verified.documentSupported);
     builtCitations = evidenceCitations;
 
     return finalize({
