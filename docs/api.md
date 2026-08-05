@@ -14,7 +14,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
   ```
 
   `400` invalid input · `404` not found · `415` wrong media type (attachments) · `429` rate limited · `500` server failure.
-- **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. Everything else is unlimited.
+- **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. Everything else is unlimited, including `POST /api/repair-plan/:runId/safety-acknowledgment`, which makes no model call.
 - **PowerShell examples:** plain `GET`/download requests use `curl.exe` (the real curl, not the PowerShell alias). Requests with a **JSON body** use `Invoke-RestMethod` instead. This is deliberate: passing inline JSON to `curl.exe` is mangled by Windows PowerShell 5.1's parser — it strips the double quotes before curl ever sees them (a literal, a `$variable`, and `ConvertTo-Json` output all break the same way), so the server receives invalid JSON and returns `400`. `Invoke-RestMethod` hands its `-Body` to the request in-process, so the JSON survives intact in both Windows PowerShell 5.1 and PowerShell 7. Multipart uploads (`-F`) still use `curl.exe`; if a field value contains spaces, run those from PowerShell 7 or a POSIX shell to avoid the same 5.1 quoting issue.
 
 ## Quick Endpoint List
@@ -33,6 +33,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `GET /api/search` (+ `/documents`, `/symptoms`, `/procedures`, `/notes`) | Keyword search per section |
 | `POST /api/ask` | Ask your documents (RAG Q&A) |
 | `POST /api/repair-plan` | Repair Planner agent (SSE stream) |
+| `POST /api/repair-plan/:runId/safety-acknowledgment` | Record the owner's safety acknowledgment for one generated plan |
 | `GET/POST /api/symptoms`, `GET/PUT/DELETE /api/symptoms/:id` | Symptom CRUD |
 | `PUT /api/symptoms/:id/procedures` | Replace a symptom's linked procedures |
 | `GET /api/symptoms/:id/suggested-procedures` | Grounded procedure suggestions |
@@ -408,6 +409,22 @@ The response is `text/event-stream`; each frame is `data: <json>\n\n` with a `ty
 A run that cannot produce a verified plan emits an `error` frame with a `code` (`planner_incomplete` or `planner_invalid_output`), a `reason` (`no_canonical_task`, `turn_limit`, `invalid_final_contract`, `provider_incomplete`, `missing_terminal_event`, `malformed_tool_arguments`), and a fixed safe `message` — and **no** `done` frame and no artifacts.
 
 `Invoke-RestMethod` waits for the stream to finish and returns the concatenated `data:` frames as text — to watch frames arrive live, run the equivalent `curl.exe -N` from a POSIX shell (Bash/WSL). Full protocol, tool list, and readiness rubric: [repair-planner.md](repair-planner.md).
+
+When the finished plan contains safety-critical work, `artifacts` also carries a `planRunId` for the acknowledgment route below. A plan with no safety-critical work has no `planRunId` — there is nothing to acknowledge.
+
+### `POST /api/repair-plan/:runId/safety-acknowledgment`  *(not rate limited: no model call)*
+
+| Body field | Required | Notes |
+| --- | --- | --- |
+| `acknowledged` | ✅ | boolean; anything else is a 400 |
+
+Records (`true`) or withdraws (`false`) the owner's acknowledgment of the safety-critical work in one already-generated plan, and returns `{ planRunId, safetyAcknowledged, readiness, checklist }` re-scored by the server.
+
+`runId` comes from `artifacts.planRunId` on that plan's `done` frame. The body carries the boolean and nothing else: the canonical tasks, skill level, verified requirement groups, and evidence status all come from the server's own record of the run, and the safety classifier is re-run over those stored tasks. Extra fields in the body are ignored, so a client cannot downgrade safety-critical work, raise its skill level, or claim satisfied requirements to reach `ready`.
+
+Acknowledgments are **not persisted**. Runs are held in memory, bounded and TTL'd, and belong to the plan they were generated for — a regenerated plan mints a new `runId` and starts unacknowledged. An unknown, evicted, or expired `runId` is a 404; build the plan again.
+
+Acknowledging does not assert that the repair is safe, correct, or within the owner's ability. It records only that the warning was shown and confirmed, and it satisfies exactly one readiness requirement (`safety_reviewed`, 20 points). Every hazard warning stays on the plan afterwards.
 
 ---
 

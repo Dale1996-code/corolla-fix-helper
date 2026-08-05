@@ -62,9 +62,21 @@ const completedRun = [
         level: "almost_ready",
         safetyCritical: true,
         safetyAcknowledged: false,
-        rubric: [{ id: "tools_listed", label: "Required tools listed", points: 25, met: true }],
+        safetyFlags: ["Brake work affects stopping safety."],
+        rubric: [
+          { id: "tools_listed", label: "Required tools listed", points: 25, met: true },
+          {
+            id: "safety_reviewed",
+            label: "Safety-critical work acknowledged",
+            points: 20,
+            met: false,
+          },
+        ],
         gaps: ["Safety-critical work detected (brake system)."],
       },
+      // The handle the acknowledgment control posts against. Without it the
+      // rubric row above would be permanently unsatisfiable.
+      planRunId: "run-abc",
       checklist: [
         {
           taskId: 1,
@@ -176,6 +188,230 @@ test("RepairPlannerPage shows a preparation-guidance safety disclaimer with read
       "Steps are preparation guidance, not verified repair instructions."
     )
   ).toBeInTheDocument();
+});
+
+// --- Safety acknowledgment ---------------------------------------------------
+//
+// The readiness rubric charges 20 points for "Safety-critical work
+// acknowledged". These tests exist because the page once rendered that
+// requirement with no control anywhere that could satisfy it, so a
+// safety-critical plan could never reach Ready.
+
+const ACK_LABEL = /I understand this plan includes safety-critical work/i;
+
+// What the server returns once the run is re-scored with the risk acknowledged.
+const acknowledgedResponse = {
+  planRunId: "run-abc",
+  safetyAcknowledged: true,
+  readiness: {
+    score: 100,
+    level: "ready",
+    safetyCritical: true,
+    safetyAcknowledged: true,
+    safetyFlags: ["Brake work affects stopping safety."],
+    rubric: [
+      { id: "tools_listed", label: "Required tools listed", points: 25, met: true },
+      { id: "safety_reviewed", label: "Safety-critical work acknowledged", points: 20, met: true },
+    ],
+    gaps: [],
+  },
+  checklist: [
+    {
+      taskId: 1,
+      task: "Replace front brake pads",
+      system: "Brakes",
+      owner: "DIY",
+      safetyCritical: true,
+      safetyFlags: ["Brake work affects stopping safety."],
+      priority: 2,
+      steps: ["Review source procedure"],
+    },
+  ],
+};
+
+function mockPlanThenAcknowledgment(ackResult = { ok: true, json: async () => acknowledgedResponse }) {
+  const fetchMock = vi.fn((url) =>
+    String(url).includes("safety-acknowledgment")
+      ? Promise.resolve(ackResult)
+      : streamResponse(completedRun)
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+async function buildSafetyCriticalPlan() {
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+  return screen.findByRole("checkbox", { name: ACK_LABEL });
+}
+
+test("a safety-critical plan renders an unchecked acknowledgment control it cannot reach Ready without", async () => {
+  mockPlanThenAcknowledgment();
+
+  const checkbox = await buildSafetyCriticalPlan();
+
+  // Accessible name, correct initial state, keyboard reachable (a real checkbox
+  // input is focusable and togglable with Space -- no div-with-onClick).
+  expect(checkbox).not.toBeChecked();
+  expect(checkbox).toBeEnabled();
+  expect(checkbox).not.toHaveAttribute("tabindex", "-1");
+
+  // The requirement it satisfies is unmet, and the plan is held below Ready.
+  expect(screen.getByText("Safety-critical work acknowledged (20 pts)")).toBeInTheDocument();
+  expect(screen.getByText("Almost ready")).toBeInTheDocument();
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+
+  // The control names the requirement it unlocks and the limit of what it means.
+  const describedBy = checkbox.getAttribute("aria-describedby").split(" ");
+  expect(describedBy).toContain("readiness-rubric-safety_reviewed");
+  expect(
+    document.getElementById("readiness-rubric-safety_reviewed")
+  ).toHaveTextContent("Safety-critical work acknowledged");
+  expect(document.getElementById(describedBy[1])).toHaveTextContent(
+    /does not mean the repair is safe/i
+  );
+
+  // The hazard being acknowledged is stated, not just referred to.
+  expect(
+    screen.getByRole("region", { name: /safety-critical work: acknowledgment required/i })
+  ).toHaveTextContent("Brake work affects stopping safety.");
+});
+
+test("acknowledging updates readiness and the checklist without regenerating the plan", async () => {
+  const fetchMock = mockPlanThenAcknowledgment();
+
+  const checkbox = await buildSafetyCriticalPlan();
+  fireEvent.click(checkbox);
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repair-plan/run-abc/safety-acknowledgment",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ acknowledged: true }),
+      })
+    );
+  });
+
+  expect(await screen.findByText("100/100")).toBeInTheDocument();
+  expect(screen.getByText("Ready")).toBeInTheDocument();
+  expect(checkbox).toBeChecked();
+  expect(screen.getByText("DIY")).toBeInTheDocument();
+  expect(screen.queryByText(/Safety-critical work detected/)).not.toBeInTheDocument();
+
+  // Acknowledging is not dismissing: the hazard warning stays on screen.
+  expect(screen.getAllByText(/Brake work affects stopping safety/).length).toBeGreaterThan(0);
+
+  // The plan itself was requested exactly once -- no regeneration.
+  expect(fetchMock.mock.calls.filter(([url]) => url === "/api/repair-plan")).toHaveLength(1);
+
+  // The panel must not keep demanding an acknowledgment the owner has given
+  // while the rubric row above it reads as met.
+  expect(screen.queryByText(/cannot reach Ready until you acknowledge/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/You have acknowledged the risk in this plan/i)).toBeInTheDocument();
+});
+
+test("the checked state follows the server's score, not the click", async () => {
+  // The server refuses the acknowledgment (an expired run). The box must not
+  // stay ticked while the rubric row says otherwise.
+  mockPlanThenAcknowledgment({
+    ok: false,
+    json: async () => ({ error: "That plan is no longer available to acknowledge." }),
+  });
+
+  const checkbox = await buildSafetyCriticalPlan();
+  fireEvent.click(checkbox);
+
+  expect(
+    await screen.findByText("That plan is no longer available to acknowledge.")
+  ).toBeInTheDocument();
+  expect(checkbox).not.toBeChecked();
+  expect(screen.getByText("80/100")).toBeInTheDocument();
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+});
+
+test("clearing the planner drops the acknowledgment along with the plan", async () => {
+  mockPlanThenAcknowledgment();
+
+  const checkbox = await buildSafetyCriticalPlan();
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(checkbox).toBeChecked());
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+  expect(screen.queryByRole("checkbox", { name: ACK_LABEL })).not.toBeInTheDocument();
+  expect(screen.queryByText("100/100")).not.toBeInTheDocument();
+});
+
+test("regenerating a plan starts the acknowledgment unchecked again", async () => {
+  mockPlanThenAcknowledgment();
+
+  const checkbox = await buildSafetyCriticalPlan();
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(checkbox).toBeChecked());
+
+  // Same page, a materially changed brief, a fresh run.
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Replace the rear brake shoes and bleed the system." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+
+  const regenerated = await screen.findByRole("checkbox", { name: ACK_LABEL });
+  expect(regenerated).not.toBeChecked();
+  expect(screen.getByText("80/100")).toBeInTheDocument();
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+});
+
+test("a plan with no safety-critical work shows no acknowledgment control or blocker", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      streamResponse([
+        {
+          type: "done",
+          status: "completed",
+          evidenceStatus: "verified",
+          text: "Oil change plan",
+          artifacts: {
+            tasks: [{ id: 1, title: "Change the engine oil", system: "Engine", difficulty: "beginner" }],
+            citations: [],
+            readiness: {
+              score: 100,
+              level: "ready",
+              safetyCritical: false,
+              safetyAcknowledged: true,
+              safetyFlags: [],
+              rubric: [
+                {
+                  id: "safety_reviewed",
+                  label: "Safety-critical work acknowledged",
+                  points: 20,
+                  met: true,
+                },
+              ],
+              gaps: [],
+            },
+            checklist: [],
+            handoffNotes: null,
+            evidence: { verifiedClaims: [], gaps: [] },
+          },
+        },
+      ])
+    )
+  );
+
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Change the engine oil." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+
+  expect(await screen.findByText("Ready")).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: ACK_LABEL })).not.toBeInTheDocument();
+  expect(screen.queryByText(/acknowledgment required/i)).not.toBeInTheDocument();
 });
 
 test("RepairPlannerPage shows the AI-not-configured message from the stream", async () => {

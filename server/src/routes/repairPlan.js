@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { runRepairPlannerAgent, SKILL_LEVELS } from "../services/agent/repairPlannerAgent.js";
+import { planRunStore } from "../services/agent/planRunStore.js";
+import { buildOwnerChecklist, checkRepairReadiness } from "../services/agent/repairTools.js";
 
 // Cap the brief (and each optional field) so a giant pasted payload cannot be
 // forwarded to the model. Briefs are longer-form than an Ask question, hence the
@@ -14,10 +16,21 @@ export const MAX_PLAN_FIELD_LENGTH = 2000;
 // progress and model text deltas as they happen. `runAgent` is injectable so
 // the route can be tested end-to-end with a mock model client.
 
-export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}) {
+export const PLAN_RUN_EXPIRED_MESSAGE =
+  "That plan is no longer available to acknowledge. Build the plan again and acknowledge the warning on the new plan.";
+
+export function createRepairPlanRouter({
+  runAgent = runRepairPlannerAgent,
+  planRuns = planRunStore,
+  // The shared AI rate limiter guards plan GENERATION only. It caps accidental
+  // OpenAI spend, and the acknowledgment route below spends nothing -- letting a
+  // checkbox toggle consume slots out of the window shared with /api/ask would
+  // charge the owner AI budget for reading a safety warning.
+  aiRateLimiter = (_request, _response, next) => next(),
+} = {}) {
   const router = Router();
 
-  router.post("/", async (request, response) => {
+  router.post("/", aiRateLimiter, async (request, response) => {
     const brief = typeof request.body?.brief === "string" ? request.body.brief.trim() : "";
 
     if (!brief) {
@@ -120,6 +133,57 @@ export function createRepairPlanRouter({ runAgent = runRepairPlannerAgent } = {}
     } finally {
       response.end();
     }
+  });
+
+  // Records the owner's safety acknowledgment for one already-generated plan and
+  // returns the re-scored readiness and checklist.
+  //
+  // The request body carries a boolean and nothing else. Everything readiness is
+  // computed from -- the canonical tasks, the skill level, the validated
+  // requirement groups, the evidence status -- comes back out of the server's own
+  // record of that run, and the safety classifier is re-run over those stored
+  // tasks here. So a client cannot re-label brake work as non-critical, cannot
+  // hand itself satisfied requirement groups, and cannot acknowledge a plan the
+  // server never produced. It is a plain JSON route, not an SSE one, and it
+  // makes no model call.
+  router.post("/:runId/safety-acknowledgment", (request, response) => {
+    const acknowledged = request.body?.acknowledged;
+
+    if (typeof acknowledged !== "boolean") {
+      response.status(400).json({ error: 'Field "acknowledged" must be true or false.' });
+      return;
+    }
+
+    const record = planRuns.get(request.params.runId);
+
+    if (!record) {
+      response.status(404).json({ error: PLAN_RUN_EXPIRED_MESSAGE });
+      return;
+    }
+
+    const readiness = checkRepairReadiness({
+      tasks: record.tasks,
+      skillLevel: record.skillLevel,
+      ackSafety: acknowledged,
+      requirements: record.requirements,
+      evidenceStatus: record.evidenceStatus,
+    });
+
+    const { checklist } = buildOwnerChecklist({
+      tasks: record.tasks,
+      skillLevel: record.skillLevel,
+      ackSafety: acknowledged,
+    });
+
+    response.json({
+      planRunId: record.runId,
+      // Echoed from the recomputed readiness, not from the request: a plan with
+      // no safety-critical work reports `true` because the requirement does not
+      // apply, and `acknowledged: true` on such a plan changes no score.
+      safetyAcknowledged: readiness.safetyAcknowledged,
+      readiness,
+      checklist,
+    });
   });
 
   return router;

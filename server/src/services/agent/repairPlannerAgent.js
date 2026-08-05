@@ -12,6 +12,7 @@ import {
 } from "./repairTools.js";
 import { buildRepairPlanEvidence } from "./repairPlanEvidenceContract.js";
 import { streamResponsesTurn } from "./openAiResponsesClient.js";
+import { planRunStore } from "./planRunStore.js";
 import { createTracer } from "./tracing.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
@@ -109,9 +110,13 @@ function buildTrustedContext(request, { brief, vehicle, tasks }) {
     availableParts: typeof request?.availableParts === "string" ? request.availableParts : "",
     constraints: typeof request?.constraints === "string" ? request.constraints : "",
     tasks: Object.freeze(tasks.map((task) => Object.freeze({ ...task }))),
-    // Server-owned and always false in this milestone. There is no request
-    // field and no model-facing schema that can set it, so safety-critical work
-    // stays Shop Recommended until an informed-consent flow is designed.
+    // Always false while the plan is being generated, and there is no request
+    // field or model-facing schema that can set it. Acknowledgment is a
+    // decision the owner makes about a plan they have already read, so it
+    // arrives afterwards through POST /api/repair-plan/:runId/safety-
+    // acknowledgment, which re-scores this run from the server's own copy of
+    // these inputs. Nothing the model or the browser sends during generation
+    // can pre-acknowledge anything.
     safetyAcknowledged: false,
   });
 }
@@ -146,6 +151,9 @@ export async function runRepairPlannerAgent(request, options = {}) {
     // enough for a multi-task brief to search and still write its narrative.
     maxTurns = 8,
     signal,
+    // Injectable so a test can observe what the acknowledgment route would later
+    // be re-scoring from, without reaching into module state.
+    planRuns = planRunStore,
   } = options;
 
   const brief = typeof request?.brief === "string" ? request.brief.trim() : "";
@@ -361,6 +369,18 @@ export async function runRepairPlannerAgent(request, options = {}) {
       verifiedClaims: finalizedPlan.verifiedClaims,
       gaps: finalizedPlan.gaps,
     };
+
+    // Only a plan with safety-critical work has anything to acknowledge, so only
+    // that plan gets a run id. A plan without it never shows the control and can
+    // never be blocked by it -- and the store stays small.
+    if (readiness.safetyCritical) {
+      artifacts.planRunId = planRuns.save({
+        tasks: trusted.tasks,
+        skillLevel: trusted.skillLevel,
+        requirements: finalizedPlan.requirements,
+        evidenceStatus: finalizedPlan.evidenceStatus,
+      });
+    }
 
     const done = {
       type: "done",
