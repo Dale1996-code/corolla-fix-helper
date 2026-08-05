@@ -221,7 +221,7 @@ test("Search and Ask can retrieve OCR-created document text and chunks", async (
     },
   ]);
 
-  const searchResults = searchDocuments({
+  const { results: searchResults } = searchDocuments({
     query: `${uniqueTag} blue yellow wire`,
   });
 

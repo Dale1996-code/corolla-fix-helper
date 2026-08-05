@@ -4,6 +4,8 @@ import { normalizeText, hasOwnField } from "../src/utils/text.js";
 import {
   parsePositiveInt,
   parsePositiveIntArray,
+  parsePageLimit,
+  parsePageOffset,
   isLoopbackAddress,
   isLoopbackRequest,
 } from "../src/utils/http.js";
@@ -81,4 +83,39 @@ test("isLoopbackRequest reads the raw socket peer address", () => {
   assert.equal(isLoopbackRequest({ connection: { remoteAddress: "::1" } }), true);
   assert.equal(isLoopbackRequest({ socket: { remoteAddress: "192.168.1.9" } }), false);
   assert.equal(isLoopbackRequest({}), false);
+});
+
+test("parsePageLimit falls back to the default for unusable values", () => {
+  const bounds = { defaultLimit: 25, maxLimit: 100 };
+
+  assert.equal(parsePageLimit(undefined, bounds), 25);
+  assert.equal(parsePageLimit("", bounds), 25);
+  assert.equal(parsePageLimit("abc", bounds), 25);
+  assert.equal(parsePageLimit("0", bounds), 25);
+  assert.equal(parsePageLimit("-10", bounds), 25);
+  assert.equal(parsePageLimit("12.5", bounds), 25);
+  assert.equal(parsePageLimit("1e999", bounds), 25);
+  assert.equal(parsePageLimit(["5", "9"], bounds), 25);
+});
+
+test("parsePageLimit keeps usable sizes and clamps to the maximum", () => {
+  const bounds = { defaultLimit: 25, maxLimit: 100 };
+
+  assert.equal(parsePageLimit("1", bounds), 1);
+  assert.equal(parsePageLimit("50", bounds), 50);
+  assert.equal(parsePageLimit("100", bounds), 100);
+  assert.equal(parsePageLimit("101", bounds), 100);
+  assert.equal(parsePageLimit("100000", bounds), 100);
+});
+
+test("parsePageOffset returns 0 for unusable values and keeps valid offsets", () => {
+  assert.equal(parsePageOffset(undefined), 0);
+  assert.equal(parsePageOffset(""), 0);
+  assert.equal(parsePageOffset("abc"), 0);
+  assert.equal(parsePageOffset("-3"), 0);
+  assert.equal(parsePageOffset("7.5"), 0);
+  assert.equal(parsePageOffset("1e999"), 0);
+  assert.equal(parsePageOffset("0"), 0);
+  assert.equal(parsePageOffset("25"), 25);
+  assert.equal(parsePageOffset("1440"), 1440);
 });

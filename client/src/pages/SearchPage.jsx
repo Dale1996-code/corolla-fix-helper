@@ -40,6 +40,14 @@ const NEWEST_OLDEST_SORT_OPTIONS = [
 const FAVORITE_OPTIONS = [{ value: "true", label: "Favorites only" }];
 const BOOKMARKED_OPTIONS = [{ value: "true", label: "Bookmarked only" }];
 
+// Matches the server's default page size for /api/search/documents. The server
+// clamps whatever it is sent, so this only decides how much we ask for.
+const DOCUMENT_RESULTS_PER_PAGE = 25;
+
+function formatCount(value) {
+  return value.toLocaleString("en-US");
+}
+
 const defaultDocumentsForm = {
   q: "",
   system: "",
@@ -98,6 +106,12 @@ function createSectionState(filters) {
     error: "",
     results: [],
     total: 0,
+    // Echoed back by paginated endpoints so the counter and the Previous/Next
+    // controls describe the page the server actually returned, not the one we
+    // asked for.
+    limit: DOCUMENT_RESULTS_PER_PAGE,
+    offset: 0,
+    hasMore: false,
     filters,
   };
 }
@@ -151,16 +165,24 @@ async function fetchSearchSection(
       return;
     }
 
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    const total = typeof payload.total === "number" ? payload.total : results.length;
+    const offset = typeof payload.offset === "number" ? payload.offset : 0;
+
     setState({
       loading: false,
       error: "",
-      results: Array.isArray(payload.results) ? payload.results : [],
-      total:
-        typeof payload.total === "number"
-          ? payload.total
-          : Array.isArray(payload.results)
-            ? payload.results.length
-            : 0,
+      results,
+      total,
+      limit:
+        typeof payload.limit === "number" && payload.limit > 0
+          ? payload.limit
+          : DOCUMENT_RESULTS_PER_PAGE,
+      offset,
+      hasMore:
+        typeof payload.hasMore === "boolean"
+          ? payload.hasMore
+          : offset + results.length < total,
       filters: payload.filters || fallbackFilters,
     });
   } catch (error) {
@@ -197,12 +219,81 @@ function SectionActions({ loading, onClear }) {
   );
 }
 
-function ResultSummary({ total, label }) {
+// Before the user searches, the section is showing a slice of the library — not
+// the outcome of a search. The two states are worded differently so a library
+// listing can never read as "your search found this many".
+function ResultSummary({ searched, paginated, total, offset, resultsOnPage, noun, nounPlural }) {
+  if (total === 0) {
+    // The empty/no-results message in SectionStatus already says everything.
+    return null;
+  }
+
+  const summary = (() => {
+    if (paginated) {
+      const from = offset + 1;
+      const to = offset + resultsOnPage;
+
+      return searched
+        ? `Showing ${formatCount(from)}–${formatCount(to)} of ${formatCount(total)} ${
+            total === 1 ? `${noun} result` : `${noun} results`
+          }.`
+        : `Showing ${formatCount(from)}–${formatCount(to)} of ${formatCount(total)} ${
+            total === 1 ? noun : nounPlural
+          } in your library. Search to narrow this list.`;
+    }
+
+    return searched
+      ? `Found ${formatCount(total)} ${total === 1 ? `${noun} result` : `${noun} results`}.`
+      : `Showing all ${formatCount(total)} ${total === 1 ? noun : nounPlural} in your library.`;
+  })();
+
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-      Found <span className="font-semibold text-slate-900">{total}</span> {label}
-      {total === 1 ? "" : "s"}.
+      {summary}
     </section>
+  );
+}
+
+// Only rendered once a page has settled, so the buttons never need a loading
+// state of their own — the section swaps in its "Loading documents..." status.
+function PaginationControls({ limit, offset, total, hasMore, onChangeOffset }) {
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  const currentPage = Math.floor(offset / limit) + 1;
+  const hasPrevious = offset > 0;
+
+  return (
+    <nav
+      aria-label="Document result pages"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
+    >
+      <button
+        type="button"
+        onClick={() => onChangeOffset(Math.max(0, offset - limit))}
+        disabled={!hasPrevious}
+        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Previous
+      </button>
+
+      <span className="text-sm text-slate-600">
+        Page <span className="font-semibold text-slate-900">{formatCount(currentPage)}</span> of{" "}
+        <span className="font-semibold text-slate-900">{formatCount(totalPages)}</span>
+      </span>
+
+      <button
+        type="button"
+        onClick={() => onChangeOffset(offset + limit)}
+        disabled={!hasMore}
+        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Next
+      </button>
+    </nav>
   );
 }
 
@@ -1009,6 +1100,10 @@ const SEARCH_SECTIONS = [
     resultNoun: "document",
     resultNounPlural: "documents",
     emptyMessage: "No documents matched this search.",
+    idleEmptyMessage: "No documents in your library yet.",
+    // The document library is the one scope that can grow into the thousands,
+    // so it is the only section that pages.
+    paginated: true,
     ResultCard: DocumentResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1095,6 +1190,7 @@ const SEARCH_SECTIONS = [
     resultNoun: "symptom",
     resultNounPlural: "symptoms",
     emptyMessage: "No symptoms matched this search.",
+    idleEmptyMessage: "No symptoms saved yet.",
     ResultCard: SymptomResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1151,6 +1247,7 @@ const SEARCH_SECTIONS = [
     resultNoun: "procedure",
     resultNounPlural: "procedures",
     emptyMessage: "No procedures matched this search.",
+    idleEmptyMessage: "No procedures saved yet.",
     ResultCard: ProcedureResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1207,6 +1304,7 @@ const SEARCH_SECTIONS = [
     resultNoun: "note",
     resultNounPlural: "notes",
     emptyMessage: "No notes matched this search.",
+    idleEmptyMessage: "No notes saved yet.",
     ResultCard: NoteResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1260,32 +1358,52 @@ const SEARCH_SECTIONS = [
 
 function SearchSection({ config }) {
   const [form, setForm] = useState(config.defaultForm);
+  // The form the visible results actually came from. Paging uses this rather
+  // than `form`, so edits the user has not submitted yet can never be applied to
+  // page 2 of an older query.
+  const [appliedForm, setAppliedForm] = useState(config.defaultForm);
+  const [searched, setSearched] = useState(false);
   const [state, setState] = useState(createSectionState(config.defaultFilters));
   const requestSeq = useRef(0);
-  const hasKeyword = form.q.trim().length > 0;
+  const hasKeyword = appliedForm.q.trim().length > 0;
   const ResultCard = config.ResultCard;
 
-  async function runSearch(nextForm = form) {
+  // Every request bumps the sequence, so a slow reply for an older query *or an
+  // older page* is dropped instead of replacing newer results.
+  async function runSearch(nextForm, nextOffset, nextSearched) {
     const seq = (requestSeq.current += 1);
-    await fetchSearchSection(config.endpoint, nextForm, setState, config.defaultFilters, {
+
+    setAppliedForm(nextForm);
+    setSearched(nextSearched);
+
+    const requestForm = config.paginated
+      ? {
+          ...nextForm,
+          limit: String(DOCUMENT_RESULTS_PER_PAGE),
+          offset: nextOffset > 0 ? String(nextOffset) : "",
+        }
+      : nextForm;
+
+    await fetchSearchSection(config.endpoint, requestForm, setState, config.defaultFilters, {
       shouldApply: () => seq === requestSeq.current,
     });
   }
 
   useEffect(() => {
-    runSearch(config.defaultForm);
+    runSearch(config.defaultForm, 0, false);
     // Only re-run on mount (per section); runSearch/config are stable for a
     // given section's lifetime.
   }, []);
 
   function handleSubmit(event) {
     event.preventDefault();
-    runSearch();
+    // A new query or filter set always restarts at the first page.
+    runSearch(form, 0, true);
   }
 
   function handleClear() {
     setForm(config.defaultForm);
-    runSearch(config.defaultForm);
+    runSearch(config.defaultForm, 0, false);
   }
 
   return (
@@ -1299,7 +1417,15 @@ function SearchSection({ config }) {
       </form>
 
       {!state.loading && !state.error ? (
-        <ResultSummary total={state.total} label={`${config.resultNoun} result`} />
+        <ResultSummary
+          searched={searched}
+          paginated={Boolean(config.paginated)}
+          total={state.total}
+          offset={state.offset}
+          resultsOnPage={state.results.length}
+          noun={config.resultNoun}
+          nounPlural={config.resultNounPlural}
+        />
       ) : null}
 
       <SectionStatus
@@ -1307,7 +1433,7 @@ function SearchSection({ config }) {
         error={state.error}
         total={state.total}
         label={config.resultNounPlural}
-        emptyMessage={config.emptyMessage}
+        emptyMessage={searched ? config.emptyMessage : config.idleEmptyMessage}
       />
 
       {!state.loading && !state.error && state.results.length
@@ -1315,6 +1441,16 @@ function SearchSection({ config }) {
             <ResultCard key={result.id} result={result} showSnippetReason={hasKeyword} />
           ))
         : null}
+
+      {config.paginated && !state.loading && !state.error ? (
+        <PaginationControls
+          limit={state.limit}
+          offset={state.offset}
+          total={state.total}
+          hasMore={state.hasMore}
+          onChangeOffset={(nextOffset) => runSearch(appliedForm, nextOffset, searched)}
+        />
+      ) : null}
     </SectionCard>
   );
 }

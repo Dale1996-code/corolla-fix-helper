@@ -13,6 +13,37 @@ export function parsePositiveInt(value) {
 }
 
 /**
+ * Parse a `limit` query value into a bounded page size.
+ *
+ * Missing, non-numeric, fractional, zero, negative, and unsafely large values
+ * all fall back to `defaultLimit`; anything larger than `maxLimit` is clamped
+ * down to it. Callers therefore always receive a page size they can hand
+ * straight to a parameterized `LIMIT ?`.
+ */
+export function parsePageLimit(value, { defaultLimit, maxLimit }) {
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return defaultLimit;
+  }
+
+  return Math.min(parsed, maxLimit);
+}
+
+/**
+ * Parse an `offset` query value into a non-negative row offset.
+ *
+ * Missing, non-numeric, fractional, negative, and unsafely large values all
+ * become 0 (the first page). A large-but-safe offset is kept as-is so paging
+ * past the end returns an empty page rather than silently restarting at page 1.
+ */
+export function parsePageOffset(value) {
+  const parsed = Number(value);
+
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/**
  * Parse a request body value as a deduplicated list of positive integer ids.
  *
  * Used by the "replace the whole set of linked ids" bodies (linked documents,

@@ -345,6 +345,21 @@ function mapSearchResultRow(row, query, tags) {
   };
 }
 
+// Document search is paged so a large library can never be pulled in one
+// response. The default is what the Search page requests; the maximum is the
+// ceiling the service enforces no matter what a caller asks for.
+export const DOCUMENT_SEARCH_PAGE_SIZE = 25;
+export const DOCUMENT_SEARCH_MAX_PAGE_SIZE = 100;
+
+/**
+ * Search documents, one bounded page at a time.
+ *
+ * Returns `{ results, total, limit, offset, hasMore }`, where `total` is the
+ * full count of matching documents (from a separate `COUNT(*)` that reuses the
+ * exact same WHERE clause and bound filter parameters) and `results` holds at
+ * most `limit` rows. `limit`/`offset` are clamped here as well as in the route,
+ * so no caller can obtain the whole library.
+ */
 export function searchDocuments({
   query = "",
   system = "",
@@ -353,12 +368,25 @@ export function searchDocuments({
   bookmarked = "",
   tag = "",
   sort = "relevance",
+  limit = DOCUMENT_SEARCH_PAGE_SIZE,
+  offset = 0,
 }) {
+  const safeLimit = Math.min(
+    Number.isSafeInteger(limit) && limit > 0 ? limit : DOCUMENT_SEARCH_PAGE_SIZE,
+    DOCUMENT_SEARCH_MAX_PAGE_SIZE
+  );
+  const safeOffset = Number.isSafeInteger(offset) && offset > 0 ? offset : 0;
+
   const trimmedQuery = query.trim();
   const loweredQuery = trimmedQuery.toLowerCase();
   const searchPattern = `%${loweredQuery}%`;
   const whereClauses = [];
-  const params = [];
+  // Relevance params bind into the SELECT list, filter params into the WHERE
+  // clause. They are kept apart so the COUNT(*) query can bind exactly the
+  // filter params and nothing else — that is what keeps the reported total from
+  // disagreeing with the rows actually returned.
+  const relevanceParams = [];
+  const filterParams = [];
 
   const relevanceSql = trimmedQuery
     ? `
@@ -396,7 +424,7 @@ export function searchDocuments({
     : "0";
 
   if (trimmedQuery) {
-    params.push(
+    relevanceParams.push(
       loweredQuery,
       searchPattern,
       loweredQuery,
@@ -420,17 +448,23 @@ export function searchDocuments({
       )
     )`);
 
-    params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+    filterParams.push(
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern
+    );
   }
 
   if (system) {
     whereClauses.push("documents.system = ?");
-    params.push(system);
+    filterParams.push(system);
   }
 
   if (documentType) {
     whereClauses.push("documents.document_type = ?");
-    params.push(documentType);
+    filterParams.push(documentType);
   }
 
   if (favorite === "true") {
@@ -451,18 +485,33 @@ export function searchDocuments({
       WHERE document_tags.document_id = documents.id
         AND tags.name = ? COLLATE NOCASE
     )`);
-    params.push(trimmedTag);
+    filterParams.push(trimmedTag);
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+  // Every ordering ends in `documents.id DESC`. Without that unique tie-breaker
+  // rows sharing the leading sort value could be ordered differently between two
+  // page queries, so a document could appear on two pages or on none.
   const sortSql = {
     relevance: trimmedQuery
       ? "ORDER BY relevance_score DESC, documents.created_at DESC, documents.id DESC"
       : "ORDER BY documents.created_at DESC, documents.id DESC",
     newest: "ORDER BY documents.created_at DESC, documents.id DESC",
-    title: "ORDER BY documents.title COLLATE NOCASE ASC, documents.created_at DESC",
+    title:
+      "ORDER BY documents.title COLLATE NOCASE ASC, documents.created_at DESC, documents.id DESC",
   }[sort] || "ORDER BY documents.created_at DESC, documents.id DESC";
+
+  const total = Number(
+    db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM documents
+        JOIN vehicles ON vehicles.id = documents.vehicle_id
+        ${whereSql}
+      `)
+      .get(...filterParams).count
+  );
 
   const rows = db
     .prepare(`
@@ -494,12 +543,21 @@ export function searchDocuments({
       JOIN vehicles ON vehicles.id = documents.vehicle_id
       ${whereSql}
       ${sortSql}
+      LIMIT ? OFFSET ?
     `)
-    .all(...params);
+    .all(...relevanceParams, ...filterParams, safeLimit, safeOffset);
 
-  return attachTags(rows, (row, tags) =>
+  const results = attachTags(rows, (row, tags) =>
     mapSearchResultRow(row, trimmedQuery, tags)
   );
+
+  return {
+    results,
+    total,
+    limit: safeLimit,
+    offset: safeOffset,
+    hasMore: safeOffset + results.length < total,
+  };
 }
 
 // True when the document has at least one chunk not embedded at the current
