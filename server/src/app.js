@@ -132,8 +132,10 @@ export function createApp(options = {}) {
   app.use("/api/ask", aiLimiter, createAskRouter({ askQuestion }));
   app.use(
     "/api/repair-plan",
-    aiLimiter,
-    createRepairPlanRouter({ runAgent: runRepairPlan })
+    // The limiter is handed to the router rather than mounted across the whole
+    // prefix so it still shares one window with /api/ask on plan generation,
+    // while the safety-acknowledgment subroute (no model call) stays outside it.
+    createRepairPlanRouter({ runAgent: runRepairPlan, aiRateLimiter: aiLimiter })
   );
 
   addFrontendRoutes(app, clientDistDir);

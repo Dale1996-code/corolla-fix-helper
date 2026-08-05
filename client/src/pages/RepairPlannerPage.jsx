@@ -26,6 +26,11 @@ const initialRun = {
   // a killed server, a proxy timeout -- used to be treated as success, so the
   // page showed a half-built plan as finished.
   sawTerminalEvent: false,
+  // Per-run safety acknowledgment. It lives inside the run rather than beside
+  // it, so every path that replaces the run -- a new plan, Clear, a failed
+  // stream -- drops the acknowledgment along with the plan it belonged to.
+  // There is no path that carries it onto a different plan.
+  safetyAck: { acknowledged: false, pending: false, error: "" },
 };
 
 const INCOMPLETE_STREAM_MESSAGE =
@@ -155,7 +160,97 @@ function EvidencePanel({ evidenceStatus, evidence }) {
   );
 }
 
-function ReadinessPanel({ readiness }) {
+// The consequence the owner is accepting, stated plainly. Deliberately not "I
+// agree": what is being confirmed is that the warning was read and that the
+// cited paperwork still has to be checked by hand.
+const SAFETY_ACK_LABEL =
+  "I understand this plan includes safety-critical work, and that before starting I must read the cited procedures, warnings, lifting points, and torque specifications for myself.";
+
+// The limit of what the checkbox means. It has to be next to the control,
+// because the readiness score jumping to Ready right after it is ticked is
+// exactly the moment "acknowledged" could be misread as "approved".
+const SAFETY_ACK_DISCLAIMER =
+  "Ticking this box does not mean the repair is safe, that the plan is correct, or that it suits your skill level. It only records that you have seen and understood this warning.";
+
+const SAFETY_ACK_RUBRIC_ID = "readiness-rubric-safety_reviewed";
+const SAFETY_ACK_DISCLAIMER_ID = "safety-acknowledgment-disclaimer";
+
+/**
+ * The control that satisfies the "Safety-critical work acknowledged" row of the
+ * rubric.
+ *
+ * Rendered only when the SERVER classified this plan as safety-critical, and it
+ * starts unticked on every plan: nothing here preselects it, and the checked
+ * state shown is the one the server scored, not a local guess. Toggling posts to
+ * the server, which re-scores the run from its own copy of the tasks and
+ * requirements -- this component never computes a score.
+ */
+function SafetyAcknowledgment({ readiness, safetyAck, onToggle, canAcknowledge }) {
+  const hazards = readiness.safetyFlags || [];
+  // The heading and lead track the acknowledgment state, so the panel never
+  // still demands an acknowledgment the owner has already given while the
+  // rubric row above it reads as met.
+  const acknowledged = safetyAck.acknowledged;
+
+  return (
+    <section
+      aria-labelledby="safety-acknowledgment-heading"
+      className="rounded-xl border border-amber-300 bg-amber-50 p-4"
+    >
+      <h3 id="safety-acknowledgment-heading" className="text-sm font-semibold text-amber-900">
+        {acknowledged
+          ? "Safety-critical work: risk acknowledged"
+          : "Safety-critical work: acknowledgment required"}
+      </h3>
+      <p className="mt-1 text-sm leading-6 text-amber-900">
+        {acknowledged
+          ? "You have acknowledged the risk in this plan. Untick the box to withdraw it. This is what was flagged:"
+          : "This plan cannot reach Ready until you acknowledge the risk below. Here is what was flagged:"}
+      </p>
+      {hazards.length ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+          {hazards.map((flag) => (
+            <li key={flag}>{flag}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      <label className="mt-3 flex items-start gap-3 text-sm text-amber-900">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 shrink-0 rounded border-amber-400 accent-amber-700"
+          checked={safetyAck.acknowledged}
+          disabled={safetyAck.pending || !canAcknowledge}
+          onChange={(event) => onToggle(event.target.checked)}
+          // Ties the control to the rubric row it unlocks, and to the statement
+          // of what it does not mean.
+          aria-describedby={`${SAFETY_ACK_RUBRIC_ID} ${SAFETY_ACK_DISCLAIMER_ID}`}
+        />
+        <span>{SAFETY_ACK_LABEL}</span>
+      </label>
+
+      <p id={SAFETY_ACK_DISCLAIMER_ID} className="mt-2 text-xs leading-5 text-amber-800">
+        {SAFETY_ACK_DISCLAIMER}
+      </p>
+
+      <p className="mt-2 text-xs text-amber-800" role="status">
+        {safetyAck.pending ? "Updating readiness..." : ""}
+      </p>
+      {safetyAck.error ? (
+        <p className="mt-1 text-xs font-semibold text-red-700" role="alert">
+          {safetyAck.error}
+        </p>
+      ) : null}
+      {!canAcknowledge && !safetyAck.error ? (
+        <p className="mt-1 text-xs text-amber-800">
+          This plan cannot be acknowledged. Build the plan again to enable the checkbox.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ReadinessPanel({ readiness, safetyAck, onAcknowledgeSafety, canAcknowledge }) {
   if (!readiness) {
     return null;
   }
@@ -177,7 +272,11 @@ function ReadinessPanel({ readiness }) {
 
       <ul className="space-y-2">
         {readiness.rubric.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 text-sm text-slate-700">
+          <li
+            key={item.id}
+            id={item.id === "safety_reviewed" ? SAFETY_ACK_RUBRIC_ID : undefined}
+            className="flex items-center gap-2 text-sm text-slate-700"
+          >
             <span aria-hidden="true">{item.met ? "✓" : "✗"}</span>
             <span className="sr-only">{item.met ? "Met: " : "Not met: "}</span>
             <span>
@@ -186,6 +285,15 @@ function ReadinessPanel({ readiness }) {
           </li>
         ))}
       </ul>
+
+      {readiness.safetyCritical ? (
+        <SafetyAcknowledgment
+          readiness={readiness}
+          safetyAck={safetyAck}
+          onToggle={onAcknowledgeSafety}
+          canAcknowledge={canAcknowledge}
+        />
+      ) : null}
 
       {readiness.gaps.length ? (
         <InfoBanner tone="amber">
@@ -577,6 +685,86 @@ export function RepairPlannerPage() {
     }
   }
 
+  // Records (or withdraws) the acknowledgment for the CURRENT plan and adopts the
+  // readiness and checklist the server sends back.
+  //
+  // Nothing about the score is computed here. The request carries a run id and a
+  // boolean; the server re-runs the safety classifier over its own copy of the
+  // canonical tasks and returns the result. That is why the page cannot talk a
+  // safety-critical plan into looking non-critical.
+  async function handleAcknowledgeSafety(nextAcknowledged) {
+    const planRunId = runRef.current.artifacts?.planRunId;
+
+    if (!planRunId || runRef.current.safetyAck.pending) {
+      return;
+    }
+
+    updateRun((current) => ({
+      ...current,
+      safetyAck: { ...current.safetyAck, pending: true, error: "" },
+    }));
+
+    // A newer plan replacing this one mid-request must not receive this
+    // acknowledgment, so every state write below re-checks the run id.
+    const stillSamePlan = (current) => current.artifacts?.planRunId === planRunId;
+
+    const failWith = (message) =>
+      updateRun((current) =>
+        stillSamePlan(current)
+          ? { ...current, safetyAck: { ...current.safetyAck, pending: false, error: message } }
+          : current
+      );
+
+    try {
+      const response = await fetch(
+        `/api/repair-plan/${encodeURIComponent(planRunId)}/safety-acknowledgment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ acknowledged: nextAcknowledged }),
+        }
+      );
+
+      if (!response.ok) {
+        let message = "Could not record the acknowledgment.";
+        try {
+          const payload = await response.json();
+          message = payload.error || message;
+        } catch {
+          // keep default message
+        }
+        failWith(message);
+        return;
+      }
+
+      const payload = await response.json();
+
+      updateRun((current) => {
+        if (!stillSamePlan(current)) {
+          return current;
+        }
+
+        return {
+          ...current,
+          artifacts: {
+            ...current.artifacts,
+            readiness: payload.readiness || current.artifacts.readiness,
+            checklist: payload.checklist || current.artifacts.checklist,
+          },
+          safetyAck: {
+            // The tick reflects what the server actually scored, not what was
+            // requested, so the checkbox can never disagree with the rubric row.
+            acknowledged: payload.readiness?.safetyAcknowledged === true,
+            pending: false,
+            error: "",
+          },
+        };
+      });
+    } catch (error) {
+      failWith(error.message || "Could not record the acknowledgment.");
+    }
+  }
+
   function handleClear() {
     setForm(defaultForm);
     runRef.current = initialRun;
@@ -704,7 +892,12 @@ export function RepairPlannerPage() {
           evidence={run.artifacts?.evidence}
         />
         <NarrativePanel narrative={run.narrative} />
-        <ReadinessPanel readiness={artifacts?.readiness} />
+        <ReadinessPanel
+          readiness={artifacts?.readiness}
+          safetyAck={run.safetyAck}
+          onAcknowledgeSafety={handleAcknowledgeSafety}
+          canAcknowledge={Boolean(artifacts?.planRunId)}
+        />
         <ChecklistPanel checklist={artifacts?.checklist} />
         <TasksPanel tasks={artifacts?.tasks} />
         <HandoffPanel handoffNotes={artifacts?.handoffNotes} />

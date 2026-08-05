@@ -560,8 +560,11 @@ function resolveTaskSafety(task) {
  * arrives its status already encodes that answer. Callers may still pass
  * `availableTools` / `availableParts` — they are ignored.
  *
+ * `tasks` is read-only here — accepted as `readonly` so a frozen, server-held
+ * task list can be re-scored without being copied.
+ *
  * @param {{
- *   tasks?: any[], skillLevel?: string, ackSafety?: boolean,
+ *   tasks?: readonly any[], skillLevel?: string, ackSafety?: boolean,
  *   requirements?: { tools: any, parts: any } | null,
  *   evidenceStatus?: string | null,
  * }} [args]
@@ -713,6 +716,9 @@ export function checkRepairReadiness({
 
 // --- Tool: build_owner_checklist ------------------------------------------
 
+/**
+ * @param {{ tasks?: readonly any[], skillLevel?: string, ackSafety?: boolean }} [args]
+ */
 export function buildOwnerChecklist({
   tasks = [],
   skillLevel = "beginner",

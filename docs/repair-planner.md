@@ -56,8 +56,37 @@ No model-facing schema exposes `brief`, `tasks`, `skillLevel`, `availableTools`,
 frozen trusted context from the request, derives canonical tasks from the
 trusted brief before the loop starts, and the executors read that context
 instead of the model's arguments. Arguments attempting to set them are ignored.
-Safety acknowledgment is server-owned and always `false`, so safety-critical
-work stays `Shop Recommended`.
+Safety acknowledgment is always `false` during generation — no model-facing
+schema can set it, so a generated plan is never pre-acknowledged and
+safety-critical work starts as `Shop Recommended`.
+
+### Safety acknowledgment
+
+The readiness rubric charges 20 points for "Safety-critical work acknowledged"
+and refuses to report `ready` without it. That requirement used to have no
+control anywhere that could satisfy it, so a safety-critical plan could never
+reach Ready. The owner now supplies it **after** reading the plan:
+
+- A completed run whose readiness is `safetyCritical` is recorded in
+  `planRunStore.js` (in memory, bounded, TTL'd — never SQLite) and its
+  `runId` ships to the browser as `artifacts.planRunId`. A plan with no
+  safety-critical work gets no run id and never shows the control.
+- `POST /api/repair-plan/:runId/safety-acknowledgment` takes `{ acknowledged:
+  boolean }` and **nothing else**. Tasks, skill level, requirement groups, and
+  evidence status all come back out of the server's own record, and
+  `checkRepairReadiness` / `buildOwnerChecklist` re-run over them. A client
+  cannot re-label brake work as non-critical, hand itself satisfied requirement
+  groups, or raise its skill level to buy points.
+- The route is outside the shared AI rate-limit window: it makes no model call,
+  so ticking a box must not spend the budget shared with `/api/ask`.
+- The acknowledgment is not persisted. It belongs to one generated plan: a new
+  run mints a new id, and Clear, a regenerated plan, or a failed stream drops it
+  with the run it belonged to.
+- `RepairPlannerPage.jsx` renders the checkbox inside the readiness card,
+  `aria-describedby` the rubric row it unlocks plus a statement that
+  acknowledging does not mean the repair is safe, correct, or suited to the
+  owner's skill. The checked state shown is the one the server scored, never a
+  local guess.
 
 ### Canonical tasks
 
