@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
@@ -38,6 +39,49 @@ export function resolveStoredFilePath(document) {
     safeFileName,
     absoluteFilePath: path.join(config.uploadsDir, safeFileName),
   };
+}
+
+/**
+ * Can this document's stored PDF actually be opened right now?
+ *
+ * Answers the same question `GET /api/documents/:id/file` answers, but ahead of
+ * time, so a source card can offer an "open" action only when the file behind it
+ * really exists. It reproduces that route's three failure exits: no row, no
+ * usable filename reference, and no file on disk.
+ *
+ * Synchronous on purpose: it is called once per cited document (at most a
+ * handful per Ask request) from a code path that shapes citations synchronously.
+ *
+ * Fails OPEN on an unexpected error. A false negative would hide a source that
+ * is genuinely there and leave the owner with no way to verify a claim, while a
+ * false positive costs one click and lands on the file route's own explicit
+ * "not found" message.
+ *
+ * @param {unknown} documentId
+ * @returns {boolean}
+ */
+export function isDocumentFileAvailable(documentId) {
+  if (!Number.isInteger(documentId) || Number(documentId) <= 0) {
+    return false;
+  }
+
+  try {
+    const document = getDocumentFileRecord(documentId);
+
+    if (!document) {
+      return false;
+    }
+
+    const resolvedFile = resolveStoredFilePath(document);
+
+    if (!resolvedFile) {
+      return false;
+    }
+
+    return existsSync(resolvedFile.absoluteFilePath);
+  } catch {
+    return true;
+  }
 }
 
 /**

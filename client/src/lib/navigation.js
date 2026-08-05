@@ -33,3 +33,52 @@ export function buildEntityLink(entityType, entityId) {
 
   return "/dashboard";
 }
+
+/**
+ * Direct link to a document's stored PDF, optionally at a cited page.
+ *
+ * Built from the SERVER-VALIDATED numeric document id only. Nothing the model
+ * produced — a title, a filename, a source label, a URL — ever reaches this
+ * string, so a source action cannot be pointed anywhere the server did not
+ * already authorize, and a title full of quotes, slashes, or `#` cannot corrupt
+ * the href.
+ *
+ * `/api/documents/:id/file` is served with `Content-Disposition: inline`, so
+ * browsers hand it to their built-in PDF viewer and the `#page=` fragment jumps
+ * to the cited page. A viewer that ignores the fragment still opens the correct
+ * document — which is why the page number stays visible on the card.
+ *
+ * @param {unknown} documentId
+ * @param {unknown} [pageNumber]
+ * @returns {string|null} null when there is no usable document identity
+ */
+export function buildDocumentFileLink(documentId, pageNumber = null) {
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    return null;
+  }
+
+  const fileUrl = `/api/documents/${documentId}/file`;
+
+  return Number.isInteger(pageNumber) && pageNumber > 0
+    ? `${fileUrl}#page=${pageNumber}`
+    : fileUrl;
+}
+
+/**
+ * The name to show for a source document.
+ *
+ * Trusted server fields only, in descending order of how much they mean to the
+ * owner: the document's own title, then the filename they uploaded it under,
+ * then a neutral label. A chunk id or other retrieval-internal identifier is
+ * never a candidate — it names a slice of extracted text, not a document.
+ *
+ * @param {{ documentTitle?: unknown, originalFilename?: unknown }} [source]
+ * @returns {string}
+ */
+export function documentSourceName(source) {
+  const title = typeof source?.documentTitle === "string" ? source.documentTitle.trim() : "";
+  const filename =
+    typeof source?.originalFilename === "string" ? source.originalFilename.trim() : "";
+
+  return title || filename || "Source document";
+}

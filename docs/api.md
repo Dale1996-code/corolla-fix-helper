@@ -212,7 +212,8 @@ Response:
       "pageNumber": 14,
       "chunkIndex": 2,
       "snippet": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf).",
-      "evidenceQuote": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf)."
+      "evidenceQuote": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf).",
+      "documentAvailable": true
     }
   ],
   "evidence": {
@@ -275,11 +276,32 @@ answer and are not endorsed as correct — the UI labels them "Retrieved context
       "originalFilename": "engine-torque.pdf",
       "pageNumber": 3,
       "chunkIndex": 0,
-      "snippet": "..."
+      "snippet": "...",
+      "documentAvailable": true
     }
   ]
 }
 ```
+
+#### `documentAvailable` (opening the source behind a passage)
+
+Every entry in `citations` and `retrievedContext` carries `documentAvailable`: a
+server-side check that the cited document still has a readable PDF in the uploads
+directory — the same three conditions `GET /api/documents/:id/file` enforces (the
+row exists, it has a usable filename reference, and the file is on disk).
+
+It exists so a client can offer "open the source" **only** when opening it will
+work. The Ask UI builds that action from `documentId` and `pageNumber` alone —
+`/api/documents/<documentId>/file#page=<pageNumber>` — never from a title,
+filename, or any other model-influenced string, and shows a plain "source
+unavailable" note instead of a link when `documentAvailable` is `false`. The
+document file route is served `Content-Disposition: inline`, so browsers with a
+built-in PDF viewer honour the `#page=` fragment; viewers that ignore it still
+open the right document, which is why the cited page number stays on screen.
+
+The check fails **open**: if the lookup itself errors, the field is `true`, since
+a false negative would hide a source the owner needs while a false positive costs
+one click and lands on the file route's own 404 message.
 
 #### `evidence` (the default; `ASK_EVIDENCE_CONTRACT=true`)
 

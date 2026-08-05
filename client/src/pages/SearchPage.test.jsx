@@ -602,7 +602,9 @@ test("SearchPage keeps distinct evidence quotes from the same source chunk", asy
     within(askSection).getByText("The oil drain plug torque is 37 Nm.")
   ).toBeInTheDocument();
   expect(
-    within(askSection).getAllByRole("link", { name: "Open source Oil Manual Page 1" })
+    within(askSection).getAllByRole("link", {
+      name: "Open Oil Manual at page 1 (PDF opens in a new tab)",
+    })
   ).toHaveLength(2);
 });
 
@@ -1053,11 +1055,13 @@ test("SearchPage renders duplicate citation identities only once", async () => {
   expect(
     await within(askSection).findByText("The oil drain plug torque is 27 ft-lb.")
   ).toBeInTheDocument();
-  expect(
-    within(askSection).getAllByRole("link", {
-      name: "Open source Oil Manual Page 3",
-    })
-  ).toHaveLength(1);
+  // The duplicate collapses to one card, and that card's action still points at
+  // the single correct source page.
+  const deduplicatedLinks = within(askSection).getAllByRole("link", {
+    name: "Open Oil Manual at page 3 (PDF opens in a new tab)",
+  });
+  expect(deduplicatedLinks).toHaveLength(1);
+  expect(deduplicatedLinks[0]).toHaveAttribute("href", "/api/documents/42/file#page=3");
 });
 
 test("SearchPage shows an answered Ask response with clickable citation cards", async () => {
@@ -1124,16 +1128,27 @@ test("SearchPage shows an answered Ask response with clickable citation cards", 
   ).toBeInTheDocument();
   expect(within(askSection).getByText("Sources")).toBeInTheDocument();
 
-  const citationLink = within(askSection).getByRole("link", {
-    name: "Open source Fake Torque Guide Page 3",
+  const citationCard = within(askSection)
+    .getByText("Fake Torque Guide")
+    .closest("article");
+  expect(citationCard).not.toBeNull();
+  expect(within(citationCard).getByText("Page 3")).toBeInTheDocument();
+  expect(within(citationCard).getByText(citationSnippet)).toBeInTheDocument();
+
+  // The source action is what makes "check the source" possible: it opens the
+  // stored PDF at the cited page in a new tab, keeping the Ask thread intact.
+  const citationLink = within(citationCard).getByRole("link", {
+    name: "Open Fake Torque Guide at page 3 (PDF opens in a new tab)",
   });
-  expect(citationLink).toHaveAttribute(
-    "href",
-    "/documents?documentId=42#document-library"
-  );
-  expect(within(citationLink).getByText("Fake Torque Guide")).toBeInTheDocument();
-  expect(within(citationLink).getByText("Page 3")).toBeInTheDocument();
-  expect(within(citationLink).getByText(citationSnippet)).toBeInTheDocument();
+  expect(citationLink).toHaveTextContent("Open cited page");
+  expect(citationLink).toHaveAttribute("href", "/api/documents/42/file#page=3");
+  expect(citationLink).toHaveAttribute("target", "_blank");
+  expect(citationLink).toHaveAttribute("rel", "noopener noreferrer");
+  // An anchor with an href is reachable and activatable by keyboard without any
+  // extra handling; assert it really is one rather than a click-only div.
+  expect(citationLink.tagName).toBe("A");
+  citationLink.focus();
+  expect(document.activeElement).toBe(citationLink);
 });
 
 test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up history", async () => {
@@ -1783,4 +1798,226 @@ test("SearchPage lets one section search independently", async () => {
   expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?sort=relevance&limit=25");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/procedures?sort=newest");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/notes?sort=newest");
+});
+
+// ---- Evidence source navigation -------------------------------------------
+//
+// The Ask UI tells the owner to check retrieved passages themselves. These
+// tests hold it to that: every source card that names an available document
+// must offer a real way to open it, and a source that cannot be opened must say
+// so instead of rendering a link that goes nowhere.
+
+async function askAndGetSection(askPayload, question = "What is the oil drain plug torque?") {
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) =>
+    url === "/api/ask" ? jsonResponse(askPayload) : baseSearchFetchMock(url, options)
+  );
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask your documents" })
+  ).closest("section");
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: question },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+
+  return askSection;
+}
+
+const notFoundContextPayload = (passage) => ({
+  question: "What is the oil drain plug torque?",
+  status: "not_found",
+  answer: "The uploaded documents do not contain enough information to answer that.",
+  citations: [],
+  retrievedContext: [passage],
+});
+
+test("a retrieved-context passage offers an open action and keeps its unused-context wording", async () => {
+  const snippet = "Water pump bolt torque table row from the engine manual.";
+  const askSection = await askAndGetSection(
+    notFoundContextPayload({
+      documentId: 12,
+      documentTitle: "Engine Mechanical Torque Specifications",
+      originalFilename: "engine-torque.pdf",
+      pageNumber: 72,
+      chunkIndex: 4,
+      snippet,
+      documentAvailable: true,
+    })
+  );
+
+  expect(await within(askSection).findByText(snippet)).toBeInTheDocument();
+
+  // The distinction between "used to answer" and "merely retrieved" survives.
+  expect(
+    within(askSection).getByRole("heading", {
+      name: "Retrieved context (may include passages the answer did not use)",
+    })
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getByText(/They were not used to answer it, so check/)
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
+
+  // ...and "check them yourself" is now something the owner can actually do.
+  const openLink = within(askSection).getByRole("link", {
+    name: "Open Engine Mechanical Torque Specifications at page 72 (PDF opens in a new tab)",
+  });
+  expect(openLink).toHaveAttribute("href", "/api/documents/12/file#page=72");
+  expect(openLink).toHaveAttribute("target", "_blank");
+});
+
+test("a source whose document is unavailable explains itself instead of linking", async () => {
+  const snippet = "Torque the drain plug to 37 Nm.";
+  const askSection = await askAndGetSection(
+    notFoundContextPayload({
+      documentId: 12,
+      documentTitle: "Deleted Manual",
+      originalFilename: "deleted.pdf",
+      pageNumber: 3,
+      chunkIndex: 0,
+      snippet,
+      documentAvailable: false,
+    })
+  );
+
+  expect(await within(askSection).findByText(snippet)).toBeInTheDocument();
+  expect(
+    within(askSection).getByText(
+      /Source unavailable — the PDF for this document is not in your workspace/
+    )
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByRole("link", { name: /^Open Deleted Manual/ })).toBeNull();
+});
+
+test("a source action prefers the real document title over a chunk-shaped filename", async () => {
+  const snippet = "Oil filter cap torque is 25 Nm.";
+  const askSection = await askAndGetSection(
+    notFoundContextPayload({
+      documentId: 9,
+      documentTitle: "Lubrication System",
+      // Bulk-split manuals arrive with names like this; the title must win.
+      originalFilename: "chunk_001.pdf",
+      pageNumber: 72,
+      chunkIndex: 1,
+      snippet,
+    })
+  );
+
+  expect(await within(askSection).findByText(snippet)).toBeInTheDocument();
+  expect(within(askSection).getByText("Lubrication System, page 72")).toBeInTheDocument();
+  expect(within(askSection).queryByText(/chunk_001/)).toBeNull();
+  expect(
+    within(askSection).getByRole("link", {
+      name: "Open Lubrication System at page 72 (PDF opens in a new tab)",
+    })
+  ).toBeInTheDocument();
+});
+
+test("two passages from the same document and page each open that page", async () => {
+  const askSection = await askAndGetSection({
+    question: "What is the oil drain plug torque?",
+    status: "not_found",
+    answer: "The uploaded documents do not contain enough information to answer that.",
+    citations: [],
+    retrievedContext: [
+      {
+        documentId: 4,
+        documentTitle: "Oil Manual",
+        originalFilename: "oil.pdf",
+        pageNumber: 2,
+        chunkIndex: 0,
+        snippet: "First passage about the drain plug.",
+      },
+      {
+        documentId: 4,
+        documentTitle: "Oil Manual",
+        originalFilename: "oil.pdf",
+        pageNumber: 2,
+        chunkIndex: 1,
+        snippet: "Second passage about the drain plug gasket.",
+      },
+    ],
+  });
+
+  expect(
+    await within(askSection).findByText("First passage about the drain plug.")
+  ).toBeInTheDocument();
+
+  const links = within(askSection).getAllByRole("link", {
+    name: "Open Oil Manual at page 2 (PDF opens in a new tab)",
+  });
+  expect(links).toHaveLength(2);
+  links.forEach((link) => {
+    expect(link).toHaveAttribute("href", "/api/documents/4/file#page=2");
+  });
+});
+
+test("a title with quotes and slashes cannot corrupt the source link", async () => {
+  const snippet = "Brake caliper bolt torque.";
+  const askSection = await askAndGetSection(
+    notFoundContextPayload({
+      documentId: 8,
+      documentTitle: 'Brakes "front/rear" #2 & <notes>',
+      originalFilename: "brakes.pdf",
+      pageNumber: 11,
+      chunkIndex: 0,
+      snippet,
+    })
+  );
+
+  expect(await within(askSection).findByText(snippet)).toBeInTheDocument();
+
+  const openLink = within(askSection).getByRole("link", {
+    name: 'Open Brakes "front/rear" #2 & <notes> at page 11 (PDF opens in a new tab)',
+  });
+  expect(openLink).toHaveAttribute("href", "/api/documents/8/file#page=11");
+});
+
+test("an unverified legacy answer still gets openable context without looking document-backed", async () => {
+  const snippet = "The oil drain plug torque is 27 ft-lb.";
+  const askSection = await askAndGetSection({
+    question: "What is the oil filter cap torque?",
+    // Old shape: "answered" prose plus every retrieved passage as a citation.
+    status: "answered",
+    answer: "The oil filter cap torque is 27 ft-lb.",
+    citations: [
+      {
+        documentId: 7,
+        documentTitle: "Oil Manual",
+        originalFilename: "oil.pdf",
+        pageNumber: 1,
+        chunkIndex: 0,
+        snippet,
+        documentAvailable: true,
+      },
+    ],
+  });
+
+  expect(
+    await within(askSection).findByText("Unverified AI answer — not document-backed")
+  ).toBeInTheDocument();
+  expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
+  expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
+
+  // The downgraded passage is openable, but only as retrieved context.
+  expect(
+    within(askSection).getByRole("heading", {
+      name: "Retrieved context (may include passages the answer did not use)",
+    })
+  ).toBeInTheDocument();
+  expect(
+    within(askSection).getByRole("link", {
+      name: "Open Oil Manual at page 1 (PDF opens in a new tab)",
+    })
+  ).toHaveAttribute("href", "/api/documents/7/file#page=1");
 });

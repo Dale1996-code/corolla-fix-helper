@@ -17,8 +17,13 @@ fs.mkdirSync(process.env.UPLOADS_DIR, { recursive: true });
 const { config } = await import("../src/config.js");
 const { db } = await import("../src/database.js");
 const { initializeDatabase } = await import("../src/initDatabase.js");
-const { resolveStoredFilePath, deleteDocument, listDocuments, countDocuments } =
-  await import("../src/services/documentService.js");
+const {
+  resolveStoredFilePath,
+  deleteDocument,
+  isDocumentFileAvailable,
+  listDocuments,
+  countDocuments,
+} = await import("../src/services/documentService.js");
 
 initializeDatabase();
 
@@ -79,6 +84,30 @@ test("resolveStoredFilePath strips directory traversal from stored values", () =
 
 test("resolveStoredFilePath returns null when no filename reference exists", () => {
   assert.equal(resolveStoredFilePath({ stored_filename: "", file_path: "" }), null);
+});
+
+// Ask source cards offer an "open the PDF" action only when this says yes, so
+// it has to answer the same way GET /api/documents/:id/file would.
+test("isDocumentFileAvailable is true only when the stored PDF is on disk", () => {
+  const documentId = insertNamedDocument("available-source");
+
+  // Row exists, file does not: the file route would answer 404.
+  assert.equal(isDocumentFileAvailable(documentId), false);
+
+  fs.writeFileSync(path.join(config.uploadsDir, "available-source.pdf"), "%PDF-1.4\n");
+
+  assert.equal(isDocumentFileAvailable(documentId), true);
+});
+
+test("isDocumentFileAvailable is false for a missing or malformed document id", () => {
+  const documentId = insertNamedDocument("deleted-source");
+  db.prepare("DELETE FROM documents WHERE id = ?").run(documentId);
+
+  assert.equal(isDocumentFileAvailable(documentId), false);
+
+  for (const badId of [0, -1, 1.5, "1", null, undefined, true, {}]) {
+    assert.equal(isDocumentFileAvailable(/** @type {any} */ (badId)), false);
+  }
 });
 
 test("listDocuments paginates with limit/offset while countDocuments counts all", () => {
