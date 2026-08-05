@@ -71,8 +71,10 @@ picked without this harness is a guess.
 
 **What it costs:** it needs `OPENAI_API_KEY` — the passage scores it calibrates come from
 embedding your question — but it stubs out the answer model, so you pay only for the query
-embeddings, not for generated answers. It reads your corpus and writes nothing. With no key
-set it prints a note and exits cleanly.
+embeddings, not for generated answers. It does not modify any corpus rows — it only reads
+your documents. (Opening the database is not literally inert: it creates the data and uploads
+folders if missing and applies the usual PRAGMAs, including WAL sidecar files. Your documents,
+chunks, and embeddings are untouched.) With no key set it prints a note and exits cleanly.
 
 It reuses the same text questions from `answerQualityCases.js` (see below), so the more real
 questions you have added there, the more trustworthy its verdict. A passage counts as **good
