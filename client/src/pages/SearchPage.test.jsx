@@ -20,7 +20,7 @@ function emptySearchResponse(filters = {}) {
 
 function createEmptySearchFetchMock() {
   return vi.fn((url) => {
-    if (url === "/api/search/documents?sort=relevance") {
+    if (url === "/api/search/documents?sort=relevance&limit=25") {
       return jsonResponse(
         emptySearchResponse({
           systems: ["Engine"],
@@ -1517,10 +1517,10 @@ test("a slow in-flight search does not overwrite a later Clear", async () => {
 
   const fetchMock = vi.fn((url) => {
     // Initial load and Clear both hit the no-query URL and return empty.
-    if (url === "/api/search/documents?sort=relevance") {
+    if (url === "/api/search/documents?sort=relevance&limit=25") {
       return jsonResponse(emptySearchResponse({ systems: ["Engine"], documentTypes: ["Reference"] }));
     }
-    if (url === "/api/search/documents?q=slow&sort=relevance") {
+    if (url === "/api/search/documents?q=slow&sort=relevance&limit=25") {
       return slow.then(() => ({
         ok: true,
         json: async () => ({ results: [slowResult], total: 1, filters: {} }),
@@ -1550,7 +1550,7 @@ test("a slow in-flight search does not overwrite a later Clear", async () => {
   fireEvent.change(keyword, { target: { value: "slow" } });
   fireEvent.click(within(documentsSection).getByRole("button", { name: "Search" }));
   await waitFor(() =>
-    expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?q=slow&sort=relevance")
+    expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?q=slow&sort=relevance&limit=25")
   );
 
   fireEvent.click(within(documentsSection).getByRole("button", { name: "Clear" }));
@@ -1567,7 +1567,7 @@ test("a slow in-flight search does not overwrite a later Clear", async () => {
 
 test("SearchPage renders separate search sections for all entity types", async () => {
   const fetchMock = vi.fn((url) => {
-    if (url === "/api/search/documents?sort=relevance") {
+    if (url === "/api/search/documents?sort=relevance&limit=25") {
       return jsonResponse({
         results: [],
         total: 0,
@@ -1638,7 +1638,7 @@ test("SearchPage renders separate search sections for all entity types", async (
 
 test("SearchPage lets one section search independently", async () => {
   const fetchMock = vi.fn((url) => {
-    if (url === "/api/search/documents?sort=relevance") {
+    if (url === "/api/search/documents?sort=relevance&limit=25") {
       return jsonResponse({
         results: [
           {
@@ -1780,7 +1780,7 @@ test("SearchPage lets one section search independently", async () => {
   ).toHaveAttribute("href", "/notes?noteId=31#note-library");
 
   expect(screen.getByText("Throttle body reference")).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?sort=relevance");
+  expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?sort=relevance&limit=25");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/procedures?sort=newest");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/notes?sort=newest");
 });

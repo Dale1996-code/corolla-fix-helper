@@ -162,15 +162,18 @@ All search endpoints are `GET`, share the shape `{ "results": [...], "total": n,
 
 | Endpoint | Query params |
 | --- | --- |
-| `GET /api/search` and `GET /api/search/documents` | `q`, `system`, `documentType`, `favorite`, `bookmarked`, `tag`, `sort` |
+| `GET /api/search` and `GET /api/search/documents` | `q`, `system`, `documentType`, `favorite`, `bookmarked`, `tag`, `sort`, `limit`, `offset` |
 | `GET /api/search/symptoms` | `q`, `system`, `status`, `sort` |
 | `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort` |
 | `GET /api/search/notes` | `q`, `noteType`, `relatedEntityType`, `sort` |
 
 Document search covers metadata, notes, extracted text (including OCR text), and tags.
 
+**Document search is always paged.** It is the one scope that can grow into the thousands, so `/api/search` and `/api/search/documents` add `limit`, `offset`, and `hasMore` to the shared shape and never return the whole library — including when no pagination params are sent. `limit` defaults to 25 and is capped at 100; `offset` defaults to 0. Missing, negative, fractional, non-numeric, and oversized values fall back to those defaults rather than erroring. `total` is the full count of matching documents (a separate `COUNT(*)` over the same filters), not the number of rows in `results`. Results carry a server-built `snippet`, never the full `extractedText`. The other three scopes are unpaged and unchanged.
+
 ```powershell
 curl.exe "http://localhost:4000/api/search/documents?q=caliper&system=Brakes"
+curl.exe "http://localhost:4000/api/search/documents?limit=25&offset=50"
 ```
 
 ---

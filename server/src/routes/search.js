@@ -1,8 +1,11 @@
 import { Router } from "express";
 import {
+  DOCUMENT_SEARCH_MAX_PAGE_SIZE,
+  DOCUMENT_SEARCH_PAGE_SIZE,
   getDocumentFilterOptions,
   searchDocuments,
 } from "../services/documentService.js";
+import { parsePageLimit, parsePageOffset } from "../utils/http.js";
 import {
   getNoteFilterOptions,
   getProcedureFilterOptions,
@@ -27,7 +30,10 @@ function sendDocumentSearchResponse(request, response) {
   const tag = getQueryValue(request, "tag");
   const sort = getQueryValue(request, "sort", "relevance");
 
-  const results = searchDocuments({
+  // Always paged, including when the client sends no pagination params: the
+  // Search page opens on this endpoint, and an unbounded default would let a
+  // large library be fetched and rendered in one go.
+  const page = searchDocuments({
     query,
     system,
     documentType,
@@ -35,11 +41,19 @@ function sendDocumentSearchResponse(request, response) {
     bookmarked,
     tag,
     sort,
+    limit: parsePageLimit(request.query.limit, {
+      defaultLimit: DOCUMENT_SEARCH_PAGE_SIZE,
+      maxLimit: DOCUMENT_SEARCH_MAX_PAGE_SIZE,
+    }),
+    offset: parsePageOffset(request.query.offset),
   });
 
   response.json({
-    results,
-    total: results.length,
+    results: page.results,
+    total: page.total,
+    limit: page.limit,
+    offset: page.offset,
+    hasMore: page.hasMore,
     filters: getDocumentFilterOptions(),
   });
 }
