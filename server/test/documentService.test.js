@@ -110,6 +110,39 @@ test("isDocumentFileAvailable is false for a missing or malformed document id", 
   }
 });
 
+// `true` means "the server checked and this really can be opened". A lookup
+// that blew up checked nothing, so it must not make that claim.
+test("isDocumentFileAvailable fails closed and logs when the lookup throws", () => {
+  const logged = [];
+
+  const onRowLookupFailure = isDocumentFileAvailable(1, {
+    getFileRecord: () => {
+      throw new Error("database is locked");
+    },
+    logFailure: (message) => logged.push(message),
+  });
+
+  assert.equal(onRowLookupFailure, false);
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /document 1/);
+  assert.match(logged[0], /database is locked/);
+
+  const onExistenceCheckFailure = isDocumentFileAvailable(1, {
+    getFileRecord: () => ({ stored_filename: "manual.pdf", file_path: "" }),
+    fileExists: () => {
+      throw new Error("EACCES");
+    },
+    logFailure: (message) => logged.push(message),
+  });
+
+  assert.equal(onExistenceCheckFailure, false);
+  assert.equal(logged.length, 2);
+
+  // The log stays on the log-safe side of the line: no title, no filename, no
+  // resolved path.
+  assert.ok(logged.every((message) => !message.includes("manual.pdf")));
+});
+
 test("listDocuments paginates with limit/offset while countDocuments counts all", () => {
   db.exec("DELETE FROM documents");
 

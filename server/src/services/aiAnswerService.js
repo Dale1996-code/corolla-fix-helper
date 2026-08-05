@@ -186,8 +186,9 @@ function buildCitationsFromChunks(
       // Whether the stored PDF behind this citation can actually be opened. The
       // UI needs a server-owned answer: it must offer "open the source" only
       // when the source really is there, and say so plainly when it is not.
-      // Defaults to available when no resolver is supplied, matching the shape
-      // clients saw before this field existed.
+      // The resolver itself fails closed (see isDocumentFileAvailable); the
+      // `true` default here applies only when no resolver was supplied at all,
+      // matching the shape clients saw before this field existed.
       documentAvailable: resolveAvailability
         ? resolveAvailability(chunk.documentId)
         : true,

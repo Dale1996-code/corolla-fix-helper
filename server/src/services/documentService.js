@@ -52,21 +52,35 @@ export function resolveStoredFilePath(document) {
  * Synchronous on purpose: it is called once per cited document (at most a
  * handful per Ask request) from a code path that shapes citations synchronously.
  *
- * Fails OPEN on an unexpected error. A false negative would hide a source that
- * is genuinely there and leave the owner with no way to verify a claim, while a
- * false positive costs one click and lands on the file route's own explicit
- * "not found" message.
+ * Fails CLOSED. `true` is a positive claim — "this source can be opened" — and
+ * the only thing entitled to make it is a completed check of all three
+ * conditions. Returning `true` from a catch block would assert availability the
+ * server never established, which is exactly the broken evidence contract this
+ * flag exists to prevent; the caller would render an inviting link whose target
+ * is unknown. An unexpected failure is logged server-side instead, so a
+ * systematically failing lookup is diagnosable rather than silent.
+ *
+ * The row lookup, the existence check, and the log sink are injectable so the
+ * error path is testable without corrupting a real database.
  *
  * @param {unknown} documentId
+ * @param {{ getFileRecord?: Function, fileExists?: Function, logFailure?: Function }} [deps]
  * @returns {boolean}
  */
-export function isDocumentFileAvailable(documentId) {
+export function isDocumentFileAvailable(
+  documentId,
+  {
+    getFileRecord = getDocumentFileRecord,
+    fileExists = existsSync,
+    logFailure = (message) => console.error(message),
+  } = {}
+) {
   if (!Number.isInteger(documentId) || Number(documentId) <= 0) {
     return false;
   }
 
   try {
-    const document = getDocumentFileRecord(documentId);
+    const document = getFileRecord(documentId);
 
     if (!document) {
       return false;
@@ -78,9 +92,16 @@ export function isDocumentFileAvailable(documentId) {
       return false;
     }
 
-    return existsSync(resolvedFile.absoluteFilePath);
-  } catch {
-    return true;
+    return Boolean(fileExists(resolvedFile.absoluteFilePath));
+  } catch (error) {
+    // Numeric id and the error text only -- no title, filename, or resolved
+    // path, keeping this consistent with the rest of the log-safe channels.
+    logFailure(
+      `[document-availability] check failed for document ${documentId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return false;
   }
 }
 

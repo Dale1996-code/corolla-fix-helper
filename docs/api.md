@@ -299,9 +299,12 @@ document file route is served `Content-Disposition: inline`, so browsers with a
 built-in PDF viewer honour the `#page=` fragment; viewers that ignore it still
 open the right document, which is why the cited page number stays on screen.
 
-The check fails **open**: if the lookup itself errors, the field is `true`, since
-a false negative would hide a source the owner needs while a false positive costs
-one click and lands on the file route's own 404 message.
+The check fails **closed**: `true` is a positive claim that the server verified
+all three conditions, so a lookup that throws reports `false` and logs the
+failure server-side rather than advertising availability it never established.
+A source can therefore read as unavailable while its file is in fact fine — the
+document remains reachable from the Documents page, and the server log names the
+document id behind any systematic failure.
 
 #### `evidence` (the default; `ASK_EVIDENCE_CONTRACT=true`)
 
