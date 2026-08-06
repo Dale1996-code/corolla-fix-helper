@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
-import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
+import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   AI_DISCLOSURE_PLANNER,
   AI_PLANNER_LIMITS,
@@ -36,6 +36,10 @@ const initialRun = {
   // stream -- drops the acknowledgment along with the plan it belonged to.
   // There is no path that carries it onto a different plan.
   safetyAck: { acknowledged: false, pending: false, error: "" },
+  // "Save as repair checklist" state, scoped to this run for the same reason:
+  // a checklist saved from one plan must never be reported as belonging to the
+  // next one.
+  checklistSave: { pending: false, error: "", message: "", checklistId: null },
 };
 
 const INCOMPLETE_STREAM_MESSAGE =
@@ -416,6 +420,156 @@ function HandoffPanel({ handoffNotes }) {
   );
 }
 
+// What a saved checklist deliberately leaves behind.
+//
+// Listed in the UI, not just in a comment, because the panel is offering to
+// make something permanent. An owner who opens the checklist next month should
+// not be surprised by what is missing, and should never assume the placeholder
+// steps or the unverified gaps came along.
+const CHECKLIST_EXCLUSIONS = [
+  "The AI's own wording — every statement saved was copied word-for-word from a cited page.",
+  "The gaps list, which describes what could not be verified.",
+  "The placeholder steps from the owner checklist above; they are not real repair instructions.",
+  "The handoff drafts (parts list, mechanic summary, log entry).",
+  "The readiness score and the safety acknowledgment — those describe this run, not the job.",
+  "Any statement the evidence check rejected.",
+];
+
+/**
+ * Offers to save the finished plan as an ordinary repair checklist.
+ *
+ * The panel is a PREVIEW: the checklist it describes was built on the server
+ * and is held there under `draftId`. Saving posts that id and nothing else, so
+ * no repair text reaches SQLite from this page — which is why the preview can
+ * be trusted to match what gets written.
+ */
+function SaveAsChecklistPanel({ draft, draftId, saveState, onSave }) {
+  if (!draft || !draftId) {
+    return null;
+  }
+
+  const items = draft.items || [];
+  const saved = Boolean(saveState.checklistId);
+
+  return (
+    <SectionCard title="Save as repair checklist">
+      <p className="text-sm leading-6 text-slate-700">
+        Keep this plan in your workspace as an ordinary checklist you can tick off, reorder, and
+        edit. It is saved as <span className="font-semibold">Planned</span>, and nothing about it
+        stays linked to this run.
+      </p>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Checklist title
+        </p>
+        <p className="mt-1 text-sm font-semibold text-slate-900">{draft.title}</p>
+
+        <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Items ({items.length})
+        </p>
+        <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-slate-700">
+          {items.map((item, index) => (
+            <li key={index}>{item.text}</li>
+          ))}
+        </ol>
+
+        <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Notes will contain
+        </p>
+        <p className="mt-1 text-sm leading-6 text-slate-700">
+          The statements verified against your documents with the document and page each came from,
+          the verified tool and part requirements, and the safety warnings for these tasks. This is
+          exactly what will be saved:
+        </p>
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700">
+          {draft.notes}
+        </pre>
+
+        <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Not copied
+        </p>
+        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {CHECKLIST_EXCLUSIONS.map((exclusion) => (
+            <li key={exclusion}>{exclusion}</li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onSave}
+          // Disabled while the request is in flight and after it succeeds, so a
+          // second click cannot ask for a second checklist. The server is
+          // idempotent per draft as well; this is the first line of defense, not
+          // the only one.
+          disabled={saveState.pending || saved}
+          className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
+        >
+          {saveState.pending ? "Saving..." : saved ? "Saved" : "Save as repair checklist"}
+        </button>
+
+        {saved ? (
+          <Link
+            to={buildEntityLink("checklist", saveState.checklistId)}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+          >
+            Open saved checklist
+          </Link>
+        ) : null}
+      </div>
+
+      {saveState.message ? (
+        <p className="text-sm font-medium text-emerald-700" role="status">
+          {saveState.message}
+        </p>
+      ) : null}
+      {saveState.error ? (
+        <p className="text-sm font-semibold text-red-700" role="alert">
+          {saveState.error}
+        </p>
+      ) : null}
+    </SectionCard>
+  );
+}
+
+/**
+ * A standing receipt for a checklist that was saved from a plan no longer on
+ * screen.
+ *
+ * Only rendered when the save panel is not already reporting this same
+ * checklist, so the ordinary path shows one confirmation, not two. The wording
+ * says the plan is gone but the checklist is not — the owner's real question at
+ * that moment is "did my save go through?", and the answer has to be reachable
+ * even though the plan it came from was cleared.
+ */
+function SavedChecklistReceipt({ savedChecklist }) {
+  if (!savedChecklist) {
+    return null;
+  }
+
+  return (
+    <SuccessBanner>
+      <p className="font-semibold">Checklist saved</p>
+      <p className="mt-2">
+        {savedChecklist.title
+          ? `"${savedChecklist.title}" was saved from a repair plan that is no longer on this page.`
+          : "A checklist was saved from a repair plan that is no longer on this page."}{" "}
+        The plan is gone, but the checklist is not.
+      </p>
+      <p className="mt-2">
+        <Link
+          to={buildEntityLink("checklist", savedChecklist.id)}
+          className="font-semibold underline"
+        >
+          Open saved checklist
+        </Link>
+      </p>
+    </SuccessBanner>
+  );
+}
+
 function SourcesPanel({ citations }) {
   if (!citations?.length) {
     return null;
@@ -487,6 +641,15 @@ function parseSseFrame(frame) {
 export function RepairPlannerPage() {
   const [form, setForm] = useState(defaultForm);
   const [run, setRun] = useState(initialRun);
+  // A receipt for the last checklist actually written, kept OUTSIDE the run.
+  //
+  // Everything else about a save is per-run and is dropped when the run is
+  // replaced, which is right for state that describes a plan. But the checklist
+  // is a durable record that exists whether or not the owner is still looking at
+  // the plan it came from: if they hit Clear or built another plan while the
+  // request was in flight, the run-scoped result was discarded and they were
+  // left believing the save had failed while the row sat in the database.
+  const [savedChecklist, setSavedChecklist] = useState(null);
   const runRef = useRef(initialRun);
   const abortRef = useRef(null);
 
@@ -495,6 +658,10 @@ export function RepairPlannerPage() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const isRunning = run.status === "running";
+  // A save in flight blocks the actions that would replace the run underneath
+  // it. The receipt above is the backstop; this is the first line of defense,
+  // and it also keeps the owner from wondering which plan a late banner is for.
+  const isSavingChecklist = run.checklistSave.pending;
 
   function updateRun(updater) {
     runRef.current = updater(runRef.current);
@@ -578,6 +745,13 @@ export function RepairPlannerPage() {
 
   async function handleSubmit(submitEvent) {
     submitEvent.preventDefault();
+
+    // The Build button is disabled while a save is in flight, but Enter inside
+    // any of the single-line fields submits the form regardless, so the guard
+    // has to live here too.
+    if (runRef.current.checklistSave.pending) {
+      return;
+    }
 
     const trimmedBrief = form.brief.trim();
     if (!trimmedBrief) {
@@ -770,6 +944,91 @@ export function RepairPlannerPage() {
     }
   }
 
+  // Saves the finished plan as a repair checklist.
+  //
+  // The request body is `{ checklistDraftId }` and nothing else: the title,
+  // the items, the verified statements, the source labels, and the safety
+  // warnings all live in the server's own draft. This page cannot add to them,
+  // edit them, or invent them -- it can only ask for the draft it was shown to
+  // be written.
+  async function handleSaveAsChecklist() {
+    const checklistDraftId = runRef.current.artifacts?.checklistDraftId;
+    const { checklistSave } = runRef.current;
+
+    // Guard the double-click here as well as with the disabled button: a fast
+    // second click can land before React re-renders.
+    if (!checklistDraftId || checklistSave.pending || checklistSave.checklistId) {
+      return;
+    }
+
+    updateRun((current) => ({
+      ...current,
+      checklistSave: { ...current.checklistSave, pending: true, error: "", message: "" },
+    }));
+
+    // A newer plan replacing this one mid-request must not adopt its result.
+    const stillSamePlan = (current) =>
+      current.artifacts?.checklistDraftId === checklistDraftId;
+
+    const failWith = (message) =>
+      updateRun((current) =>
+        stillSamePlan(current)
+          ? {
+              ...current,
+              checklistSave: { ...current.checklistSave, pending: false, error: message },
+            }
+          : current
+      );
+
+    try {
+      const response = await fetch("/api/repair-checklists/from-planner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checklistDraftId }),
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        failWith(payload?.error || "Could not save the plan as a checklist.");
+        return;
+      }
+
+      const checklistId = payload?.checklist?.id;
+
+      if (!checklistId) {
+        failWith("The checklist was not saved. Please try again.");
+        return;
+      }
+
+      // Recorded UNCONDITIONALLY, before the run-scoped write below. The
+      // checklist exists in the database now; whether the owner is still on the
+      // plan that produced it changes nothing about that.
+      setSavedChecklist({ id: checklistId, title: payload.checklist?.title || "" });
+
+      updateRun((current) =>
+        stillSamePlan(current)
+          ? {
+              ...current,
+              checklistSave: {
+                pending: false,
+                error: "",
+                message: payload.message || "Checklist saved.",
+                checklistId,
+              },
+            }
+          : current
+      );
+    } catch (error) {
+      failWith(error.message || "Could not save the plan as a checklist.");
+    }
+  }
+
   function handleClear() {
     setForm(defaultForm);
     runRef.current = initialRun;
@@ -876,7 +1135,9 @@ export function RepairPlannerPage() {
             <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                disabled={isRunning}
+                // Blocked while a checklist save is in flight: replacing the run
+                // underneath it is what made a successful save vanish.
+                disabled={isRunning || isSavingChecklist}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
               >
                 {isRunning ? "Planning..." : "Build repair plan"}
@@ -890,6 +1151,11 @@ export function RepairPlannerPage() {
                   Stop
                 </button>
               ) : null}
+              {/* Clear stays available during a save on purpose. Blocking
+                  Build prevents the genuinely confusing case (two plans, one
+                  in-flight save, no way to tell which it belongs to), but Clear
+                  is just the owner saying "I am done with this" -- and the
+                  receipt above means doing so can no longer lose the result. */}
               <button
                 type="button"
                 onClick={handleClear}
@@ -900,6 +1166,12 @@ export function RepairPlannerPage() {
             </div>
           </form>
         </SectionCard>
+
+        {/* Shown only when the save panel below is not already reporting this
+            same checklist, so the ordinary path confirms once, not twice. */}
+        {savedChecklist && run.checklistSave.checklistId !== savedChecklist.id ? (
+          <SavedChecklistReceipt savedChecklist={savedChecklist} />
+        ) : null}
 
         <StatusBanner status={run.status} message={run.message} />
         <ActivityLog activity={run.activity} statusMessage={run.statusMessage} isRunning={isRunning} />
@@ -915,6 +1187,14 @@ export function RepairPlannerPage() {
           canAcknowledge={Boolean(artifacts?.planRunId)}
         />
         <ChecklistPanel checklist={artifacts?.checklist} />
+        {run.status === "done" ? (
+          <SaveAsChecklistPanel
+            draft={artifacts?.checklistDraft}
+            draftId={artifacts?.checklistDraftId}
+            saveState={run.checklistSave}
+            onSave={handleSaveAsChecklist}
+          />
+        ) : null}
         <TasksPanel tasks={artifacts?.tasks} />
         <HandoffPanel handoffNotes={artifacts?.handoffNotes} />
         <SourcesPanel citations={artifacts?.citations} />

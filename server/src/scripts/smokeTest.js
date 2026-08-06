@@ -155,6 +155,28 @@ async function runChecks(baseUrl, { frontendBuilt }) {
       assert.match(contentType, /html/);
     });
 
+    // The client renders its own "Page not found" page for unmatched routes,
+    // which only works if the server hands unknown non-API GETs to the SPA
+    // index instead of 404-ing them itself.
+    await check("an unknown page route falls back to the SPA index", async () => {
+      const { status, contentType, text } = await requestText(
+        baseUrl,
+        "/this-page-does-not-exist"
+      );
+      assert.equal(status, 200);
+      assert.match(contentType, /html/);
+      assert.match(text, /<div id="root">/);
+    });
+
+    // The other side of that boundary: an unknown /api/* path must 404 as an
+    // API miss, never get swallowed by the SPA fallback and answered with the
+    // client's 404 page — that would turn a broken fetch into a 200 of HTML.
+    await check("an unknown /api route is not served by the SPA fallback", async () => {
+      const { status, text } = await requestText(baseUrl, "/api/does-not-exist");
+      assert.equal(status, 404);
+      assert.doesNotMatch(text, /<div id="root">/);
+    });
+
     await check("PWA assets are served for phone installs", async () => {
       const manifest = await requestJson(baseUrl, "/manifest.webmanifest");
       assert.equal(manifest.status, 200);

@@ -9,6 +9,7 @@ import { ProceduresPage } from "./pages/ProceduresPage";
 import { NotesPage } from "./pages/NotesPage";
 import { RepairChecklistsPage } from "./pages/RepairChecklistsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { navigationItems } from "./lib/navigation";
 
 function MobileNav() {
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/repair-checklists" element={<RepairChecklistsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </main>
       </div>

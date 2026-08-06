@@ -31,6 +31,10 @@ export function buildEntityLink(entityType, entityId) {
     return `/notes?noteId=${entityId}#note-library`;
   }
 
+  if (entityType === "checklist") {
+    return `/repair-checklists?checklistId=${entityId}#checklist-library`;
+  }
+
   return "/dashboard";
 }
 

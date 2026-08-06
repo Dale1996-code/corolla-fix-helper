@@ -11,6 +11,7 @@ import {
   repairToolSchemas,
 } from "./repairTools.js";
 import { buildRepairPlanEvidence } from "./repairPlanEvidenceContract.js";
+import { buildPlannerChecklistDraft } from "./plannerChecklistDraft.js";
 import { streamResponsesTurn } from "./openAiResponsesClient.js";
 import { planRunStore } from "./planRunStore.js";
 import { createTracer } from "./tracing.js";
@@ -381,6 +382,23 @@ export async function runRepairPlannerAgent(request, options = {}) {
         evidenceStatus: finalizedPlan.evidenceStatus,
       });
     }
+
+    // EVERY completed run can be saved as a checklist, including `not_found`:
+    // the canonical task list and the safety warnings are real work worth
+    // keeping even when nothing could be grounded, and the draft's notes say so
+    // in as many words. The draft is built and held server-side; the browser
+    // gets a copy to preview and an id to save it by, and sends back only the
+    // id. `checklistDraftId` is separate from `planRunId` on purpose -- a plan
+    // with no safety-critical work has no run record and would otherwise be
+    // unsaveable.
+    artifacts.checklistDraft = buildPlannerChecklistDraft({
+      tasks: trusted.tasks,
+      evidenceStatus: finalizedPlan.evidenceStatus,
+      verifiedClaims: finalizedPlan.verifiedClaims,
+      citations: finalizedPlan.citations,
+      requirements: finalizedPlan.requirements,
+    });
+    artifacts.checklistDraftId = planRuns.saveChecklistDraft(artifacts.checklistDraft);
 
     const done = {
       type: "done",
