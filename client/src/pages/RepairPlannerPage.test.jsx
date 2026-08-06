@@ -104,6 +104,18 @@ const completedRun = [
         mechanicHandoff: "Vehicle: Corolla",
         maintenanceLogEntry: "Maintenance log",
       },
+      // The server-built checklist the page may offer to save. It is a preview
+      // only: the page posts `checklistDraftId` and never this content.
+      checklistDraftId: "draft-abc",
+      checklistDraft: {
+        title: "Replace front brake pads",
+        status: "planned",
+        description: "Saved from a Repair Planner run (evidence: partial).",
+        notes:
+          "Verified statements from your documents\n1. Replace front brake pads\n   - torque caliper bolts to 25 ft-lb (Brake Service Guide, page 4)",
+        items: [{ text: "Replace front brake pads" }],
+        evidenceStatus: "partial",
+      },
     },
   },
 ];
@@ -582,4 +594,170 @@ test("RepairPlannerPage renders the plan from done.text, not from model prose", 
 
   expect(await screen.findByText(/Torque caliper bolts to 25 ft-lb/)).toBeInTheDocument();
   expect(screen.queryByText(/54 Nm/)).not.toBeInTheDocument();
+});
+
+// --- Save as repair checklist ------------------------------------------------
+//
+// Saving writes durable SQLite rows, so the page must (a) show the owner exactly
+// what will be written before they commit to it, and (b) send nothing but the
+// server's draft id.
+
+const SAVE_BUTTON = /save as repair checklist/i;
+
+const savedChecklistResponse = {
+  ok: true,
+  status: 201,
+  json: async () => ({
+    message: "Checklist saved from your repair plan.",
+    created: true,
+    checklist: { id: 42, title: "Replace front brake pads", items: [] },
+  }),
+};
+
+function mockPlanThenSave(saveResult = savedChecklistResponse) {
+  const fetchMock = vi.fn((url) =>
+    String(url).includes("from-planner")
+      ? Promise.resolve(saveResult)
+      : streamResponse(completedRun)
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+async function buildPlanWithSavePanel() {
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+  return screen.findByRole("button", { name: SAVE_BUTTON });
+}
+
+test("the save panel previews the exact title and items, and states what is not copied", async () => {
+  mockPlanThenSave();
+
+  await buildPlanWithSavePanel();
+
+  const panel = screen
+    .getByRole("heading", { name: "Save as repair checklist" })
+    .closest("section");
+
+  // The title and the item list, exactly as the server built them. The text
+  // appears twice on purpose: once as the checklist's title, once as its item.
+  expect(within(panel).getByText("Checklist title")).toBeInTheDocument();
+  expect(within(panel).getAllByText("Replace front brake pads")).toHaveLength(2);
+  expect(within(panel).getByText("Items (1)")).toBeInTheDocument();
+
+  // What the notes will hold, shown verbatim rather than described.
+  expect(within(panel).getByText("Notes will contain")).toBeInTheDocument();
+  expect(
+    within(panel).getByText(/torque caliper bolts to 25 ft-lb \(Brake Service Guide, page 4\)/)
+  ).toBeInTheDocument();
+
+  // And what is deliberately left behind.
+  expect(within(panel).getByText("Not copied")).toBeInTheDocument();
+  expect(within(panel).getByText(/gaps list/i)).toBeInTheDocument();
+  expect(within(panel).getByText(/placeholder steps/i)).toBeInTheDocument();
+  expect(within(panel).getByText(/handoff drafts/i)).toBeInTheDocument();
+  expect(within(panel).getByText(/readiness score/i)).toBeInTheDocument();
+});
+
+test("saving sends the draft id and nothing else", async () => {
+  const fetchMock = mockPlanThenSave();
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/repair-checklists/from-planner",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  const saveCall = fetchMock.mock.calls.find(([url]) =>
+    String(url).includes("from-planner")
+  );
+
+  // No task text, no claims, no warnings, no evidence -- one field.
+  expect(JSON.parse(saveCall[1].body)).toEqual({ checklistDraftId: "draft-abc" });
+});
+
+test("a successful save reports it and offers a link to the saved checklist", async () => {
+  mockPlanThenSave();
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  expect(
+    await screen.findByText("Checklist saved from your repair plan.")
+  ).toBeInTheDocument();
+
+  const link = screen.getByRole("link", { name: "Open saved checklist" });
+  expect(link).toHaveAttribute("href", "/repair-checklists?checklistId=42#checklist-library");
+
+  // The owner stays on the Planner: the plan is still on screen.
+  expect(screen.getByRole("heading", { name: "Launch readiness" })).toBeInTheDocument();
+});
+
+test("the save button is disabled while saving and cannot fire twice", async () => {
+  let releaseSave;
+  const pendingSave = new Promise((resolve) => {
+    releaseSave = () => resolve(savedChecklistResponse);
+  });
+  const fetchMock = mockPlanThenSave(pendingSave);
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /saving\.\.\./i })).toBeDisabled();
+  });
+
+  // A second click while in flight must not queue a second checklist.
+  fireEvent.click(screen.getByRole("button", { name: /saving\.\.\./i }));
+
+  releaseSave();
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /^saved$/i })).toBeDisabled();
+  });
+
+  // A click after success is a no-op too.
+  fireEvent.click(screen.getByRole("button", { name: /^saved$/i }));
+
+  const saveCalls = fetchMock.mock.calls.filter(([url]) =>
+    String(url).includes("from-planner")
+  );
+  expect(saveCalls).toHaveLength(1);
+});
+
+test("a failed save shows the server's guidance and leaves the button usable", async () => {
+  mockPlanThenSave({
+    ok: false,
+    status: 404,
+    json: async () => ({
+      error: "That repair plan is no longer available to save. Build the plan again.",
+    }),
+  });
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  expect(
+    await screen.findByText(
+      "That repair plan is no longer available to save. Build the plan again."
+    )
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open saved checklist" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: SAVE_BUTTON })).toBeEnabled();
+});
+
+test("no save panel is offered for a run that produced no draft", async () => {
+  // doneFrame() artifacts carry no checklistDraftId -- an older server, or a run
+  // that ended without one. The panel must not appear with nothing to save.
+  await runWithFrames([doneFrame("partial")]);
+
+  expect(await screen.findByText("Partly verified")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: SAVE_BUTTON })).not.toBeInTheDocument();
 });

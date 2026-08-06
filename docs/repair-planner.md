@@ -31,7 +31,10 @@ instead of pulling in a separate agents framework:
 | `server/src/services/agent/openAiResponsesClient.js` | Streaming Responses API client (`stream: true`, SSE parsing) — the only key-dependent piece |
 | `server/src/services/agent/repairPlannerAgent.js` | The tool-calling loop; emits ordered events |
 | `server/src/services/agent/tracing.js` | Lightweight span tracer (observability hook) |
+| `server/src/services/agent/planRunStore.js` | In-memory, bounded, TTL'd store for readiness inputs (`planRunId`) and checklist drafts (`checklistDraftId`) |
+| `server/src/services/agent/plannerChecklistDraft.js` | Builds the checklist a completed run can be saved as |
 | `server/src/routes/repairPlan.js` | `POST /api/repair-plan` Server-Sent-Events route |
+| `server/src/routes/repairChecklists.js` | Checklist CRUD **and** `POST /api/repair-checklists/from-planner` |
 | `client/src/pages/RepairPlannerPage.jsx` | Frontend form + live stream consumer + result cards |
 
 ## Tools
@@ -87,6 +90,51 @@ reach Ready. The owner now supplies it **after** reading the plan:
   acknowledging does not mean the repair is safe, correct, or suited to the
   owner's skill. The checked state shown is the one the server scored, never a
   local guess.
+
+### Saving a plan as a repair checklist
+
+A finished plan is a good starting point for a checklist the owner actually
+works from, so **every** completed run — `verified`, `partial`, and `not_found`
+alike — can be saved as one. The mechanism is the same trust boundary as the
+acknowledgment above, for the same reason: a saved checklist is a **durable
+SQLite record**, and if its text arrived from the browser then a tampered
+request could write an invented torque figure into permanent storage wearing the
+planner's authority.
+
+- When a run completes, `plannerChecklistDraft.js` builds the checklist from
+  validated output only and `planRunStore.js` holds it under a
+  `checklistDraftId`. The browser gets `artifacts.checklistDraft` to **preview**
+  and `artifacts.checklistDraftId` to save it by.
+- `checklistDraftId` is **separate from `planRunId`**. They authorize different
+  things and are minted under different conditions: only a safety-critical plan
+  has anything to acknowledge, while every completed plan is saveable. One id
+  doing both jobs would leave non-safety-critical plans unsaveable.
+- `POST /api/repair-checklists/from-planner` takes `{ checklistDraftId }` and
+  nothing else. Task text, claims, warnings, and evidence in the body are
+  ignored.
+- **In the draft:** a `planned` checklist titled from the canonical tasks, one
+  normal item per high-level task, and notes carrying the accepted claims with
+  their document and page, the verified tool/part requirements, and the safety
+  warnings for those tasks. A `not_found` run saves the tasks and warnings plus
+  an explicit notice that nothing was verified — an honest empty result is still
+  worth keeping.
+- **Never in the draft:** model prose, the run's gaps, the placeholder
+  owner-checklist steps, the handoff drafts, the readiness score or
+  acknowledgment state, and every rejected claim. `plannerChecklistSave.test.js`
+  asserts each of these against the database, not against the draft object.
+- The checklist and all its items are written in **one transaction**: a plan is
+  never saved as a titled checklist with half its tasks missing, which would
+  look finished while silently dropping work.
+- Saving the same draft twice returns the checklist it already became rather
+  than creating a duplicate; the page also disables the button while the request
+  is in flight and after it succeeds.
+- Drafts expire with the run store (bounded, six hours, never SQLite). An
+  unknown or expired id is a 404 whose message tells the owner to build the plan
+  again. The saved checklist itself is permanent and unaffected.
+- The result is an **ordinary** checklist — editable, deletable, with no stored
+  link back to the plan. There is no migration and no planner-to-checklist
+  relationship. The saved statements are reference notes, not check-off repair
+  instructions.
 
 ### Canonical tasks
 
@@ -156,7 +204,7 @@ one `data: <json>\n\n` frame. Event types:
 | `trace` | A finished tracing span (observability) |
 | `ai_not_configured` | No `OPENAI_API_KEY` is set; the run stops gracefully |
 | `error` | The run failed (`code`, `reason`, fixed `message`) |
-| `done` | Final event with `status`, `evidenceStatus`, the server-rendered `text`, and assembled `artifacts` |
+| `done` | Final event with `status`, `evidenceStatus`, the server-rendered `text`, and assembled `artifacts` (including `checklistDraft` / `checklistDraftId`, and `planRunId` when the plan is safety-critical) |
 
 `text_delta` remains in the documented protocol but **the planner no longer
 emits it**. Model prose is discarded, including prose emitted before a tool
@@ -278,6 +326,12 @@ Frontend flow:
 - [ ] Readiness, owner checklist, extracted tasks, handoff drafts, and sources
       cards all appear after `done`.
 - [ ] Source cards link to the correct document page.
+- [ ] "Save as repair checklist" previews the exact title, items, and notes, and
+      lists what is not copied.
+- [ ] Saving stays on the Planner page, disables the button, and shows a working
+      "Open saved checklist" link; the saved checklist has one item per task and
+      no placeholder steps.
+- [ ] Clicking save twice creates exactly one checklist.
 - [ ] With no key, the AI-not-configured banner appears and nothing crashes.
 
 Tool outputs:

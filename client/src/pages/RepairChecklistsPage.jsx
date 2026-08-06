@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { useScrollToHash } from "../lib/useScrollToHash";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -114,7 +116,10 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
     "grid grid-cols-[minmax(11rem,2.4fr)_minmax(7rem,1fr)_minmax(6rem,0.9fr)_minmax(8rem,1fr)] gap-3";
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section
+      id="checklist-library"
+      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+    >
       <div className="overflow-x-auto">
         <div className="min-w-[620px]">
           <div
@@ -514,6 +519,19 @@ function toChecklistPayload(form) {
 }
 
 export function RepairChecklistsPage() {
+  useScrollToHash();
+
+  // `?checklistId=` lets another page link straight to one checklist -- the
+  // Repair Planner's "Open saved checklist" link is the first caller. It only
+  // preselects a row; the checklist itself is still loaded from the server, so
+  // a bogus id simply falls back to the newest checklist.
+  const [searchParams] = useSearchParams();
+  const requestedChecklistIdValue = Number(searchParams.get("checklistId"));
+  const requestedChecklistId =
+    Number.isInteger(requestedChecklistIdValue) && requestedChecklistIdValue > 0
+      ? requestedChecklistIdValue
+      : null;
+
   const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -569,6 +587,16 @@ export function RepairChecklistsPage() {
       setSelectedChecklistId((currentId) => {
         if (currentId && nextChecklists.some((checklist) => checklist.id === currentId)) {
           return currentId;
+        }
+
+        // A deep link picks the checklist it names, but only if it is really
+        // there -- a stale or hand-typed id falls back to the newest one rather
+        // than showing an empty detail pane.
+        if (
+          requestedChecklistId &&
+          nextChecklists.some((checklist) => checklist.id === requestedChecklistId)
+        ) {
+          return requestedChecklistId;
         }
 
         return nextChecklists[0]?.id || null;

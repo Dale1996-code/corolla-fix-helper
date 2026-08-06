@@ -34,6 +34,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `POST /api/ask` | Ask your documents (RAG Q&A) |
 | `POST /api/repair-plan` | Repair Planner agent (SSE stream) |
 | `POST /api/repair-plan/:runId/safety-acknowledgment` | Record the owner's safety acknowledgment for one generated plan |
+| `POST /api/repair-checklists/from-planner` | Save a completed Repair Planner result as an ordinary checklist |
 | `GET/POST /api/symptoms`, `GET/PUT/DELETE /api/symptoms/:id` | Symptom CRUD |
 | `PUT /api/symptoms/:id/procedures` | Replace a symptom's linked procedures |
 | `GET /api/symptoms/:id/suggested-procedures` | Grounded procedure suggestions |
@@ -437,6 +438,21 @@ A run that cannot produce a verified plan emits an `error` frame with a `code` (
 
 When the finished plan contains safety-critical work, `artifacts` also carries a `planRunId` for the acknowledgment route below. A plan with no safety-critical work has no `planRunId` — there is nothing to acknowledge.
 
+Every completed run — `verified`, `partial`, and `not_found` alike — also carries `artifacts.checklistDraftId` and `artifacts.checklistDraft`, the server-built checklist the run can be saved as (see [`POST /api/repair-checklists/from-planner`](#post-apirepair-checklistsfrom-planner)). `checklistDraft` is a **preview**: the authoritative copy stays on the server, and the save route reads it from there rather than from the request.
+
+```jsonc
+"checklistDraft": {
+  "title": "Replace the front brake pads (+1 more)",
+  "status": "planned",
+  "description": "Saved from a Repair Planner run (evidence: partial).",
+  "notes": "Saved from a Repair Planner run. ...",   // verified statements + sources, requirements, safety warnings
+  "items": [{ "text": "Replace the front brake pads." }],
+  "evidenceStatus": "partial"
+}
+```
+
+`checklistDraftId` is deliberately **separate** from `planRunId`: the two authorize different things and are minted under different conditions, and a plan with no safety-critical work has no run record but is still saveable.
+
 ### `POST /api/repair-plan/:runId/safety-acknowledgment`  *(not rate limited: no model call)*
 
 | Body field | Required | Notes |
@@ -524,12 +540,38 @@ Every write returns the **whole** checklist — its own fields plus `items`, `it
 | `PUT /api/repair-checklists/:id/items/:itemId` | body: `text` and/or `isDone` (boolean); partial update |
 | `DELETE /api/repair-checklists/:id/items/:itemId` | removes one item |
 | `POST /api/repair-checklists/:id/items/:itemId/move` | body `{ "direction": "up" }` — swaps the item with its neighbor. At the top/bottom of the list it is a no-op, not an error. |
+| `POST /api/repair-checklists/from-planner` | body: `checklistDraftId` (required). Saves a completed Repair Planner result — see below |
 
 ```powershell
 $body = @{ title = "Front brake job"; status = "in_progress" } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-checklists `
   -ContentType "application/json" -Body $body
 ```
+
+### `POST /api/repair-checklists/from-planner`
+
+| Body field | Required | Notes |
+| --- | --- | --- |
+| `checklistDraftId` | ✅ | from `artifacts.checklistDraftId` on that plan's `done` frame |
+
+| Status | Meaning |
+| --- | --- |
+| `201` | the checklist was created → `{ "message", "checklist", "created": true }` |
+| `200` | this draft had already been saved → the same checklist, `"created": false` |
+| `400` | `checklistDraftId` is missing or not a string |
+| `404` | the draft is unknown or expired — the message tells the owner to build the plan again |
+
+**Trust boundary.** The body carries a draft id and nothing else of consequence. The title, items, notes, verified statements, source labels, and safety warnings all come from the server's own draft, built from validated planner output when the run completed. Task text, claims, warnings, or evidence sent in the body are **ignored** — a request cannot write invented repair text into SQLite wearing the planner's authority.
+
+**What the draft contains:** a `planned` checklist titled from the canonical tasks, one normal item per high-level task, and notes holding the statements the evidence contract accepted (each with its document and page), the verified tool/part requirements, and the safety warnings raised for those tasks. A `not_found` run saves only the tasks and the warnings, plus an explicit notice that nothing was verified.
+
+**What it never contains:** the model's own prose, the run's gaps, the placeholder owner-checklist steps, the handoff drafts, the readiness score or acknowledgment state, or any rejected claim.
+
+**Expiry.** Drafts live in the same bounded, in-memory, six-hour store as plan runs and are **not persisted**. A server restart, a TTL expiry, or enough newer runs retires one; the saved checklist itself is a permanent SQLite record and is unaffected.
+
+**Idempotency.** Saving the same draft twice returns the checklist it already became (`200`) instead of creating a duplicate. If that checklist has since been deleted, the draft is saved again.
+
+The result is an **ordinary** checklist: `planned`, fully editable, with no stored link back to the plan it came from. Nothing about the saved statements is a check-off repair instruction — they are reference notes, and this route creates no schema change or planner-to-checklist relationship.
 
 ---
 
