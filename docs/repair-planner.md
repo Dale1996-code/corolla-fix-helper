@@ -2,9 +2,11 @@
 
 The Repair Planner turns a rough, free-text repair brief for the 2009 Toyota
 Corolla into an actionable plan: a prioritized narrative, a readiness score, an
-owner checklist, handoff drafts, and follow-up questions when key details are
-missing. It streams its progress (tool calls and model text) to the browser as
-it works.
+owner checklist, and handoff drafts. It streams its progress (tool calls, not
+model text) to the browser as it works; the narrative itself arrives whole in
+the final `done` frame, rendered server-side from verified claims. A brief too
+vague to plan fails outright with `no_canonical_task` rather than prompting the
+owner with follow-up questions.
 
 It is the agent-shaped sibling of the "Ask your documents" feature: where Ask
 answers one question from PDF chunks, the Repair Planner runs a multi-step
@@ -284,7 +286,8 @@ npm --prefix client test     # the page streams activity, text, and artifacts
 ```
 
 The server suite includes an end-to-end test that POSTs to `/api/repair-plan`
-and asserts the stream contains at least one tool event and one model text delta.
+and asserts the stream contains at least one tool event, **zero** `text_delta`
+frames, and a `done` frame carrying the server-rendered plan text.
 
 ### Live end-to-end check (requires a real key + network egress)
 
