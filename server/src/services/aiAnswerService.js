@@ -4,6 +4,7 @@ import {
   retrieveRelevantChunks,
 } from "./chunkRetrievalService.js";
 import { reserveAiCall } from "./aiUsageBudget.js";
+import { isDocumentFileAvailable } from "./documentService.js";
 import {
   createRedactedOpenAiHttpError,
   parseCompleteOpenAiOutputText,
@@ -145,7 +146,28 @@ function isCitableChunk(chunk) {
   return hasSource && Boolean(buildSnippet(chunk.chunkText));
 }
 
-function buildCitationsFromChunks(chunks, { distinguishSnippets = false } = {}) {
+/**
+ * Memoize an availability lookup for one request.
+ *
+ * A retrieval result routinely cites the same manual several times, and the
+ * lookup touches the database and the filesystem, so ask once per document.
+ */
+function createAvailabilityCache(isSourceAvailable) {
+  const answers = new Map();
+
+  return (documentId) => {
+    if (!answers.has(documentId)) {
+      answers.set(documentId, Boolean(isSourceAvailable(documentId)));
+    }
+
+    return answers.get(documentId);
+  };
+}
+
+function buildCitationsFromChunks(
+  chunks,
+  { distinguishSnippets = false, resolveAvailability = null } = {}
+) {
   const citations = [];
   const seen = new Set();
 
@@ -161,6 +183,15 @@ function buildCitationsFromChunks(chunks, { distinguishSnippets = false } = {}) 
       pageNumber: chunk.pageNumber,
       chunkIndex: chunk.chunkIndex,
       snippet: buildSnippet(chunk.chunkText),
+      // Whether the stored PDF behind this citation can actually be opened. The
+      // UI needs a server-owned answer: it must offer "open the source" only
+      // when the source really is there, and say so plainly when it is not.
+      // The resolver itself fails closed (see isDocumentFileAvailable); the
+      // `true` default here applies only when no resolver was supplied at all,
+      // matching the shape clients saw before this field existed.
+      documentAvailable: resolveAvailability
+        ? resolveAvailability(chunk.documentId)
+        : true,
     };
     const fullEvidenceQuote =
       distinguishSnippets && typeof chunk.evidenceQuote === "string"
@@ -214,7 +245,7 @@ function buildCitationsFromChunks(chunks, { distinguishSnippets = false } = {}) 
   return citations;
 }
 
-function buildCitationsFromEvidence(items) {
+function buildCitationsFromEvidence(items, { resolveAvailability = null } = {}) {
   return buildCitationsFromChunks(
     (Array.isArray(items) ? items : []).map((item) => ({
       ...item,
@@ -224,7 +255,7 @@ function buildCitationsFromEvidence(items) {
     })),
     // One chunk may support multiple atomic claims with different verbatim
     // passages. Remove exact duplicates, but preserve those distinct quotes.
-    { distinguishSnippets: true }
+    { distinguishSnippets: true, resolveAvailability }
   );
 }
 
@@ -537,10 +568,14 @@ export async function askQuestionUsingDocuments(
     image = null,
     includeMetrics = config.askDebugMetrics,
     isAiConfigured = Boolean(config.openAiApiKey),
+    isSourceAvailable = isDocumentFileAvailable,
     retrieveChunks = retrieveRelevantChunks,
     rewriteQuestion = rewriteQuestionFromOpenAi,
   } = {}
 ) {
+  // One lookup per document per request; injectable so tests and evals can
+  // exercise both the available and the unavailable branch without real files.
+  const resolveAvailability = createAvailabilityCache(isSourceAvailable);
   // Stage timings and the collected chunks/citations feed the optional metrics
   // summary. finalize() attaches metrics only when includeMetrics is on, so the
   // default return shape (and logs) stay exactly as before.
@@ -604,7 +639,7 @@ export async function askQuestionUsingDocuments(
       }
     }
 
-    return unique.length ? buildCitationsFromChunks(unique) : null;
+    return unique.length ? buildCitationsFromChunks(unique, { resolveAvailability }) : null;
   };
 
   const finalize = (result) => {
@@ -716,7 +751,7 @@ export async function askQuestionUsingDocuments(
     });
   }
 
-  const citations = buildCitationsFromChunks(chunks);
+  const citations = buildCitationsFromChunks(chunks, { resolveAvailability });
   builtCitations = citations;
 
   // Defense in depth: answering from sources we cannot show the owner would be
@@ -750,7 +785,9 @@ export async function askQuestionUsingDocuments(
     // Status is DERIVED, never taken from the model -- a model-supplied status
     // could contradict its own claims.
     const status = deriveEvidenceStatus(verified);
-    const evidenceCitations = buildCitationsFromEvidence(verified.documentSupported);
+    const evidenceCitations = buildCitationsFromEvidence(verified.documentSupported, {
+      resolveAvailability,
+    });
     builtCitations = evidenceCitations;
 
     return finalize({

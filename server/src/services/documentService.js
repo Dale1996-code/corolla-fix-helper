@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
@@ -38,6 +39,70 @@ export function resolveStoredFilePath(document) {
     safeFileName,
     absoluteFilePath: path.join(config.uploadsDir, safeFileName),
   };
+}
+
+/**
+ * Can this document's stored PDF actually be opened right now?
+ *
+ * Answers the same question `GET /api/documents/:id/file` answers, but ahead of
+ * time, so a source card can offer an "open" action only when the file behind it
+ * really exists. It reproduces that route's three failure exits: no row, no
+ * usable filename reference, and no file on disk.
+ *
+ * Synchronous on purpose: it is called once per cited document (at most a
+ * handful per Ask request) from a code path that shapes citations synchronously.
+ *
+ * Fails CLOSED. `true` is a positive claim — "this source can be opened" — and
+ * the only thing entitled to make it is a completed check of all three
+ * conditions. Returning `true` from a catch block would assert availability the
+ * server never established, which is exactly the broken evidence contract this
+ * flag exists to prevent; the caller would render an inviting link whose target
+ * is unknown. An unexpected failure is logged server-side instead, so a
+ * systematically failing lookup is diagnosable rather than silent.
+ *
+ * The row lookup, the existence check, and the log sink are injectable so the
+ * error path is testable without corrupting a real database.
+ *
+ * @param {unknown} documentId
+ * @param {{ getFileRecord?: Function, fileExists?: Function, logFailure?: Function }} [deps]
+ * @returns {boolean}
+ */
+export function isDocumentFileAvailable(
+  documentId,
+  {
+    getFileRecord = getDocumentFileRecord,
+    fileExists = existsSync,
+    logFailure = (message) => console.error(message),
+  } = {}
+) {
+  if (!Number.isInteger(documentId) || Number(documentId) <= 0) {
+    return false;
+  }
+
+  try {
+    const document = getFileRecord(documentId);
+
+    if (!document) {
+      return false;
+    }
+
+    const resolvedFile = resolveStoredFilePath(document);
+
+    if (!resolvedFile) {
+      return false;
+    }
+
+    return Boolean(fileExists(resolvedFile.absoluteFilePath));
+  } catch (error) {
+    // Numeric id and the error text only -- no title, filename, or resolved
+    // path, keeping this consistent with the rest of the log-safe channels.
+    logFailure(
+      `[document-availability] check failed for document ${documentId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return false;
+  }
 }
 
 /**

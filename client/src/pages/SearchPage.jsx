@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
 import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
 import { SelectField, TextField } from "../components/forms/FormFields";
 import { attachmentFileUrl, fetchAllImageAttachments } from "../lib/apiClient";
 import { labelize } from "../lib/labelize";
-import { buildEntityLink } from "../lib/navigation";
+import { buildDocumentFileLink, documentSourceName } from "../lib/navigation";
 import {
   DocumentResultCard,
   NoteResultCard,
@@ -516,25 +515,72 @@ function buildEvidenceHistoryContent(evidence) {
   ].join("\n");
 }
 
+// The one control that makes "check the source yourself" actionable.
+//
+// Every source card gets one: telling the owner to verify a passage while giving
+// them no way to reach it is a broken evidence contract. The target is built
+// from the server's validated numeric document id and page number only — never
+// from a model-supplied title, filename, or label — so no model output can steer
+// where this points.
+//
+// A plain anchor rather than a router Link, matching how the Documents page
+// already opens a stored PDF (`window.open('/api/documents/:id/file')`): it opens
+// the PDF in a new tab, so the Ask question, answer, and thread are still there
+// when the owner comes back. Anchors are focusable and activatable by keyboard
+// with no extra handlers.
+function AskSourceAction({ source }) {
+  const pageNumber =
+    Number.isInteger(source?.pageNumber) && source.pageNumber > 0 ? source.pageNumber : null;
+  const fileUrl = buildDocumentFileLink(source?.documentId, pageNumber);
+  // A response from before this field existed carries no availability verdict;
+  // treat that as available rather than hiding a source that is probably fine.
+  const isAvailable = source?.documentAvailable !== false;
+
+  if (!fileUrl || !isAvailable) {
+    return (
+      <p className="mt-3 text-xs font-medium text-slate-500">
+        Source unavailable — the PDF for this document is not in your workspace, so it
+        cannot be opened here.
+      </p>
+    );
+  }
+
+  const documentName = documentSourceName(source);
+
+  return (
+    <a
+      href={fileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={
+        pageNumber
+          ? `Open ${documentName} at page ${pageNumber} (PDF opens in a new tab)`
+          : `Open ${documentName} (PDF opens in a new tab)`
+      }
+      className="mt-3 inline-flex text-sm font-medium text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
+    >
+      {pageNumber ? "Open cited page" : "Open document"}
+    </a>
+  );
+}
+
 function AskCitationCard({ citation }) {
-  const documentName =
-    citation.documentTitle || citation.originalFilename || "Untitled document";
+  const documentName = documentSourceName(citation);
   const pageLabel = citation.pageNumber ? `Page ${citation.pageNumber}` : "Page unknown";
 
   return (
-    <Link
-      to={buildEntityLink("document", citation.documentId)}
-      aria-label={`Open source ${documentName} ${pageLabel}`}
-      className="block rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
-    >
+    <article className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="font-semibold text-slate-900">{documentName}</p>
+        {/* Kept visible even when the PDF opens at the page: a viewer that
+            ignores the #page fragment leaves the owner to find it by hand. */}
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
           {pageLabel}
         </span>
       </div>
       <p className="mt-3 leading-6 text-slate-700">{citation.snippet}</p>
-    </Link>
+      <AskSourceAction source={citation} />
+    </article>
   );
 }
 
@@ -542,8 +588,7 @@ function AskCitationCard({ citation }) {
 // the not-found "Retrieved context" list, which render identical cards under
 // different headings.
 function AskPassageCard({ passage }) {
-  const documentName =
-    passage.documentTitle || passage.originalFilename || "Untitled document";
+  const documentName = documentSourceName(passage);
   const pageLabel = passage.pageNumber ? `page ${passage.pageNumber}` : "page unknown";
 
   return (
@@ -552,6 +597,7 @@ function AskPassageCard({ passage }) {
         {documentName}, {pageLabel}
       </p>
       <p className="mt-2 leading-6">{passage.snippet}</p>
+      <AskSourceAction source={passage} />
     </div>
   );
 }
@@ -638,7 +684,7 @@ function AskEvidence({ evidence }) {
                   “{item.evidenceQuote}”
                 </p>
                 <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
-                  {item.documentTitle || item.originalFilename}, page {item.pageNumber}
+                  {documentSourceName(item)}, page {item.pageNumber}
                 </p>
               </li>
             ))}
