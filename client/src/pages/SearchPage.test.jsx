@@ -2,6 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { SearchPage } from "./SearchPage";
+import {
+  AI_DISCLOSURE_ASK,
+  AI_SAFETY_WARNING,
+} from "../components/feedback/AiSafetyNotices";
 
 function jsonResponse(payload, ok = true) {
   return Promise.resolve({
@@ -126,7 +130,14 @@ test("SearchPage shows the Ask panel empty state above document search", async (
   );
 });
 
-test("SearchPage discloses that the question and PDF excerpts are sent to OpenAI", async () => {
+// Asserts against the imported constants from the shared AiSafetyNotices
+// module, not literal strings -- this is what actually proves SearchPage is
+// still rendering the shared component rather than a copy that happens to read
+// the same today. A standalone drift-guard test file that renders both pages
+// (AiSafetyNotices.test.jsx) checks the same thing from the other direction;
+// this belongs here too so SearchPage's own suite fails on its own if the page
+// stops using the shared source.
+test("SearchPage renders the shared AI disclosure and safety warning from AiSafetyNotices", async () => {
   const fetchMock = createEmptySearchFetchMock();
   vi.stubGlobal("fetch", fetchMock);
 
@@ -141,9 +152,17 @@ test("SearchPage discloses that the question and PDF excerpts are sent to OpenAI
   });
   const askSection = askHeading.closest("section");
 
-  expect(
-    within(askSection).getByText(/sent to\s+OpenAI to generate an answer/i)
-  ).toBeInTheDocument();
+  const warning = within(askSection).getByText(AI_SAFETY_WARNING);
+  const disclosure = within(askSection).getByText(AI_DISCLOSURE_ASK);
+  expect(warning).toBeInTheDocument();
+  expect(disclosure).toBeInTheDocument();
+
+  // Ahead of the question textbox -- the point of the notice is to be read
+  // before the owner asks anything.
+  const questionField = within(askSection).getByRole("textbox", { name: "Question" });
+  expect(warning.compareDocumentPosition(questionField)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING
+  );
 });
 
 test("SearchPage shows loading state while Ask waits for an answer", async () => {
@@ -1244,11 +1263,7 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
     await screen.findByRole("heading", { name: "Ask your documents" })
   ).closest("section");
   expect(askSection).not.toBeNull();
-  expect(
-    within(askSection).getByText(
-      "Verify torque specs and safety steps against the manual before doing repair work."
-    )
-  ).toBeInTheDocument();
+  expect(within(askSection).getByText(AI_SAFETY_WARNING)).toBeInTheDocument();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the front brake caliper mounting bolt torque?" },
