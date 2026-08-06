@@ -27,22 +27,35 @@ import {
 // coverage rules are different. Only the three neutral, config-free helpers are
 // shared.
 
-/** Claims that describe the repair itself. Coverage requires one of these. */
-export const TECHNICAL_CLAIM_KINDS = [
+/**
+ * Technical claims naming an item the repair REQUIRES. They are grouped into
+ * requirement rows rather than read as statements about the repair, so anything
+ * that renders claims must partition on this list rather than inventing its own
+ * copy -- two modules disagreeing about what counts as "a verified statement" is
+ * how a checklist ended up saying nothing was verified directly above a list of
+ * verified requirements.
+ */
+export const REQUIREMENT_CLAIM_KINDS = ["required_tool", "required_part"];
+
+/** Technical claims that state something about the repair itself. */
+export const STATEMENT_CLAIM_KINDS = [
   "procedure",
   "numeric_spec",
   "safety_instruction",
   "vehicle_fact",
-  "required_tool",
-  "required_part",
 ];
+
+/** Claims that describe the repair itself. Coverage requires one of these. */
+export const TECHNICAL_CLAIM_KINDS = [...STATEMENT_CLAIM_KINDS, ...REQUIREMENT_CLAIM_KINDS];
 
 /** Grounded assertions that a requirement group is empty. */
 export const NEGATIVE_CLAIM_KINDS = ["no_required_tools", "no_required_parts"];
 
 export const CLAIM_KINDS = [...TECHNICAL_CLAIM_KINDS, ...NEGATIVE_CLAIM_KINDS];
 
-const ITEM_NAME_KINDS = new Set(["required_tool", "required_part"]);
+// Same list, as a set: a requirement claim is exactly the kind that must name
+// the item it requires.
+const ITEM_NAME_KINDS = new Set(REQUIREMENT_CLAIM_KINDS);
 
 const ALLOWED_CLAIM_FIELDS = new Set([
   "taskId",

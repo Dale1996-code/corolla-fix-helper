@@ -302,9 +302,11 @@ curl -N -X POST http://localhost:4000/api/repair-plan \
   -d '{"brief":"Front brakes squeak when stopping. Replace the pads this weekend.","skillLevel":"beginner","availableTools":"socket set, jack stands"}'
 ```
 
-Confirm the stream emits at least one `tool_call` and one `text_delta` frame and
-ends with a `done` frame whose `artifacts` include citations. If you instead see
-an `ai_not_configured` frame, the key is not reaching the server process; if the
+Confirm the stream emits at least one `tool_call` frame and ends with a `done`
+frame whose `artifacts` include citations. There will be **no** `text_delta`
+frames: model prose is discarded, and the plan arrives whole in `done.text`,
+rendered by the server from verified claims. If you instead see an
+`ai_not_configured` frame, the key is not reaching the server process; if the
 stream errors, the server cannot reach the OpenAI API (check network egress).
 
 ## Validation checklist
@@ -313,7 +315,10 @@ Agent behavior:
 
 - [ ] A detailed brief (symptom + tools + parts) yields a `ready` or
       `almost_ready` readiness score with no false gaps.
-- [ ] A sparse brief produces follow-up questions in the narrative.
+- [ ] A brief too vague to name a part or symptom fails with `no_canonical_task`
+      and its fixed message, rather than planning a placeholder task. (The plan
+      never asks follow-up questions: its text is rendered from verified claims,
+      so a thin brief surfaces as gaps or as this failure.)
 - [ ] A task above the stated skill level is assigned to a professional shop and
       flagged in the readiness gaps.
 - [ ] Safety-critical work (brakes, fuel, electrical, lifting, cooling) surfaces
@@ -322,7 +327,9 @@ Agent behavior:
 Frontend flow:
 
 - [ ] The agent activity log shows tool calls and results as they stream.
-- [ ] The plan narrative renders progressively (not only at the end).
+- [ ] The plan appears whole when the run finishes. It does **not** render
+      progressively — model prose is discarded, so there is nothing to stream
+      until `done` carries the server-rendered text.
 - [ ] Readiness, owner checklist, extracted tasks, handoff drafts, and sources
       cards all appear after `done`.
 - [ ] Source cards link to the correct document page.

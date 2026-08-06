@@ -1,4 +1,4 @@
-import { TECHNICAL_CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
+import { STATEMENT_CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
 
 // The checklist a completed Repair Planner run may be saved as.
 //
@@ -37,15 +37,24 @@ export const MAX_DRAFT_STATEMENTS = 60;
 export const MAX_DRAFT_TITLE_LENGTH = 120;
 
 // Requirement claims get their own section, so they are not also listed as
-// free-text statements. Derived from the contract's own list so a newly added
-// technical kind shows up here instead of being silently dropped.
-const REQUIREMENT_CLAIM_KINDS = new Set(["required_tool", "required_part"]);
-const STATEMENT_CLAIM_KINDS = TECHNICAL_CLAIM_KINDS.filter(
-  (kind) => !REQUIREMENT_CLAIM_KINDS.has(kind)
-);
+// free-text statements. The partition comes from the evidence contract rather
+// than a local copy: this module and the contract disagreeing about what counts
+// as "a verified statement" is precisely the bug fixed below.
 
 const NOT_FOUND_NOTICE =
   "No statement in this plan could be verified against your uploaded documents. Only the repair tasks and the safety warnings below were saved -- no technical statement was verified, so nothing here is a specification you can work to.";
+
+// A plan CAN verify tool and part requirements while verifying nothing about the
+// repair itself: the evidence contract counts required_tool / required_part as
+// technical claims, so such a run is `partial` or even `verified`, not
+// `not_found`.
+//
+// The notice above must not fire for it. Doing so wrote two contradictory
+// sentences into a permanent record -- "nothing could be verified" sitting
+// directly above "Verified requirements: Tools: torque wrench" -- which is worse
+// than either statement alone, because the owner cannot tell which to believe.
+const REQUIREMENTS_ONLY_NOTICE =
+  "The only statements verified for this plan were the tool and part requirements listed below. No procedure, specification, or safety instruction could be verified for the tasks themselves, so read the cited documents in full before starting.";
 
 const PROVENANCE_NOTE =
   "Saved from a Repair Planner run. The statements below were matched word-for-word to a page of your uploaded documents at the time the plan was built. They are reference material, not step-by-step repair instructions: open each cited page and read the full procedure before working on the vehicle.";
@@ -145,8 +154,13 @@ export function buildPlannerChecklistDraft({
 
   const notes = [PROVENANCE_NOTE, ""];
 
-  if (evidenceStatus === "not_found" || !statements.length) {
+  // Gated on the STATUS, never on "are there statements to print". Those are
+  // different questions, and conflating them is what let a requirement-only plan
+  // claim nothing was verified.
+  if (evidenceStatus === "not_found") {
     notes.push(NOT_FOUND_NOTICE, "");
+  } else if (!statements.length) {
+    notes.push(REQUIREMENTS_ONLY_NOTICE, "");
   } else {
     notes.push("Verified statements from your documents");
 

@@ -761,3 +761,70 @@ test("no save panel is offered for a run that produced no draft", async () => {
   expect(await screen.findByText("Partly verified")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: SAVE_BUTTON })).not.toBeInTheDocument();
 });
+
+test("building another plan is blocked while a checklist save is in flight", async () => {
+  let releaseSave;
+  const pendingSave = new Promise((resolve) => {
+    releaseSave = () => resolve(savedChecklistResponse);
+  });
+  mockPlanThenSave(pendingSave);
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  // Two plans and one in-flight save is the genuinely confusing case: there
+  // would be no way to tell which plan a late banner belonged to.
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /build repair plan/i })).toBeDisabled();
+  });
+
+  releaseSave();
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: /build repair plan/i })).toBeEnabled();
+  });
+});
+
+test("clearing the plan mid-save still reaches the owner with the saved checklist", async () => {
+  // Clear stays available during a save, so this path is real rather than
+  // theoretical. The run-scoped result is deliberately discarded when the run
+  // changes; the checklist row exists regardless, so the receipt must survive.
+  let releaseSave;
+  const pendingSave = new Promise((resolve) => {
+    releaseSave = () => resolve(savedChecklistResponse);
+  });
+  mockPlanThenSave(pendingSave);
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+  // The plan really is gone -- this is the state that used to swallow the save.
+  expect(screen.queryByRole("button", { name: SAVE_BUTTON })).not.toBeInTheDocument();
+
+  releaseSave();
+
+  // The owner is still told the checklist exists, and can still open it.
+  expect(await screen.findByText("Checklist saved")).toBeInTheDocument();
+  expect(
+    screen.getByText(/no longer on this page\. The plan is gone, but the checklist is not\./)
+  ).toBeInTheDocument();
+
+  const link = screen.getByRole("link", { name: "Open saved checklist" });
+  expect(link).toHaveAttribute("href", "/repair-checklists?checklistId=42#checklist-library");
+});
+
+test("the ordinary save path confirms once, not twice", async () => {
+  mockPlanThenSave();
+
+  const saveButton = await buildPlanWithSavePanel();
+  fireEvent.click(saveButton);
+
+  await screen.findByText("Checklist saved from your repair plan.");
+
+  // The standing receipt is for a plan that is GONE. While the panel is still
+  // reporting this same checklist, showing both would be noise.
+  expect(screen.queryByText("Checklist saved")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: "Open saved checklist" })).toHaveLength(1);
+});

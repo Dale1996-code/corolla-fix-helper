@@ -22,7 +22,9 @@ const { db } = await import("../src/database.js");
 const { createRepairChecklistsRouter, CHECKLIST_DRAFT_EXPIRED_MESSAGE } = await import(
   "../src/routes/repairChecklists.js"
 );
-const { createPlanRunStore } = await import("../src/services/agent/planRunStore.js");
+const { createPlanRunStore, DEFAULT_MAX_RUNS } = await import(
+  "../src/services/agent/planRunStore.js"
+);
 const { runRepairPlannerAgent } = await import("../src/services/agent/repairPlannerAgent.js");
 const { buildPlannerChecklistDraft } = await import(
   "../src/services/agent/plannerChecklistDraft.js"
@@ -316,6 +318,73 @@ test("the request body carries a draft id only: task text, claims, and warnings 
   );
 });
 
+// --- Requirement-only plans --------------------------------------------------
+//
+// The evidence contract counts required_tool / required_part as TECHNICAL
+// claims, so a run that grounds only those is `partial` (or even `verified`) --
+// never `not_found`. The draft used to gate its "nothing was verified" notice on
+// "are there statements to print", which is a different question, and wrote both
+// that notice AND a populated "Verified requirements" section into one permanent
+// record.
+
+test("a requirement-only plan never claims nothing was verified", async () => {
+  const planRuns = createPlanRunStore();
+  const result = await runPlan({ claims: [TOOL_CLAIM, PART_CLAIM], planRuns });
+
+  // Precondition: this really is the shape the bug needed -- a non-not_found
+  // status with no statement claims to print.
+  assert.notEqual(result.evidenceStatus, "not_found");
+  assert.equal(
+    result.artifacts.evidence.verifiedClaims.every((claim) =>
+      ["required_tool", "required_part"].includes(claim.kind)
+    ),
+    true,
+    "only requirement claims were accepted"
+  );
+
+  const app = createTestApp(planRuns);
+  const response = await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId: result.artifacts.checklistDraftId })
+    .expect(201);
+
+  const { notes } = response.body.checklist;
+
+  // The requirements really are listed...
+  assert.match(notes, /Tools: torque wrench/);
+  assert.match(notes, /Parts: brake pads/);
+
+  // ...so the record must not also say nothing could be verified.
+  assert.doesNotMatch(
+    notes,
+    /No statement in this plan could be verified/,
+    "the not_found notice must not fire for a plan that verified its requirements"
+  );
+  assert.match(
+    notes,
+    /The only statements verified for this plan were the tool and part requirements/
+  );
+});
+
+test("the not_found notice still fires for a genuinely ungrounded plan", async () => {
+  const planRuns = createPlanRunStore();
+  const result = await runPlan({ claims: [], planRuns });
+
+  assert.equal(result.evidenceStatus, "not_found");
+
+  const app = createTestApp(planRuns);
+  const response = await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId: result.artifacts.checklistDraftId })
+    .expect(201);
+
+  assert.match(response.body.checklist.notes, /No statement in this plan could be verified/);
+  assert.doesNotMatch(
+    response.body.checklist.notes,
+    /The only statements verified for this plan/
+  );
+});
+
 // --- Transactional creation and idempotency ----------------------------------
 
 test("saving the same draft twice returns the checklist it already became", async () => {
@@ -376,6 +445,135 @@ test("a checklist and all its items are created together or not at all", async (
     0,
     "the item that did insert was rolled back too"
   );
+});
+
+test("re-saving a draft whose checklist was deleted creates a new one", async () => {
+  const planRuns = createPlanRunStore();
+  const result = await runPlan({ planRuns });
+  const app = createTestApp(planRuns);
+  const { checklistDraftId } = result.artifacts;
+
+  const first = await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId })
+    .expect(201);
+
+  // The owner deletes it from the Checklists page.
+  db.prepare("DELETE FROM repair_checklists WHERE id = ?").run(first.body.checklist.id);
+
+  // Saving again must not 200 with a dangling id: the owner asked for a
+  // checklist and there is no longer one.
+  const second = await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId })
+    .expect(201);
+
+  assert.equal(second.body.created, true);
+  assert.notEqual(second.body.checklist.id, first.body.checklist.id);
+  assert.equal(second.body.checklist.items[0].text, "Replace the front brake pads.");
+
+  // And the draft now points at the replacement, so a third save is idempotent
+  // against THAT one rather than creating a third checklist.
+  const third = await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId })
+    .expect(200);
+
+  assert.equal(third.body.checklist.id, second.body.checklist.id);
+});
+
+// --- Store bounds and id minting ---------------------------------------------
+
+test("the draft store is bounded and evicts the oldest drafts", () => {
+  const planRuns = createPlanRunStore();
+  const ids = [];
+
+  for (let index = 0; index < DEFAULT_MAX_RUNS + 3; index += 1) {
+    ids.push(
+      planRuns.saveChecklistDraft({
+        title: `Draft ${index}`,
+        status: "planned",
+        description: "",
+        notes: "",
+        items: [{ text: "Do the thing" }],
+      })
+    );
+  }
+
+  // Three saves past the cap retire exactly the three oldest drafts.
+  assert.equal(planRuns.checklistDraftSize, DEFAULT_MAX_RUNS);
+  assert.equal(planRuns.getChecklistDraft(ids[0]), null, "the oldest draft was retired");
+  assert.equal(planRuns.getChecklistDraft(ids[1]), null);
+  assert.equal(planRuns.getChecklistDraft(ids[2]), null);
+  assert.ok(planRuns.getChecklistDraft(ids[3]), "the fourth draft is the oldest survivor");
+  assert.ok(planRuns.getChecklistDraft(ids[ids.length - 1]), "the newest draft is still saveable");
+});
+
+test("an expired draft that has already been saved cannot be re-saved", async () => {
+  // Eviction must not resurrect anything: the checklist stays, the draft does
+  // not, and a stale tab gets the same rebuild guidance as any expired id.
+  let clock = 1_000;
+  const planRuns = createPlanRunStore({ ttlMs: 100, now: () => clock });
+  const checklistDraftId = planRuns.saveChecklistDraft({
+    title: "Save then expire",
+    status: "planned",
+    description: "",
+    notes: "",
+    items: [{ text: "Do the thing" }],
+  });
+
+  const app = createTestApp(planRuns);
+  await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId })
+    .expect(201);
+
+  clock += 101;
+
+  await request(app)
+    .post("/api/repair-checklists/from-planner")
+    .send({ checklistDraftId })
+    .expect(404);
+
+  assert.equal(countChecklistsTitled("Save then expire"), 1, "the saved checklist survives");
+});
+
+test("a colliding id generator is refused rather than overwriting a live record", () => {
+  // randomUUID makes this unreachable in practice, but `createId` is injectable
+  // and the failure mode matters: a silent Map overwrite would make one draft id
+  // resolve to a DIFFERENT plan's content. Refusing is the safe direction.
+  const planRuns = createPlanRunStore({ createId: () => "always-the-same-id" });
+
+  const draftId = planRuns.saveChecklistDraft({
+    title: "First draft",
+    status: "planned",
+    description: "",
+    notes: "",
+    items: [{ text: "Do the thing" }],
+  });
+
+  assert.throws(
+    () =>
+      planRuns.saveChecklistDraft({
+        title: "Second draft",
+        status: "planned",
+        description: "",
+        notes: "",
+        items: [{ text: "Something else" }],
+      }),
+    /unique/i
+  );
+
+  assert.equal(
+    planRuns.getChecklistDraft(draftId).draft.title,
+    "First draft",
+    "the existing draft was not overwritten"
+  );
+
+  // The run map mints ids the same way.
+  const runStore = createPlanRunStore({ createId: () => "always-the-same-id" });
+  runStore.save({ tasks: [{ id: 1, title: "Replace front brake pads" }] });
+  assert.throws(() => runStore.save({ tasks: [{ id: 1, title: "Wash the car" }] }), /unique/i);
 });
 
 // --- Expiry and validation ---------------------------------------------------

@@ -43,6 +43,11 @@ export const DEFAULT_MAX_RUNS = 20;
 // cannot acknowledge a plan from days ago.
 export const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 
+// How many times a colliding id is regenerated before the store gives up. Five
+// is already unreachable with a real UUID source; the loop exists so a broken
+// injected generator fails loudly instead of overwriting a live record.
+export const MAX_ID_ATTEMPTS = 5;
+
 /**
  * @typedef {{
  *   runId: string,
@@ -111,6 +116,24 @@ export function createPlanRunStore({
     evictExpiredFrom(runs);
   }
 
+  // Never reuse a live key. `randomUUID` makes a collision effectively
+  // impossible, but `createId` is injectable, and the failure mode if one ever
+  // landed is the worst kind: `Map.set` would silently overwrite the earlier
+  // record, so one owner's save or acknowledgment would resolve against a
+  // DIFFERENT plan's stored tasks. Refusing to mint is a loud, harmless failure;
+  // overwriting is a quiet, harmful one.
+  function mintUniqueId(store) {
+    for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
+      const id = createId();
+
+      if (!store.has(id)) {
+        return id;
+      }
+    }
+
+    throw new Error("Could not mint a unique plan run id.");
+  }
+
   return {
     /**
      * Stores the server-owned readiness inputs for a completed run and returns
@@ -121,7 +144,7 @@ export function createPlanRunStore({
       evictExpired();
       makeRoomIn(runs);
 
-      const runId = createId();
+      const runId = mintUniqueId(runs);
 
       runs.set(
         runId,
@@ -157,7 +180,7 @@ export function createPlanRunStore({
       evictExpiredFrom(checklistDrafts);
       makeRoomIn(checklistDrafts);
 
-      const draftId = createId();
+      const draftId = mintUniqueId(checklistDrafts);
 
       checklistDrafts.set(draftId, {
         draftId,

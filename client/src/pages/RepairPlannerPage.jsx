@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
-import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
+import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
 import { buildEntityLink } from "../lib/navigation";
 
 const defaultForm = {
@@ -529,6 +529,42 @@ function SaveAsChecklistPanel({ draft, draftId, saveState, onSave }) {
   );
 }
 
+/**
+ * A standing receipt for a checklist that was saved from a plan no longer on
+ * screen.
+ *
+ * Only rendered when the save panel is not already reporting this same
+ * checklist, so the ordinary path shows one confirmation, not two. The wording
+ * says the plan is gone but the checklist is not — the owner's real question at
+ * that moment is "did my save go through?", and the answer has to be reachable
+ * even though the plan it came from was cleared.
+ */
+function SavedChecklistReceipt({ savedChecklist }) {
+  if (!savedChecklist) {
+    return null;
+  }
+
+  return (
+    <SuccessBanner>
+      <p className="font-semibold">Checklist saved</p>
+      <p className="mt-2">
+        {savedChecklist.title
+          ? `"${savedChecklist.title}" was saved from a repair plan that is no longer on this page.`
+          : "A checklist was saved from a repair plan that is no longer on this page."}{" "}
+        The plan is gone, but the checklist is not.
+      </p>
+      <p className="mt-2">
+        <Link
+          to={buildEntityLink("checklist", savedChecklist.id)}
+          className="font-semibold underline"
+        >
+          Open saved checklist
+        </Link>
+      </p>
+    </SuccessBanner>
+  );
+}
+
 function SourcesPanel({ citations }) {
   if (!citations?.length) {
     return null;
@@ -600,6 +636,15 @@ function parseSseFrame(frame) {
 export function RepairPlannerPage() {
   const [form, setForm] = useState(defaultForm);
   const [run, setRun] = useState(initialRun);
+  // A receipt for the last checklist actually written, kept OUTSIDE the run.
+  //
+  // Everything else about a save is per-run and is dropped when the run is
+  // replaced, which is right for state that describes a plan. But the checklist
+  // is a durable record that exists whether or not the owner is still looking at
+  // the plan it came from: if they hit Clear or built another plan while the
+  // request was in flight, the run-scoped result was discarded and they were
+  // left believing the save had failed while the row sat in the database.
+  const [savedChecklist, setSavedChecklist] = useState(null);
   const runRef = useRef(initialRun);
   const abortRef = useRef(null);
 
@@ -608,6 +653,10 @@ export function RepairPlannerPage() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const isRunning = run.status === "running";
+  // A save in flight blocks the actions that would replace the run underneath
+  // it. The receipt above is the backstop; this is the first line of defense,
+  // and it also keeps the owner from wondering which plan a late banner is for.
+  const isSavingChecklist = run.checklistSave.pending;
 
   function updateRun(updater) {
     runRef.current = updater(runRef.current);
@@ -691,6 +740,13 @@ export function RepairPlannerPage() {
 
   async function handleSubmit(submitEvent) {
     submitEvent.preventDefault();
+
+    // The Build button is disabled while a save is in flight, but Enter inside
+    // any of the single-line fields submits the form regardless, so the guard
+    // has to live here too.
+    if (runRef.current.checklistSave.pending) {
+      return;
+    }
 
     const trimmedBrief = form.brief.trim();
     if (!trimmedBrief) {
@@ -945,6 +1001,11 @@ export function RepairPlannerPage() {
         return;
       }
 
+      // Recorded UNCONDITIONALLY, before the run-scoped write below. The
+      // checklist exists in the database now; whether the owner is still on the
+      // plan that produced it changes nothing about that.
+      setSavedChecklist({ id: checklistId, title: payload.checklist?.title || "" });
+
       updateRun((current) =>
         stillSamePlan(current)
           ? {
@@ -1058,7 +1119,9 @@ export function RepairPlannerPage() {
             <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                disabled={isRunning}
+                // Blocked while a checklist save is in flight: replacing the run
+                // underneath it is what made a successful save vanish.
+                disabled={isRunning || isSavingChecklist}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
               >
                 {isRunning ? "Planning..." : "Build repair plan"}
@@ -1072,6 +1135,11 @@ export function RepairPlannerPage() {
                   Stop
                 </button>
               ) : null}
+              {/* Clear stays available during a save on purpose. Blocking
+                  Build prevents the genuinely confusing case (two plans, one
+                  in-flight save, no way to tell which it belongs to), but Clear
+                  is just the owner saying "I am done with this" -- and the
+                  receipt above means doing so can no longer lose the result. */}
               <button
                 type="button"
                 onClick={handleClear}
@@ -1082,6 +1150,12 @@ export function RepairPlannerPage() {
             </div>
           </form>
         </SectionCard>
+
+        {/* Shown only when the save panel below is not already reporting this
+            same checklist, so the ordinary path confirms once, not twice. */}
+        {savedChecklist && run.checklistSave.checklistId !== savedChecklist.id ? (
+          <SavedChecklistReceipt savedChecklist={savedChecklist} />
+        ) : null}
 
         <StatusBanner status={run.status} message={run.message} />
         <ActivityLog activity={run.activity} statusMessage={run.statusMessage} isRunning={isRunning} />

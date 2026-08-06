@@ -625,4 +625,4 @@ Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire upload
 
 ## Keeping This Document Honest
 
-This reference was written against the route files on 2026-07-02 and last updated 2026-07-25 (shared rate-limit wording). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
+This reference was written against the route files on 2026-07-02 and last updated 2026-08-06 (`POST /api/repair-checklists/from-planner`, and the planner's `checklistDraft` / `checklistDraftId` artifacts). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
