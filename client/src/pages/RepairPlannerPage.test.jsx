@@ -2,6 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { RepairPlannerPage } from "./RepairPlannerPage";
+import {
+  AI_DISCLOSURE_PLANNER,
+  AI_PLANNER_LIMITS,
+  AI_SAFETY_WARNING,
+} from "../components/feedback/AiSafetyNotices";
 
 function streamResponse(events) {
   const encoder = new TextEncoder();
@@ -190,6 +195,83 @@ test("RepairPlannerPage shows a preparation-guidance safety disclaimer with read
   ).toBeInTheDocument();
 });
 
+// --- General AI disclosure and safety warning --------------------------------
+//
+// These are the page-level notices, not the per-plan ones. The planner shipped
+// with neither: the only cautionary text on the page appeared after a run
+// finished, and the strongest of it only when the server happened to flag the
+// plan safety-critical. So an owner could describe a brake job, read a streamed
+// plan, and never be told the output was AI-generated or that it needed checking
+// against the manual.
+
+// Every notice is expected in every state -- the point of the fix is that they
+// do not depend on a run existing, succeeding, or being hazardous.
+function expectGeneralNotices() {
+  expect(screen.getByText(AI_SAFETY_WARNING)).toBeInTheDocument();
+  expect(screen.getByText(AI_PLANNER_LIMITS)).toBeInTheDocument();
+  expect(screen.getByText(AI_DISCLOSURE_PLANNER)).toBeInTheDocument();
+}
+
+test("the AI disclosure and safety warning are on screen before any plan is built", () => {
+  vi.stubGlobal("fetch", vi.fn());
+
+  renderPage();
+
+  expectGeneralNotices();
+
+  // Ahead of the control they warn about, not below the results. Comparing
+  // document positions is what actually pins "before the user acts" -- asserting
+  // presence alone would still pass if the banners were appended at the bottom.
+  const warning = screen.getByText(AI_SAFETY_WARNING);
+  const submit = screen.getByRole("button", { name: "Build repair plan" });
+  expect(warning.compareDocumentPosition(submit)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING
+  );
+});
+
+test("the general notices survive a completed plan, a failed run, and Clear", async () => {
+  const fetchMock = vi.fn(() => streamResponse(completedRun));
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+
+  expect(await screen.findByRole("heading", { name: "Owner checklist" })).toBeInTheDocument();
+  expectGeneralNotices();
+
+  // Not swallowed by the agent activity log -- an owner scanning the run should
+  // find the warning as page furniture, not as one more streamed line item.
+  const activityLog = screen
+    .getByRole("heading", { name: "Agent activity" })
+    .closest("section");
+  expect(within(activityLog).queryByText(AI_SAFETY_WARNING)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  expectGeneralNotices();
+});
+
+test("the general notices are still shown when the run fails", async () => {
+  const fetchMock = vi.fn(() =>
+    streamResponse([
+      { type: "status", message: "Analyzing repair brief..." },
+      { type: "error", message: "The planner could not finish." },
+    ])
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+
+  expect(await screen.findByText("The planner could not finish.")).toBeInTheDocument();
+  expectGeneralNotices();
+});
+
 // --- Safety acknowledgment ---------------------------------------------------
 //
 // The readiness rubric charges 20 points for "Safety-critical work
@@ -278,6 +360,37 @@ test("a safety-critical plan renders an unchecked acknowledgment control it cann
   expect(
     screen.getByRole("region", { name: /safety-critical work: acknowledgment required/i })
   ).toHaveTextContent("Brake work affects stopping safety.");
+});
+
+// The failure mode the general banner could introduce: a page-wide "you were
+// warned" notice reading as the per-plan acknowledgment, so a hazardous plan
+// looks signed off before the owner has ticked anything.
+test("the general safety banner does not acknowledge a safety-critical plan", async () => {
+  mockPlanThenAcknowledgment();
+
+  const checkbox = await buildSafetyCriticalPlan();
+
+  // The general notices are present...
+  expectGeneralNotices();
+
+  // ...and the plan-specific requirement is untouched by them.
+  expect(checkbox).not.toBeChecked();
+  expect(
+    screen.getByRole("region", { name: /safety-critical work: acknowledgment required/i })
+  ).toBeInTheDocument();
+  expect(screen.getByText("Almost ready")).toBeInTheDocument();
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+
+  // The hazard the server flagged is still stated in full, not replaced or
+  // softened by the general wording.
+  expect(screen.getAllByText(/Brake work affects stopping safety\./).length).toBeGreaterThan(0);
+
+  // The two live in different regions: the general banner is page-level, the
+  // acknowledgment belongs to the readiness card.
+  const ackRegion = screen.getByRole("region", {
+    name: /safety-critical work: acknowledgment required/i,
+  });
+  expect(within(ackRegion).queryByText(AI_SAFETY_WARNING)).not.toBeInTheDocument();
 });
 
 test("acknowledging updates readiness and the checklist without regenerating the plan", async () => {

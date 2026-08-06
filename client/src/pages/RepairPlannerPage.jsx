@@ -3,6 +3,11 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
 import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
+import {
+  AI_DISCLOSURE_PLANNER,
+  AI_PLANNER_LIMITS,
+  AiSafetyNotices,
+} from "../components/feedback/AiSafetyNotices";
 import { buildEntityLink } from "../lib/navigation";
 
 const defaultForm = {
@@ -792,6 +797,17 @@ export function RepairPlannerPage() {
       />
 
       <div className="space-y-6">
+        {/* Ahead of the form, and outside every run-dependent panel below, so the
+            same warning is on screen whether the page is idle, streaming, done,
+            or failed -- and is read before the owner acts on any of it. This is
+            the general notice only: the per-plan hazard list and the
+            acknowledgment checkbox live in ReadinessPanel and are unaffected by
+            it. Nothing here acknowledges anything. */}
+        <AiSafetyNotices
+          disclosure={AI_DISCLOSURE_PLANNER}
+          extraWarning={AI_PLANNER_LIMITS}
+        />
+
         <SectionCard title="Describe the repair">
           <form className="space-y-4" onSubmit={handleSubmit}>
             <label className="grid gap-2 text-sm text-slate-700">
