@@ -308,3 +308,56 @@ test("clears a checklist's saved-status banner when a different checklist is sel
   // ...and A's "Changes saved." banner must not carry over to B.
   expect(screen.queryByText("Changes saved.")).not.toBeInTheDocument();
 });
+
+// --- Deep link ---------------------------------------------------------------
+//
+// The Repair Planner's "Open saved checklist" link lands here with
+// `?checklistId=`. Without this the link would drop the owner on the newest
+// checklist, which is usually not the one they just saved.
+
+function renderWithChecklists(checklists, entry) {
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/repair-checklists" && (!options.method || options.method === "GET")) {
+      return jsonResponse({ checklists, total: checklists.length });
+    }
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={[entry]}>
+      <RepairChecklistsPage />
+    </MemoryRouter>
+  );
+}
+
+const NEWEST = {
+  id: 1,
+  title: "Front brake job",
+  status: "planned",
+  description: "",
+  notes: "",
+  createdAt: "2026-05-01T08:00:00.000Z",
+  updatedAt: "2026-05-02T09:00:00.000Z",
+  items: [],
+  itemCount: 0,
+  doneItemCount: 0,
+};
+
+const OLDER = { ...NEWEST, id: 2, title: "Oil change", updatedAt: "2026-05-01T09:00:00.000Z" };
+
+test("?checklistId= selects the checklist it names instead of the newest one", async () => {
+  renderWithChecklists([NEWEST, OLDER], "/repair-checklists?checklistId=2#checklist-library");
+
+  // The named checklist is selected even though it is not first in the list.
+  expect(await screen.findByRole("heading", { name: "Oil change" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Select checklist: Oil change" })
+  ).toHaveAttribute("aria-current", "true");
+});
+
+test("a stale ?checklistId= falls back to the newest checklist rather than an empty pane", async () => {
+  renderWithChecklists([NEWEST, OLDER], "/repair-checklists?checklistId=999");
+
+  expect(await screen.findByRole("heading", { name: "Front brake job" })).toBeInTheDocument();
+});

@@ -125,6 +125,8 @@ Use a fake or sample PDF so the agent has manuals to cite.
 2. Enter a repair brief, skill level, available tools, and available parts.
 3. Click **Build repair plan**.
 4. Submit with an empty brief to confirm the validation message.
+5. On a finished plan, use **Save as repair checklist** — read the preview
+   first, then save and follow **Open saved checklist**.
 
 Check:
 
@@ -138,6 +140,17 @@ Check:
   `Not ready` rather than a confident-looking plan.
 - Readiness, owner checklist, extracted tasks, handoff drafts, and sources cards appear when finished.
 - Source cards open the matching document page.
+- **Save as repair checklist** appears on every finished plan, including a
+  `Not found in your documents` one, and previews the exact title, item list,
+  and notes it will write, plus what it will not copy.
+- Saving keeps you on the Planner, disables the button, and offers **Open saved
+  checklist**; that link lands on Checklists with the new checklist selected.
+- The saved checklist is `Planned`, has one item per extracted task, and its
+  notes carry the verified statements with document and page — no placeholder
+  steps, no gaps, no handoff drafts, no readiness score.
+- Clicking save twice creates exactly one checklist.
+- Rebuild the plan and try saving from the old browser tab after a server
+  restart: the save reports that the plan expired and to build it again.
 - If `OPENAI_API_KEY` is not configured, an AI-not-configured banner appears and nothing crashes.
 - See `docs/repair-planner.md` for the full validation checklist and the live key-backed check.
 

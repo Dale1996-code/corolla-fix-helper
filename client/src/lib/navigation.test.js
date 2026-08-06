@@ -7,6 +7,9 @@ describe("buildEntityLink", () => {
     expect(buildEntityLink("symptom", 7)).toBe("/symptoms?symptomId=7#symptom-library");
     expect(buildEntityLink("procedure", 7)).toBe("/procedures?procedureId=7#procedure-library");
     expect(buildEntityLink("note", 7)).toBe("/notes?noteId=7#note-library");
+    expect(buildEntityLink("checklist", 7)).toBe(
+      "/repair-checklists?checklistId=7#checklist-library"
+    );
   });
 
   test("falls back to the dashboard without an id", () => {

@@ -2,9 +2,11 @@
 
 The Repair Planner turns a rough, free-text repair brief for the 2009 Toyota
 Corolla into an actionable plan: a prioritized narrative, a readiness score, an
-owner checklist, handoff drafts, and follow-up questions when key details are
-missing. It streams its progress (tool calls and model text) to the browser as
-it works.
+owner checklist, and handoff drafts. It streams its progress (tool calls, not
+model text) to the browser as it works; the narrative itself arrives whole in
+the final `done` frame, rendered server-side from verified claims. A brief too
+vague to plan fails outright with `no_canonical_task` rather than prompting the
+owner with follow-up questions.
 
 It is the agent-shaped sibling of the "Ask your documents" feature: where Ask
 answers one question from PDF chunks, the Repair Planner runs a multi-step
@@ -31,7 +33,10 @@ instead of pulling in a separate agents framework:
 | `server/src/services/agent/openAiResponsesClient.js` | Streaming Responses API client (`stream: true`, SSE parsing) — the only key-dependent piece |
 | `server/src/services/agent/repairPlannerAgent.js` | The tool-calling loop; emits ordered events |
 | `server/src/services/agent/tracing.js` | Lightweight span tracer (observability hook) |
+| `server/src/services/agent/planRunStore.js` | In-memory, bounded, TTL'd store for readiness inputs (`planRunId`) and checklist drafts (`checklistDraftId`) |
+| `server/src/services/agent/plannerChecklistDraft.js` | Builds the checklist a completed run can be saved as |
 | `server/src/routes/repairPlan.js` | `POST /api/repair-plan` Server-Sent-Events route |
+| `server/src/routes/repairChecklists.js` | Checklist CRUD **and** `POST /api/repair-checklists/from-planner` |
 | `client/src/pages/RepairPlannerPage.jsx` | Frontend form + live stream consumer + result cards |
 
 ## Tools
@@ -87,6 +92,51 @@ reach Ready. The owner now supplies it **after** reading the plan:
   acknowledging does not mean the repair is safe, correct, or suited to the
   owner's skill. The checked state shown is the one the server scored, never a
   local guess.
+
+### Saving a plan as a repair checklist
+
+A finished plan is a good starting point for a checklist the owner actually
+works from, so **every** completed run — `verified`, `partial`, and `not_found`
+alike — can be saved as one. The mechanism is the same trust boundary as the
+acknowledgment above, for the same reason: a saved checklist is a **durable
+SQLite record**, and if its text arrived from the browser then a tampered
+request could write an invented torque figure into permanent storage wearing the
+planner's authority.
+
+- When a run completes, `plannerChecklistDraft.js` builds the checklist from
+  validated output only and `planRunStore.js` holds it under a
+  `checklistDraftId`. The browser gets `artifacts.checklistDraft` to **preview**
+  and `artifacts.checklistDraftId` to save it by.
+- `checklistDraftId` is **separate from `planRunId`**. They authorize different
+  things and are minted under different conditions: only a safety-critical plan
+  has anything to acknowledge, while every completed plan is saveable. One id
+  doing both jobs would leave non-safety-critical plans unsaveable.
+- `POST /api/repair-checklists/from-planner` takes `{ checklistDraftId }` and
+  nothing else. Task text, claims, warnings, and evidence in the body are
+  ignored.
+- **In the draft:** a `planned` checklist titled from the canonical tasks, one
+  normal item per high-level task, and notes carrying the accepted claims with
+  their document and page, the verified tool/part requirements, and the safety
+  warnings for those tasks. A `not_found` run saves the tasks and warnings plus
+  an explicit notice that nothing was verified — an honest empty result is still
+  worth keeping.
+- **Never in the draft:** model prose, the run's gaps, the placeholder
+  owner-checklist steps, the handoff drafts, the readiness score or
+  acknowledgment state, and every rejected claim. `plannerChecklistSave.test.js`
+  asserts each of these against the database, not against the draft object.
+- The checklist and all its items are written in **one transaction**: a plan is
+  never saved as a titled checklist with half its tasks missing, which would
+  look finished while silently dropping work.
+- Saving the same draft twice returns the checklist it already became rather
+  than creating a duplicate; the page also disables the button while the request
+  is in flight and after it succeeds.
+- Drafts expire with the run store (bounded, six hours, never SQLite). An
+  unknown or expired id is a 404 whose message tells the owner to build the plan
+  again. The saved checklist itself is permanent and unaffected.
+- The result is an **ordinary** checklist — editable, deletable, with no stored
+  link back to the plan. There is no migration and no planner-to-checklist
+  relationship. The saved statements are reference notes, not check-off repair
+  instructions.
 
 ### Canonical tasks
 
@@ -156,7 +206,7 @@ one `data: <json>\n\n` frame. Event types:
 | `trace` | A finished tracing span (observability) |
 | `ai_not_configured` | No `OPENAI_API_KEY` is set; the run stops gracefully |
 | `error` | The run failed (`code`, `reason`, fixed `message`) |
-| `done` | Final event with `status`, `evidenceStatus`, the server-rendered `text`, and assembled `artifacts` |
+| `done` | Final event with `status`, `evidenceStatus`, the server-rendered `text`, and assembled `artifacts` (including `checklistDraft` / `checklistDraftId`, and `planRunId` when the plan is safety-critical) |
 
 `text_delta` remains in the documented protocol but **the planner no longer
 emits it**. Model prose is discarded, including prose emitted before a tool
@@ -236,7 +286,8 @@ npm --prefix client test     # the page streams activity, text, and artifacts
 ```
 
 The server suite includes an end-to-end test that POSTs to `/api/repair-plan`
-and asserts the stream contains at least one tool event and one model text delta.
+and asserts the stream contains at least one tool event, **zero** `text_delta`
+frames, and a `done` frame carrying the server-rendered plan text.
 
 ### Live end-to-end check (requires a real key + network egress)
 
@@ -254,9 +305,11 @@ curl -N -X POST http://localhost:4000/api/repair-plan \
   -d '{"brief":"Front brakes squeak when stopping. Replace the pads this weekend.","skillLevel":"beginner","availableTools":"socket set, jack stands"}'
 ```
 
-Confirm the stream emits at least one `tool_call` and one `text_delta` frame and
-ends with a `done` frame whose `artifacts` include citations. If you instead see
-an `ai_not_configured` frame, the key is not reaching the server process; if the
+Confirm the stream emits at least one `tool_call` frame and ends with a `done`
+frame whose `artifacts` include citations. There will be **no** `text_delta`
+frames: model prose is discarded, and the plan arrives whole in `done.text`,
+rendered by the server from verified claims. If you instead see an
+`ai_not_configured` frame, the key is not reaching the server process; if the
 stream errors, the server cannot reach the OpenAI API (check network egress).
 
 ## Validation checklist
@@ -265,7 +318,10 @@ Agent behavior:
 
 - [ ] A detailed brief (symptom + tools + parts) yields a `ready` or
       `almost_ready` readiness score with no false gaps.
-- [ ] A sparse brief produces follow-up questions in the narrative.
+- [ ] A brief too vague to name a part or symptom fails with `no_canonical_task`
+      and its fixed message, rather than planning a placeholder task. (The plan
+      never asks follow-up questions: its text is rendered from verified claims,
+      so a thin brief surfaces as gaps or as this failure.)
 - [ ] A task above the stated skill level is assigned to a professional shop and
       flagged in the readiness gaps.
 - [ ] Safety-critical work (brakes, fuel, electrical, lifting, cooling) surfaces
@@ -274,10 +330,18 @@ Agent behavior:
 Frontend flow:
 
 - [ ] The agent activity log shows tool calls and results as they stream.
-- [ ] The plan narrative renders progressively (not only at the end).
+- [ ] The plan appears whole when the run finishes. It does **not** render
+      progressively — model prose is discarded, so there is nothing to stream
+      until `done` carries the server-rendered text.
 - [ ] Readiness, owner checklist, extracted tasks, handoff drafts, and sources
       cards all appear after `done`.
 - [ ] Source cards link to the correct document page.
+- [ ] "Save as repair checklist" previews the exact title, items, and notes, and
+      lists what is not copied.
+- [ ] Saving stays on the Planner page, disables the button, and shows a working
+      "Open saved checklist" link; the saved checklist has one item per task and
+      no placeholder steps.
+- [ ] Clicking save twice creates exactly one checklist.
 - [ ] With no key, the AI-not-configured banner appears and nothing crashes.
 
 Tool outputs:
