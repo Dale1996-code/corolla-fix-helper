@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { RepairPlannerPage } from "./RepairPlannerPage";
@@ -1071,4 +1071,110 @@ test("retrying after a failure can succeed and clears the error", async () => {
   fireEvent.click(button);
   expect(await screen.findByText("Copied to clipboard")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+// --- Out-of-order copy completions -------------------------------------------
+//
+// `writeText` is async and two clicks can be in flight at once, with no
+// guarantee they settle in the order they were made. An unguarded handler let a
+// slow FIRST request resolve last and repaint the card the owner clicked first
+// as the copied one -- while the clipboard actually held the second draft. The
+// feedback would then be describing something that is not on the clipboard.
+
+/**
+ * A clipboard whose writes never settle on their own.
+ *
+ * Each pending write is held by the text it was called with, so a test can
+ * settle them in whatever order it likes. Settling runs inside `act` so the
+ * promise continuation and the React update it triggers are both flushed before
+ * the assertion that follows.
+ */
+function controllableClipboard() {
+  const pending = new Map();
+
+  const writeText = vi.fn(
+    (text) => new Promise((resolve, reject) => pending.set(text, { resolve, reject }))
+  );
+
+  return {
+    writeText,
+    async settle(text, mode = "resolve") {
+      const controls = pending.get(text);
+
+      if (!controls) {
+        throw new Error(`No pending clipboard write for: ${text}`);
+      }
+
+      await act(async () => {
+        if (mode === "resolve") {
+          controls.resolve();
+        } else {
+          controls.reject(new Error("denied"));
+        }
+      });
+    },
+  };
+}
+
+async function startTwoOverlappingCopies(clipboard) {
+  mockPlanWithClipboard(clipboard.writeText);
+  await buildPlanWithHandoffDrafts();
+
+  // Copy A, then Copy B before A has settled.
+  fireEvent.click(screen.getByRole("button", { name: "Copy Parts shopping list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Copy Mechanic handoff" }));
+
+  expect(clipboard.writeText).toHaveBeenCalledTimes(2);
+  expect(clipboard.writeText).toHaveBeenNthCalledWith(1, HANDOFF.partsShoppingList);
+  expect(clipboard.writeText).toHaveBeenNthCalledWith(2, HANDOFF.mechanicHandoff);
+}
+
+test("a slower earlier copy cannot overwrite a newer copy's result", async () => {
+  const clipboard = controllableClipboard();
+  await startTwoOverlappingCopies(clipboard);
+
+  // B settles first and is the newest attempt, so it reports.
+  await clipboard.settle(HANDOFF.mechanicHandoff);
+  expect(screen.getByText("Mechanic handoff copied to clipboard")).toBeInTheDocument();
+
+  // A settles afterwards. It is stale, and the clipboard holds B's text, so its
+  // completion must change nothing.
+  await clipboard.settle(HANDOFF.partsShoppingList);
+
+  expect(screen.getByText("Mechanic handoff copied to clipboard")).toBeInTheDocument();
+  expect(
+    screen.queryByText("Parts shopping list copied to clipboard")
+  ).not.toBeInTheDocument();
+  expect(screen.getAllByText("Copied to clipboard")).toHaveLength(1);
+});
+
+test("a late failure from an abandoned copy cannot replace the newest result", async () => {
+  const clipboard = controllableClipboard();
+  await startTwoOverlappingCopies(clipboard);
+
+  await clipboard.settle(HANDOFF.mechanicHandoff);
+  expect(screen.getByText("Mechanic handoff copied to clipboard")).toBeInTheDocument();
+
+  // The abandoned attempt fails late. A stale error is as wrong as a stale
+  // success: B really is on the clipboard.
+  await clipboard.settle(HANDOFF.partsShoppingList, "reject");
+
+  expect(screen.getByText("Mechanic handoff copied to clipboard")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("a late success from an abandoned copy cannot mask the newest copy's failure", async () => {
+  const clipboard = controllableClipboard();
+  await startTwoOverlappingCopies(clipboard);
+
+  // The mirror case: the newest attempt fails, and the stale one then succeeds.
+  // Reporting that success would tell the owner a draft is on their clipboard
+  // when the copy they actually asked for was refused.
+  await clipboard.settle(HANDOFF.mechanicHandoff, "reject");
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Could not copy/);
+
+  await clipboard.settle(HANDOFF.partsShoppingList);
+
+  expect(screen.getByRole("alert")).toHaveTextContent(/Could not copy/);
+  expect(screen.queryByText("Copied to clipboard")).not.toBeInTheDocument();
 });

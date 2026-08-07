@@ -437,6 +437,13 @@ function HandoffPanel({ handoffNotes }) {
   // on a card the owner did not just click is a lie about what is on their
   // clipboard.
   const [copyState, setCopyState] = useState({ label: "", status: "" });
+  // Which copy attempt is the newest. `writeText` is async, so two clicks can be
+  // in flight at once and there is no guarantee they settle in the order they
+  // were made -- a slow first request resolving last would otherwise repaint the
+  // card the owner clicked FIRST as the copied one, while the clipboard actually
+  // holds the second draft. A counter is enough: only the newest attempt may
+  // report, and every earlier one is discarded on arrival.
+  const latestCopyRequestRef = useRef(0);
 
   if (!handoffNotes) {
     return null;
@@ -454,6 +461,15 @@ function HandoffPanel({ handoffNotes }) {
   // reformatted on the way out: what is copied is exactly the server-built text
   // the owner can see.
   async function copyDraft(block) {
+    // Claim this attempt as the newest one. Anything already in flight is now
+    // stale and may no longer write feedback, whether it succeeds or fails: a
+    // late error from an abandoned attempt would be just as wrong as a late
+    // success, since neither describes what is on the clipboard now.
+    const requestId = latestCopyRequestRef.current + 1;
+    latestCopyRequestRef.current = requestId;
+
+    const isNewestAttempt = () => latestCopyRequestRef.current === requestId;
+
     // Feature-detect rather than assume. The Clipboard API is unavailable over
     // plain HTTP on some browsers, which is a real configuration for this app
     // when it is reached from a phone over the LAN.
@@ -464,11 +480,16 @@ function HandoffPanel({ handoffNotes }) {
 
     try {
       await navigator.clipboard.writeText(block.value);
-      setCopyState({ label: block.label, status: "copied" });
+
+      if (isNewestAttempt()) {
+        setCopyState({ label: block.label, status: "copied" });
+      }
     } catch {
       // A rejected permission must never read as success — the owner would
       // paste whatever was on the clipboard before.
-      setCopyState({ label: block.label, status: "failed" });
+      if (isNewestAttempt()) {
+        setCopyState({ label: block.label, status: "failed" });
+      }
     }
   }
 
