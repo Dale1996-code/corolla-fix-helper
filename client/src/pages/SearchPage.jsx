@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
 import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
+import {
+  AI_DISCLOSURE_ASK,
+  AiSafetyNotices,
+} from "../components/feedback/AiSafetyNotices";
 import { SelectField, TextField } from "../components/forms/FormFields";
 import { attachmentFileUrl, fetchAllImageAttachments } from "../lib/apiClient";
 import { labelize } from "../lib/labelize";
@@ -1045,14 +1049,9 @@ function AskDocumentsSection() {
 
   return (
     <SectionCard title="Ask your documents">
-      <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-        Verify torque specs and safety steps against the manual before doing repair work.
-      </p>
-
-      <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-        Your question and relevant excerpts from your uploaded PDFs are sent to
-        OpenAI to generate an answer. Photos you attach are also included.
-      </p>
+      {/* Same component the Repair Planner uses, so the two AI features cannot
+          drift into differently-worded versions of the same warning. */}
+      <AiSafetyNotices disclosure={AI_DISCLOSURE_ASK} />
 
       <form className="space-y-4" onSubmit={handleSubmit}>
         <label className="grid gap-2 text-sm text-slate-700">
