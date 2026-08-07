@@ -23,7 +23,7 @@ import {
 } from "./askEvidenceContract.js";
 
 export const AI_NOT_CONFIGURED_MESSAGE =
-  "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.";
+  "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask AI.";
 export const NOT_FOUND_MESSAGE = "not in documents";
 export const EVIDENCE_UNAVAILABLE_MESSAGE =
   "The AI reply could not be checked against your documents, so it was not shown. Please try again.";

@@ -51,8 +51,11 @@ const quickActions = [
     to: "/documents#document-library",
   },
   {
-    label: "Open Search",
-    description: "Search documents, symptoms, procedures, and notes from one page.",
+    // Named for the destination, which the sidebar and the page heading both
+    // call "Ask AI". It was "Open Search", a name that page no longer uses.
+    label: "Open Ask AI",
+    description:
+      "Ask a question about your PDFs, or search documents, symptoms, procedures, and notes.",
     to: "/search",
   },
   {

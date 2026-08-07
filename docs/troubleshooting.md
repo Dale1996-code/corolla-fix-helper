@@ -105,7 +105,7 @@ Without the volume, data can disappear when the container is replaced.
 
 ## Ask Your Documents Says AI Is Not Configured
 
-The Ask panel needs `OPENAI_API_KEY` in the server environment before it can generate OpenAI answers.
+Ask AI needs `OPENAI_API_KEY` in the server environment before it can generate OpenAI answers. (The Search sections on the same page do not — they never call a model.)
 
 If you see an AI-not-configured message:
 

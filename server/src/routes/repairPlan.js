@@ -127,7 +127,7 @@ export function createRepairPlanRouter({
           type: "error",
           ...(error?.code ? { code: error.code } : {}),
           ...(error?.reason ? { reason: error.reason } : {}),
-          message: error.message || "The repair planner failed.",
+          message: error.message || "The Repair Planner failed.",
         });
       }
     } finally {

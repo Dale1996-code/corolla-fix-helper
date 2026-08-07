@@ -809,7 +809,7 @@ test("a successful save reports it and offers a link to the saved checklist", as
   const link = screen.getByRole("link", { name: "Open saved checklist" });
   expect(link).toHaveAttribute("href", "/repair-checklists?checklistId=42#checklist-library");
 
-  // The owner stays on the Planner: the plan is still on screen.
+  // The owner stays on Repair Planner: the plan is still on screen.
   expect(screen.getByRole("heading", { name: "Launch readiness" })).toBeInTheDocument();
 });
 

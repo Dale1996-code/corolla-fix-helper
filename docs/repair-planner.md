@@ -8,7 +8,7 @@ the final `done` frame, rendered server-side from verified claims. A brief too
 vague to plan fails outright with `no_canonical_task` rather than prompting the
 owner with follow-up questions.
 
-It is the agent-shaped sibling of the "Ask your documents" feature: where Ask
+It is the agent-shaped sibling of Ask AI: where Ask AI
 answers one question from PDF chunks, the Repair Planner runs a multi-step
 tool-calling loop and assembles structured artifacts.
 
@@ -338,7 +338,7 @@ Frontend flow:
 - [ ] Source cards link to the correct document page.
 - [ ] "Save as repair checklist" previews the exact title, items, and notes, and
       lists what is not copied.
-- [ ] Saving stays on the Planner page, disables the button, and shows a working
+- [ ] Saving stays on the Repair Planner page, disables the button, and shows a working
       "Open saved checklist" link; the saved checklist has one item per task and
       no placeholder steps.
 - [ ] Clicking save twice creates exactly one checklist.

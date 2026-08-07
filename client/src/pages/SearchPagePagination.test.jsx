@@ -129,7 +129,7 @@ function renderSearchPage() {
 }
 
 async function findDocumentsSection() {
-  const heading = await screen.findByRole("heading", { name: "Documents" });
+  const heading = await screen.findByRole("heading", { name: "Search documents" });
   return heading.closest("section");
 }
 
@@ -353,12 +353,14 @@ test("Symptoms, Procedures, and Notes stay present below the paged Documents sec
   const documentsSection = await findDocumentsSection();
   await waitFor(() => expect(documentCards(documentsSection).length).toBe(25));
 
-  for (const name of ["Symptoms", "Procedures", "Notes"]) {
+  for (const name of ["Search symptoms", "Search procedures", "Search notes"]) {
     expect(screen.getByRole("heading", { name })).toBeInTheDocument();
   }
 
   // The lower sections keep their own results and their unpaged wording.
-  const symptomsSection = screen.getByRole("heading", { name: "Symptoms" }).closest("section");
+  const symptomsSection = screen
+    .getByRole("heading", { name: "Search symptoms" })
+    .closest("section");
   expect(within(symptomsSection).getByText("Idle flare on cold start")).toBeInTheDocument();
   expect(
     within(symptomsSection).getByText("Showing all 1 symptom in your library.")
@@ -366,7 +368,7 @@ test("Symptoms, Procedures, and Notes stay present below the paged Documents sec
 
   // Notes came back empty and unsearched: an idle empty message, not a
   // "nothing matched your search" message.
-  const notesSection = screen.getByRole("heading", { name: "Notes" }).closest("section");
+  const notesSection = screen.getByRole("heading", { name: "Search notes" }).closest("section");
   expect(within(notesSection).getByText("No notes saved yet.")).toBeInTheDocument();
 });
 

@@ -11,13 +11,14 @@ import { RepairChecklistsPage } from "./pages/RepairChecklistsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { navigationItems } from "./lib/navigation";
+import { PRODUCT_NAME } from "./lib/pageTitle";
 
 function MobileNav() {
   return (
     <header className="border-b border-slate-300 bg-white/90 px-4 py-4 lg:hidden">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
-          Corolla Fix Helper
+          {PRODUCT_NAME}
         </p>
         <span className="font-display text-sm font-bold tracking-tight text-sky-900">
           DaleTech

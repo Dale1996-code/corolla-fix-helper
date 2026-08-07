@@ -431,7 +431,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
       return failRun(error.code, error.reason);
     }
 
-    emit({ type: "error", message: error.message || "The repair planner failed." });
+    emit({ type: "error", message: error.message || "The Repair Planner failed." });
     return { status: "error", text: "", artifacts };
   }
 }

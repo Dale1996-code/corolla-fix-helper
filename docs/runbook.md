@@ -71,7 +71,7 @@ curl.exe http://localhost:4000/api/dashboard
 # expect: JSON with vehicle, summary counts, recent activity
 ```
 
-Is the frontend up (dev mode)? Open `http://localhost:5173` — the sidebar should list Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Settings.
+Is the frontend up (dev mode)? Open `http://localhost:5173` — the sidebar should list Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Repair Checklists, Settings.
 
 Which database/uploads is the app actually using? Open **Settings → runtime info** in the UI, or:
 
@@ -80,7 +80,7 @@ curl.exe http://localhost:4000/api/settings
 # runtime.databaseFile and runtime.uploadsDir show the live paths
 ```
 
-Are the AI features configured? Ask something in the Ask AI page's Ask panel — `"status":"ai_not_configured"` in the response means no key reached the server process.
+Are the AI features configured? Ask something in the Ask AI page's "Ask a question" panel — `"status":"ai_not_configured"` in the response means no key reached the server process.
 
 Full production-style check in one command (boots the built app on throwaway data, verifies the frontend and core API routes, never touches real data):
 

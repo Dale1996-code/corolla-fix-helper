@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { navigationItems } from "../lib/navigation";
+import { PRODUCT_NAME } from "../lib/pageTitle";
 
 export function Sidebar() {
   return (
@@ -7,21 +8,27 @@ export function Sidebar() {
       <div className="mb-8 border-b border-white/10 pb-6">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
-            Corolla Fix Helper
+            {PRODUCT_NAME}
           </p>
           <span className="font-display text-sm font-bold tracking-tight text-white">
             DaleTech
           </span>
         </div>
+        {/* A descriptor, deliberately not a second product name. This line used
+            to read "Local Repair Helper", which put a competing name in the
+            largest type on the page one line under the real one. */}
         <p className="mt-2 font-display text-[2rem] font-bold leading-none text-white">
-          Local Repair Helper
+          Local repair workspace
         </p>
         <p className="mt-3 text-sm leading-6 text-slate-300">
           Documents, symptoms, procedures, and notes for your 2009 Toyota Corolla LE 1.8L.
         </p>
       </div>
 
-      <nav className="space-y-1.5">
+      {/* Named for parity with the mobile header's nav. Only one of the two is
+          ever in the accessibility tree -- the other is display:none at that
+          breakpoint -- so the shared name is not a duplicate landmark. */}
+      <nav className="space-y-1.5" aria-label="Primary navigation">
         {navigationItems.map((item) => (
           <NavLink
             key={item.to}

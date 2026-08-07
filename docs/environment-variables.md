@@ -70,7 +70,7 @@ What each one means:
 - `DATABASE_FILE` is the SQLite database file path.
 - `UPLOADS_DIR` is where uploaded PDFs are stored.
 - `MAX_UPLOAD_SIZE_MB` is the largest PDF upload size in megabytes.
-- `OPENAI_API_KEY` is the OpenAI API key used by the "Ask your documents" feature. Settings → **AI** reports only whether it is set; the key itself is never sent to the browser.
+- `OPENAI_API_KEY` is the OpenAI API key used by the Ask AI feature. Settings → **AI** reports only whether it is set; the key itself is never sent to the browser.
 - `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is the pinned snapshot `gpt-5.5-2026-04-23`.
 - `OPENAI_VISION_MODEL` is the OpenAI model used only when Ask includes one already-saved image attachment. Leave it blank to reuse `OPENAI_ANSWER_MODEL`.
 - `AI_DAILY_CALL_LIMIT` is a coarse daily ceiling on OpenAI Responses API calls, as accidental-spend insurance. The default is `500`; `0` disables the ceiling. The daily counter behind it is what Settings → **AI** shows as "AI calls today": it counts individual **provider requests** (one Ask can send a rewrite, a rerank, and an answer; a Repair Planner run sends one per agent turn), not questions asked. Embedding requests are excluded, and a call the ceiling refuses is not counted. Counting continues even when the ceiling is disabled. The count resets at **local** midnight and when the server restarts, because the counter is held in memory rather than in SQLite.

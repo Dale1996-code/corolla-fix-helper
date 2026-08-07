@@ -10,8 +10,8 @@ The current app supports:
 - Local uploaded PDF storage
 - Dashboard
 - Documents, including PDF upload, metadata editing, favorites, document delete cleanup, PDF open links, and single-document extraction re-run
-- Search across documents, symptoms, procedures, and notes using separate Search page sections
-- "Ask your documents" Q&A using uploaded PDF chunks, hybrid keyword+embedding retrieval, OpenAI answer generation, and citations
+- Search across documents, symptoms, procedures, and notes using separate keyword-search sections on the Ask AI page (`/search`)
+- Ask AI: grounded Q&A using uploaded PDF chunks, hybrid keyword+embedding retrieval, OpenAI answer generation, and citations
 - Repair Planner, a document-grounded streaming agent that turns a repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts (`POST /api/repair-plan`, Server-Sent Events)
 - Repair Checklists v1 (shipped July 5, 2026): standalone local job checklists at `/repair-checklists` and `/api/repair-checklists`, with statuses (`planned`, `in_progress`, `blocked`, `done`), ordered check-off items, metadata, notes, and item reordering. V1 does not link checklists to symptoms, procedures, notes, documents, or image attachments.
 - Symptoms linked to documents
@@ -65,7 +65,7 @@ RAG means retrieval-augmented generation: the app retrieves matching document te
 
 The first document Q&A version is now partially implemented:
 
-- The Search page has an "Ask your documents" panel.
+- The Ask AI page (`/search`) has an "Ask a question" panel above the keyword-search sections.
 - Uploaded and re-extracted PDFs are split into `document_chunks`.
 - `POST /api/ask` accepts a question and returns an answer status, answer text, and citations.
 - Ask can optionally include one already-saved image attachment by `attachmentId` (Vision Ask) so the model can see a photo of the symptom or part. Retrieval still runs on the text question only, images never enter `document_chunks`, documents stay PDF-only, and every spec, torque value, capacity, tool, step, and warning still comes only from retrieved PDF chunks. The vision request uses `OPENAI_VISION_MODEL`, which defaults to the answer model.
