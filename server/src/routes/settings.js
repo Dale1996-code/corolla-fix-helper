@@ -10,6 +10,7 @@ import {
   getDocumentDefaults,
   updateDocumentDefaults,
 } from "../services/appSettingsService.js";
+import { getAiUsageSnapshot, AI_USAGE_DAY_BOUNDARY } from "../services/aiUsageBudget.js";
 import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import { getVehicle } from "../services/vehicleService.js";
@@ -75,6 +76,43 @@ function getBackupExportSettings() {
     path: "Download from Settings",
     message:
       "Use Export backup to download one .tar.gz file containing your SQLite database and uploaded PDFs.",
+    // Restore is a CLI operation (server/src/scripts/restoreBackup.js). The
+    // command lives here rather than as client-side text so the UI cannot drift
+    // from the script that actually exists.
+    restore: {
+      supported: true,
+      method: "cli",
+      command: 'npm run restore -- "/path/to/corolla-fix-helper-backup-....tar.gz"',
+      documentation: "docs/backup-restore.md",
+    },
+  };
+}
+
+/**
+ * Safe, narrowly-scoped AI status for the Settings page.
+ *
+ * Only a boolean is derived from OPENAI_API_KEY — never the key, its length, or
+ * any prefix of it. `model` is the server's effective answer model so the
+ * browser never has to guess or hardcode it, and `callsToday` is read from the
+ * same server-owned counter the daily spend ceiling enforces.
+ */
+export function getAiSettings() {
+  const { callsToday } = getAiUsageSnapshot();
+
+  return {
+    apiKeyConfigured: Boolean(config.openAiApiKey),
+    model: config.openAiAnswerModel,
+    callsToday,
+    // One user request can make several provider requests (Ask can rewrite the
+    // question, rerank, then answer; a planner run streams one turn per agent
+    // step), so label what is actually counted instead of implying it is a
+    // count of user actions.
+    countingBasis: "provider requests",
+    dayBoundary: AI_USAGE_DAY_BOUNDARY,
+    // 0 means the ceiling is disabled; the count is still tracked.
+    dailyCallLimit: config.openAiDailyCallLimit,
+    // The counter lives in server memory, so a restart zeroes it.
+    countPersistsAcrossRestart: false,
   };
 }
 
@@ -229,6 +267,7 @@ settingsRouter.get("/", (_request, response) => {
       runtime: getRuntimeSettings(),
       documentDefaults: getDocumentDefaults(),
       backupExport: getBackupExportSettings(),
+      ai: getAiSettings(),
     });
   } catch (error) {
     response.status(500).json({

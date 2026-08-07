@@ -83,10 +83,16 @@ async function runChecks(baseUrl, { frontendBuilt }) {
     assert.ok(Array.isArray(body.documents), "expected documents array");
   });
 
-  await check("GET /api/settings returns the vehicle profile", async () => {
+  await check("GET /api/settings returns the vehicle profile and safe AI status", async () => {
     const { status, body } = await requestJson(baseUrl, "/api/settings");
     assert.equal(status, 200);
     assert.equal(typeof body.vehicle.make, "string");
+    // The Settings AI card reads these. The key itself must never be part of
+    // the payload — only whether one is configured.
+    assert.equal(typeof body.ai.apiKeyConfigured, "boolean");
+    assert.equal(typeof body.ai.model, "string");
+    assert.equal(typeof body.ai.callsToday, "number");
+    assert.ok(!JSON.stringify(body).includes("sk-"), "settings payload must not carry an API key");
   });
 
   await check("GET /api/search/documents responds", async () => {

@@ -21,7 +21,8 @@ Check:
 2. Change one vehicle value, such as trim or engine.
 3. Save the vehicle profile.
 4. Save a simple document default, such as a common system name.
-5. Click **Export backup (.tar.gz)**.
+5. Read the **AI** card, then ask one question on Ask AI and click **Refresh** on it.
+6. Click **Export backup (.tar.gz)** and read the restore instructions under it.
 
 Check:
 
@@ -29,6 +30,9 @@ Check:
 - Runtime values are shown as read-only.
 - Backup export downloads a `.tar.gz` file.
 - No secret values appear in the browser.
+- The AI card shows **Configured** / **Not configured**, the model name, and "AI calls today". The API key itself never appears — check the Network tab's `/api/settings` response too.
+- "AI calls today" goes up after an Ask (by more than one if the rewrite and reranker ran) and does not move when you only click **Refresh**.
+- The restore instructions show `npm run restore -- "..."`, **Copy command** copies it, and the command block scrolls sideways instead of stretching the page at phone width.
 
 ## 3. Documents
 
