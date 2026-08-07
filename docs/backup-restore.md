@@ -37,6 +37,12 @@ folder, etc.). Use sample or fake PDFs before sharing a backup.
 
 ## Restore a backup
 
+Restore is **CLI-only**. There is no restore button in the app, and adding one
+is not planned: restoring replaces the live database while the server holds it
+open, so it has to happen with the server stopped. Settings shows these same
+instructions next to the export button so the two halves are discoverable
+together.
+
 > **Stop the server first** (or restart it afterward). The running app keeps a
 > live SQLite connection open on the database file, and restore replaces that
 > file on disk.
@@ -46,6 +52,15 @@ Run the restore CLI with the path to a backup archive:
 ```bash
 npm run restore -- "/path/to/corolla-fix-helper-backup-2026-06-15T....tar.gz"
 ```
+
+Run it from the project root (that is where the `restore` script lives). The
+path argument may be absolute or relative to the folder you run it from — it is
+resolved with `path.resolve`, so the archive does not need to sit anywhere in
+particular. The command takes exactly one argument and **starts immediately;
+there is no confirmation prompt**, and a successful restore replaces the
+documents, symptoms, procedures, notes, and uploaded files currently in the app
+with the ones in the archive. You do not need to take a safety backup by hand —
+step 3 below does it for you.
 
 Restore targets the same `DATABASE_FILE` / `UPLOADS_DIR` the app uses, so set
 those environment variables the same way you do for the server if you have

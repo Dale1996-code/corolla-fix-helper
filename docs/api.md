@@ -603,11 +603,40 @@ curl.exe -X POST http://localhost:4000/api/attachments `
   "vehicle": { "id": 1, "year": 2009, "make": "Toyota", "model": "Corolla", "trim": "LE", "engine": "1.8L" },
   "runtime": { "databaseFile": "...", "uploadsDir": "...", "maxUploadSizeMb": 20, "port": 4000, "clientPort": 5173, "pathsEditable": false },
   "documentDefaults": { "commonSystems": [...], "documentTypes": [...] },
-  "backupExport": { "supported": true, ... }
+  "backupExport": {
+    "supported": true,
+    "message": "...",
+    "restore": {
+      "supported": true,
+      "method": "cli",
+      "command": "npm run restore -- \"/path/to/corolla-fix-helper-backup-....tar.gz\"",
+      "documentation": "docs/backup-restore.md"
+    }
+  },
+  "ai": {
+    "apiKeyConfigured": true,
+    "model": "gpt-5.5-2026-04-23",
+    "callsToday": 4,
+    "countingBasis": "provider requests",
+    "dayBoundary": "local",
+    "dailyCallLimit": 500,
+    "countPersistsAcrossRestart": false
+  }
 }
 ```
 
 `runtime` is the fastest way to check which database/uploads paths the live server is actually using.
+
+`ai` is the safe status block behind the Settings page's **AI** card. Read it carefully before relying on it:
+
+- `apiKeyConfigured` is `Boolean(OPENAI_API_KEY)` and nothing else. **The key, its length, and any prefix of it are never sent.** Do not infer key status from a failed AI request — use this field.
+- `model` is `config.openAiAnswerModel`, the effective model for generated answers (`OPENAI_ANSWER_MODEL` → legacy `OPENAI_MODEL` → the pinned default). Ask's vision path and the reranker may use a different model when `OPENAI_VISION_MODEL` / `OPENAI_RERANK_MODEL` are set; those are not reported here.
+- `callsToday` counts **provider requests** — individual OpenAI Responses API calls made through `postToOpenAiResponses` and `streamResponsesTurn`, which is what `AI_DAILY_CALL_LIMIT` enforces. It is **not** a count of user actions: one Ask can send up to three (query rewrite, rerank, answer) and one Repair Planner run sends one per agent turn. Embedding requests (`/v1/embeddings`) are not counted. A call refused by the daily ceiling is not counted, because no provider request was made. `countingBasis` states this in the payload.
+- `dayBoundary` is `"local"` — the count resets at the host machine's local midnight.
+- `countPersistsAcrossRestart` is `false`: the counter lives in server memory, so restarting the server zeroes it. Persisting it was deliberately rejected (see `docs/evals/ask-rag-iteration-log.md`).
+- `dailyCallLimit` is `AI_DAILY_CALL_LIMIT`; `0` means the ceiling is disabled. Counting continues either way.
+
+`GET /api/settings` is a status read and never increments `callsToday`.
 
 ### `PUT /api/settings/vehicle`
 
@@ -625,4 +654,4 @@ Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire upload
 
 ## Keeping This Document Honest
 
-This reference was written against the route files on 2026-07-02 and last updated 2026-08-06 (`POST /api/repair-checklists/from-planner`, and the planner's `checklistDraft` / `checklistDraftId` artifacts). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
+This reference was written against the route files on 2026-07-02 and last updated 2026-08-07 (`GET /api/settings` now returns the `ai` status block and `backupExport.restore`). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
