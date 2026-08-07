@@ -941,3 +941,134 @@ test("the ordinary save path confirms once, not twice", async () => {
   expect(screen.queryByText("Checklist saved")).not.toBeInTheDocument();
   expect(screen.getAllByRole("link", { name: "Open saved checklist" })).toHaveLength(1);
 });
+
+// --- Copying handoff drafts (H4) ---------------------------------------------
+//
+// The drafts are written to be pasted into a text message, an email, or a work
+// order. Before this they were plain <p> text with no control at all, so the
+// only route out was a manual drag-select that easily caught the section label
+// with it.
+
+const HANDOFF = completedRun[completedRun.length - 1].artifacts.handoffNotes;
+
+function mockPlanWithClipboard(writeText) {
+  vi.stubGlobal("fetch", vi.fn(() => streamResponse(completedRun)));
+  vi.stubGlobal("navigator", { ...navigator, clipboard: writeText ? { writeText } : undefined });
+}
+
+async function buildPlanWithHandoffDrafts() {
+  renderPage();
+  fireEvent.change(screen.getByLabelText(/repair brief/i), {
+    target: { value: "Front brakes squeak when stopping." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /build repair plan/i }));
+  return screen.findByRole("button", { name: "Copy Mechanic handoff" });
+}
+
+test("every handoff draft gets its own Copy button", async () => {
+  mockPlanWithClipboard(vi.fn().mockResolvedValue(undefined));
+
+  await buildPlanWithHandoffDrafts();
+
+  expect(screen.getByRole("button", { name: "Copy Parts shopping list" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Copy Mechanic handoff" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Copy Maintenance log entry" })).toBeInTheDocument();
+});
+
+test("copying a draft sends that draft's exact text, without the section label", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  mockPlanWithClipboard(writeText);
+
+  await buildPlanWithHandoffDrafts();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Mechanic handoff" }));
+
+  await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+  // Exactly the server-built string -- not the card's textContent, which would
+  // drag "Mechanic handoff" along with it.
+  expect(writeText).toHaveBeenCalledWith(HANDOFF.mechanicHandoff);
+  expect(writeText.mock.calls[0][0]).not.toMatch(/Mechanic handoff/);
+
+  // And the draft itself is still on the page, selectable, unchanged.
+  expect(screen.getByText(HANDOFF.mechanicHandoff)).toBeInTheDocument();
+});
+
+test("each draft copies its own text, not a neighbour's", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  mockPlanWithClipboard(writeText);
+
+  await buildPlanWithHandoffDrafts();
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy Parts shopping list" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(HANDOFF.partsShoppingList));
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy Maintenance log entry" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(HANDOFF.maintenanceLogEntry));
+});
+
+test("success feedback is accessible text and belongs to only the copied draft", async () => {
+  mockPlanWithClipboard(vi.fn().mockResolvedValue(undefined));
+
+  await buildPlanWithHandoffDrafts();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Parts shopping list" }));
+
+  // Announced, not just coloured.
+  expect(
+    await screen.findByText("Parts shopping list copied to clipboard")
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Copied to clipboard")).toHaveLength(1);
+
+  // Copying a second draft moves the confirmation with it: a stale "Copied" on
+  // another card would misdescribe what is actually on the clipboard.
+  fireEvent.click(screen.getByRole("button", { name: "Copy Maintenance log entry" }));
+
+  expect(
+    await screen.findByText("Maintenance log entry copied to clipboard")
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText("Parts shopping list copied to clipboard")
+  ).not.toBeInTheDocument();
+  expect(screen.getAllByText("Copied to clipboard")).toHaveLength(1);
+});
+
+test("a rejected clipboard write reports failure instead of claiming success", async () => {
+  mockPlanWithClipboard(vi.fn().mockRejectedValue(new Error("denied")));
+
+  await buildPlanWithHandoffDrafts();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Mechanic handoff" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/Could not copy/);
+  expect(screen.queryByText("Copied to clipboard")).not.toBeInTheDocument();
+
+  // The button stays usable so the owner can retry.
+  expect(screen.getByRole("button", { name: "Copy Mechanic handoff" })).toBeEnabled();
+});
+
+test("a browser with no Clipboard API says so rather than failing silently", async () => {
+  mockPlanWithClipboard(null);
+
+  await buildPlanWithHandoffDrafts();
+  fireEvent.click(screen.getByRole("button", { name: "Copy Mechanic handoff" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(/copy it by hand/i);
+  expect(screen.queryByText("Copied to clipboard")).not.toBeInTheDocument();
+});
+
+test("retrying after a failure can succeed and clears the error", async () => {
+  const writeText = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("denied"))
+    .mockResolvedValueOnce(undefined);
+  mockPlanWithClipboard(writeText);
+
+  await buildPlanWithHandoffDrafts();
+  const button = screen.getByRole("button", { name: "Copy Mechanic handoff" });
+
+  fireEvent.click(button);
+  expect(await screen.findByRole("alert")).toHaveTextContent(/Could not copy/);
+
+  fireEvent.click(button);
+  expect(await screen.findByText("Copied to clipboard")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
