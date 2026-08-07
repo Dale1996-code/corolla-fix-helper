@@ -391,7 +391,60 @@ function TasksPanel({ tasks }) {
   );
 }
 
+const COPY_UNSUPPORTED_MESSAGE =
+  "This browser will not let the page copy for you. Select the text and copy it by hand.";
+const COPY_FAILED_MESSAGE = "Could not copy. Try again, or select the text and copy it by hand.";
+
+/**
+ * Per-draft copy result, rendered under the draft it belongs to.
+ *
+ * Feedback is TEXT, not a colour change or a tick glyph: a copy that silently
+ * failed and a copy that worked must not look alike, because the owner is about
+ * to paste this into a message to a mechanic and will not re-read the card.
+ */
+function CopyDraftFeedback({ label, status }) {
+  const errorMessage =
+    status === "unsupported"
+      ? COPY_UNSUPPORTED_MESSAGE
+      : status === "failed"
+        ? COPY_FAILED_MESSAGE
+        : "";
+
+  return (
+    <>
+      {/* Always mounted, so assistive tech announces a change of content rather
+          than the arrival of a new node. */}
+      <p className="sr-only" role="status">
+        {status === "copied" ? `${label} copied to clipboard` : ""}
+      </p>
+      {status === "copied" ? (
+        <p className="mt-2 text-xs font-semibold text-emerald-700" aria-hidden="true">
+          Copied to clipboard
+        </p>
+      ) : null}
+      {errorMessage ? (
+        <p className="mt-2 text-xs font-semibold text-red-700" role="alert">
+          {errorMessage}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function HandoffPanel({ handoffNotes }) {
+  // Which draft last reported a copy result, and what it was. One slot, keyed by
+  // label, so copying a second draft clears the first: a stale "Copied" sitting
+  // on a card the owner did not just click is a lie about what is on their
+  // clipboard.
+  const [copyState, setCopyState] = useState({ label: "", status: "" });
+  // Which copy attempt is the newest. `writeText` is async, so two clicks can be
+  // in flight at once and there is no guarantee they settle in the order they
+  // were made -- a slow first request resolving last would otherwise repaint the
+  // card the owner clicked FIRST as the copied one, while the clipboard actually
+  // holds the second draft. A counter is enough: only the newest attempt may
+  // report, and every earlier one is discarded on arrival.
+  const latestCopyRequestRef = useRef(0);
+
   if (!handoffNotes) {
     return null;
   }
@@ -402,17 +455,73 @@ function HandoffPanel({ handoffNotes }) {
     { label: "Maintenance log entry", value: handoffNotes.maintenanceLogEntry },
   ];
 
+  // Copies the draft's own string, never the card's `textContent` — the card
+  // also holds the section label ("Mechanic handoff"), which is UI chrome and
+  // has no business landing in a work order. Nothing is regenerated or
+  // reformatted on the way out: what is copied is exactly the server-built text
+  // the owner can see.
+  async function copyDraft(block) {
+    // Claim this attempt as the newest one. Anything already in flight is now
+    // stale and may no longer write feedback, whether it succeeds or fails: a
+    // late error from an abandoned attempt would be just as wrong as a late
+    // success, since neither describes what is on the clipboard now.
+    const requestId = latestCopyRequestRef.current + 1;
+    latestCopyRequestRef.current = requestId;
+
+    const isNewestAttempt = () => latestCopyRequestRef.current === requestId;
+
+    // Feature-detect rather than assume. The Clipboard API is unavailable over
+    // plain HTTP on some browsers, which is a real configuration for this app
+    // when it is reached from a phone over the LAN.
+    if (!navigator.clipboard?.writeText) {
+      setCopyState({ label: block.label, status: "unsupported" });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(block.value);
+
+      if (isNewestAttempt()) {
+        setCopyState({ label: block.label, status: "copied" });
+      }
+    } catch {
+      // A rejected permission must never read as success — the owner would
+      // paste whatever was on the clipboard before.
+      if (isNewestAttempt()) {
+        setCopyState({ label: block.label, status: "failed" });
+      }
+    }
+  }
+
   return (
     <SectionCard title="Handoff drafts">
       <div className="grid gap-3 md:grid-cols-3">
         {blocks.map((block) => (
           <div key={block.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {block.label}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                {block.label}
+              </p>
+              <button
+                type="button"
+                onClick={() => copyDraft(block)}
+                // Named for the draft it belongs to, so three identical "Copy"
+                // buttons stay distinguishable by screen reader and by test.
+                aria-label={`Copy ${block.label}`}
+                className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+              >
+                Copy
+              </button>
+            </div>
+            {/* Untouched by the copy control: the draft stays ordinary,
+                selectable text, so manual selection still works. */}
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
               {block.value}
             </p>
+            <CopyDraftFeedback
+              label={block.label}
+              status={copyState.label === block.label ? copyState.status : ""}
+            />
           </div>
         ))}
       </div>
