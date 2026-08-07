@@ -187,6 +187,10 @@ async function runChecks(baseUrl, { frontendBuilt }) {
       const manifest = await requestJson(baseUrl, "/manifest.webmanifest");
       assert.equal(manifest.status, 200);
       assert.equal(manifest.body.name, "Corolla Fix Helper");
+      // The one sanctioned short form of the product name, pinned so it stays a
+      // deliberate truncation for the Home Screen label rather than drifting
+      // into a second brand.
+      assert.equal(manifest.body.short_name, "Corolla Fix");
 
       const icon = await requestText(baseUrl, "/apple-touch-icon.png");
       assert.equal(icon.status, 200);
