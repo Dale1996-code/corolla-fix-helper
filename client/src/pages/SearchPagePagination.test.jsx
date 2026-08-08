@@ -756,3 +756,50 @@ test("a page is never clamped using the previous search's result count", async (
   );
   expect(lastDocumentsUrl(documents)).toContain("offset=975");
 });
+
+test("a wildly over-range page on a filtered deep link converges on the last real page", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // 40 results at 25 per page is two pages. Page 999 must not stick, and the
+  // `state.query === requestQuery` guard that stops a stale total from clamping
+  // must not stop this legitimate clamp either -- it only defers it until the
+  // matching response lands.
+  renderSearchPage("/search?documents.q=brake&documents.page=999");
+  const section = await findDocumentsSection();
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2"));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 26–40 of 40 document results.")).toBeInTheDocument()
+  );
+  expect(within(section).getByRole("textbox", { name: "Keyword" })).toHaveValue("brake");
+
+  // Exactly two requests: the over-range one, then the corrected one. Settling
+  // must not oscillate or re-clamp.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  expect(documents.requestedUrls).toHaveLength(2);
+  expect(documents.requestedUrls[0]).toContain("offset=24950");
+  expect(documents.requestedUrls[1]).toContain("offset=25");
+  expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2");
+});
+
+test("an over-range page on the unfiltered listing converges too", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // 1,443 documents at 25 per page is 58 pages.
+  renderSearchPage("/search?documents.page=9999");
+  const section = await findDocumentsSection();
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.page=58"));
+  await waitFor(() =>
+    expect(
+      within(section).getByText(
+        "Showing 1,426–1,443 of 1,443 documents in your library. Search to narrow this list."
+      )
+    ).toBeInTheDocument()
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  expect(documents.requestedUrls).toHaveLength(2);
+});
