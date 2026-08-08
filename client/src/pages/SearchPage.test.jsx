@@ -1345,7 +1345,7 @@ test("SearchPage shows request error state when Ask fails", async () => {
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });
 
-test("SearchPage's Ask a question panelshows a saved-photo selector from saved attachments", async () => {
+test("SearchPage's Ask a question panel shows a saved-photo selector from saved attachments", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
@@ -1374,7 +1374,7 @@ test("SearchPage's Ask a question panelshows a saved-photo selector from saved a
   ).toBeInTheDocument();
 });
 
-test("SearchPage's Ask a question panelshows a thumbnail after selecting a saved photo", async () => {
+test("SearchPage's Ask a question panel shows a thumbnail after selecting a saved photo", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
@@ -1402,7 +1402,7 @@ test("SearchPage's Ask a question panelshows a thumbnail after selecting a saved
   expect(thumb).toHaveAttribute("src", "/api/attachments/7/file");
 });
 
-test("SearchPage's Ask a question panelremoves the selected photo", async () => {
+test("SearchPage's Ask a question panel removes the selected photo", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
