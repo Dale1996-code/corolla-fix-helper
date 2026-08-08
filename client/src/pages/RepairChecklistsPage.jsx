@@ -113,13 +113,22 @@ function ChecklistCreateForm({ form, creating, createMessage, createError, onCha
   );
 }
 
+// Checklist titles are long and were the most cramped column on the page at
+// 11rem; Status (60px), Progress (an 82px header over "3/8"), and Updated
+// (a 102px date) funded the increase.
+// Tracks 224+96+96+120 = 536px, +3x12px gap +32px padding = 604px.
+//
+// ChecklistList is page-local; see NotesPage for why the table's width is
+// exported as one named definition.
+export const checklistListTable = {
+  name: "RepairChecklists",
+  gridClass:
+    "grid grid-cols-[minmax(14rem,2.4fr)_minmax(6rem,1fr)_minmax(6rem,0.9fr)_minmax(7.5rem,1fr)] gap-3",
+  minWidthClass: "min-w-[38rem]",
+};
+
 function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
-  // Checklist titles are long and were the most cramped column on the page at
-  // 11rem; Status (60px), Progress (an 82px header over "3/8"), and Updated
-  // (a 102px date) funded the increase.
-  // Tracks 224+96+96+120 = 536px, +3x12px gap +32px padding = 604px.
-  const listGridClass =
-    "grid grid-cols-[minmax(14rem,2.4fr)_minmax(6rem,1fr)_minmax(6rem,0.9fr)_minmax(7.5rem,1fr)] gap-3";
+  const listGridClass = checklistListTable.gridClass;
 
   return (
     <section
@@ -127,7 +136,7 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
       className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
     >
       <div className="overflow-x-auto">
-        <div className="min-w-[38rem]">
+        <div className={checklistListTable.minWidthClass}>
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >
@@ -1014,27 +1023,31 @@ export function RepairChecklistsPage() {
                 checklist{checklists.length === 1 ? "" : "s"}.
               </section>
 
-              <ListDetailLayout>
-                <ChecklistList
-                  checklists={checklists}
-                  selectedChecklistId={selectedChecklistId}
-                  onSelectChecklist={handleSelectChecklist}
-                />
-
-                <ChecklistDetails
-                  checklist={selectedChecklist}
-                  isEditing={editingChecklistId === selectedChecklistId}
-                  editForm={editForm}
-                  saveState={saveState}
-                  deleteState={deleteState}
-                  itemsProps={itemsProps}
-                  onStartEdit={startEditingChecklist}
-                  onCancelEdit={cancelEditingChecklist}
-                  onEditChange={handleEditFormChange}
-                  onSaveEdit={handleSaveChecklist}
-                  onDelete={handleDeleteChecklist}
-                />
-              </ListDetailLayout>
+              <ListDetailLayout
+                selectedId={selectedChecklistId}
+                list={
+                  <ChecklistList
+                    checklists={checklists}
+                    selectedChecklistId={selectedChecklistId}
+                    onSelectChecklist={handleSelectChecklist}
+                  />
+                }
+                detail={
+                  <ChecklistDetails
+                    checklist={selectedChecklist}
+                    isEditing={editingChecklistId === selectedChecklistId}
+                    editForm={editForm}
+                    saveState={saveState}
+                    deleteState={deleteState}
+                    itemsProps={itemsProps}
+                    onStartEdit={startEditingChecklist}
+                    onCancelEdit={cancelEditingChecklist}
+                    onEditChange={handleEditFormChange}
+                    onSaveEdit={handleSaveChecklist}
+                    onDelete={handleDeleteChecklist}
+                  />
+                }
+              />
             </>
           ) : null}
         </div>

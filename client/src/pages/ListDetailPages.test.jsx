@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 
+import App from "../App";
 import { DocumentsPage } from "./DocumentsPage";
 import { SymptomsPage } from "./SymptomsPage";
 import { ProceduresPage } from "./ProceduresPage";
@@ -201,3 +202,22 @@ test.each(PAGES)(
     }
   }
 );
+
+test("the app shell renders the width the split's pane arithmetic assumes", () => {
+  stubApi();
+  const { container } = render(
+    <MemoryRouter initialEntries={["/documents"]}>
+      <App />
+    </MemoryRouter>
+  );
+
+  // The pane-fit invariant in listTableWidths.test.js computes the list pane
+  // from `shellMaxWidthRem`. That computation is only meaningful if the shell
+  // element on screen really is that wide, so this is the assertion that would
+  // fail if App.jsx went back to its own literal (88rem is what H6 started
+  // from). Anchored on the shell's own layout classes rather than "the first
+  // max-w in the tree".
+  const shell = container.querySelector("div.mx-auto.flex.min-h-screen");
+  expect(shell).not.toBeNull();
+  expect(shell.className).toContain(listDetailLayoutClasses.appShellMaxWidth);
+});

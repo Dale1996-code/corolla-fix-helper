@@ -2,6 +2,28 @@ import { formatDate } from "../../lib/formatDate";
 import { getDocumentTags, normalizeExtractionStatus } from "./documentDisplay";
 import { TagChips } from "./TagChips";
 
+// Column minimums are what actually set this table's width -- the wrapper's
+// minWidthClass only has to match them so row backgrounds and borders paint
+// across the full scroll width. They are sized against measured content:
+// System needs 73px, the Favorite button 77px, an extraction badge ~110px,
+// and a formatted date 102px, against the 128/116/144/152px they used to
+// reserve. Reclaiming that padding is what lets the whole table fit beside a
+// detail panel instead of hiding three columns inside the scroller.
+// Title keeps the largest minimum: it stacks the title, the original
+// filename, and the tag chips.
+// Tracks 240+96+136+88+120+120 = 800px, +5x12px gap +32px padding = 892px.
+//
+// Exported as one named definition so `listTableWidths.test.js` reads the two
+// halves of this table's width from here, instead of scanning the file for its
+// first arbitrary `grid-cols-[...]` / `min-w-[...]` and hoping it belongs to
+// the list.
+export const documentsListTable = {
+  name: "Documents",
+  gridClass:
+    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(6rem,1.1fr)_minmax(8.5rem,1.2fr)_minmax(5.5rem,0.9fr)_minmax(7.5rem,1.1fr)_minmax(7.5rem,1.1fr)] gap-3",
+  minWidthClass: "min-w-[56rem]",
+};
+
 export function DocumentsList({
   documents,
   selectedDocumentId,
@@ -9,23 +31,12 @@ export function DocumentsList({
   onToggleFavorite,
   favoriteUpdateState,
 }) {
-  // Column minimums are what actually set this table's width -- the wrapper's
-  // min-w below only has to match them so row backgrounds and borders paint
-  // across the full scroll width. They are sized against measured content:
-  // System needs 73px, the Favorite button 77px, an extraction badge ~110px,
-  // and a formatted date 102px, against the 128/116/144/152px they used to
-  // reserve. Reclaiming that padding is what lets the whole table fit beside a
-  // detail panel instead of hiding three columns inside the scroller.
-  // Title keeps the largest minimum: it stacks the title, the original
-  // filename, and the tag chips.
-  // Tracks 240+96+136+88+120+120 = 800px, +5x12px gap +32px padding = 892px.
-  const listGridClass =
-    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(6rem,1.1fr)_minmax(8.5rem,1.2fr)_minmax(5.5rem,0.9fr)_minmax(7.5rem,1.1fr)_minmax(7.5rem,1.1fr)] gap-3";
+  const listGridClass = documentsListTable.gridClass;
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[56rem]">
+        <div className={documentsListTable.minWidthClass}>
           <div
             className={`${listGridClass} border-b border-slate-800 bg-slate-950 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-200`}
           >
