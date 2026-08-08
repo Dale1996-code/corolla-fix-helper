@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { buildEntityLink } from "../lib/navigation";
 import { DocumentsPage } from "./DocumentsPage";
 import { SymptomsPage } from "./SymptomsPage";
 import { NotesPage } from "./NotesPage";
@@ -145,6 +146,26 @@ test("Documents rebuilds filter, page, and selection from a deep link", async ()
   // The deep link is left exactly as it was handed to us -- normalizing a URL
   // that is already canonical would spend a history entry saying nothing.
   expect(currentUrl()).toBe("/documents?system=Brakes&page=2&documentId=4");
+});
+
+test("Documents opens the record a buildEntityLink deep link names, #hash and all", async () => {
+  // The real shape other pages link with: "?documentId=4#document-library".
+  // The trailing hash is a scroll anchor, so it must not disturb the selection.
+  const link = buildEntityLink("document", 4);
+  expect(link).toBe("/documents?documentId=4#document-library");
+
+  await renderDocuments(link);
+
+  expect(selectedDocumentTitle()).toBe("Doc 004");
+  expect(currentUrl()).toBe("/documents?documentId=4");
+});
+
+test("Documents survives duplicate query keys", async () => {
+  await renderDocuments("/documents?page=1&page=99&documentId=8&documentId=4");
+
+  // URLSearchParams reads the first value of a repeated key, and nothing throws.
+  expect(selectedDocumentTitle()).toBe("Doc 008");
+  expectPageIndicator("Page 1 of 3");
 });
 
 test("Documents keeps a default view's URL clean", async () => {

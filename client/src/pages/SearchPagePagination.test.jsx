@@ -701,3 +701,58 @@ test("one URL change causes exactly one request per card", async () => {
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(documents.requestedUrls).toHaveLength(4);
 });
+
+test("Clear resets a keyword typed but never submitted", async () => {
+  const { fetchMock } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+
+  // Nothing has been submitted, so the card owns no URL parameters. Clear still
+  // has to empty the box -- otherwise it visibly does nothing.
+  const keyword = within(section).getByRole("textbox", { name: "Keyword" });
+  fireEvent.change(keyword, { target: { value: "brake" } });
+  expect(keyword).toHaveValue("brake");
+
+  fireEvent.click(within(section).getByRole("button", { name: "Clear" }));
+
+  await waitFor(() => expect(keyword).toHaveValue(""));
+  expect(currentUrl()).toBe("/search");
+});
+
+test("a page is never clamped using the previous search's result count", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // Deep in the 1,443-document listing (58 pages)...
+  renderSearchPage("/search?documents.page=40");
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+  expect(currentUrl()).toBe("/search?documents.page=40");
+
+  // ...then a narrow search that only has two pages.
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(section).getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 1–25 of 40 document results.")).toBeInTheDocument()
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "history back" }));
+
+  // Back must land on page 40 of the listing. Clamping it to page 2 -- the last
+  // page of the search that is no longer on screen -- would destroy a valid
+  // history entry and show the wrong results.
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.page=40"));
+  await waitFor(() =>
+    expect(
+      within(section).getByText(
+        "Showing 976–1,000 of 1,443 documents in your library. Search to narrow this list."
+      )
+    ).toBeInTheDocument()
+  );
+  expect(lastDocumentsUrl(documents)).toContain("offset=975");
+});

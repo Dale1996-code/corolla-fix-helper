@@ -111,6 +111,10 @@ function createSectionState(filters) {
     error: "",
     results: [],
     total: 0,
+    // The request these results answer. Page clamping compares against it, so a
+    // total left over from a different search can never decide how many pages
+    // the current one has.
+    query: null,
     // Echoed back by paginated endpoints so the counter and the Previous/Next
     // controls describe the page the server actually returned, not the one we
     // asked for.
@@ -224,6 +228,7 @@ async function fetchSearchSection(
     setState({
       loading: false,
       error: "",
+      query: queryString,
       results,
       total,
       limit:
@@ -1534,8 +1539,14 @@ function SearchSection({ config }) {
 
   // Normalization only, so it replaces: a `page` past the end of the results --
   // or a hand-typed `page=abc` -- should not leave a history entry behind.
+  //
+  // `state.query !== requestQuery` is the guard that matters: between a URL
+  // change and its response, `state` still holds the PREVIOUS search's totals.
+  // Clamping against those would rewrite a perfectly valid page -- pressing
+  // Back from a 40-result search to page 40 of the 1,443-document listing would
+  // "clamp" to page 2, destroying the history entry and showing the wrong page.
   useEffect(() => {
-    if (!config.paginated || state.loading || state.error) {
+    if (!config.paginated || state.loading || state.error || state.query !== requestQuery) {
       return;
     }
 
@@ -1551,6 +1562,8 @@ function SearchSection({ config }) {
     state.error,
     state.total,
     state.limit,
+    state.query,
+    requestQuery,
     currentPage,
     pageKey,
     searchParams,
@@ -1567,6 +1580,10 @@ function SearchSection({ config }) {
   }
 
   function handleClear() {
+    // Reset the draft directly as well as the URL: clearing a card that has no
+    // parameters yet changes no URL, so the draft-sync effect would not fire
+    // and text typed but never submitted would survive the Clear.
+    setForm(config.defaultForm);
     updateSectionParams(clearSectionUpdates(config));
   }
 
