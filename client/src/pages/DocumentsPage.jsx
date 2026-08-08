@@ -1361,35 +1361,39 @@ export function DocumentsPage() {
                 ) : null}
               </section>
 
-              <ListDetailLayout>
-                <DocumentsList
-                  documents={pagedDocuments}
-                  selectedDocumentId={selectedDocumentId}
-                  onSelectDocument={handleSelectDocument}
-                  onToggleFavorite={toggleFavorite}
-                  favoriteUpdateState={favoriteUpdateState}
-                />
-
-                <DocumentDetails
-                  document={selectedDocument}
-                  isEditing={editingDocumentId === selectedDocumentId}
-                  editValues={editForm}
-                  saveState={saveState}
-                  extractionRunState={extractionRunState}
-                  bookmarkUpdateState={bookmarkUpdateState}
-                  onStartEdit={startEditingDocument}
-                  onCancelEdit={cancelEditingDocument}
-                  onEditChange={handleEditFormChange}
-                  onSaveEdit={handleSaveMetadata}
-                  onOpenFile={openDocumentFile}
-                  onToggleFavorite={toggleFavorite}
-                  onToggleBookmark={toggleBookmark}
-                  onRerunExtraction={rerunExtraction}
-                  onDeleteDocument={handleDeleteDocument}
-                  systemSuggestions={systemSuggestions}
-                  documentTypeSuggestions={documentTypeSuggestions}
-                />
-              </ListDetailLayout>
+              <ListDetailLayout
+                selectedId={selectedDocumentId}
+                list={
+                  <DocumentsList
+                    documents={pagedDocuments}
+                    selectedDocumentId={selectedDocumentId}
+                    onSelectDocument={handleSelectDocument}
+                    onToggleFavorite={toggleFavorite}
+                    favoriteUpdateState={favoriteUpdateState}
+                  />
+                }
+                detail={
+                  <DocumentDetails
+                    document={selectedDocument}
+                    isEditing={editingDocumentId === selectedDocumentId}
+                    editValues={editForm}
+                    saveState={saveState}
+                    extractionRunState={extractionRunState}
+                    bookmarkUpdateState={bookmarkUpdateState}
+                    onStartEdit={startEditingDocument}
+                    onCancelEdit={cancelEditingDocument}
+                    onEditChange={handleEditFormChange}
+                    onSaveEdit={handleSaveMetadata}
+                    onOpenFile={openDocumentFile}
+                    onToggleFavorite={toggleFavorite}
+                    onToggleBookmark={toggleBookmark}
+                    onRerunExtraction={rerunExtraction}
+                    onDeleteDocument={handleDeleteDocument}
+                    systemSuggestions={systemSuggestions}
+                    documentTypeSuggestions={documentTypeSuggestions}
+                  />
+                }
+              />
             </>
           ) : null}
         </div>

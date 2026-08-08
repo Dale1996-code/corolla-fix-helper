@@ -385,17 +385,27 @@ function NotesListControls({
   );
 }
 
+// Title grew and the three trailing columns shrank to what they measure:
+// a note type is 71px, a linked-item label 103px, a formatted date 102px.
+// Tracks 224+96+136+120 = 576px, +3x12px gap +32px padding = 644px.
+//
+// NotesList is page-local, so this export exists purely so the shared width
+// test can name the notes table directly rather than guessing which arbitrary
+// class in a 1200-line page file belongs to it.
+export const notesListTable = {
+  name: "Notes",
+  gridClass:
+    "grid grid-cols-[minmax(14rem,2.5fr)_minmax(6rem,1fr)_minmax(8.5rem,1.4fr)_minmax(7.5rem,1fr)] gap-3",
+  minWidthClass: "min-w-[41rem]",
+};
+
 function NotesList({ notes, selectedNoteId, onSelectNote }) {
-  // Title grew and the three trailing columns shrank to what they measure:
-  // a note type is 71px, a linked-item label 103px, a formatted date 102px.
-  // Tracks 224+96+136+120 = 576px, +3x12px gap +32px padding = 644px.
-  const listGridClass =
-    "grid grid-cols-[minmax(14rem,2.5fr)_minmax(6rem,1fr)_minmax(8.5rem,1.4fr)_minmax(7.5rem,1fr)] gap-3";
+  const listGridClass = notesListTable.gridClass;
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[41rem]">
+        <div className={notesListTable.minWidthClass}>
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >
@@ -1196,31 +1206,35 @@ export function NotesPage() {
                 note{notes.length === 1 ? "" : "s"}.
               </section>
 
-              <ListDetailLayout>
-                <NotesList
-                  notes={filteredNotes}
-                  selectedNoteId={selectedNoteId}
-                  onSelectNote={(noteId) => updateViewParams({ noteId })}
-                />
-
-            <NoteDetails
-              note={selectedNote}
-              isEditing={editingNoteId === selectedNoteId}
-              editForm={editForm}
-              documents={documents}
-              symptoms={symptoms}
-              procedures={procedures}
-              saveState={saveState}
-              deleteState={deleteState}
-              onStartEdit={startEditingNote}
-              onCancelEdit={cancelEditingNote}
-              onEditChange={handleEditFormChange}
-              onRelatedEntityTypeChange={handleEditRelatedEntityTypeChange}
-              onRelatedEntityChange={handleEditRelatedEntityChange}
-              onSaveEdit={handleSaveNote}
-              onDelete={handleDeleteNote}
-            />
-              </ListDetailLayout>
+              <ListDetailLayout
+                selectedId={selectedNoteId}
+                list={
+                  <NotesList
+                    notes={filteredNotes}
+                    selectedNoteId={selectedNoteId}
+                    onSelectNote={(noteId) => updateViewParams({ noteId })}
+                  />
+                }
+                detail={
+                  <NoteDetails
+                    note={selectedNote}
+                    isEditing={editingNoteId === selectedNoteId}
+                    editForm={editForm}
+                    documents={documents}
+                    symptoms={symptoms}
+                    procedures={procedures}
+                    saveState={saveState}
+                    deleteState={deleteState}
+                    onStartEdit={startEditingNote}
+                    onCancelEdit={cancelEditingNote}
+                    onEditChange={handleEditFormChange}
+                    onRelatedEntityTypeChange={handleEditRelatedEntityTypeChange}
+                    onRelatedEntityChange={handleEditRelatedEntityChange}
+                    onSaveEdit={handleSaveNote}
+                    onDelete={handleDeleteNote}
+                  />
+                }
+              />
             </>
           ) : null}
         </div>

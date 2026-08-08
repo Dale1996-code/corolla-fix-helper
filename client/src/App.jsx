@@ -10,6 +10,7 @@ import { NotesPage } from "./pages/NotesPage";
 import { RepairChecklistsPage } from "./pages/RepairChecklistsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { listDetailLayoutClasses } from "./components/ListDetailLayout";
 import { navigationItems } from "./lib/navigation";
 import { PRODUCT_NAME } from "./lib/pageTitle";
 
@@ -50,13 +51,14 @@ export default function App() {
   return (
     <div className="editorial-app min-h-screen text-ink-900">
       <MobileNav />
-      {/* 104rem (1664px), not the old 88rem (1408px). With a 288px sidebar and
-          64px of padding on <main>, 88rem capped every page's content box at
-          1056px, so a 1920px monitor left 512px of viewport empty while the
-          list tables clipped ~445px of columns. 104rem is the width at which
-          the list/detail split in ListDetailLayout fits both panes; keep the
-          two in step. */}
-      <div className="mx-auto flex min-h-screen max-w-[104rem]">
+      {/* 104rem, not the old 88rem. With an 18rem sidebar and 4rem of padding
+          on <main>, 88rem capped every page's content box at 66rem, so a wide
+          monitor left hundreds of pixels of viewport empty while the list
+          tables clipped ~28rem of columns. 104rem is the width at which the
+          list/detail split fits both panes, so the class comes from
+          ListDetailLayout -- the two describe the same measurement and cannot
+          drift apart. */}
+      <div className={`mx-auto flex min-h-screen ${listDetailLayoutClasses.appShellMaxWidth}`}>
         <Sidebar />
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

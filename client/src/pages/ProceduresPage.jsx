@@ -1161,33 +1161,37 @@ export function ProceduresPage() {
                 }}
               />
 
-              <ListDetailLayout>
-                <ProceduresList
-                  procedures={filteredProcedures}
-                  totalProcedures={procedures.length}
-                  hasActiveFilters={hasActiveFilters}
-                  selectedProcedureId={selectedProcedureId}
-                  onSelectProcedure={(procedureId) => updateViewParams({ procedureId })}
-                />
-
-                <ProcedureDetails
-                  procedure={selectedProcedure}
-                  isEditing={editingProcedureId === selectedProcedureId}
-                  editForm={editForm}
-                  documents={documents}
-                  symptoms={symptoms}
-                  systemSuggestions={systemSuggestions}
-                  saveState={saveState}
-                  deleteState={deleteState}
-                  onStartEdit={startEditingProcedure}
-                  onCancelEdit={cancelEditingProcedure}
-                  onEditChange={handleEditFormChange}
-                  onToggleEditDocument={handleToggleEditDocument}
-                  onSaveEdit={handleSaveProcedure}
-                  onDelete={handleDeleteProcedure}
-                  onProcedureUpdated={handleProcedureUpdated}
-                />
-              </ListDetailLayout>
+              <ListDetailLayout
+                selectedId={selectedProcedureId}
+                list={
+                  <ProceduresList
+                    procedures={filteredProcedures}
+                    totalProcedures={procedures.length}
+                    hasActiveFilters={hasActiveFilters}
+                    selectedProcedureId={selectedProcedureId}
+                    onSelectProcedure={(procedureId) => updateViewParams({ procedureId })}
+                  />
+                }
+                detail={
+                  <ProcedureDetails
+                    procedure={selectedProcedure}
+                    isEditing={editingProcedureId === selectedProcedureId}
+                    editForm={editForm}
+                    documents={documents}
+                    symptoms={symptoms}
+                    systemSuggestions={systemSuggestions}
+                    saveState={saveState}
+                    deleteState={deleteState}
+                    onStartEdit={startEditingProcedure}
+                    onCancelEdit={cancelEditingProcedure}
+                    onEditChange={handleEditFormChange}
+                    onToggleEditDocument={handleToggleEditDocument}
+                    onSaveEdit={handleSaveProcedure}
+                    onDelete={handleDeleteProcedure}
+                    onProcedureUpdated={handleProcedureUpdated}
+                  />
+                }
+              />
             </>
           ) : null}
         </div>

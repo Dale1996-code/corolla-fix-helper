@@ -1324,33 +1324,37 @@ export function SymptomsPage() {
                 }}
               />
 
-              <ListDetailLayout>
-                <SymptomsList
-                  symptoms={filteredSymptoms}
-                  totalSymptoms={symptoms.length}
-                  hasActiveFilters={hasActiveFilters}
-                  selectedSymptomId={selectedSymptomId}
-                  onSelectSymptom={(symptomId) => updateViewParams({ symptomId })}
-                />
-
-                <SymptomDetails
-                  symptom={selectedSymptom}
-                  isEditing={editingSymptomId === selectedSymptomId}
-                  editForm={editForm}
-                  documents={documents}
-                  procedures={procedures}
-                  systemSuggestions={systemSuggestions}
-                  saveState={saveState}
-                  deleteState={deleteState}
-                  onStartEdit={startEditingSymptom}
-                  onCancelEdit={cancelEditingSymptom}
-                  onEditChange={handleEditFormChange}
-                  onToggleEditDocument={handleToggleEditDocument}
-                  onSaveEdit={handleSaveSymptom}
-                  onDelete={handleDeleteSymptom}
-                  onSymptomUpdated={handleSymptomUpdated}
-                />
-              </ListDetailLayout>
+              <ListDetailLayout
+                selectedId={selectedSymptomId}
+                list={
+                  <SymptomsList
+                    symptoms={filteredSymptoms}
+                    totalSymptoms={symptoms.length}
+                    hasActiveFilters={hasActiveFilters}
+                    selectedSymptomId={selectedSymptomId}
+                    onSelectSymptom={(symptomId) => updateViewParams({ symptomId })}
+                  />
+                }
+                detail={
+                  <SymptomDetails
+                    symptom={selectedSymptom}
+                    isEditing={editingSymptomId === selectedSymptomId}
+                    editForm={editForm}
+                    documents={documents}
+                    procedures={procedures}
+                    systemSuggestions={systemSuggestions}
+                    saveState={saveState}
+                    deleteState={deleteState}
+                    onStartEdit={startEditingSymptom}
+                    onCancelEdit={cancelEditingSymptom}
+                    onEditChange={handleEditFormChange}
+                    onToggleEditDocument={handleToggleEditDocument}
+                    onSaveEdit={handleSaveSymptom}
+                    onDelete={handleDeleteSymptom}
+                    onSymptomUpdated={handleSymptomUpdated}
+                  />
+                }
+              />
             </>
           ) : null}
         </div>
