@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   SelectField,
@@ -1160,7 +1161,7 @@ export function ProceduresPage() {
                 }}
               />
 
-              <div className="grid gap-6 xl:grid-cols-2">
+              <ListDetailLayout>
                 <ProceduresList
                   procedures={filteredProcedures}
                   totalProcedures={procedures.length}
@@ -1186,7 +1187,7 @@ export function ProceduresPage() {
                   onDelete={handleDeleteProcedure}
                   onProcedureUpdated={handleProcedureUpdated}
                 />
-              </div>
+              </ListDetailLayout>
             </>
           ) : null}
         </div>

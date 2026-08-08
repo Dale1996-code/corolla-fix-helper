@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   SuggestionDatalist,
@@ -1360,7 +1361,7 @@ export function DocumentsPage() {
                 ) : null}
               </section>
 
-              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
+              <ListDetailLayout>
                 <DocumentsList
                   documents={pagedDocuments}
                   selectedDocumentId={selectedDocumentId}
@@ -1388,7 +1389,7 @@ export function DocumentsPage() {
                   systemSuggestions={systemSuggestions}
                   documentTypeSuggestions={documentTypeSuggestions}
                 />
-              </div>
+              </ListDetailLayout>
             </>
           ) : null}
         </div>

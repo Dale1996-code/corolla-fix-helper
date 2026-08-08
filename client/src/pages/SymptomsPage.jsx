@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   SelectField,
@@ -1323,7 +1324,7 @@ export function SymptomsPage() {
                 }}
               />
 
-              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
+              <ListDetailLayout>
                 <SymptomsList
                   symptoms={filteredSymptoms}
                   totalSymptoms={symptoms.length}
@@ -1349,7 +1350,7 @@ export function SymptomsPage() {
                   onDelete={handleDeleteSymptom}
                   onSymptomUpdated={handleSymptomUpdated}
                 />
-              </div>
+              </ListDetailLayout>
             </>
           ) : null}
         </div>

@@ -9,13 +9,17 @@ export function ProceduresList({
   selectedProcedureId,
   onSelectProcedure,
 }) {
+  // Same rebalance as SymptomsList: "Linked docs" grew to fit its own 108px
+  // header, Title grew because a procedure title is the column people scan,
+  // and System/Difficulty/Updated gave back width they never used.
+  // Tracks 224+96+104+112+112+120 = 768px, +5x12px gap +32px padding = 860px.
   const listGridClass =
-    "grid grid-cols-[minmax(13rem,2.5fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(6rem,0.8fr)_minmax(9rem,1fr)] gap-3";
+    "grid grid-cols-[minmax(14rem,2.5fr)_minmax(6rem,1fr)_minmax(6.5rem,1fr)_minmax(7rem,1fr)_minmax(7rem,0.8fr)_minmax(7.5rem,1fr)] gap-3";
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[720px]">
+        <div className="min-w-[54rem]">
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >
