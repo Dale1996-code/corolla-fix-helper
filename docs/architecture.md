@@ -51,7 +51,7 @@ In a production-style run:
 
 React 19 + React Router 7 + Tailwind CSS 4. The pattern is simple and repeated:
 
-- One page component per feature under `client/src/pages/` (Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Settings). Routes are wired in `client/src/App.jsx`. Note the "Ask AI" page keeps its historical `/search` route and `SearchPage.jsx` filename — it holds the Ask panel plus the keyword-search sections.
+- One page component per feature under `client/src/pages/` (Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Repair Checklists, Settings). Routes are wired in `client/src/App.jsx`; the visible label for each is in `client/src/lib/navigation.js`, and `PageHeader` derives the browser tab title from the page's own heading (`lib/pageTitle.js`) so nav label, `<h1>`, and tab title cannot drift apart. Note the "Ask AI" page keeps its historical `/search` route and `SearchPage.jsx` filename — it holds the "Ask a question" panel plus the keyword-search sections, which are separate features sharing one page.
 - Shared presentational pieces under `client/src/components/` (e.g. `documents/DocumentsList.jsx`, `search/ResultCards.jsx`).
 - `client/src/lib/apiClient.js` is a thin `fetch` wrapper (`requestJson`) plus helpers for attachments and symptom↔procedure links.
 - Tests are co-located next to the code (`*.test.jsx`, Vitest + jsdom + Testing Library).
@@ -118,7 +118,7 @@ Key points:
 - Re-running extraction (`POST /api/documents/:id/extract`) runs the same pipeline on the stored file and rebuilds that document's chunks.
 - The bulk importer (`server/src/scripts/importFolder.js`, `npm run import`) uses this same storage model. It is resumable: it skips duplicates by MD5 hash only (two byte-distinct files that share a basename both import, with the stored filename disambiguated), keeps going after corrupt files, and reports imported / skipped / failed / `IMAGE-ONLY` counts.
 
-## Data Flow 2: "Ask your documents" (RAG)
+## Data Flow 2: Ask AI (RAG)
 
 RAG means retrieval-augmented generation: the server *retrieves* relevant document text first, then asks an AI model to answer *using only that text*.
 

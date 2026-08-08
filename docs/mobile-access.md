@@ -89,8 +89,15 @@ the public internet and should **not** be used with this app (it has no login).
 1. Open the app in **Safari** — use the HTTPS Tailscale Serve address if you set
    it up, otherwise whichever address you use day to day.
 2. Tap the **Share** button, then **Add to Home Screen**, then **Add**.
-3. Launch "Corolla Fix" from the Home Screen: it opens full-screen with its own
+3. Launch **Corolla Fix** from the Home Screen: it opens full-screen with its own
    wrench icon and launch screen — no Safari address bar.
+
+The Home Screen icon is deliberately labelled "Corolla Fix", not "Corolla Fix
+Helper": iOS truncates long Home Screen labels, so the app declares that short
+form in `apple-mobile-web-app-title` and in the manifest's `short_name`. Those
+two fields are the only places the shortened name is used — the browser tab, the
+app's own header, and the installed app's manifest `name` all read **Corolla Fix
+Helper** in full.
 
 The installed app remembers the address it was installed from, which is why
 installing from the Tailscale Serve URL is the "works everywhere" choice.

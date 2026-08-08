@@ -1,3 +1,10 @@
+// Desktop sidebar and mobile header both render this one list, so the two can
+// never label the same destination differently.
+//
+// Each label must match the `<h1>` of the page it routes to -- PageHeader also
+// builds the browser tab title from that heading, so a label that drifts from
+// its page shows up three times over (nav item, heading, tab). "Checklists"
+// pointing at a page headed "Repair Checklists" was exactly that bug.
 export const navigationItems = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Documents", to: "/documents" },
@@ -6,7 +13,7 @@ export const navigationItems = [
   { label: "Symptoms", to: "/symptoms" },
   { label: "Procedures", to: "/procedures" },
   { label: "Notes", to: "/notes" },
-  { label: "Checklists", to: "/repair-checklists" },
+  { label: "Repair Checklists", to: "/repair-checklists" },
   { label: "Settings", to: "/settings" },
 ];
 

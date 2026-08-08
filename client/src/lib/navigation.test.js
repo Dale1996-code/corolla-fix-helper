@@ -1,5 +1,41 @@
 import { describe, expect, test } from "vitest";
-import { buildDocumentFileLink, buildEntityLink, documentSourceName } from "./navigation";
+import {
+  buildDocumentFileLink,
+  buildEntityLink,
+  documentSourceName,
+  navigationItems,
+} from "./navigation";
+
+describe("navigationItems", () => {
+  // The canonical visible label for every destination, in nav order. App.test
+  // proves each label matches its page's <h1> and tab title; this pins the
+  // wording itself so a rename has to be deliberate.
+  test("uses the canonical feature label for every destination", () => {
+    expect(navigationItems).toEqual([
+      { label: "Dashboard", to: "/dashboard" },
+      { label: "Documents", to: "/documents" },
+      { label: "Ask AI", to: "/search" },
+      { label: "Repair Planner", to: "/repair-planner" },
+      { label: "Symptoms", to: "/symptoms" },
+      { label: "Procedures", to: "/procedures" },
+      { label: "Notes", to: "/notes" },
+      { label: "Repair Checklists", to: "/repair-checklists" },
+      { label: "Settings", to: "/settings" },
+    ]);
+  });
+
+  // Retired names. "Search" and "Ask" both once labelled the /search
+  // destination that is now called "Ask AI"; "Checklists" once labelled the
+  // page headed "Repair Checklists"; "Planner" is never an acceptable
+  // abbreviation of "Repair Planner".
+  test("does not reuse a retired feature name", () => {
+    const labels = navigationItems.map((item) => item.label);
+
+    for (const retired of ["Search", "Ask", "Checklists", "Planner"]) {
+      expect(labels).not.toContain(retired);
+    }
+  });
+});
 
 describe("buildEntityLink", () => {
   test("routes each entity type to its library anchor", () => {

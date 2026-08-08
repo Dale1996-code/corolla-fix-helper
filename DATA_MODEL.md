@@ -280,7 +280,7 @@ New items are appended at `MAX(sort_order) + 1`. Reordering swaps a row's `sort_
 
 ### `document_chunks`
 
-Stores smaller page-aware chunks of extracted PDF text for the "Ask your documents" feature. OCR-created text uses the same table and keeps the original PDF page number.
+Stores smaller page-aware chunks of extracted PDF text for the Ask AI feature. OCR-created text uses the same table and keeps the original PDF page number.
 
 Important fields:
 
@@ -326,7 +326,7 @@ Current use:
 - Upload images against a symptom, procedure, or note (`POST /api/attachments`).
 - List the images for one entity (`GET /api/attachments?entityType=...&entityId=...`).
 - Serve a stored image inline (`GET /api/attachments/:id/file`).
-- List every saved image across all entities (`GET /api/attachments/all`), used by the Vision Ask picker on the Search page.
+- List every saved image across all entities (`GET /api/attachments/all`), used by the Vision Ask picker on the Ask AI page.
 - Delete one image and its file (`DELETE /api/attachments/:id`).
 
 Vision Ask reuses these saved rows read-only: `POST /api/ask` accepts an optional `attachmentId`, and the server loads that record and its stored file to show the model the photo. Attachment images are never copied into `document_chunks`; documents stay PDF-only and remain the only source of repair facts.

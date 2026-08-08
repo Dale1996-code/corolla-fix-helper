@@ -247,7 +247,7 @@ function AiSection({ ai, refreshing, refreshError, onRefresh }) {
           }
           helpText={`Counts ${
             ai.countingBasis || "provider requests"
-          } sent to OpenAI, not questions asked — one Ask or planner run can send several. Resets at ${dayBoundaryLabel}${
+          } sent to OpenAI, not questions asked — one Ask AI question or Repair Planner run can send several. Resets at ${dayBoundaryLabel}${
             ai.countPersistsAcrossRestart === false ? " and when the server restarts" : ""
           }.${ai.dailyCallLimit > 0 ? "" : " The daily ceiling is disabled (AI_DAILY_CALL_LIMIT=0)."}`}
         />

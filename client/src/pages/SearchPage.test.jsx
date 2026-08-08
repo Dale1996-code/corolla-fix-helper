@@ -95,7 +95,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("SearchPage shows the Ask panel empty state above document search", async () => {
+test("SearchPage shows the Ask a question panel empty state above document search", async () => {
   const fetchMock = createEmptySearchFetchMock();
   vi.stubGlobal("fetch", fetchMock);
 
@@ -106,9 +106,9 @@ test("SearchPage shows the Ask panel empty state above document search", async (
   );
 
   const askHeading = await screen.findByRole("heading", {
-    name: "Ask your documents",
+    name: "Ask a question",
   });
-  const documentsHeading = screen.getByRole("heading", { name: "Documents" });
+  const documentsHeading = screen.getByRole("heading", { name: "Search documents" });
   expect(askHeading.compareDocumentPosition(documentsHeading)).toBe(
     Node.DOCUMENT_POSITION_FOLLOWING
   );
@@ -119,7 +119,7 @@ test("SearchPage shows the Ask panel empty state above document search", async (
     within(askSection).getByText("Type a question about your uploaded documents to begin.")
   ).toBeInTheDocument();
 
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     within(askSection).getByText("Enter a question before asking.")
@@ -148,7 +148,7 @@ test("SearchPage renders the shared AI disclosure and safety warning from AiSafe
   );
 
   const askHeading = await screen.findByRole("heading", {
-    name: "Ask your documents",
+    name: "Ask a question",
   });
   const askSection = askHeading.closest("section");
 
@@ -184,14 +184,14 @@ test("SearchPage shows loading state while Ask waits for an answer", async () =>
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -221,7 +221,7 @@ test("SearchPage shows AI not configured state from Ask response", async () => {
         question: "What is the oil drain plug torque?",
         status: "ai_not_configured",
         answer:
-          "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask.",
+          "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask AI.",
         citations: [],
       });
     }
@@ -238,19 +238,19 @@ test("SearchPage shows AI not configured state from Ask response", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("AI not configured")).toBeInTheDocument();
   expect(
     within(askSection).getByText(
-      "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask."
+      "AI is not configured yet. Set OPENAI_API_KEY in the server environment to enable Ask AI."
     )
   ).toBeInTheDocument();
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
@@ -280,14 +280,14 @@ test("SearchPage shows not-found state from Ask response", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the water pump torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("No answer found")).toBeInTheDocument();
   expect(
@@ -335,14 +335,14 @@ test("SearchPage shows retrieved context on a not-found Ask response", async () 
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the water pump torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("No answer found")).toBeInTheDocument();
 
@@ -395,12 +395,12 @@ test("SearchPage labels a legacy answer as unverified and never document-backed"
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil filter cap torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Unverified AI answer — not document-backed")
@@ -434,13 +434,13 @@ test("SearchPage omits retrieved context when the response has none", async () =
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the water pump torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("No answer found")).toBeInTheDocument();
   expect(
@@ -504,13 +504,13 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   // Document-supported claims, with the quote shown so the owner can check it.
   const supportedHeading = await within(askSection).findByRole("heading", {
@@ -607,12 +607,12 @@ test("SearchPage keeps distinct evidence quotes from the same source chunk", asy
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "How do I reinstall the oil drain plug?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Install the oil drain plug with a new gasket.")
@@ -651,13 +651,13 @@ test("SearchPage hides an answered response that has no evidence and no citation
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -701,12 +701,12 @@ test("SearchPage hides a response whose API status is missing", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -762,12 +762,12 @@ test("SearchPage hides a document-supported claim whose source does not match a 
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -822,12 +822,12 @@ test("SearchPage hides a document-supported claim whose quote does not match its
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -885,12 +885,12 @@ test("SearchPage rejects matching passages whose server evidence identifiers dis
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("Could not ask documents")).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
@@ -945,12 +945,12 @@ test("SearchPage rejects a long evidence quote that only matches the citation pr
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What should I do next?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -1005,12 +1005,12 @@ test("SearchPage rejects boolean document, page, and chunk identifiers", async (
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("Could not ask documents")
@@ -1064,12 +1064,12 @@ test("SearchPage renders duplicate citation identities only once", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText("The oil drain plug torque is 27 ft-lb.")
@@ -1132,14 +1132,14 @@ test("SearchPage shows an answered Ask response with clickable citation cards", 
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("From your documents")).toBeInTheDocument();
   expect(
@@ -1260,7 +1260,7 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
   expect(within(askSection).getByText(AI_SAFETY_WARNING)).toBeInTheDocument();
@@ -1268,7 +1268,7 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the front brake caliper mounting bolt torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText(
@@ -1284,7 +1284,7 @@ test("SearchPage keeps an Ask chat thread and sends prior messages as follow-up 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What about the rear ones?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
     await within(askSection).findByText(
@@ -1331,21 +1331,21 @@ test("SearchPage shows request error state when Ask fails", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "Why did the Ask request fail?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(await within(askSection).findByText("Could not ask documents")).toBeInTheDocument();
   expect(within(askSection).getByText("Ask service failed.")).toBeInTheDocument();
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });
 
-test("SearchPage Ask panel shows a saved-photo selector from saved attachments", async () => {
+test("SearchPage's Ask a question panel shows a saved-photo selector from saved attachments", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
@@ -1361,7 +1361,7 @@ test("SearchPage Ask panel shows a saved-photo selector from saved attachments",
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
   expect(askSection).not.toBeNull();
 
@@ -1374,7 +1374,7 @@ test("SearchPage Ask panel shows a saved-photo selector from saved attachments",
   ).toBeInTheDocument();
 });
 
-test("SearchPage Ask panel shows a thumbnail after selecting a saved photo", async () => {
+test("SearchPage's Ask a question panel shows a thumbnail after selecting a saved photo", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
@@ -1390,7 +1390,7 @@ test("SearchPage Ask panel shows a thumbnail after selecting a saved photo", asy
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   const selector = await within(askSection).findByRole("combobox", {
@@ -1402,7 +1402,7 @@ test("SearchPage Ask panel shows a thumbnail after selecting a saved photo", asy
   expect(thumb).toHaveAttribute("src", "/api/attachments/7/file");
 });
 
-test("SearchPage Ask panel removes the selected photo", async () => {
+test("SearchPage's Ask a question panel removes the selected photo", async () => {
   const attachments = [
     { id: 7, caption: "Cracked hose", originalFilename: "hose.jpg", mimeType: "image/jpeg" },
   ];
@@ -1418,7 +1418,7 @@ test("SearchPage Ask panel removes the selected photo", async () => {
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   const selector = await within(askSection).findByRole("combobox", {
@@ -1460,7 +1460,7 @@ test("SearchPage Ask request includes attachmentId when a photo is selected", as
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   fireEvent.change(
@@ -1470,7 +1470,7 @@ test("SearchPage Ask request includes attachmentId when a photo is selected", as
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is wrong with this hose?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   await waitFor(() => {
     expect(askBodies).toHaveLength(1);
@@ -1505,7 +1505,7 @@ test("SearchPage Ask request omits attachmentId when no photo is selected", asyn
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   // Wait for the selector to load so we know attachments are present but unused.
@@ -1513,7 +1513,7 @@ test("SearchPage Ask request omits attachmentId when no photo is selected", asyn
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: "What is the oil drain plug torque?" },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   await waitFor(() => {
     expect(askBodies).toHaveLength(1);
@@ -1570,7 +1570,7 @@ test("a slow in-flight search does not overwrite a later Clear", async () => {
     </MemoryRouter>
   );
 
-  const documentsSection = (await screen.findByRole("heading", { name: "Documents" })).closest(
+  const documentsSection = (await screen.findByRole("heading", { name: "Search documents" })).closest(
     "section"
   );
   const keyword = within(documentsSection).getByRole("textbox", { name: "Keyword" });
@@ -1656,10 +1656,10 @@ test("SearchPage renders separate search sections for all entity types", async (
     </MemoryRouter>
   );
 
-  expect(await screen.findByRole("heading", { name: "Documents" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Symptoms" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Procedures" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Search documents" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Search symptoms" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Search procedures" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Search notes" })).toBeInTheDocument();
 
   expect(screen.getAllByRole("button", { name: "Search" })).toHaveLength(4);
   expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(4);
@@ -1785,7 +1785,7 @@ test("SearchPage lets one section search independently", async () => {
     </MemoryRouter>
   );
 
-  const symptomsSection = (await screen.findByRole("heading", { name: "Symptoms" })).closest(
+  const symptomsSection = (await screen.findByRole("heading", { name: "Search symptoms" })).closest(
     "section"
   );
   expect(symptomsSection).not.toBeNull();
@@ -1803,7 +1803,7 @@ test("SearchPage lets one section search independently", async () => {
     within(symptomsSection).getByRole("link", { name: "Open symptom Idle flare on cold start" })
   ).toHaveAttribute("href", "/symptoms?symptomId=21#symptom-library");
 
-  const notesSection = screen.getByRole("heading", { name: "Notes" }).closest("section");
+  const notesSection = screen.getByRole("heading", { name: "Search notes" }).closest("section");
   expect(notesSection).not.toBeNull();
   expect(
     within(notesSection).getByRole("link", { name: "Open note Cold-start idle note" })
@@ -1837,13 +1837,13 @@ async function askAndGetSection(askPayload, question = "What is the oil drain pl
   );
 
   const askSection = (
-    await screen.findByRole("heading", { name: "Ask your documents" })
+    await screen.findByRole("heading", { name: "Ask a question" })
   ).closest("section");
 
   fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
     target: { value: question },
   });
-  fireEvent.click(within(askSection).getByRole("button", { name: "Ask" }));
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   return askSection;
 }

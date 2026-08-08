@@ -7,7 +7,7 @@ Welcome! This guide takes a new developer — including a beginner — from zero
 1. **It's one app for one car.** A local-first repair workspace for a single 2009 Toyota Corolla LE 1.8L. No login, no cloud sync, no multi-vehicle support — and changes should stay inside that scope (the scope rules live in `AGENTS.md`).
 2. **Two halves, one contract.** `client/` is a React app; `server/` is an Express API. The browser only ever talks to the server through `/api/...` routes ([api.md](api.md) lists them all).
 3. **All data is two things on disk:** one SQLite database file (`server/data/`) and one uploads folder (`server/uploads/`). Delete those two and the app is factory-new. Back them up and you've backed up everything.
-4. **The AI is grounded, and optional.** "Ask your documents" and the Repair Planner only use text retrieved from *your uploaded PDFs*, cite their sources, and refuse (`not in documents`) rather than guess. Without an `OPENAI_API_KEY` they degrade to an "AI not configured" state and the rest of the app works normally.
+4. **The AI is grounded, and optional.** Ask AI and the Repair Planner only use text retrieved from *your uploaded PDFs*, cite their sources, and refuse (`not in documents`) rather than guess. Without an `OPENAI_API_KEY` they degrade to an "AI not configured" state and the rest of the app works normally.
 5. **Node must be 24.** The server uses Node's built-in `node:sqlite`, so the required range is `>=24 <25`. Most mystery failures are the wrong Node version.
 
 ## 2. Set Up Your Environment
@@ -143,7 +143,7 @@ Add a **new** numbered migration in `server/src/initDatabase.js` (`NNN_short_des
 - [ ] `npm run install:all` completes
 - [ ] `npm run dev` — app opens at `http://localhost:5173`, health check OK at `http://localhost:4000/api/health`
 - [ ] Upload one PDF on the Documents page; open its stored file; check its extraction status
-- [ ] Run a keyword search on the Ask AI page (route `/search` — the page holds both the Ask panel and the search sections)
+- [ ] Run a keyword search on the Ask AI page (route `/search` — the page holds both the "Ask a question" panel and the Search sections)
 - [ ] `npm run lint && npm run typecheck && npm run test` all pass
 - [ ] Read [architecture.md](architecture.md) (with the diagrams)
 - [ ] Skim [api.md](api.md) and [DATA_MODEL.md](../DATA_MODEL.md)

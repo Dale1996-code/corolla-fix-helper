@@ -15,13 +15,29 @@ Storage is local, but the AI features are not offline: when `OPENAI_API_KEY` is 
 - **Documents** — upload PDFs, edit metadata, tag, favorite, bookmark, open the stored file, re-run text extraction, and delete with full cleanup
 - **Bulk import** — resumable folder import for many PDFs with MD5 duplicate detection and an image-only report (`npm run import`)
 - **OCR (optional)** — scanned or image-only PDF pages become searchable text when local Tesseract and Poppler are installed
-- **Ask AI / Search** — one page (labelled "Ask AI" in the sidebar, route `/search`) with the Ask panel plus separate keyword-search sections for documents, symptoms, procedures, and notes
-- **Ask your documents** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, OpenAI-generated answers with citations, and a deliberate `not in documents` refusal when your PDFs don't contain the answer. Can optionally include one saved photo (Vision Ask).
+- **Ask AI** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, OpenAI-generated answers with citations, and a deliberate `not in documents` refusal when your PDFs don't contain the answer. Can optionally include one saved photo (Vision Ask). Sidebar **Ask AI**, route `/search`; the panel on that page is headed "Ask a question".
+- **Search** — plain keyword search, no AI and no API key needed. Its four sections ("Search documents", "Search symptoms", "Search procedures", "Search notes") sit below the Ask AI panel on the same page, and hit `/api/search/*`.
 - **Repair Planner** — a streaming tool-calling agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts, grounded in your PDFs
 - **Symptoms, Procedures, Notes** — create/edit/delete with filters and sorting; link them to documents and to each other; attach photos (JPEG/PNG/WebP)
-- **Repair Checklists** — plan a repair job as a simple list of steps, check them off as you go, add a status (planned / in progress / blocked / done) and notes, and reorder steps with Up/Down (sidebar "Checklists")
+- **Repair Checklists** — plan a repair job as a simple list of steps, check them off as you go, add a status (planned / in progress / blocked / done) and notes, and reorder steps with Up/Down
 - **Settings** — vehicle profile, document defaults, runtime info, and one-click backup export
 - **Backup & restore** — export a `.tar.gz` of everything; restore validates the archive, snapshots current data, swaps atomically, and rolls back on failure ([docs/backup-restore.md](docs/backup-restore.md))
+
+### What things are called
+
+The product is **Corolla Fix Helper** everywhere it is named: browser tab title, app header, PWA manifest `name`, this README, and the user docs. The one sanctioned short form is **Corolla Fix**, used only where the platform truncates — the manifest's `short_name` and the iOS `apple-mobile-web-app-title` that labels the Home Screen icon.
+
+Each feature has exactly one visible name, and the sidebar item, the page's own heading, and the browser tab title all use it:
+
+| Feature | Visible name | Route |
+| --- | --- | --- |
+| Document library | Documents | `/documents` |
+| AI question answering | Ask AI | `/search` |
+| Keyword search | Search (as "Search documents", "Search symptoms", …) | `/search` |
+| Repair planning agent | Repair Planner | `/repair-planner` |
+| Job checklists | Repair Checklists | `/repair-checklists` |
+
+Routes and API paths are **not** renamed to match: `/search` predates the "Ask AI" name and is still the address of that page, `SearchPage.jsx` is still the component, and `/api/search/*` is still the keyword-search API. Only what the owner reads changed.
 
 ## Current Limits
 
@@ -33,7 +49,7 @@ The app does **not** include:
 - general open-ended AI chat (both AI features stay grounded in the uploaded documents)
 - a verified current cloud deployment from this branch
 
-> ⚠️ **Do not expose this app on a public URL without putting HTTPS and authentication in front of it.** There is no login, so anyone who can reach it can read your data and spend your OpenAI budget. The AI endpoints are rate-limited (20 requests/minute) as a basic safeguard, but that is not a substitute for authentication. The Ask feature sends your question and relevant excerpts from your uploaded PDFs (plus any photo you attach) to OpenAI to generate an answer.
+> ⚠️ **Do not expose this app on a public URL without putting HTTPS and authentication in front of it.** There is no login, so anyone who can reach it can read your data and spend your OpenAI budget. The AI endpoints are rate-limited (20 requests/minute) as a basic safeguard, but that is not a substitute for authentication. Ask AI sends your question and relevant excerpts from your uploaded PDFs (plus any photo you attach) to OpenAI to generate an answer.
 
 Use sample or fake PDFs before sharing a public demo.
 
@@ -77,7 +93,7 @@ The key ones:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | (empty) | Enables Ask answers, Repair Planner, embeddings, and answer evals. Without it, both AI features show "AI not configured" and everything else keeps working. |
+| `OPENAI_API_KEY` | (empty) | Enables Ask AI answers, Repair Planner, embeddings, and answer evals. Without it, both AI features show "AI not configured" and everything else keeps working. |
 | `PORT` | `4000` | Backend port |
 | `DATABASE_FILE` | `server/data/corolla-fix-helper.db` | SQLite database file |
 | `UPLOADS_DIR` | `server/uploads` | Where uploaded PDFs (and attachment images) live |

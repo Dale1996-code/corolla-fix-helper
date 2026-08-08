@@ -30,8 +30,8 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `POST /api/documents/:id/extract` | Re-run text extraction |
 | `PUT /api/documents/:id` | Edit metadata / favorite / bookmark / tags |
 | `DELETE /api/documents/:id` | Delete document + full cleanup |
-| `GET /api/search` (+ `/documents`, `/symptoms`, `/procedures`, `/notes`) | Keyword search per section |
-| `POST /api/ask` | Ask your documents (RAG Q&A) |
+| `GET /api/search` (+ `/documents`, `/symptoms`, `/procedures`, `/notes`) | Keyword search per section — the UI's **Search** sections |
+| `POST /api/ask` | **Ask AI** — grounded Q&A over your PDFs (RAG) |
 | `POST /api/repair-plan` | Repair Planner agent (SSE stream) |
 | `POST /api/repair-plan/:runId/safety-acknowledgment` | Record the owner's safety acknowledgment for one generated plan |
 | `POST /api/repair-checklists/from-planner` | Save a completed Repair Planner result as an ordinary checklist |
@@ -160,6 +160,8 @@ Deletes the document, its stored file, its chunks, its symptom/procedure links, 
 
 ## Search
 
+These back the **Search** sections of the UI ("Search documents", "Search symptoms", "Search procedures", "Search notes"), which sit on the `/search` page below the Ask AI panel. They are plain SQL keyword search: no model call, no `OPENAI_API_KEY`, and unrelated to `POST /api/ask` below.
+
 All search endpoints are `GET`, share the shape `{ "results": [...], "total": n, "filters": {...} }`, and default `sort` to `relevance`. `filters` lists the values currently in use (systems, types, tags...) so the UI can build dropdowns.
 
 | Endpoint | Query params |
@@ -180,7 +182,9 @@ curl.exe "http://localhost:4000/api/search/documents?limit=25&offset=50"
 
 ---
 
-## Ask Your Documents (RAG)
+## Ask AI (RAG)
+
+Backs the "Ask a question" panel on the `/search` page — the feature the UI calls **Ask AI**. The route path is unrelated to `/api/search/*` above; only the browser route is shared.
 
 ### `POST /api/ask`  *(rate limited: 20/min)*
 

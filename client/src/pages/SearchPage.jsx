@@ -1047,8 +1047,10 @@ function AskDocumentsSection() {
 
   const isLoading = askState.status === "loading";
 
+  // The page <h1> already names the feature "Ask AI"; this card is titled by its
+  // task so the same name does not appear at two heading levels.
   return (
-    <SectionCard title="Ask your documents">
+    <SectionCard title="Ask a question">
       {/* Same component the Repair Planner uses, so the two AI features cannot
           drift into differently-worded versions of the same warning. */}
       <AiSafetyNotices disclosure={AI_DISCLOSURE_ASK} />
@@ -1120,7 +1122,7 @@ function AskDocumentsSection() {
             disabled={isLoading}
             className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-600"
           >
-            {isLoading ? "Asking..." : "Ask"}
+            {isLoading ? "Asking..." : "Ask question"}
           </button>
         </div>
       </form>
@@ -1134,10 +1136,16 @@ function AskDocumentsSection() {
 // One config per entity type drives a shared SearchSection instead of four
 // near-identical ~150-line components differing only in endpoint, fields,
 // and result card.
+//
+// Each title says "Search ..." rather than just naming the entity: these cards
+// share a page with the Ask AI panel, and a bare "Documents" heading also reads
+// as the nav destination of the same name. Keyword search and the AI answer are
+// separate features (`/api/search/*` is deterministic SQL and needs no API key)
+// that merely share a route, so their headings have to say which is which.
 const SEARCH_SECTIONS = [
   {
     key: "documents",
-    title: "Documents",
+    title: "Search documents",
     endpoint: "/api/search/documents",
     defaultForm: defaultDocumentsForm,
     defaultFilters: defaultDocumentsFilters,
@@ -1227,7 +1235,7 @@ const SEARCH_SECTIONS = [
   },
   {
     key: "symptoms",
-    title: "Symptoms",
+    title: "Search symptoms",
     endpoint: "/api/search/symptoms",
     defaultForm: defaultSymptomsForm,
     defaultFilters: defaultSymptomsFilters,
@@ -1284,7 +1292,7 @@ const SEARCH_SECTIONS = [
   },
   {
     key: "procedures",
-    title: "Procedures",
+    title: "Search procedures",
     endpoint: "/api/search/procedures",
     defaultForm: defaultProceduresForm,
     defaultFilters: defaultProceduresFilters,
@@ -1341,7 +1349,7 @@ const SEARCH_SECTIONS = [
   },
   {
     key: "notes",
-    title: "Notes",
+    title: "Search notes",
     endpoint: "/api/search/notes",
     defaultForm: defaultNotesForm,
     defaultFilters: defaultNotesFilters,
@@ -1503,9 +1511,12 @@ function SearchSection({ config }) {
 export function SearchPage() {
   return (
     <>
+      {/* The heading matches the nav item that routes here. The description has
+          to cover both halves of the page: the old one described only the
+          search sections, which left the AI panel above them unnamed. */}
       <PageHeader
         title="Ask AI"
-        description="Search documents, symptoms, procedures, and notes from one page while keeping each search area separate and easy to understand."
+        description="Ask a question and get an answer built only from your uploaded PDFs, or search documents, symptoms, procedures, and notes from the same page."
       />
 
       <div className="space-y-6">

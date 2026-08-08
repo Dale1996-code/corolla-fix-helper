@@ -13,7 +13,10 @@ Check:
 
 - Frontend opens at `http://localhost:5173`.
 - Backend health check works at `http://localhost:4000/api/health`.
-- The sidebar shows Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Checklists, and Settings.
+- The sidebar shows Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Repair Checklists, and Settings.
+- Each sidebar label matches the heading of the page it opens, and the browser tab reads `<that heading> | Corolla Fix Helper`.
+- The mobile header (narrow window) shows the same nine labels as the sidebar.
+- The sidebar brand block reads **Corolla Fix Helper**; no screen calls the app anything else.
 
 ## 2. Settings
 
@@ -73,14 +76,19 @@ Check:
 
 ## 5. Search Sections
 
-1. Open Search.
-2. Search the Documents section for text from an uploaded PDF.
-3. Search the Symptoms, Procedures, and Notes sections.
+Keyword search and Ask AI share the `/search` page but are separate features:
+the sections below are plain SQL search and work with no `OPENAI_API_KEY`.
+
+1. Open **Ask AI** and scroll past the "Ask a question" panel to the search sections.
+2. Search the **Search documents** section for text from an uploaded PDF.
+3. Search the **Search symptoms**, **Search procedures**, and **Search notes** sections.
 4. Try one filter in each section.
 
 Check:
 
-- Each Search section has its own controls.
+- Each Search section has its own controls, and its heading says "Search …" so it
+  cannot be mistaken for the Ask AI panel above it or for the nav destination of
+  the same name.
 - Results narrow correctly.
 - Result links open the matching item.
 - Empty states are clear when no result matches.
@@ -89,7 +97,7 @@ Check:
 
 Use a fake or sample PDF with text you can safely test.
 
-1. Open Ask AI.
+1. Open **Ask AI** (sidebar item, page heading, and browser tab all say "Ask AI"; the panel is headed "Ask a question" and its button reads **Ask question**).
 2. Run `npm run embed:backfill` if `OPENAI_API_KEY` is configured and the PDF was imported or re-extracted.
 3. Ask a question that should be answered by text in the uploaded PDF.
 4. Ask a question that the uploaded PDFs cannot answer.
@@ -105,9 +113,9 @@ Check:
 
 ### Vision Ask (optional saved image)
 
-First save at least one image attachment on a symptom, procedure, or note (see section 12) so the Ask panel has a photo to choose.
+First save at least one image attachment on a symptom, procedure, or note (see section 12) so the "Ask a question" panel has a photo to choose.
 
-1. In the Ask panel, confirm a "saved photo" selector lists your saved attachments.
+1. In the "Ask a question" panel, confirm a "saved photo" selector lists your saved attachments.
 2. Select one; confirm its thumbnail appears next to the question input and that "Remove photo" clears it.
 3. With a photo selected, ask a question the PDFs can answer.
 4. With no photo selected, ask the same kind of question (text-only Ask).
@@ -147,8 +155,8 @@ Check:
 - **Save as repair checklist** appears on every finished plan, including a
   `Not found in your documents` one, and previews the exact title, item list,
   and notes it will write, plus what it will not copy.
-- Saving keeps you on the Planner, disables the button, and offers **Open saved
-  checklist**; that link lands on Checklists with the new checklist selected.
+- Saving keeps you on Repair Planner, disables the button, and offers **Open saved
+  checklist**; that link lands on Repair Checklists with the new checklist selected.
 - The saved checklist is `Planned`, has one item per extracted task, and its
   notes carry the verified statements with document and page — no placeholder
   steps, no gaps, no handoff drafts, no readiness score.
@@ -162,7 +170,7 @@ Check:
 
 Use a test checklist, not an important repair record.
 
-1. Open **Checklists** and observe the initial loading state.
+1. Open **Repair Checklists** and observe the initial loading state.
 2. Create a checklist with a title, description, notes, and each available status:
    `planned`, `in_progress`, `blocked`, or `done`.
 3. Select the checklist, edit its title, description, notes, and status, then save.
@@ -180,7 +188,8 @@ Use a test checklist, not an important repair record.
 
 Check:
 
-- The sidebar label is **Checklists** and the page opens at `/repair-checklists`.
+- The sidebar label is **Repair Checklists**, matching the page heading, and the
+  page opens at `/repair-checklists`.
 - Loading, empty, success, and failure messages are clear and do not leave stale
   data or banners on another selected checklist.
 - Creating and editing metadata persists title, description, notes, and status.
