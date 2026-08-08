@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
@@ -17,6 +17,15 @@ import {
 import { TagChips } from "../components/documents/TagChips";
 import { ListControls } from "../components/documents/ListControls";
 import { DocumentsList } from "../components/documents/DocumentsList";
+import {
+  applyParamUpdates,
+  DEFAULT_PAGE,
+  filterValueUpdates,
+  pageParamValue,
+  readFilterValues,
+  readIdParam,
+  readPageParam,
+} from "../lib/urlState";
 
 const emptyUploadForm = {
   pdfFile: null,
@@ -47,21 +56,25 @@ const emptyDocumentDefaults = {
   documentTypes: [],
 };
 
-function normalizeFavoriteFilter(value) {
-  if (value === "favorites_only" || value === "not_favorites") {
-    return value;
-  }
+// The library view state that belongs in the URL. `favorite`, `bookmark`, and
+// `tag` keep the names the page already accepted as one-way deep links, so
+// links built before this page could write them back still work.
+//
+// `system`, `documentType`, and `tag` have no options list because their
+// choices are built from the owner's own library -- a value that matches
+// nothing filters the list to empty, which is a truthful view rather than an
+// error.
+const DOCUMENT_FILTERS = {
+  sort: { default: "newest", options: ["newest", "oldest", "title_asc"] },
+  system: { default: "all" },
+  documentType: { default: "all" },
+  favorite: { default: "all", options: ["all", "favorites_only", "not_favorites"] },
+  bookmark: { default: "all", options: ["all", "bookmarked_only", "not_bookmarked"] },
+  tag: { default: "all" },
+};
 
-  return "all";
-}
-
-function normalizeBookmarkFilter(value) {
-  if (value === "bookmarked_only" || value === "not_bookmarked") {
-    return value;
-  }
-
-  return "all";
-}
+// Show the documents in fixed-size pages so a large library stays scannable.
+const DOCUMENTS_PER_PAGE = 25;
 
 
 function UploadForm({
@@ -548,7 +561,7 @@ export function DocumentsPage() {
   useScrollToHash();
 
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [documents, setDocuments] = useState([]);
   const [documentDefaults, setDocumentDefaults] = useState(emptyDocumentDefaults);
   const [loading, setLoading] = useState(true);
@@ -570,23 +583,20 @@ export function DocumentsPage() {
     }
   }, [location.hash]);
 
-  const [sortBy, setSortBy] = useState("newest");
-  const [systemFilter, setSystemFilter] = useState("all");
-  const [documentTypeFilter, setDocumentTypeFilter] = useState("all");
-  const requestedDocumentIdValue = Number(searchParams.get("documentId"));
-  const requestedDocumentId =
-    Number.isInteger(requestedDocumentIdValue) && requestedDocumentIdValue > 0
-      ? requestedDocumentIdValue
-      : null;
-  const requestedFavoriteFilter = normalizeFavoriteFilter(searchParams.get("favorite"));
-  const [favoriteFilter, setFavoriteFilter] = useState(requestedFavoriteFilter);
-  const requestedBookmarkFilter = normalizeBookmarkFilter(searchParams.get("bookmark"));
-  const [bookmarkFilter, setBookmarkFilter] = useState(requestedBookmarkFilter);
-  const requestedTagFilter = searchParams.get("tag") || "all";
-  const [tagFilter, setTagFilter] = useState(requestedTagFilter);
+  // Filters, page, and selection are read from the URL rather than mirrored
+  // into component state: with a copy in state the two can disagree, and the
+  // copy is the one Back cannot restore.
+  const {
+    sort: sortBy,
+    system: systemFilter,
+    documentType: documentTypeFilter,
+    favorite: favoriteFilter,
+    bookmark: bookmarkFilter,
+    tag: tagFilter,
+  } = readFilterValues(searchParams, DOCUMENT_FILTERS);
+  const requestedPage = readPageParam(searchParams);
+  const requestedDocumentId = readIdParam(searchParams, "documentId");
 
-  const [page, setPage] = useState(1);
-  const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [editingDocumentId, setEditingDocumentId] = useState(null);
   const [editForm, setEditForm] = useState(emptyEditForm);
   const [saveState, setSaveState] = useState({
@@ -641,14 +651,6 @@ export function DocumentsPage() {
       ...documents.map((document) => document.documentType),
     ]);
   }, [documentDefaults.documentTypes, documents]);
-
-  const selectedDocument = useMemo(() => {
-    if (!selectedDocumentId) {
-      return null;
-    }
-
-    return documents.find((document) => document.id === selectedDocumentId) || null;
-  }, [documents, selectedDocumentId]);
 
   const filteredDocuments = useMemo(() => {
     const nextDocuments = documents.filter((document) => {
@@ -719,29 +721,84 @@ export function DocumentsPage() {
     tagFilter,
   ]);
 
-  // Show the documents in fixed-size pages so a large library stays scannable.
-  const DOCUMENTS_PER_PAGE = 25;
   const totalPages = Math.max(
     1,
     Math.ceil(filteredDocuments.length / DOCUMENTS_PER_PAGE)
   );
-  const currentPage = Math.min(page, totalPages);
+  const currentPage = Math.min(requestedPage, totalPages);
   const pagedDocuments = useMemo(() => {
     const start = (currentPage - 1) * DOCUMENTS_PER_PAGE;
     return filteredDocuments.slice(start, start + DOCUMENTS_PER_PAGE);
   }, [filteredDocuments, currentPage]);
 
-  // Reset to the first page whenever the filtered set changes underneath us.
+  // The selected document is derived, not stored. No `documentId` in the URL
+  // means "the first document" -- the same default the page always had, but now
+  // spelled as the absence of a parameter, so an untouched library keeps a
+  // clean `/documents` URL. Lookup runs over the whole library rather than the
+  // filtered page, matching the existing behaviour where a filter hides a row
+  // from the list without emptying the detail panel beside it.
+  const selectedDocument = useMemo(() => {
+    const requestedDocument = requestedDocumentId
+      ? documents.find((document) => document.id === requestedDocumentId)
+      : null;
+
+    return requestedDocument || documents[0] || null;
+  }, [documents, requestedDocumentId]);
+  const selectedDocumentId = selectedDocument?.id ?? null;
+
+  // One writer for every URL change this page makes, so "carry the parameters
+  // I did not mention" is guaranteed rather than remembered at each call site.
+  const updateViewParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
+
+  // Changing a filter is a navigation step the owner should be able to undo, so
+  // it pushes -- and it drops `page`, because page 4 of the old filter says
+  // nothing about the new one.
+  function handleFilterChange(key, value) {
+    updateViewParams({
+      ...filterValueUpdates({ [key]: value }, DOCUMENT_FILTERS),
+      page: null,
+    });
+  }
+
+  // Normalization only, so it replaces rather than pushing: a URL that says
+  // `page=99` or `page=abc` should not become a history entry the owner has to
+  // press Back through. Waits for the load to settle -- before that every page
+  // looks out of range because the library is still empty.
   useEffect(() => {
-    setPage(1);
-  }, [
-    sortBy,
-    systemFilter,
-    documentTypeFilter,
-    favoriteFilter,
-    bookmarkFilter,
-    tagFilter,
-  ]);
+    if (loading || loadError) {
+      return;
+    }
+
+    const canonicalPage = pageParamValue(Math.min(Math.max(requestedPage, DEFAULT_PAGE), totalPages));
+
+    if ((searchParams.get("page") ?? null) !== canonicalPage) {
+      updateViewParams({ page: canonicalPage }, { replace: true });
+    }
+  }, [loading, loadError, requestedPage, totalPages, searchParams, updateViewParams]);
+
+  // A `documentId` naming a document that is not there -- deleted, or a
+  // hand-typed id, well-formed or not -- drops out of the URL so the address
+  // stops describing a view that does not exist. Only that parameter is
+  // touched; the filters and page the owner chose stay exactly as they are.
+  useEffect(() => {
+    if (loading || loadError || !searchParams.has("documentId")) {
+      return;
+    }
+
+    const namesALoadedDocument =
+      requestedDocumentId && documents.some((document) => document.id === requestedDocumentId);
+
+    if (!namesALoadedDocument) {
+      updateViewParams({ documentId: null }, { replace: true });
+    }
+  }, [loading, loadError, requestedDocumentId, documents, searchParams, updateViewParams]);
 
   async function loadDocuments() {
     try {
@@ -759,29 +816,13 @@ export function DocumentsPage() {
       setDocuments(nextDocuments);
 
       if (nextDocuments.length === 0) {
-        setSelectedDocumentId(null);
         setEditingDocumentId(null);
         return;
       }
 
-      setSelectedDocumentId((currentSelectedId) => {
-        if (
-          requestedDocumentId &&
-          nextDocuments.some((document) => document.id === requestedDocumentId)
-        ) {
-          return requestedDocumentId;
-        }
-
-        if (
-          currentSelectedId &&
-          nextDocuments.some((document) => document.id === currentSelectedId)
-        ) {
-          return currentSelectedId;
-        }
-
-        return nextDocuments[0].id;
-      });
-
+      // Selection needs no repair here: it is derived from the URL and this
+      // list, so a document that vanished simply stops matching and the
+      // normalization effect drops the stale parameter.
       setEditingDocumentId((currentEditingId) => {
         if (
           currentEditingId &&
@@ -817,22 +858,13 @@ export function DocumentsPage() {
     }
   }
 
+  // The library is fetched once. Filters, paging, and selection are all applied
+  // to the loaded list, so moving through them never costs a request -- and
+  // Back/Forward across those views never refetches either.
   useEffect(() => {
     loadDocuments();
     loadDocumentDefaults();
   }, []);
-
-  useEffect(() => {
-    setFavoriteFilter(requestedFavoriteFilter);
-  }, [requestedFavoriteFilter]);
-
-  useEffect(() => {
-    setBookmarkFilter(requestedBookmarkFilter);
-  }, [requestedBookmarkFilter]);
-
-  useEffect(() => {
-    setTagFilter(requestedTagFilter);
-  }, [requestedTagFilter]);
 
   function handleUploadFileChange(event) {
     const nextFile = event.target.files?.[0] || null;
@@ -898,7 +930,9 @@ export function DocumentsPage() {
       await loadDocuments();
 
       if (newDocument?.id) {
-        setSelectedDocumentId(newDocument.id);
+        // Replace, not push: landing on the document just uploaded is part of
+        // the upload, not a separate step to press Back through.
+        updateViewParams({ documentId: newDocument.id, page: null }, { replace: true });
       }
     } catch (error) {
       setUploadError(error.message || "Could not upload the document.");
@@ -908,7 +942,9 @@ export function DocumentsPage() {
   }
 
   function handleSelectDocument(documentId) {
-    setSelectedDocumentId(documentId);
+    // Picking a record is a real navigation step, so it pushes: Back returns to
+    // the document that was open before.
+    updateViewParams({ documentId });
     setEditingDocumentId(null);
     setSaveState({
       documentId: null,
@@ -1260,19 +1296,25 @@ export function DocumentsPage() {
             <>
               <ListControls
                 sortBy={sortBy}
-                onSortChange={(event) => setSortBy(event.target.value)}
+                onSortChange={(event) => handleFilterChange("sort", event.target.value)}
                 systemFilter={systemFilter}
-                onSystemFilterChange={(event) => setSystemFilter(event.target.value)}
+                onSystemFilterChange={(event) =>
+                  handleFilterChange("system", event.target.value)
+                }
                 documentTypeFilter={documentTypeFilter}
                 onDocumentTypeFilterChange={(event) =>
-                  setDocumentTypeFilter(event.target.value)
+                  handleFilterChange("documentType", event.target.value)
                 }
                 favoriteFilter={favoriteFilter}
-                onFavoriteFilterChange={(event) => setFavoriteFilter(event.target.value)}
+                onFavoriteFilterChange={(event) =>
+                  handleFilterChange("favorite", event.target.value)
+                }
                 bookmarkFilter={bookmarkFilter}
-                onBookmarkFilterChange={(event) => setBookmarkFilter(event.target.value)}
+                onBookmarkFilterChange={(event) =>
+                  handleFilterChange("bookmark", event.target.value)
+                }
                 tagFilter={tagFilter}
-                onTagFilterChange={(event) => setTagFilter(event.target.value)}
+                onTagFilterChange={(event) => handleFilterChange("tag", event.target.value)}
                 systems={systems}
                 documentTypes={documentTypes}
                 tags={availableTags}
@@ -1291,7 +1333,9 @@ export function DocumentsPage() {
                     <button
                       type="button"
                       className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                      onClick={() =>
+                        updateViewParams({ page: pageParamValue(Math.max(1, currentPage - 1)) })
+                      }
                       disabled={currentPage <= 1}
                     >
                       Previous
@@ -1303,7 +1347,11 @@ export function DocumentsPage() {
                     <button
                       type="button"
                       className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                      onClick={() =>
+                        updateViewParams({
+                          page: pageParamValue(Math.min(totalPages, currentPage + 1)),
+                        })
+                      }
                       disabled={currentPage >= totalPages}
                     >
                       Next

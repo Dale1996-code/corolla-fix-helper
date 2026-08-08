@@ -54,9 +54,22 @@ React 19 + React Router 7 + Tailwind CSS 4. The pattern is simple and repeated:
 - One page component per feature under `client/src/pages/` (Dashboard, Documents, Ask AI, Repair Planner, Symptoms, Procedures, Notes, Repair Checklists, Settings). Routes are wired in `client/src/App.jsx`; the visible label for each is in `client/src/lib/navigation.js`, and `PageHeader` derives the browser tab title from the page's own heading (`lib/pageTitle.js`) so nav label, `<h1>`, and tab title cannot drift apart. Note the "Ask AI" page keeps its historical `/search` route and `SearchPage.jsx` filename — it holds the "Ask a question" panel plus the keyword-search sections, which are separate features sharing one page.
 - Shared presentational pieces under `client/src/components/` (e.g. `documents/DocumentsList.jsx`, `search/ResultCards.jsx`).
 - `client/src/lib/apiClient.js` is a thin `fetch` wrapper (`requestJson`) plus helpers for attachments and symptom↔procedure links.
+- `client/src/lib/urlState.js` holds the query-string helpers described below.
 - Tests are co-located next to the code (`*.test.jsx`, Vitest + jsdom + Testing Library).
 
 The client holds no data of its own — every page fetches from the API on load.
+
+#### View state lives in the query string
+
+Filters, pagination, and the selected record are **URL state, not component state**, on Documents, Ask AI's four search cards, Symptoms, Procedures, Notes, and Repair Checklists. Holding them in `useState` meant the browser had no record of them, so Back returned to a default list instead of the one the owner had been reading. `client/src/lib/urlState.js` supplies the readers, writers, and the `useDraftTextParam` hook; the rules it enforces:
+
+- **Defaults are omitted.** `/documents` and `/documents?sort=newest&page=1` are the same view, so only the short form is ever produced.
+- **Reading is total.** Any string can arrive in a query string, so every reader falls back to its default rather than throwing. `page=abc` is page 1; a `documentId` that is not a positive integer is no selection at all.
+- **Writing is additive.** `applyParamUpdates` carries through every parameter it was not asked about, so one page's controls cannot drop another feature's.
+- **Push for navigation, replace for normalization.** Applying a filter, changing page, and picking a record push. Clamping an out-of-range page, canonicalizing an unusable value, clearing a selection that names nothing, opening a just-created record, and the debounced commit of a live-typing search box all replace.
+- **Selection is derived, and its absence means the page's default record** (`resolveSelectedRecord`) — which is why an untouched list has a clean URL. A selection parameter naming a record that is not loaded is cleared; one that merely sits behind a filter is kept, so loosening the filter brings it back.
+
+Only the client-side pages page from already-loaded data. Ask AI's documents card is the one section with real server pagination: its `documents.page` parameter is turned back into the `limit`/`offset` the API expects, and the section's URL-derived query string is the sole dependency of its fetch, so one URL change (submit, page button, Back, deep link) is exactly one request. The Ask panel's question and answers are deliberately **not** URL state — see "Not in the Current App".
 
 ### Server (`server/`)
 
@@ -277,3 +290,4 @@ Cloud Run is not the target because the app depends on a local SQLite file and l
 - general AI chat outside uploaded documents
 - vector database
 - automatic (unattended) restore from backup export
+- Ask AI's question text or answers in the URL. A repair answer is generated content, not a view identity: putting the question in the query string would make a shared or reloaded link either an unanswered box or a silent second model call against the daily budget. The Ask panel's state stays in the component.

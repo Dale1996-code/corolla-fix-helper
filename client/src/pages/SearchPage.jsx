@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
 import { ErrorBanner, InfoBanner } from "../components/feedback/Banner";
@@ -16,6 +17,7 @@ import {
   ProcedureResultCard,
   SymptomResultCard,
 } from "../components/search/ResultCards";
+import { applyParamUpdates, pageParamValue, readPageParam } from "../lib/urlState";
 
 // The shared SelectField takes [{ value, label }]; search filter options come
 // back from the API as plain strings, so labelize them into that shape here.
@@ -109,6 +111,10 @@ function createSectionState(filters) {
     error: "",
     results: [],
     total: 0,
+    // The request these results answer. Page clamping compares against it, so a
+    // total left over from a different search can never decide how many pages
+    // the current one has.
+    query: null,
     // Echoed back by paginated endpoints so the counter and the Previous/Next
     // controls describe the page the server actually returned, not the one we
     // asked for.
@@ -117,6 +123,53 @@ function createSectionState(filters) {
     hasMore: false,
     filters,
   };
+}
+
+// Four search cards share one page, and therefore one query string, so each
+// one's parameters carry its section key: `documents.q`, `symptoms.status`,
+// `documents.page`. Without the prefix the cards would silently overwrite each
+// other's keyword the moment two of them were used in the same visit.
+function sectionParamKey(config, field) {
+  return `${config.key}.${field}`;
+}
+
+// The form the visible results actually came from, read back out of the URL.
+// A field the URL does not mention is at its default, which is exactly how it
+// got left out in the first place.
+function readSectionForm(searchParams, config) {
+  const form = {};
+
+  Object.entries(config.defaultForm).forEach(([field, defaultValue]) => {
+    const value = searchParams.get(sectionParamKey(config, field));
+    form[field] = typeof value === "string" && value !== "" ? value : defaultValue;
+  });
+
+  return form;
+}
+
+// Updates that write a submitted form into the URL, leaving out every field
+// still at its default so an untouched card adds nothing to the address bar.
+function sectionFormUpdates(form, config) {
+  const updates = {};
+
+  Object.entries(config.defaultForm).forEach(([field, defaultValue]) => {
+    const value = typeof form[field] === "string" ? form[field].trim() : "";
+    updates[sectionParamKey(config, field)] = value && value !== defaultValue ? value : null;
+  });
+
+  return updates;
+}
+
+// Every parameter one card owns, cleared -- the other three cards' parameters
+// (and anything else in the query string) are left alone.
+function clearSectionUpdates(config) {
+  const updates = { [sectionParamKey(config, "page")]: null };
+
+  Object.keys(config.defaultForm).forEach((field) => {
+    updates[sectionParamKey(config, field)] = null;
+  });
+
+  return updates;
 }
 
 function buildQueryString(form) {
@@ -175,6 +228,7 @@ async function fetchSearchSection(
     setState({
       loading: false,
       error: "",
+      query: queryString,
       results,
       total,
       limit:
@@ -1410,53 +1464,127 @@ const SEARCH_SECTIONS = [
 ];
 
 function SearchSection({ config }) {
-  const [form, setForm] = useState(config.defaultForm);
-  // The form the visible results actually came from. Paging uses this rather
-  // than `form`, so edits the user has not submitted yet can never be applied to
-  // page 2 of an older query.
-  const [appliedForm, setAppliedForm] = useState(config.defaultForm);
-  const [searched, setSearched] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [state, setState] = useState(createSectionState(config.defaultFilters));
   const requestSeq = useRef(0);
-  const hasKeyword = appliedForm.q.trim().length > 0;
   const ResultCard = config.ResultCard;
+  const pageKey = sectionParamKey(config, "page");
+
+  // The URL holds the search that produced the visible results; `form` is only
+  // the draft in the input boxes. Paging therefore uses the URL rather than the
+  // draft, so edits the owner has not submitted yet still cannot be applied to
+  // page 2 of an older query -- the invariant the old `appliedForm` protected,
+  // now enforced by where the value lives.
+  const appliedForm = readSectionForm(searchParams, config);
+  const appliedQuery = buildQueryString(appliedForm);
+  const [form, setForm] = useState(appliedForm);
+
+  // A card counts as "searched" when the URL carries any of its form
+  // parameters. `page` is deliberately excluded: paging through the library
+  // listing is not a search, and counting it as one would swap the summary copy
+  // from "in your library" to "results" just for pressing Next.
+  const searched = Object.keys(config.defaultForm).some((field) =>
+    searchParams.has(sectionParamKey(config, field))
+  );
+
+  const currentPage = config.paginated ? readPageParam(searchParams, pageKey) : 1;
+  const requestOffset = (currentPage - 1) * DOCUMENT_RESULTS_PER_PAGE;
+  const requestForm = config.paginated
+    ? {
+        ...appliedForm,
+        limit: String(DOCUMENT_RESULTS_PER_PAGE),
+        offset: requestOffset > 0 ? String(requestOffset) : "",
+      }
+    : appliedForm;
+  // The exact query the endpoint will be called with, and the only thing the
+  // fetch effect depends on: one request per distinct search, whether the URL
+  // changed because of a submit, a page button, Back, or a pasted link.
+  const requestQuery = buildQueryString(requestForm);
+
+  const updateSectionParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
+
+  // Re-sync the draft when the URL's search changes underneath it -- Back,
+  // Forward, Clear, or a pasted link. Keyed on the serialized query rather than
+  // the form object so it fires on real changes only, not on every render.
+  useEffect(() => {
+    const appliedParams = new URLSearchParams(appliedQuery);
+    const nextForm = {};
+
+    Object.entries(config.defaultForm).forEach(([field, defaultValue]) => {
+      nextForm[field] = appliedParams.get(field) ?? defaultValue;
+    });
+
+    setForm(nextForm);
+  }, [appliedQuery, config]);
 
   // Every request bumps the sequence, so a slow reply for an older query *or an
   // older page* is dropped instead of replacing newer results.
-  async function runSearch(nextForm, nextOffset, nextSearched) {
+  useEffect(() => {
     const seq = (requestSeq.current += 1);
 
-    setAppliedForm(nextForm);
-    setSearched(nextSearched);
-
-    const requestForm = config.paginated
-      ? {
-          ...nextForm,
-          limit: String(DOCUMENT_RESULTS_PER_PAGE),
-          offset: nextOffset > 0 ? String(nextOffset) : "",
-        }
-      : nextForm;
-
-    await fetchSearchSection(config.endpoint, requestForm, setState, config.defaultFilters, {
+    fetchSearchSection(config.endpoint, requestForm, setState, config.defaultFilters, {
       shouldApply: () => seq === requestSeq.current,
     });
-  }
+    // `requestQuery` is the serialization of `requestForm`, so the string is
+    // the whole dependency -- listing the object too would re-fetch on every
+    // render, since it is rebuilt each time.
+  }, [requestQuery, config]);
 
+  // Normalization only, so it replaces: a `page` past the end of the results --
+  // or a hand-typed `page=abc` -- should not leave a history entry behind.
+  //
+  // `state.query !== requestQuery` is the guard that matters: between a URL
+  // change and its response, `state` still holds the PREVIOUS search's totals.
+  // Clamping against those would rewrite a perfectly valid page -- pressing
+  // Back from a 40-result search to page 40 of the 1,443-document listing would
+  // "clamp" to page 2, destroying the history entry and showing the wrong page.
   useEffect(() => {
-    runSearch(config.defaultForm, 0, false);
-    // Only re-run on mount (per section); runSearch/config are stable for a
-    // given section's lifetime.
-  }, []);
+    if (!config.paginated || state.loading || state.error || state.query !== requestQuery) {
+      return;
+    }
+
+    const lastPage = Math.max(1, Math.ceil(state.total / state.limit));
+    const canonicalPage = pageParamValue(Math.min(currentPage, lastPage));
+
+    if ((searchParams.get(pageKey) ?? null) !== canonicalPage) {
+      updateSectionParams({ [pageKey]: canonicalPage }, { replace: true });
+    }
+  }, [
+    config.paginated,
+    state.loading,
+    state.error,
+    state.total,
+    state.limit,
+    state.query,
+    requestQuery,
+    currentPage,
+    pageKey,
+    searchParams,
+    updateSectionParams,
+  ]);
+
+  const hasKeyword = appliedForm.q.trim().length > 0;
 
   function handleSubmit(event) {
     event.preventDefault();
-    // A new query or filter set always restarts at the first page.
-    runSearch(form, 0, true);
+    // Submitting is a navigation step, so it pushes -- and a new query or
+    // filter set always restarts at the first page.
+    updateSectionParams({ ...sectionFormUpdates(form, config), [pageKey]: null });
   }
 
   function handleClear() {
+    // Reset the draft directly as well as the URL: clearing a card that has no
+    // parameters yet changes no URL, so the draft-sync effect would not fire
+    // and text typed but never submitted would survive the Clear.
     setForm(config.defaultForm);
-    runSearch(config.defaultForm, 0, false);
+    updateSectionParams(clearSectionUpdates(config));
   }
 
   return (
@@ -1501,7 +1629,14 @@ function SearchSection({ config }) {
           offset={state.offset}
           total={state.total}
           hasMore={state.hasMore}
-          onChangeOffset={(nextOffset) => runSearch(appliedForm, nextOffset, searched)}
+          // Changing page is a navigation step, so it pushes. The page number
+          // is derived from the offset the server echoed back, so Previous/Next
+          // move relative to the page actually on screen.
+          onChangeOffset={(nextOffset) =>
+            updateSectionParams({
+              [pageKey]: pageParamValue(Math.floor(nextOffset / state.limit) + 1),
+            })
+          }
         />
       ) : null}
     </SectionCard>

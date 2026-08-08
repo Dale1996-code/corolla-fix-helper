@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
@@ -18,6 +18,15 @@ import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
 import { useScrollToHash } from "../lib/useScrollToHash";
+import {
+  applyParamUpdates,
+  clearFilterUpdates,
+  filterValueUpdates,
+  readFilterValues,
+  readIdParam,
+  resolveSelectedRecord,
+  useDraftTextParam,
+} from "../lib/urlState";
 import { getStatusBadgeClass } from "../components/symptoms/symptomDisplay";
 import { SymptomsControls } from "../components/symptoms/SymptomsControls";
 import { SymptomsSummary } from "../components/symptoms/SymptomsSummary";
@@ -32,6 +41,21 @@ const emptySymptomForm = {
   status: "open",
   notes: "",
   linkedDocumentIds: [],
+};
+
+// The filters that materially decide which symptoms are on screen, and so
+// belong in the URL. `system` carries no options list: the choices come from
+// the owner's own symptoms, and a system that matches nothing filters the list
+// to empty rather than being an error.
+const SYMPTOM_FILTERS = {
+  q: { default: "" },
+  status: {
+    default: "all",
+    options: ["all", "active", "open", "monitoring", "resolved"],
+  },
+  system: { default: "all" },
+  confidence: { default: "all", options: ["all", "high", "medium", "low"] },
+  sort: { default: "newest", options: ["newest", "oldest", "title"] },
 };
 
 function compareSymptoms(firstSymptom, secondSymptom, sortBy) {
@@ -761,12 +785,8 @@ function toSymptomPayload(form) {
 export function SymptomsPage() {
   useScrollToHash();
 
-  const [searchParams] = useSearchParams();
-  const requestedSymptomIdValue = Number(searchParams.get("symptomId"));
-  const requestedSymptomId =
-    Number.isInteger(requestedSymptomIdValue) && requestedSymptomIdValue > 0
-      ? requestedSymptomIdValue
-      : null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSymptomId = readIdParam(searchParams, "symptomId");
   const [symptoms, setSymptoms] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [procedures, setProcedures] = useState([]);
@@ -779,7 +799,6 @@ export function SymptomsPage() {
   const [createMessage, setCreateMessage] = useState("");
   const [createError, setCreateError] = useState("");
 
-  const [selectedSymptomId, setSelectedSymptomId] = useState(null);
   const [editingSymptomId, setEditingSymptomId] = useState(null);
   const [editForm, setEditForm] = useState(emptySymptomForm);
   const [saveState, setSaveState] = useState({
@@ -791,11 +810,33 @@ export function SymptomsPage() {
     deletingId: null,
     error: "",
   });
-  const [searchValue, setSearchValue] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [systemFilter, setSystemFilter] = useState("all");
-  const [confidenceFilter, setConfidenceFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("newest");
+  // Filters live in the URL so Back returns to the filtered list the owner was
+  // reading, not to an unfiltered one. The keyword box is the exception: it
+  // types into local state and lands in the URL a beat later (see
+  // useDraftTextParam), because "brake" is one view, not five history entries.
+  const {
+    status: statusFilter,
+    system: systemFilter,
+    confidence: confidenceFilter,
+    sort: sortBy,
+  } = readFilterValues(searchParams, SYMPTOM_FILTERS);
+  const [searchValue, setSearchValue] = useDraftTextParam("q", {
+    searchParams,
+    setSearchParams,
+  });
+
+  const updateViewParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
+
+  function handleFilterChange(key, value) {
+    updateViewParams(filterValueUpdates({ [key]: value }, SYMPTOM_FILTERS));
+  }
 
   const availableSystems = useMemo(() => {
     return Array.from(
@@ -855,13 +896,14 @@ export function SymptomsPage() {
       );
   }, [symptoms, searchValue, statusFilter, systemFilter, confidenceFilter, sortBy]);
 
-  const selectedSymptom = useMemo(() => {
-    if (!selectedSymptomId) {
-      return null;
-    }
-
-    return filteredSymptoms.find((symptom) => symptom.id === selectedSymptomId) || null;
-  }, [filteredSymptoms, selectedSymptomId]);
+  // Derived from the URL and the list rather than stored. No `symptomId` means
+  // the page's existing default (see resolveSelectedRecord), now spelled as an
+  // absent parameter so an untouched list keeps a clean `/symptoms` URL.
+  const selectedSymptom = useMemo(
+    () => resolveSelectedRecord(requestedSymptomId, symptoms, filteredSymptoms),
+    [requestedSymptomId, symptoms, filteredSymptoms]
+  );
+  const selectedSymptomId = selectedSymptom?.id ?? null;
 
   const hasActiveFilters =
     searchValue.trim() !== "" ||
@@ -920,20 +962,6 @@ export function SymptomsPage() {
 
       setSymptoms(nextSymptoms);
       setDocuments(nextDocuments);
-      setSelectedSymptomId((currentId) => {
-        if (
-          requestedSymptomId &&
-          nextSymptoms.some((symptom) => symptom.id === requestedSymptomId)
-        ) {
-          return requestedSymptomId;
-        }
-
-        if (currentId && nextSymptoms.some((symptom) => symptom.id === currentId)) {
-          return currentId;
-        }
-
-        return nextSymptoms[0]?.id || null;
-      });
 
       // Procedures power the manual link selector; a failure here should not
       // block the symptom list, so it loads on its own.
@@ -969,25 +997,15 @@ export function SymptomsPage() {
     }
   }
 
+  // Loaded once. Filtering, sorting, and picking a symptom all work on this
+  // list, so URL changes -- including Back and Forward -- never refetch.
   useEffect(() => {
     loadData();
   }, []);
 
+  // An edit form has to close when its symptom leaves the visible list, or the
+  // page would keep editing a record nobody can see.
   useEffect(() => {
-    if (!filteredSymptoms.length) {
-      setSelectedSymptomId(null);
-      setEditingSymptomId(null);
-      return;
-    }
-
-    setSelectedSymptomId((currentId) => {
-      if (currentId && filteredSymptoms.some((symptom) => symptom.id === currentId)) {
-        return currentId;
-      }
-
-      return filteredSymptoms[0].id;
-    });
-
     setEditingSymptomId((currentId) => {
       if (currentId && filteredSymptoms.some((symptom) => symptom.id === currentId)) {
         return currentId;
@@ -996,6 +1014,24 @@ export function SymptomsPage() {
       return null;
     });
   }, [filteredSymptoms]);
+
+  // A `symptomId` for a symptom that is not in the library -- deleted, or
+  // hand-typed, well-formed or not -- drops out of the URL so the address stops
+  // naming a record that does not exist. A symptom that exists but is hidden by
+  // the current filter keeps its parameter: it is the filter doing the hiding,
+  // and loosening it should bring the owner's selection back.
+  useEffect(() => {
+    if (loading || loadError || !searchParams.has("symptomId")) {
+      return;
+    }
+
+    const namesALoadedSymptom =
+      requestedSymptomId && symptoms.some((symptom) => symptom.id === requestedSymptomId);
+
+    if (!namesALoadedSymptom) {
+      updateViewParams({ symptomId: null }, { replace: true });
+    }
+  }, [loading, loadError, requestedSymptomId, symptoms, searchParams, updateViewParams]);
 
   function handleCreateFormChange(event) {
     const { name, value } = event.target;
@@ -1043,7 +1079,9 @@ export function SymptomsPage() {
       const newSymptom = payload.symptom;
 
       setSymptoms((currentSymptoms) => [newSymptom, ...currentSymptoms]);
-      setSelectedSymptomId(newSymptom.id);
+      // Replace, not push: opening the symptom just created is part of creating
+      // it, not a step the owner should have to press Back through.
+      updateViewParams({ symptomId: newSymptom.id }, { replace: true });
       setCreateForm(emptySymptomForm);
       setCreateMessage("Symptom saved.");
       setEditingSymptomId(null);
@@ -1192,21 +1230,12 @@ export function SymptomsPage() {
         throw new Error(payload.error || "Could not delete symptom.");
       }
 
-      setSymptoms((currentSymptoms) => {
-        const remainingSymptoms = currentSymptoms.filter(
-          (currentSymptom) => currentSymptom.id !== symptom.id
-        );
-
-        setSelectedSymptomId((currentId) => {
-          if (currentId !== symptom.id) {
-            return currentId;
-          }
-
-          return remainingSymptoms[0]?.id || null;
-        });
-
-        return remainingSymptoms;
-      });
+      // Dropping the row is enough: the deleted id no longer matches anything,
+      // so the detail panel falls back to the first remaining symptom and the
+      // normalization effect clears the stale `symptomId` from the URL.
+      setSymptoms((currentSymptoms) =>
+        currentSymptoms.filter((currentSymptom) => currentSymptom.id !== symptom.id)
+      );
 
       if (editingSymptomId === symptom.id) {
         cancelEditingSymptom();
@@ -1269,23 +1298,28 @@ export function SymptomsPage() {
                 searchValue={searchValue}
                 onSearchChange={(event) => setSearchValue(event.target.value)}
                 statusFilter={statusFilter}
-                onStatusFilterChange={(event) => setStatusFilter(event.target.value)}
+                onStatusFilterChange={(event) =>
+                  handleFilterChange("status", event.target.value)
+                }
                 systemFilter={systemFilter}
-                onSystemFilterChange={(event) => setSystemFilter(event.target.value)}
+                onSystemFilterChange={(event) =>
+                  handleFilterChange("system", event.target.value)
+                }
                 confidenceFilter={confidenceFilter}
-                onConfidenceFilterChange={(event) => setConfidenceFilter(event.target.value)}
+                onConfidenceFilterChange={(event) =>
+                  handleFilterChange("confidence", event.target.value)
+                }
                 sortBy={sortBy}
-                onSortByChange={(event) => setSortBy(event.target.value)}
+                onSortByChange={(event) => handleFilterChange("sort", event.target.value)}
                 systems={availableSystems}
                 totalCount={symptoms.length}
                 visibleCount={filteredSymptoms.length}
                 hasActiveFilters={hasActiveFilters}
                 onClearFilters={() => {
                   setSearchValue("");
-                  setStatusFilter("all");
-                  setSystemFilter("all");
-                  setConfidenceFilter("all");
-                  setSortBy("newest");
+                  // Clears only the filters this page owns; a `symptomId` deep
+                  // link (or anything else in the query string) survives.
+                  updateViewParams(clearFilterUpdates(SYMPTOM_FILTERS));
                 }}
               />
 
@@ -1295,7 +1329,7 @@ export function SymptomsPage() {
                   totalSymptoms={symptoms.length}
                   hasActiveFilters={hasActiveFilters}
                   selectedSymptomId={selectedSymptomId}
-                  onSelectSymptom={setSelectedSymptomId}
+                  onSelectSymptom={(symptomId) => updateViewParams({ symptomId })}
                 />
 
                 <SymptomDetails

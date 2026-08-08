@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { SearchPage } from "./SearchPage";
 
@@ -120,12 +120,38 @@ function createFetchMock(options = {}) {
   return { fetchMock, documents };
 }
 
-function renderSearchPage() {
+// Exposes the current URL and the browser's Back/Forward controls, so the H7
+// query-string contract can be asserted alongside the pagination behaviour it
+// now rides on. MemoryRouter keeps a real history stack, so navigate(-1)/(1)
+// exercise the same code path the browser buttons do.
+function HistoryHarness() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  return (
+    <div>
+      <button type="button" onClick={() => navigate(-1)}>
+        history back
+      </button>
+      <button type="button" onClick={() => navigate(1)}>
+        history forward
+      </button>
+      <span data-testid="url">{`${location.pathname}${location.search}`}</span>
+    </div>
+  );
+}
+
+function renderSearchPage(entry = "/search") {
   render(
-    <MemoryRouter initialEntries={["/search"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <SearchPage />
+      <HistoryHarness />
     </MemoryRouter>
   );
+}
+
+function currentUrl() {
+  return screen.getByTestId("url").textContent;
 }
 
 async function findDocumentsSection() {
@@ -487,4 +513,293 @@ test("a stale page response cannot replace a newer one", async () => {
       "Showing 1–25 of 1,443 documents in your library. Search to narrow this list."
     )
   ).toBeInTheDocument();
+});
+
+// --- H7: the Search page's view state lives in the query string --------------
+//
+// Four cards share this page and therefore one query string, so each card's
+// parameters carry its section key. Only the documents card pages, and its
+// `page` parameter is turned back into the server's `limit`/`offset` -- the
+// backend contract is unchanged.
+
+test("a documents search and page are readable in the URL and restorable from it", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+
+  // An untouched page carries no parameters at all.
+  expect(currentUrl()).toBe("/search");
+
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(section).getByRole("button", { name: "Search" }));
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+
+  fireEvent.click(await within(section).findByRole("button", { name: "Next" }));
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2"));
+
+  // Page 2 is still a bounded server request, built from the URL's page number.
+  await waitFor(() => expect(lastDocumentsUrl(documents)).toContain("offset=25"));
+  expect(lastDocumentsUrl(documents)).toContain("limit=25");
+  expect(lastDocumentsUrl(documents)).toContain("q=brake");
+});
+
+test("Back and Forward move between the searches the owner ran", async () => {
+  const { fetchMock } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(section).getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 1–25 of 40 document results.")).toBeInTheDocument()
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "history back" }));
+
+  // Back returns to the library listing, and the keyword box follows the URL
+  // rather than keeping the submitted text.
+  await waitFor(() => expect(currentUrl()).toBe("/search"));
+  await waitFor(() =>
+    expect(
+      within(section).getByText(
+        "Showing 1–25 of 1,443 documents in your library. Search to narrow this list."
+      )
+    ).toBeInTheDocument()
+  );
+  expect(within(section).getByRole("textbox", { name: "Keyword" })).toHaveValue("");
+
+  fireEvent.click(screen.getByRole("button", { name: "history forward" }));
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 1–25 of 40 document results.")).toBeInTheDocument()
+  );
+  expect(within(section).getByRole("textbox", { name: "Keyword" })).toHaveValue("brake");
+});
+
+test("a deep-linked search and page are reconstructed on first render", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage("/search?documents.q=brake&documents.page=2");
+  const section = await findDocumentsSection();
+
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 26–40 of 40 document results.")).toBeInTheDocument()
+  );
+  expect(within(section).getByRole("textbox", { name: "Keyword" })).toHaveValue("brake");
+
+  // One request, already at the right offset -- not a first page followed by a
+  // correction.
+  expect(documents.requestedUrls).toHaveLength(1);
+  expect(documents.requestedUrls[0]).toContain("offset=25");
+});
+
+test("each card owns its own parameters and leaves the others alone", async () => {
+  const { fetchMock } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const documentsSection = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(documentsSection).length).toBe(25));
+
+  const symptomsSection = screen
+    .getByRole("heading", { name: "Search symptoms" })
+    .closest("section");
+
+  fireEvent.change(within(documentsSection).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(documentsSection).getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+
+  fireEvent.change(within(symptomsSection).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "idle" },
+  });
+  fireEvent.click(within(symptomsSection).getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(currentUrl()).toBe("/search?documents.q=brake&symptoms.q=idle")
+  );
+
+  // Clearing one card removes only that card's parameters.
+  fireEvent.click(within(symptomsSection).getByRole("button", { name: "Clear" }));
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+});
+
+test("an unusable page parameter is normalized without an extra history entry", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage("/search?documents.q=brake&documents.page=abc");
+  const section = await findDocumentsSection();
+
+  // "abc" is page 1, and the parameter is rewritten in place.
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 1–25 of 40 document results.")).toBeInTheDocument()
+  );
+
+  // Normalizing an already-correct request must not cost a second fetch.
+  expect(documents.requestedUrls).toHaveLength(1);
+  expect(documents.requestedUrls[0]).not.toContain("offset=");
+});
+
+test("a page past the end of the results is clamped to the last real page", async () => {
+  const { fetchMock } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // 40 results at 25 per page is two pages; page 9 does not exist.
+  renderSearchPage("/search?documents.q=brake&documents.page=9");
+  const section = await findDocumentsSection();
+
+  await waitFor(() =>
+    expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2")
+  );
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 26–40 of 40 document results.")).toBeInTheDocument()
+  );
+});
+
+test("one URL change causes exactly one request per card", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+
+  expect(documents.requestedUrls).toHaveLength(1);
+
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(section).getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(documents.requestedUrls).toHaveLength(2));
+
+  fireEvent.click(await within(section).findByRole("button", { name: "Next" }));
+  await waitFor(() => expect(documents.requestedUrls).toHaveLength(3));
+
+  fireEvent.click(screen.getByRole("button", { name: "history back" }));
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake"));
+  await waitFor(() => expect(documents.requestedUrls).toHaveLength(4));
+
+  // Typing in the box without submitting changes nothing on the server.
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "rotor" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(documents.requestedUrls).toHaveLength(4);
+});
+
+test("Clear resets a keyword typed but never submitted", async () => {
+  const { fetchMock } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderSearchPage();
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+
+  // Nothing has been submitted, so the card owns no URL parameters. Clear still
+  // has to empty the box -- otherwise it visibly does nothing.
+  const keyword = within(section).getByRole("textbox", { name: "Keyword" });
+  fireEvent.change(keyword, { target: { value: "brake" } });
+  expect(keyword).toHaveValue("brake");
+
+  fireEvent.click(within(section).getByRole("button", { name: "Clear" }));
+
+  await waitFor(() => expect(keyword).toHaveValue(""));
+  expect(currentUrl()).toBe("/search");
+});
+
+test("a page is never clamped using the previous search's result count", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // Deep in the 1,443-document listing (58 pages)...
+  renderSearchPage("/search?documents.page=40");
+  const section = await findDocumentsSection();
+  await waitFor(() => expect(documentCards(section).length).toBe(25));
+  expect(currentUrl()).toBe("/search?documents.page=40");
+
+  // ...then a narrow search that only has two pages.
+  fireEvent.change(within(section).getByRole("textbox", { name: "Keyword" }), {
+    target: { value: "brake" },
+  });
+  fireEvent.click(within(section).getByRole("button", { name: "Search" }));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 1–25 of 40 document results.")).toBeInTheDocument()
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "history back" }));
+
+  // Back must land on page 40 of the listing. Clamping it to page 2 -- the last
+  // page of the search that is no longer on screen -- would destroy a valid
+  // history entry and show the wrong results.
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.page=40"));
+  await waitFor(() =>
+    expect(
+      within(section).getByText(
+        "Showing 976–1,000 of 1,443 documents in your library. Search to narrow this list."
+      )
+    ).toBeInTheDocument()
+  );
+  expect(lastDocumentsUrl(documents)).toContain("offset=975");
+});
+
+test("a wildly over-range page on a filtered deep link converges on the last real page", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // 40 results at 25 per page is two pages. Page 999 must not stick, and the
+  // `state.query === requestQuery` guard that stops a stale total from clamping
+  // must not stop this legitimate clamp either -- it only defers it until the
+  // matching response lands.
+  renderSearchPage("/search?documents.q=brake&documents.page=999");
+  const section = await findDocumentsSection();
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2"));
+  await waitFor(() =>
+    expect(within(section).getByText("Showing 26–40 of 40 document results.")).toBeInTheDocument()
+  );
+  expect(within(section).getByRole("textbox", { name: "Keyword" })).toHaveValue("brake");
+
+  // Exactly two requests: the over-range one, then the corrected one. Settling
+  // must not oscillate or re-clamp.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  expect(documents.requestedUrls).toHaveLength(2);
+  expect(documents.requestedUrls[0]).toContain("offset=24950");
+  expect(documents.requestedUrls[1]).toContain("offset=25");
+  expect(currentUrl()).toBe("/search?documents.q=brake&documents.page=2");
+});
+
+test("an over-range page on the unfiltered listing converges too", async () => {
+  const { fetchMock, documents } = createFetchMock();
+  vi.stubGlobal("fetch", fetchMock);
+
+  // 1,443 documents at 25 per page is 58 pages.
+  renderSearchPage("/search?documents.page=9999");
+  const section = await findDocumentsSection();
+
+  await waitFor(() => expect(currentUrl()).toBe("/search?documents.page=58"));
+  await waitFor(() =>
+    expect(
+      within(section).getByText(
+        "Showing 1,426–1,443 of 1,443 documents in your library. Search to narrow this list."
+      )
+    ).toBeInTheDocument()
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  expect(documents.requestedUrls).toHaveLength(2);
 });

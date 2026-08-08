@@ -172,7 +172,11 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
 
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(await screen.findByText(getCountTextMatcher("Showing 2 of 2 procedures."))).toBeInTheDocument();
-  expect(await screen.findByText("Throttle body cleaning")).toBeInTheDocument();
+  // Both panels can name it now: with the selection living in the URL, clearing
+  // the filters (which only clears filter parameters) leaves no `procedureId`,
+  // so the detail panel falls back to the default record while the list row is
+  // back too. Assert it is on screen, not which panel it is in.
+  expect((await screen.findAllByText("Throttle body cleaning")).length).toBeGreaterThan(0);
 });
 
 test("ProceduresPage keeps the detail panel on a visible procedure when filters hide the current selection", async () => {
