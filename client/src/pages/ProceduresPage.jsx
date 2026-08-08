@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
@@ -17,6 +17,15 @@ import { mergeSuggestionValues } from "../lib/suggestionUtils";
 import { useScrollToHash } from "../lib/useScrollToHash";
 import { ProceduresListControls } from "../components/procedures/ProceduresListControls";
 import { ProceduresList } from "../components/procedures/ProceduresList";
+import {
+  applyParamUpdates,
+  clearFilterUpdates,
+  filterValueUpdates,
+  readFilterValues,
+  readIdParam,
+  resolveSelectedRecord,
+  useDraftTextParam,
+} from "../lib/urlState";
 
 const emptyProcedureForm = {
   title: "",
@@ -29,6 +38,20 @@ const emptyProcedureForm = {
   notes: "",
   confidence: "medium",
   linkedDocumentIds: [],
+};
+
+// The filters that materially decide which procedures are on screen, and so
+// belong in the URL. `system` carries no options list: its choices come from
+// the owner's own procedures.
+const PROCEDURE_FILTERS = {
+  q: { default: "" },
+  system: { default: "all" },
+  difficulty: {
+    default: "all",
+    options: ["all", "beginner", "intermediate", "advanced"],
+  },
+  confidence: { default: "all", options: ["all", "high", "medium", "low"] },
+  sort: { default: "newest", options: ["newest", "oldest", "title"] },
 };
 
 function compareProcedures(firstProcedure, secondProcedure, sortBy) {
@@ -626,12 +649,8 @@ function toProcedurePayload(form) {
 export function ProceduresPage() {
   useScrollToHash();
 
-  const [searchParams] = useSearchParams();
-  const requestedProcedureIdValue = Number(searchParams.get("procedureId"));
-  const requestedProcedureId =
-    Number.isInteger(requestedProcedureIdValue) && requestedProcedureIdValue > 0
-      ? requestedProcedureIdValue
-      : null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedProcedureId = readIdParam(searchParams, "procedureId");
   const [procedures, setProcedures] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [symptoms, setSymptoms] = useState([]);
@@ -644,7 +663,6 @@ export function ProceduresPage() {
   const [createMessage, setCreateMessage] = useState("");
   const [createError, setCreateError] = useState("");
 
-  const [selectedProcedureId, setSelectedProcedureId] = useState(null);
   const [editingProcedureId, setEditingProcedureId] = useState(null);
   const [editForm, setEditForm] = useState(emptyProcedureForm);
   const [saveState, setSaveState] = useState({
@@ -656,11 +674,32 @@ export function ProceduresPage() {
     deletingId: null,
     error: "",
   });
-  const [searchValue, setSearchValue] = useState("");
-  const [systemFilter, setSystemFilter] = useState("all");
-  const [difficultyFilter, setDifficultyFilter] = useState("all");
-  const [confidenceFilter, setConfidenceFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("newest");
+  // Filters read from the URL, so Back returns to the filtered list rather than
+  // to an unfiltered one. The keyword box types locally and lands in the URL a
+  // beat later (see useDraftTextParam), so typing does not fill up history.
+  const {
+    system: systemFilter,
+    difficulty: difficultyFilter,
+    confidence: confidenceFilter,
+    sort: sortBy,
+  } = readFilterValues(searchParams, PROCEDURE_FILTERS);
+  const [searchValue, setSearchValue] = useDraftTextParam("q", {
+    searchParams,
+    setSearchParams,
+  });
+
+  const updateViewParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
+
+  function handleFilterChange(key, value) {
+    updateViewParams(filterValueUpdates({ [key]: value }, PROCEDURE_FILTERS));
+  }
 
   const availableSystems = useMemo(
     () =>
@@ -705,13 +744,14 @@ export function ProceduresPage() {
     confidenceFilter !== "all" ||
     sortBy !== "newest";
 
-  const selectedProcedure = useMemo(() => {
-    if (!selectedProcedureId) {
-      return null;
-    }
-
-    return filteredProcedures.find((procedure) => procedure.id === selectedProcedureId) || null;
-  }, [filteredProcedures, selectedProcedureId]);
+  // Derived from the URL and the list rather than stored. No `procedureId`
+  // means the page's existing default (see resolveSelectedRecord), now spelled
+  // as an absent parameter so an untouched list keeps a clean `/procedures`.
+  const selectedProcedure = useMemo(
+    () => resolveSelectedRecord(requestedProcedureId, procedures, filteredProcedures),
+    [requestedProcedureId, procedures, filteredProcedures]
+  );
+  const selectedProcedureId = selectedProcedure?.id ?? null;
 
   const systemSuggestions = useMemo(() => {
     return mergeSuggestionValues([
@@ -771,20 +811,6 @@ export function ProceduresPage() {
 
       setProcedures(nextProcedures);
       setDocuments(nextDocuments);
-      setSelectedProcedureId((currentId) => {
-        if (
-          requestedProcedureId &&
-          nextProcedures.some((procedure) => procedure.id === requestedProcedureId)
-        ) {
-          return requestedProcedureId;
-        }
-
-        if (currentId && nextProcedures.some((procedure) => procedure.id === currentId)) {
-          return currentId;
-        }
-
-        return nextProcedures[0]?.id || null;
-      });
 
       // Symptoms power the manual link selector; a failure here should not
       // block the procedure list, so it loads on its own.
@@ -818,23 +844,30 @@ export function ProceduresPage() {
     }
   }
 
+  // Loaded once. Filtering, sorting, and picking a procedure all work on this
+  // list, so URL changes -- including Back and Forward -- never refetch.
   useEffect(() => {
     loadData();
   }, []);
 
+  // A `procedureId` for a procedure that is not in the library -- deleted, or
+  // hand-typed, well-formed or not -- drops out of the URL so the address stops
+  // naming a record that does not exist. A procedure that exists but is hidden
+  // by the current filter keeps its parameter: the filter is doing the hiding,
+  // and loosening it should bring the owner's selection back.
   useEffect(() => {
-    setSelectedProcedureId((currentId) => {
-      if (!filteredProcedures.length) {
-        return null;
-      }
+    if (loading || loadError || !searchParams.has("procedureId")) {
+      return;
+    }
 
-      if (currentId && filteredProcedures.some((procedure) => procedure.id === currentId)) {
-        return currentId;
-      }
+    const namesALoadedProcedure =
+      requestedProcedureId &&
+      procedures.some((procedure) => procedure.id === requestedProcedureId);
 
-      return filteredProcedures[0].id;
-    });
-  }, [filteredProcedures]);
+    if (!namesALoadedProcedure) {
+      updateViewParams({ procedureId: null }, { replace: true });
+    }
+  }, [loading, loadError, requestedProcedureId, procedures, searchParams, updateViewParams]);
 
   function handleCreateFormChange(event) {
     const { name, value } = event.target;
@@ -882,7 +915,9 @@ export function ProceduresPage() {
       const newProcedure = payload.procedure;
 
       setProcedures((currentProcedures) => [newProcedure, ...currentProcedures]);
-      setSelectedProcedureId(newProcedure.id);
+      // Replace, not push: opening the procedure just created is part of
+      // creating it, not a step to press Back through.
+      updateViewParams({ procedureId: newProcedure.id }, { replace: true });
       setCreateForm(emptyProcedureForm);
       setCreateMessage("Procedure saved.");
       setEditingProcedureId(null);
@@ -1033,21 +1068,12 @@ export function ProceduresPage() {
         throw new Error(payload.error || "Could not delete procedure.");
       }
 
-      setProcedures((currentProcedures) => {
-        const remainingProcedures = currentProcedures.filter(
-          (currentProcedure) => currentProcedure.id !== procedure.id
-        );
-
-        setSelectedProcedureId((currentId) => {
-          if (currentId !== procedure.id) {
-            return currentId;
-          }
-
-          return remainingProcedures[0]?.id || null;
-        });
-
-        return remainingProcedures;
-      });
+      // Dropping the row is enough: the deleted id no longer matches anything,
+      // so the detail panel falls back to the first remaining procedure and the
+      // normalization effect clears the stale `procedureId` from the URL.
+      setProcedures((currentProcedures) =>
+        currentProcedures.filter((currentProcedure) => currentProcedure.id !== procedure.id)
+      );
 
       if (editingProcedureId === procedure.id) {
         cancelEditingProcedure();
@@ -1109,23 +1135,28 @@ export function ProceduresPage() {
                 searchValue={searchValue}
                 onSearchChange={(event) => setSearchValue(event.target.value)}
                 systemFilter={systemFilter}
-                onSystemFilterChange={(event) => setSystemFilter(event.target.value)}
+                onSystemFilterChange={(event) =>
+                  handleFilterChange("system", event.target.value)
+                }
                 difficultyFilter={difficultyFilter}
-                onDifficultyFilterChange={(event) => setDifficultyFilter(event.target.value)}
+                onDifficultyFilterChange={(event) =>
+                  handleFilterChange("difficulty", event.target.value)
+                }
                 confidenceFilter={confidenceFilter}
-                onConfidenceFilterChange={(event) => setConfidenceFilter(event.target.value)}
+                onConfidenceFilterChange={(event) =>
+                  handleFilterChange("confidence", event.target.value)
+                }
                 sortBy={sortBy}
-                onSortByChange={(event) => setSortBy(event.target.value)}
+                onSortByChange={(event) => handleFilterChange("sort", event.target.value)}
                 systems={availableSystems}
                 totalCount={procedures.length}
                 visibleCount={filteredProcedures.length}
                 hasActiveFilters={hasActiveFilters}
                 onClearFilters={() => {
                   setSearchValue("");
-                  setSystemFilter("all");
-                  setDifficultyFilter("all");
-                  setConfidenceFilter("all");
-                  setSortBy("newest");
+                  // Clears only the filters this page owns; a `procedureId`
+                  // deep link (or anything else in the URL) survives.
+                  updateViewParams(clearFilterUpdates(PROCEDURE_FILTERS));
                 }}
               />
 
@@ -1135,7 +1166,7 @@ export function ProceduresPage() {
                   totalProcedures={procedures.length}
                   hasActiveFilters={hasActiveFilters}
                   selectedProcedureId={selectedProcedureId}
-                  onSelectProcedure={setSelectedProcedureId}
+                  onSelectProcedure={(procedureId) => updateViewParams({ procedureId })}
                 />
 
                 <ProcedureDetails

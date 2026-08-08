@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
@@ -8,6 +8,13 @@ import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { useScrollToHash } from "../lib/useScrollToHash";
+import {
+  applyParamUpdates,
+  filterValueUpdates,
+  readFilterValues,
+  readIdParam,
+  resolveSelectedRecord,
+} from "../lib/urlState";
 
 const emptyNoteForm = {
   title: "",
@@ -15,6 +22,18 @@ const emptyNoteForm = {
   noteType: "general",
   relatedEntityType: "none",
   relatedEntityId: "",
+};
+
+// The filters that materially decide which notes are on screen, and so belong
+// in the URL. `noteType` has no options list: the choices are built from the
+// note types the owner has actually used.
+const NOTE_FILTERS = {
+  noteType: { default: "all" },
+  relatedEntityType: {
+    default: "all",
+    options: ["all", "none", "document", "symptom", "procedure"],
+  },
+  sort: { default: "newest", options: ["newest", "oldest"] },
 };
 
 function getRelatedEntityFieldConfig(relatedEntityType, documents, symptoms, procedures) {
@@ -680,12 +699,8 @@ function toNotePayload(form) {
 export function NotesPage() {
   useScrollToHash();
 
-  const [searchParams] = useSearchParams();
-  const requestedNoteIdValue = Number(searchParams.get("noteId"));
-  const requestedNoteId =
-    Number.isInteger(requestedNoteIdValue) && requestedNoteIdValue > 0
-      ? requestedNoteIdValue
-      : null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedNoteId = readIdParam(searchParams, "noteId");
   const [notes, setNotes] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [symptoms, setSymptoms] = useState([]);
@@ -698,7 +713,6 @@ export function NotesPage() {
   const [createMessage, setCreateMessage] = useState("");
   const [createError, setCreateError] = useState("");
 
-  const [selectedNoteId, setSelectedNoteId] = useState(null);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNoteForm);
   const [saveState, setSaveState] = useState({
@@ -710,9 +724,26 @@ export function NotesPage() {
     deletingId: null,
     error: "",
   });
-  const [noteTypeFilter, setNoteTypeFilter] = useState("all");
-  const [relatedEntityTypeFilter, setRelatedEntityTypeFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("newest");
+  // Filters read from the URL, so Back returns to the filtered list the owner
+  // was reading rather than to an unfiltered one.
+  const {
+    noteType: noteTypeFilter,
+    relatedEntityType: relatedEntityTypeFilter,
+    sort: sortBy,
+  } = readFilterValues(searchParams, NOTE_FILTERS);
+
+  const updateViewParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
+
+  function handleFilterChange(key, value) {
+    updateViewParams(filterValueUpdates({ [key]: value }, NOTE_FILTERS));
+  }
 
   const noteTypes = useMemo(() => {
     return Array.from(
@@ -750,13 +781,14 @@ export function NotesPage() {
     return nextNotes;
   }, [notes, noteTypeFilter, relatedEntityTypeFilter, sortBy]);
 
-  const selectedNote = useMemo(() => {
-    if (!selectedNoteId) {
-      return null;
-    }
-
-    return filteredNotes.find((note) => note.id === selectedNoteId) || null;
-  }, [filteredNotes, selectedNoteId]);
+  // Derived from the URL and the list rather than stored. No `noteId` means the
+  // page's existing default (see resolveSelectedRecord), now spelled as an
+  // absent parameter so an untouched list keeps a clean `/notes` URL.
+  const selectedNote = useMemo(
+    () => resolveSelectedRecord(requestedNoteId, notes, filteredNotes),
+    [requestedNoteId, notes, filteredNotes]
+  );
+  const selectedNoteId = selectedNote?.id ?? null;
 
   async function loadData() {
     try {
@@ -806,17 +838,6 @@ export function NotesPage() {
       setDocuments(nextDocuments);
       setSymptoms(nextSymptoms);
       setProcedures(nextProcedures);
-      setSelectedNoteId((currentId) => {
-        if (requestedNoteId && nextNotes.some((note) => note.id === requestedNoteId)) {
-          return requestedNoteId;
-        }
-
-        if (currentId && nextNotes.some((note) => note.id === currentId)) {
-          return currentId;
-        }
-
-        return nextNotes[0]?.id || null;
-      });
     } catch (error) {
       setLoadError(error.message || "Could not load note data.");
     } finally {
@@ -824,25 +845,32 @@ export function NotesPage() {
     }
   }
 
+  // Loaded once. Filtering, sorting, and picking a note all work on this list,
+  // so URL changes -- including Back and Forward -- never refetch.
   useEffect(() => {
     loadData();
   }, []);
 
+  // A `noteId` for a note that is not in the list -- deleted, or hand-typed,
+  // well-formed or not -- drops out of the URL so the address stops naming a
+  // record that does not exist. A note that exists but is hidden by the current
+  // filter keeps its parameter: the filter is doing the hiding, and loosening
+  // it should bring the owner's selection back.
   useEffect(() => {
-    if (filteredNotes.length === 0) {
-      setSelectedNoteId(null);
-      setEditingNoteId(null);
+    if (loading || loadError || !searchParams.has("noteId")) {
       return;
     }
 
-    setSelectedNoteId((currentId) => {
-      if (currentId && filteredNotes.some((note) => note.id === currentId)) {
-        return currentId;
-      }
+    const namesALoadedNote = requestedNoteId && notes.some((note) => note.id === requestedNoteId);
 
-      return filteredNotes[0].id;
-    });
+    if (!namesALoadedNote) {
+      updateViewParams({ noteId: null }, { replace: true });
+    }
+  }, [loading, loadError, requestedNoteId, notes, searchParams, updateViewParams]);
 
+  // An edit form has to close when its note leaves the visible list, or the
+  // page would keep editing a record nobody can see.
+  useEffect(() => {
     setEditingNoteId((currentEditingId) => {
       if (
         currentEditingId &&
@@ -918,7 +946,9 @@ export function NotesPage() {
       const newNote = payload.note;
 
       setNotes((currentNotes) => [newNote, ...currentNotes]);
-      setSelectedNoteId(newNote.id);
+      // Replace, not push: opening the note just created is part of creating
+      // it, not a step to press Back through.
+      updateViewParams({ noteId: newNote.id }, { replace: true });
       setCreateForm(emptyNoteForm);
       setCreateMessage("Note saved.");
       setEditingNoteId(null);
@@ -1081,19 +1111,12 @@ export function NotesPage() {
         throw new Error(payload.error || "Could not delete note.");
       }
 
-      setNotes((currentNotes) => {
-        const remainingNotes = currentNotes.filter((currentNote) => currentNote.id !== note.id);
-
-        setSelectedNoteId((currentId) => {
-          if (currentId !== note.id) {
-            return currentId;
-          }
-
-          return remainingNotes[0]?.id || null;
-        });
-
-        return remainingNotes;
-      });
+      // Dropping the row is enough: the deleted id no longer matches anything,
+      // so the detail panel falls back to the first remaining note and the
+      // normalization effect clears the stale `noteId` from the URL.
+      setNotes((currentNotes) =>
+        currentNotes.filter((currentNote) => currentNote.id !== note.id)
+      );
 
       if (editingNoteId === note.id) {
         cancelEditingNote();
@@ -1150,13 +1173,15 @@ export function NotesPage() {
             <>
                     <NotesListControls
                       noteTypeFilter={noteTypeFilter}
-                      onNoteTypeFilterChange={(event) => setNoteTypeFilter(event.target.value)}
+                      onNoteTypeFilterChange={(event) =>
+                        handleFilterChange("noteType", event.target.value)
+                      }
                       relatedEntityTypeFilter={relatedEntityTypeFilter}
                       onRelatedEntityTypeFilterChange={(event) =>
-                        setRelatedEntityTypeFilter(event.target.value)
+                        handleFilterChange("relatedEntityType", event.target.value)
                       }
                       sortBy={sortBy}
-                      onSortByChange={(event) => setSortBy(event.target.value)}
+                      onSortByChange={(event) => handleFilterChange("sort", event.target.value)}
                       noteTypes={noteTypes}
                     />
 
@@ -1171,7 +1196,7 @@ export function NotesPage() {
                 <NotesList
                   notes={filteredNotes}
                   selectedNoteId={selectedNoteId}
-                  onSelectNote={setSelectedNoteId}
+                  onSelectNote={(noteId) => updateViewParams({ noteId })}
                 />
 
             <NoteDetails

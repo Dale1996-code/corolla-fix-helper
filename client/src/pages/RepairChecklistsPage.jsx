@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { useScrollToHash } from "../lib/useScrollToHash";
+import { applyParamUpdates, readIdParam } from "../lib/urlState";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -521,16 +522,13 @@ function toChecklistPayload(form) {
 export function RepairChecklistsPage() {
   useScrollToHash();
 
-  // `?checklistId=` lets another page link straight to one checklist -- the
-  // Repair Planner's "Open saved checklist" link is the first caller. It only
-  // preselects a row; the checklist itself is still loaded from the server, so
-  // a bogus id simply falls back to the newest checklist.
-  const [searchParams] = useSearchParams();
-  const requestedChecklistIdValue = Number(searchParams.get("checklistId"));
-  const requestedChecklistId =
-    Number.isInteger(requestedChecklistIdValue) && requestedChecklistIdValue > 0
-      ? requestedChecklistIdValue
-      : null;
+  // `?checklistId=` is where the open checklist lives, so Back returns to the
+  // checklist that was open rather than to the newest one. The Repair Planner's
+  // "Open saved checklist" link writes the same parameter. It only names a row;
+  // the checklist itself is still loaded from the server, so a bogus id falls
+  // back to the newest checklist and then drops out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedChecklistId = readIdParam(searchParams, "checklistId");
 
   const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -541,7 +539,6 @@ export function RepairChecklistsPage() {
   const [createMessage, setCreateMessage] = useState("");
   const [createError, setCreateError] = useState("");
 
-  const [selectedChecklistId, setSelectedChecklistId] = useState(null);
   const [editingChecklistId, setEditingChecklistId] = useState(null);
   const [editForm, setEditForm] = useState(emptyChecklistForm);
   const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
@@ -561,13 +558,26 @@ export function RepairChecklistsPage() {
   const [itemActionPending, setItemActionPending] = useState(false);
   const creatingInFlight = useRef(false);
 
+  // Derived from the URL and the loaded list: no `checklistId` means the newest
+  // checklist, the fallback this page always had, now spelled as an absent
+  // parameter so an untouched page keeps a clean `/repair-checklists` URL.
   const selectedChecklist = useMemo(() => {
-    if (!selectedChecklistId) {
-      return null;
-    }
+    const requestedChecklist = requestedChecklistId
+      ? checklists.find((checklist) => checklist.id === requestedChecklistId)
+      : null;
 
-    return checklists.find((checklist) => checklist.id === selectedChecklistId) || null;
-  }, [checklists, selectedChecklistId]);
+    return requestedChecklist || checklists[0] || null;
+  }, [checklists, requestedChecklistId]);
+  const selectedChecklistId = selectedChecklist?.id ?? null;
+
+  const updateViewParams = useCallback(
+    (updates, { replace = false } = {}) => {
+      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
+        replace,
+      });
+    },
+    [setSearchParams]
+  );
 
   async function loadData() {
     try {
@@ -584,23 +594,6 @@ export function RepairChecklistsPage() {
       const nextChecklists = Array.isArray(payload.checklists) ? payload.checklists : [];
 
       setChecklists(nextChecklists);
-      setSelectedChecklistId((currentId) => {
-        if (currentId && nextChecklists.some((checklist) => checklist.id === currentId)) {
-          return currentId;
-        }
-
-        // A deep link picks the checklist it names, but only if it is really
-        // there -- a stale or hand-typed id falls back to the newest one rather
-        // than showing an empty detail pane.
-        if (
-          requestedChecklistId &&
-          nextChecklists.some((checklist) => checklist.id === requestedChecklistId)
-        ) {
-          return requestedChecklistId;
-        }
-
-        return nextChecklists[0]?.id || null;
-      });
     } catch (error) {
       setLoadError(error.message || "Could not load repair checklists.");
     } finally {
@@ -611,6 +604,24 @@ export function RepairChecklistsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // A `checklistId` naming a checklist that is not there -- deleted, or a stale
+  // link from the Repair Planner -- drops out of the URL after the newest
+  // checklist has been shown in its place, so the address stops describing a
+  // view that does not exist.
+  useEffect(() => {
+    if (loading || loadError || !searchParams.has("checklistId")) {
+      return;
+    }
+
+    const namesALoadedChecklist =
+      requestedChecklistId &&
+      checklists.some((checklist) => checklist.id === requestedChecklistId);
+
+    if (!namesALoadedChecklist) {
+      updateViewParams({ checklistId: null }, { replace: true });
+    }
+  }, [loading, loadError, requestedChecklistId, checklists, searchParams, updateViewParams]);
 
   // Replace one checklist in state with a server-returned copy (item mutations
   // and edits both return the full, refreshed checklist), then re-sort so the
@@ -667,7 +678,9 @@ export function RepairChecklistsPage() {
       const newChecklist = payload.checklist;
 
       setChecklists((currentChecklists) => [newChecklist, ...currentChecklists]);
-      setSelectedChecklistId(newChecklist.id);
+      // Replace, not push: opening the checklist just created is part of
+      // creating it, not a step to press Back through.
+      updateViewParams({ checklistId: newChecklist.id }, { replace: true });
       setCreateForm(emptyChecklistForm);
       setCreateMessage("Checklist saved.");
       setEditingChecklistId(null);
@@ -680,6 +693,11 @@ export function RepairChecklistsPage() {
   }
 
   function startEditingChecklist(checklist) {
+    // Pin the checklist being edited into the URL. Saving re-sorts the list by
+    // newest activity, so without a named selection the implicit "first row"
+    // default could slide to a different checklist mid-edit. Replace, not push:
+    // opening an edit form is not a navigation step of its own.
+    updateViewParams({ checklistId: checklist.id }, { replace: true });
     setEditingChecklistId(checklist.id);
     setEditForm({
       title: checklist.title || "",
@@ -757,15 +775,12 @@ export function RepairChecklistsPage() {
         throw new Error(payload.error || "Could not delete checklist.");
       }
 
-      setChecklists((currentChecklists) => {
-        const remaining = currentChecklists.filter((current) => current.id !== checklist.id);
-
-        setSelectedChecklistId((currentId) =>
-          currentId === checklist.id ? remaining[0]?.id || null : currentId
-        );
-
-        return remaining;
-      });
+      // Dropping the row is enough: the deleted id no longer matches anything,
+      // so the detail panel falls back to the newest remaining checklist and
+      // the normalization effect clears the stale `checklistId` from the URL.
+      setChecklists((currentChecklists) =>
+        currentChecklists.filter((current) => current.id !== checklist.id)
+      );
 
       if (editingChecklistId === checklist.id) {
         cancelEditingChecklist();
@@ -943,7 +958,9 @@ export function RepairChecklistsPage() {
   };
 
   function handleSelectChecklist(checklistId) {
-    setSelectedChecklistId(checklistId);
+    // Picking a checklist is a real navigation step, so it pushes: Back returns
+    // to the checklist that was open before.
+    updateViewParams({ checklistId });
     cancelEditingItem();
     // Cancel any in-progress checklist edit so its form/state does not leak across
     // checklists; cancelEditingChecklist also clears the saveState banner.
