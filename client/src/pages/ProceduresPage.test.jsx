@@ -153,13 +153,13 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
   );
 
   expect(await screen.findByPlaceholderText("Search title, system, tools, parts, steps, or notes")).toBeInTheDocument();
-  expect(screen.getByText(getCountTextMatcher("Showing 2 of 2 procedures."))).toBeInTheDocument();
+  expect(screen.getByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))).toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText("Search title, system, tools, parts, steps, or notes"), {
     target: { value: "brake" },
   });
 
-  expect(screen.getByText(getCountTextMatcher("Showing 1 of 2 procedures."))).toBeInTheDocument();
+  expect(screen.getByText(getCountTextMatcher("Showing 1–1 of 1 procedure."))).toBeInTheDocument();
   expect(screen.getAllByText("Rear brake pad replacement").length).toBeGreaterThan(0);
   expect(screen.queryAllByText("Throttle body cleaning")).toHaveLength(0);
 
@@ -167,11 +167,21 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
     target: { value: "beginner" },
   });
 
-  expect(screen.getByText(getCountTextMatcher("Showing 0 of 2 procedures."))).toBeInTheDocument();
-  expect(await screen.findByText("No procedures match the current filters.")).toBeInTheDocument();
+  // Zero matches gets a sentence, never an impossible "Showing 1-0 of 0". The
+  // counter in the filter bar and the list's own empty state both say it, so
+  // this asserts the pair rather than a single node.
+  expect(
+    screen.getAllByText(getCountTextMatcher("No procedures match these filters."))
+  ).toHaveLength(2);
+  // The empty state names a control that really exists in the filter bar.
+  expect(
+    await screen.findByText(
+      "Change the filters or use Clear filters to see your saved procedures."
+    )
+  ).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-  expect(await screen.findByText(getCountTextMatcher("Showing 2 of 2 procedures."))).toBeInTheDocument();
+  expect(await screen.findByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))).toBeInTheDocument();
   // Both panels can name it now: with the selection living in the URL, clearing
   // the filters (which only clears filter parameters) leaves no `procedureId`,
   // so the detail panel falls back to the default record while the list row is

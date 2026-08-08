@@ -8,6 +8,7 @@ import {
   AI_PLANNER_LIMITS,
   AiSafetyNotices,
 } from "../components/feedback/AiSafetyNotices";
+import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 
 const defaultForm = {
@@ -378,7 +379,7 @@ function TasksPanel({ tasks }) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-semibold text-slate-900">{task.title}</span>
               <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
-                {task.system} · {task.difficulty}
+                {task.system} · {labelize(task.difficulty)}
               </span>
             </div>
             {task.safetyFlags?.length ? (

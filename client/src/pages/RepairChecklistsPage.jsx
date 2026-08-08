@@ -5,6 +5,7 @@ import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { formatLibraryTotal } from "../lib/resultRange";
 import { useScrollToHash } from "../lib/useScrollToHash";
 import { applyParamUpdates, readIdParam } from "../lib/urlState";
 
@@ -147,7 +148,10 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
           </div>
 
           {checklists.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-600">No checklists yet.</div>
+            <div className="space-y-2 px-4 py-8 text-sm text-slate-600">
+              <p className="font-semibold text-slate-900">No checklists yet.</p>
+              <p>Create your first checklist above to plan a repair job step by step.</p>
+            </div>
           ) : null}
 
           {checklists.map((checklist) => {
@@ -318,7 +322,7 @@ function ChecklistItems({
           value={newItemText}
           onChange={(event) => onNewItemTextChange(event.target.value)}
           placeholder="Add a checklist item"
-          aria-label="New item text"
+          aria-label="New checklist item"
           disabled={addingItem}
         />
         <button
@@ -1018,9 +1022,15 @@ export function RepairChecklistsPage() {
 
           {!loading && !loadError ? (
             <>
+              {/* Every checklist is always on screen -- there is no filter and
+                  no paging here -- so this is the library-total form, not a
+                  range that would only restate its own total. */}
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                <span className="font-semibold text-slate-900">{checklists.length}</span>{" "}
-                checklist{checklists.length === 1 ? "" : "s"}.
+                {formatLibraryTotal({
+                  total: checklists.length,
+                  noun: "checklist",
+                  nounPlural: "checklists",
+                })}
               </section>
 
               <ListDetailLayout

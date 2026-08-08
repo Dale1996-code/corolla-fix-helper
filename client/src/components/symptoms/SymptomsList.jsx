@@ -44,13 +44,15 @@ export function SymptomsList({
             <div className="px-4 py-8 text-sm text-slate-600">
               {totalSymptoms === 0 ? (
                 <div className="space-y-2">
-                  <p className="font-semibold text-slate-900">No symptoms saved yet.</p>
+                  <p className="font-semibold text-slate-900">No symptoms yet.</p>
                   <p>Create your first symptom above to start tracking what the car is doing.</p>
                 </div>
               ) : hasActiveFilters ? (
                 <div className="space-y-2">
-                  <p className="font-semibold text-slate-900">No symptoms match the current filters.</p>
-                  <p>Change the filters or create a new symptom that matches what you want to track.</p>
+                  <p className="font-semibold text-slate-900">
+                    No symptoms match these filters.
+                  </p>
+                  <p>Change the filters or use Clear filters to see your saved symptoms.</p>
                 </div>
               ) : (
                 <p>No symptoms are available right now.</p>

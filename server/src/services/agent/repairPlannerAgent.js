@@ -436,21 +436,46 @@ export async function runRepairPlannerAgent(request, options = {}) {
   }
 }
 
+// The readiness level as the owner reads it in the browser. The wire value
+// (`ready` / `almost_ready` / `not_ready`) is unchanged; only this activity-log
+// line, which used to print the raw enum, is humanized.
+const READINESS_LEVEL_LABELS = {
+  ready: "Ready",
+  almost_ready: "Almost ready",
+  not_ready: "Not ready",
+};
+
+function pluralize(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+// These strings stream to the Repair Planner's activity log, so they are user
+// copy, not logs: real plurals rather than "(s)", and no internal vocabulary.
 function summarizeToolResult(name, result) {
   if (result?.error) {
     return result.error;
   }
   if (name === "extract_repair_tasks") {
-    return `Found ${result.tasks?.length || 0} task(s).`;
+    return `Found ${pluralize(result.tasks?.length || 0, "task", "tasks")}.`;
   }
   if (name === "search_repair_docs") {
-    return `Retrieved ${result.citations?.length || 0} document chunk(s) for "${result.query || ""}".`;
+    return `Retrieved ${pluralize(
+      result.citations?.length || 0,
+      "passage",
+      "passages"
+    )} for "${result.query || ""}".`;
   }
   if (name === "check_repair_readiness") {
-    return `Readiness ${result.score ?? 0}/100 (${result.level || "unknown"}).`;
+    const level = READINESS_LEVEL_LABELS[result.level] || "Unknown";
+
+    return `Readiness ${result.score ?? 0}/100 (${level}).`;
   }
   if (name === "build_owner_checklist") {
-    return `Built ${result.checklist?.length || 0} checklist item(s).`;
+    return `Built ${pluralize(
+      result.checklist?.length || 0,
+      "checklist item",
+      "checklist items"
+    )}.`;
   }
   if (name === "draft_handoff_notes") {
     return "Drafted parts list, mechanic handoff, and log entry.";

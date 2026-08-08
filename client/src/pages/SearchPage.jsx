@@ -18,6 +18,7 @@ import {
   SymptomResultCard,
 } from "../components/search/ResultCards";
 import { applyParamUpdates, pageParamValue, readPageParam } from "../lib/urlState";
+import { formatCount, formatResultRange } from "../lib/resultRange";
 
 // The shared SelectField takes [{ value, label }]; search filter options come
 // back from the API as plain strings, so labelize them into that shape here.
@@ -48,10 +49,6 @@ const BOOKMARKED_OPTIONS = [{ value: "true", label: "Bookmarked only" }];
 // Matches the server's default page size for /api/search/documents. The server
 // clamps whatever it is sent, so this only decides how much we ask for.
 const DOCUMENT_RESULTS_PER_PAGE = 25;
-
-function formatCount(value) {
-  return value.toLocaleString("en-US");
-}
 
 const defaultDocumentsForm = {
   q: "",
@@ -277,32 +274,41 @@ function SectionActions({ loading, onClear }) {
 }
 
 // Before the user searches, the section is showing a slice of the library — not
-// the outcome of a search. The two states are worded differently so a library
-// listing can never read as "your search found this many".
+// the outcome of a search. The two states keep different nouns ("document
+// results" vs "documents in your library") so a library listing can never read
+// as "your search found this many" — but both go through the one shared range
+// formatter, so the shape is identical on every card and every page.
+//
+// An unpaginated card has its whole result set on screen, so its range simply
+// runs from the first row to the last.
 function ResultSummary({ searched, paginated, total, offset, resultsOnPage, noun, nounPlural }) {
   if (total === 0) {
     // The empty/no-results message in SectionStatus already says everything.
     return null;
   }
 
-  const summary = (() => {
-    if (paginated) {
-      const from = offset + 1;
-      const to = offset + resultsOnPage;
+  const from = paginated ? offset + 1 : 1;
+  const to = paginated ? offset + resultsOnPage : total;
 
-      return searched
-        ? `Showing ${formatCount(from)}–${formatCount(to)} of ${formatCount(total)} ${
-            total === 1 ? `${noun} result` : `${noun} results`
-          }.`
-        : `Showing ${formatCount(from)}–${formatCount(to)} of ${formatCount(total)} ${
-            total === 1 ? noun : nounPlural
-          } in your library. Search to narrow this list.`;
-    }
+  const range = searched
+    ? formatResultRange({
+        from,
+        to,
+        total,
+        noun: `${noun} result`,
+        nounPlural: `${noun} results`,
+      })
+    : formatResultRange({
+        from,
+        to,
+        total,
+        noun,
+        nounPlural,
+        suffix: "in your library",
+      });
 
-    return searched
-      ? `Found ${formatCount(total)} ${total === 1 ? `${noun} result` : `${noun} results`}.`
-      : `Showing all ${formatCount(total)} ${total === 1 ? noun : nounPlural} in your library.`;
-  })();
+  const summary =
+    !searched && paginated ? `${range} Search to narrow this list.` : range;
 
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -875,7 +881,7 @@ function AskAssistantMessage({ message }) {
   }
 
   if (message.status === "error") {
-    return <ErrorBanner title="Could not ask documents">{message.content}</ErrorBanner>;
+    return <ErrorBanner title="Could not answer this question">{message.content}</ErrorBanner>;
   }
 
   return null;
@@ -1206,8 +1212,10 @@ const SEARCH_SECTIONS = [
     gridColsClass: "xl:grid-cols-5",
     resultNoun: "document",
     resultNounPlural: "documents",
-    emptyMessage: "No documents matched this search.",
-    idleEmptyMessage: "No documents in your library yet.",
+    emptyMessage:
+      "No documents matched this search. Try a different keyword, or use Clear to start over.",
+    idleEmptyMessage:
+      "No documents in your library yet. Upload a PDF on the Documents page to get started.",
     // The document library is the one scope that can grow into the thousands,
     // so it is the only section that pages.
     paginated: true,
@@ -1296,8 +1304,10 @@ const SEARCH_SECTIONS = [
     gridColsClass: "xl:grid-cols-4",
     resultNoun: "symptom",
     resultNounPlural: "symptoms",
-    emptyMessage: "No symptoms matched this search.",
-    idleEmptyMessage: "No symptoms saved yet.",
+    emptyMessage:
+      "No symptoms matched this search. Try a different keyword, or use Clear to start over.",
+    idleEmptyMessage:
+      "No symptoms yet. Create one on the Symptoms page to track what the car is doing.",
     ResultCard: SymptomResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1353,8 +1363,10 @@ const SEARCH_SECTIONS = [
     gridColsClass: "xl:grid-cols-4",
     resultNoun: "procedure",
     resultNounPlural: "procedures",
-    emptyMessage: "No procedures matched this search.",
-    idleEmptyMessage: "No procedures saved yet.",
+    emptyMessage:
+      "No procedures matched this search. Try a different keyword, or use Clear to start over.",
+    idleEmptyMessage:
+      "No procedures yet. Create one on the Procedures page to save tools, parts, and steps.",
     ResultCard: ProcedureResultCard,
     renderFields({ form, setForm, filters }) {
       return (
@@ -1410,8 +1422,9 @@ const SEARCH_SECTIONS = [
     gridColsClass: "xl:grid-cols-4",
     resultNoun: "note",
     resultNounPlural: "notes",
-    emptyMessage: "No notes matched this search.",
-    idleEmptyMessage: "No notes saved yet.",
+    emptyMessage:
+      "No notes matched this search. Try a different keyword, or use Clear to start over.",
+    idleEmptyMessage: "No notes yet. Write one on the Notes page to start your repair log.",
     ResultCard: NoteResultCard,
     renderFields({ form, setForm, filters }) {
       return (

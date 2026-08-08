@@ -46,6 +46,36 @@ test("AttachmentPanel renders existing attachments with an image source", async 
   expect(image).toHaveAttribute("src", "/api/attachments/1/file");
 });
 
+// The panel used to label its control "Remove" while the confirmation it opened
+// said "Delete this photo" -- one action described two ways. The button, the
+// prompt, and the request have to agree.
+test("AttachmentPanel deletes a photo with matching button and prompt wording", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockReturnValueOnce(jsonResponse({ attachments: [makeAttachment()], total: 1 }))
+    .mockReturnValueOnce(jsonResponse({ message: "Attachment deleted." }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const confirmMock = vi.fn(() => true);
+  vi.stubGlobal("confirm", confirmMock);
+
+  render(<AttachmentPanel entityType="symptom" entityId={5} />);
+
+  expect(await screen.findByText("Engine bay")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  expect(confirmMock).toHaveBeenCalledWith(
+    'Delete this photo ("Engine bay")? This cannot be undone.'
+  );
+
+  // The relabelled button still calls the same route.
+  await screen.findByText(/no photos yet/i);
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/attachments/1");
+  expect(fetchMock.mock.calls[1][1].method).toBe("DELETE");
+});
+
 test("AttachmentPanel uploads an image and shows it (happy path)", async () => {
   const fetchMock = vi
     .fn()

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { labelize } from "../../lib/labelize";
 import { buildEntityLink } from "../../lib/navigation";
+import { normalizeExtractionStatus } from "../documents/documentDisplay";
 
 function SnippetBlock({ snippet, snippetField, showSnippetReason }) {
   if (!snippet) {
@@ -71,9 +72,12 @@ export function DocumentResultCard({ result, showSnippetReason }) {
           <span className="font-semibold text-slate-900">Pages:</span>{" "}
           {result.pageCount ?? "Unknown"}
         </p>
+        {/* The same human label the Documents page shows. Rendering the raw
+            column value put database states ("not_attempted",
+            "completed_with_warning: ocr_unavailable: ...") on a result card. */}
         <p>
           <span className="font-semibold text-slate-900">Extraction:</span>{" "}
-          {result.extractionStatus || "Unknown"}
+          {normalizeExtractionStatus(result.extractionStatus).label}
         </p>
       </div>
 
@@ -119,8 +123,10 @@ function LinkedDocsResultCard({ entityType, secondaryLabel, result, showSnippetR
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
             {labelize(result.confidence)}
           </span>
+          {/* "docs" rather than "documents" to match the Linked docs column
+              these cards sit beside; only the plural was wrong. */}
           <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800">
-            {linkedDocumentCount} linked docs
+            {linkedDocumentCount} linked doc{linkedDocumentCount === 1 ? "" : "s"}
           </span>
         </div>
       </div>

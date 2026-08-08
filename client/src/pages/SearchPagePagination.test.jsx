@@ -389,13 +389,19 @@ test("Symptoms, Procedures, and Notes stay present below the paged Documents sec
     .closest("section");
   expect(within(symptomsSection).getByText("Idle flare on cold start")).toBeInTheDocument();
   expect(
-    within(symptomsSection).getByText("Showing all 1 symptom in your library.")
+    // An unpaginated card ranges over its whole result set, and a single
+    // record keeps singular grammar.
+    within(symptomsSection).getByText("Showing 1–1 of 1 symptom in your library.")
   ).toBeInTheDocument();
 
   // Notes came back empty and unsearched: an idle empty message, not a
   // "nothing matched your search" message.
   const notesSection = screen.getByRole("heading", { name: "Search notes" }).closest("section");
-  expect(within(notesSection).getByText("No notes saved yet.")).toBeInTheDocument();
+  expect(
+    within(notesSection).getByText(
+      "No notes yet. Write one on the Notes page to start your repair log."
+    )
+  ).toBeInTheDocument();
 });
 
 test("loading, no-results, and error states still work on the paged section", async () => {
@@ -446,7 +452,11 @@ test("loading, no-results, and error states still work on the paged section", as
   // No-results state after a real search.
   resolvePending();
   await waitFor(() =>
-    expect(within(section).getByText("No documents matched this search.")).toBeInTheDocument()
+    expect(
+      within(section).getByText(
+        "No documents matched this search. Try a different keyword, or use Clear to start over."
+      )
+    ).toBeInTheDocument()
   );
   expect(within(section).queryByText(/Showing/)).not.toBeInTheDocument();
   expect(within(section).queryByRole("button", { name: "Next" })).not.toBeInTheDocument();

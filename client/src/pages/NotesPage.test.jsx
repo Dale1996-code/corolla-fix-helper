@@ -130,7 +130,11 @@ test("NotesPage filters notes by linked item type", async () => {
   expect(screen.queryAllByText("Document note")).toHaveLength(0);
   expect(screen.queryAllByText("Procedure note")).toHaveLength(0);
   expect(screen.queryAllByText("Unlinked note")).toHaveLength(0);
-  expect(screen.getByText("1")).toBeInTheDocument();
+  // One match out of four: singular grammar, and the counter says what the
+  // list was narrowed from since nothing else on the page shows the total.
+  expect(
+    screen.getByText("Showing 1–1 of 1 note. Filtered from 4 in your library.")
+  ).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Linked item"), {
     target: { value: "none" },

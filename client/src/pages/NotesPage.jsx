@@ -6,6 +6,7 @@ import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { formatCount, formatLibraryTotal, formatResultRange } from "../lib/resultRange";
 import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { useScrollToHash } from "../lib/useScrollToHash";
@@ -43,7 +44,7 @@ function getRelatedEntityFieldConfig(relatedEntityType, documents, symptoms, pro
       label: "Linked document",
       placeholder: "Choose a document",
       entities: documents,
-      emptyMessage: "No documents available yet. Upload a PDF in Documents first.",
+      emptyMessage: "No documents available yet. Upload a PDF on the Documents page first.",
     };
   }
 
@@ -52,7 +53,7 @@ function getRelatedEntityFieldConfig(relatedEntityType, documents, symptoms, pro
       label: "Linked symptom",
       placeholder: "Choose a symptom",
       entities: symptoms,
-      emptyMessage: "No symptoms available yet. Add a symptom first.",
+      emptyMessage: "No symptoms available yet. Create one on the Symptoms page first.",
     };
   }
 
@@ -61,7 +62,7 @@ function getRelatedEntityFieldConfig(relatedEntityType, documents, symptoms, pro
       label: "Linked procedure",
       placeholder: "Choose a procedure",
       entities: procedures,
-      emptyMessage: "No procedures available yet. Add a procedure first.",
+      emptyMessage: "No procedures available yet. Create one on the Procedures page first.",
     };
   }
 
@@ -247,8 +248,8 @@ function NoteCreateForm({
     >
       <h2 className="text-lg font-semibold text-slate-900">Create note</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Save observations, reminders, and repair notes. In this page, you can optionally link
-        each note to one document, symptom, or procedure.
+        Save observations, reminders, and repair notes. You can optionally link each note to
+        one document, symptom, or procedure.
       </p>
 
       <form className="mt-4 grid gap-4" onSubmit={onSubmit}>
@@ -399,7 +400,13 @@ export const notesListTable = {
   minWidthClass: "min-w-[41rem]",
 };
 
-function NotesList({ notes, selectedNoteId, onSelectNote }) {
+function NotesList({
+  notes,
+  totalNotes = 0,
+  hasActiveFilters = false,
+  selectedNoteId,
+  onSelectNote,
+}) {
   const listGridClass = notesListTable.gridClass;
 
   return (
@@ -415,9 +422,25 @@ function NotesList({ notes, selectedNoteId, onSelectNote }) {
             <span>Updated</span>
           </div>
 
+          {/* "You have written nothing" and "your filters hide everything" need
+              different next steps; the create form is directly above the list. */}
           {notes.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-600">
-              No notes saved yet.
+            <div className="px-4 py-8 text-sm text-slate-600">
+              {totalNotes === 0 ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">No notes yet.</p>
+                  <p>Write your first note above to start your repair log.</p>
+                </div>
+              ) : hasActiveFilters ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">
+                    No notes match these filters.
+                  </p>
+                  <p>Change the filters above to see more of your notes.</p>
+                </div>
+              ) : (
+                <p>No notes are available right now.</p>
+              )}
             </div>
           ) : null}
 
@@ -666,8 +689,12 @@ function NoteDetails({
                 </Link>
               </div>
             ) : (
+              /* The linked record is gone (or was never joined), so say that
+                 rather than printing a bare database id at the owner. */
               <p className="mt-2 text-slate-700">
-                {linkedEntityHeading} ID: {note.relatedEntityId || "Not set"}
+                {note.relatedEntityId
+                  ? `${linkedEntityHeading} #${note.relatedEntityId} is no longer available.`
+                  : `${linkedEntityHeading} is no longer available.`}
               </p>
             )}
           </div>
@@ -803,6 +830,34 @@ export function NotesPage() {
     [requestedNoteId, notes, filteredNotes]
   );
   const selectedNoteId = selectedNote?.id ?? null;
+
+  const hasActiveFilters = noteTypeFilter !== "all" || relatedEntityTypeFilter !== "all";
+
+  // The whole filtered list is on screen (notes do not page), so the range runs
+  // from the first row to the last. The library total is shown nowhere else on
+  // this page, so a narrowed list says what it was narrowed from.
+  const noteRangeSummary = (() => {
+    const range = formatResultRange({
+      from: 1,
+      to: filteredNotes.length,
+      total: filteredNotes.length,
+      noun: "note",
+      nounPlural: "notes",
+      // The zero-state carries the library size, which the list's own empty
+      // state below does not, so the two do not simply repeat each other.
+      emptyText: notes.length
+        ? `No notes match these filters. ${formatLibraryTotal({
+            total: notes.length,
+            noun: "note",
+            nounPlural: "notes",
+          })}`
+        : "No notes in your library yet.",
+    });
+
+    return filteredNotes.length && filteredNotes.length !== notes.length
+      ? `${range} Filtered from ${formatCount(notes.length)} in your library.`
+      : range;
+  })();
 
   async function loadData() {
     try {
@@ -1152,7 +1207,7 @@ export function NotesPage() {
     <>
       <PageHeader
         title="Notes"
-        description="Save practical notes for your Corolla work, then optionally link each note to one document, symptom, or procedure in the current Notes page."
+        description="Save practical notes for your Corolla work, then optionally link each note to one document, symptom, or procedure."
       />
 
       <div className="space-y-6">
@@ -1200,10 +1255,7 @@ export function NotesPage() {
                     />
 
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                Showing{" "}
-                <span className="font-semibold text-slate-900">{filteredNotes.length}</span>{" "}
-                of <span className="font-semibold text-slate-900">{notes.length}</span>{" "}
-                note{notes.length === 1 ? "" : "s"}.
+                {noteRangeSummary}
               </section>
 
               <ListDetailLayout
@@ -1211,6 +1263,8 @@ export function NotesPage() {
                 list={
                   <NotesList
                     notes={filteredNotes}
+                    totalNotes={notes.length}
+                    hasActiveFilters={hasActiveFilters}
                     selectedNoteId={selectedNoteId}
                     onSelectNote={(noteId) => updateViewParams({ noteId })}
                   />

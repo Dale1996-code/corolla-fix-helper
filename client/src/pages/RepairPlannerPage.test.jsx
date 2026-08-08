@@ -31,7 +31,7 @@ function streamResponse(events) {
 const completedRun = [
   { type: "status", message: "Analyzing repair brief..." },
   { type: "tool_call", name: "extract_repair_tasks" },
-  { type: "tool_result", name: "extract_repair_tasks", summary: "Found 1 task(s)." },
+  { type: "tool_result", name: "extract_repair_tasks", summary: "Found 1 task." },
   { type: "tool_call", name: "search_repair_docs" },
   {
     type: "done",
@@ -174,7 +174,11 @@ test("RepairPlannerPage streams agent activity, plan text, and structured artifa
 
   // Tool progress events.
   expect(screen.getByText("Calling extract_repair_tasks")).toBeInTheDocument();
-  expect(screen.getByText("Found 1 task(s).")).toBeInTheDocument();
+  expect(screen.getByText("Found 1 task.")).toBeInTheDocument();
+
+  // The task chip shows the difficulty as a label, not the stored value: it
+  // used to print "intermediate" straight from the artifact.
+  expect(screen.getByText("Brakes · Intermediate")).toBeInTheDocument();
 
   // Structured artifacts from the done event.
   expect(screen.getByText("80/100")).toBeInTheDocument();

@@ -660,7 +660,7 @@ test("SearchPage hides an answered response that has no evidence and no citation
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(
     within(askSection).queryByText("From your documents")
@@ -709,7 +709,7 @@ test("SearchPage hides a response whose API status is missing", async () => {
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(
     within(askSection).queryByText("UNSUPPORTED ANSWER WITH NO STATUS")
@@ -770,7 +770,7 @@ test("SearchPage hides a document-supported claim whose source does not match a 
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
   expect(within(askSection).queryByText(/54 Nm/)).not.toBeInTheDocument();
@@ -830,7 +830,7 @@ test("SearchPage hides a document-supported claim whose quote does not match its
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
   expect(within(askSection).queryByText(/54 Nm/)).not.toBeInTheDocument();
@@ -892,7 +892,7 @@ test("SearchPage rejects matching passages whose server evidence identifiers dis
   });
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
-  expect(await within(askSection).findByText("Could not ask documents")).toBeInTheDocument();
+  expect(await within(askSection).findByText("Could not answer this question")).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
   expect(within(askSection).queryByText(/27 ft-lb/)).not.toBeInTheDocument();
 });
@@ -953,7 +953,7 @@ test("SearchPage rejects a long evidence quote that only matches the citation pr
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
   expect(within(askSection).queryByText(/fabricated instruction/)).not.toBeInTheDocument();
@@ -1013,7 +1013,7 @@ test("SearchPage rejects boolean document, page, and chunk identifiers", async (
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
   expect(
-    await within(askSection).findByText("Could not ask documents")
+    await within(askSection).findByText("Could not answer this question")
   ).toBeInTheDocument();
   expect(within(askSection).queryByText("From your documents")).not.toBeInTheDocument();
   expect(within(askSection).queryByText(/37 Nm/)).not.toBeInTheDocument();
@@ -1340,7 +1340,7 @@ test("SearchPage shows request error state when Ask fails", async () => {
   });
   fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
 
-  expect(await within(askSection).findByText("Could not ask documents")).toBeInTheDocument();
+  expect(await within(askSection).findByText("Could not answer this question")).toBeInTheDocument();
   expect(within(askSection).getByText("Ask service failed.")).toBeInTheDocument();
   expect(within(askSection).queryByText("Sources")).not.toBeInTheDocument();
 });

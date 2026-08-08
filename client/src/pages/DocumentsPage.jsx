@@ -9,6 +9,7 @@ import {
   TextField,
 } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { formatCount, formatLibraryTotal, formatResultRange } from "../lib/resultRange";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
 import { useScrollToHash } from "../lib/useScrollToHash";
 import {
@@ -106,9 +107,10 @@ function UploadForm({
         }`}
       >
         <div>
-          <h2 className="text-lg font-semibold text-slate-950">Import PDF</h2>
+          <h2 className="text-lg font-semibold text-slate-950">Upload PDF</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Upload one document at a time, then review status and fix details if needed
+            Upload one PDF at a time, then review its extraction status and edit the details
+            if needed.
           </p>
         </div>
         <span className="flex items-center gap-3">
@@ -181,7 +183,7 @@ function UploadForm({
               name="title"
               value={form.title}
               onChange={onTextChange}
-              placeholder="Optional manual title"
+              placeholder="Optional custom title"
             />
             <TextField
               label="System"
@@ -200,7 +202,7 @@ function UploadForm({
               placeholder="Ignition, Cooling..."
             />
             <TextField
-              label="Document Type"
+              label="Document type"
               name="documentType"
               value={form.documentType}
               onChange={onTextChange}
@@ -259,7 +261,7 @@ function UploadForm({
   );
 }
 
-function EditMetadataForm({
+function EditDetailsForm({
   values,
   onChange,
   onSubmit,
@@ -287,7 +289,7 @@ function EditMetadataForm({
           onChange={onChange}
         />
         <TextField
-          label="Document Type"
+          label="Document type"
           name="documentType"
           value={values.documentType}
           onChange={onChange}
@@ -305,7 +307,7 @@ function EditMetadataForm({
         placeholder="Comma separated, e.g. brakes, torque-specs, diy"
       />
 
-      <TextAreaField label="Document notes" name="notes" value={values.notes} onChange={onChange} />
+      <TextAreaField label="Notes" name="notes" value={values.notes} onChange={onChange} />
 
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -335,7 +337,7 @@ function EditMetadataForm({
           disabled={saving}
           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
         >
-          {saving ? "Saving..." : "Save metadata"}
+          {saving ? "Saving..." : "Save details"}
         </button>
         <button
           type="button"
@@ -419,7 +421,7 @@ function DocumentDetails({
             onClick={() => onStartEdit(document)}
             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
           >
-            Edit metadata
+            Edit details
           </button>
           <button
             type="button"
@@ -525,14 +527,14 @@ function DocumentDetails({
       </div>
 
       <div className="mt-4">
-        <h3 className="text-sm font-semibold text-slate-900">Document notes</h3>
+        <h3 className="text-sm font-semibold text-slate-900">Notes</h3>
         <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
           {document.notes || "No notes yet."}
         </p>
       </div>
 
       {isEditing ? (
-        <EditMetadataForm
+        <EditDetailsForm
           values={editValues}
           onChange={onEditChange}
           onSubmit={onSaveEdit}
@@ -731,6 +733,44 @@ export function DocumentsPage() {
     const start = (currentPage - 1) * DOCUMENTS_PER_PAGE;
     return filteredDocuments.slice(start, start + DOCUMENTS_PER_PAGE);
   }, [filteredDocuments, currentPage]);
+
+  // Whether the library on screen is narrower than the library itself. Drives
+  // both the counter's second sentence and which empty state the list shows --
+  // "you have not uploaded anything" and "your filters hide everything" are
+  // different problems with different fixes.
+  const hasActiveFilters =
+    systemFilter !== "all" ||
+    documentTypeFilter !== "all" ||
+    favoriteFilter !== "all" ||
+    bookmarkFilter !== "all" ||
+    tagFilter !== "all";
+
+  const documentRangeSummary = (() => {
+    const firstOnPage = (currentPage - 1) * DOCUMENTS_PER_PAGE + 1;
+    // The zero-state says how big the library is, which is the one thing the
+    // list's own empty state below does not -- so the two do not simply repeat
+    // each other, and "nothing here" is never confused with "nothing exists".
+    const range = formatResultRange({
+      from: firstOnPage,
+      to: firstOnPage + pagedDocuments.length - 1,
+      total: filteredDocuments.length,
+      noun: "document",
+      nounPlural: "documents",
+      emptyText: documents.length
+        ? `No documents match these filters. ${formatLibraryTotal({
+            total: documents.length,
+            noun: "document",
+            nounPlural: "documents",
+          })}`
+        : "No documents in your library yet.",
+    });
+
+    // The library total is shown nowhere else on this page, so a narrowed list
+    // says what it was narrowed from.
+    return filteredDocuments.length && filteredDocuments.length !== documents.length
+      ? `${range} Filtered from ${formatCount(documents.length)} in your library.`
+      : range;
+  })();
 
   // The selected document is derived, not stored. No `documentId` in the URL
   // means "the first document" -- the same default the page always had, but now
@@ -1002,14 +1042,16 @@ export function DocumentsPage() {
     }));
   }
 
-  async function handleSaveMetadata(event) {
+  async function handleSaveDetails(event) {
     event.preventDefault();
 
     if (!editingDocumentId) {
       return;
     }
 
-    const metadataPayload = {
+    // The request body keeps the API's own field names -- this rename is the
+    // button's wording, not the contract's.
+    const detailsPayload = {
       title: editForm.title,
       system: editForm.system,
       subsystem: editForm.subsystem,
@@ -1034,13 +1076,13 @@ export function DocumentsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(metadataPayload),
+        body: JSON.stringify(detailsPayload),
       });
 
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.error || "Could not update document metadata.");
+        throw new Error(payload.error || "Could not save document details.");
       }
 
       const updatedDocument = payload.document;
@@ -1054,7 +1096,7 @@ export function DocumentsPage() {
       setSaveState({
         documentId: updatedDocument.id,
         saving: false,
-        message: "Metadata saved.",
+        message: "Details saved.",
         error: "",
       });
       setEditingDocumentId(null);
@@ -1063,7 +1105,7 @@ export function DocumentsPage() {
         documentId: editingDocumentId,
         saving: false,
         message: "",
-        error: error.message || "Could not update document metadata.",
+        error: error.message || "Could not save document details.",
       });
     }
   }
@@ -1170,7 +1212,7 @@ export function DocumentsPage() {
 
   async function handleDeleteDocument(document) {
     const confirmed = window.confirm(
-      `Delete "${document.title}"? This removes the document record and uploaded PDF file. Linked symptom/procedure references will be removed and linked notes will be cleared.`
+      `Delete "${document.title}"? This deletes the document and its uploaded PDF. Links from symptoms and procedures are removed, and linked notes are unlinked.`
     );
 
     if (!confirmed) {
@@ -1322,12 +1364,7 @@ export function DocumentsPage() {
               />
 
               <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                <span>
-                  Showing{" "}
-                  <span className="font-semibold text-slate-900">{pagedDocuments.length}</span>{" "}
-                  of <span className="font-semibold text-slate-900">{filteredDocuments.length}</span>{" "}
-                  matching ({documents.length} total).
-                </span>
+                <span>{documentRangeSummary}</span>
 
                 {totalPages > 1 ? (
                   <span className="flex items-center gap-2">
@@ -1366,6 +1403,8 @@ export function DocumentsPage() {
                 list={
                   <DocumentsList
                     documents={pagedDocuments}
+                    totalDocuments={documents.length}
+                    hasActiveFilters={hasActiveFilters}
                     selectedDocumentId={selectedDocumentId}
                     onSelectDocument={handleSelectDocument}
                     onToggleFavorite={toggleFavorite}
@@ -1383,7 +1422,7 @@ export function DocumentsPage() {
                     onStartEdit={startEditingDocument}
                     onCancelEdit={cancelEditingDocument}
                     onEditChange={handleEditFormChange}
-                    onSaveEdit={handleSaveMetadata}
+                    onSaveEdit={handleSaveDetails}
                     onOpenFile={openDocumentFile}
                     onToggleFavorite={toggleFavorite}
                     onToggleBookmark={toggleBookmark}

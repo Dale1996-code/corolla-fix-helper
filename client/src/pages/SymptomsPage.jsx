@@ -111,7 +111,7 @@ function LinkedDocumentsSelector({
 
       {documents.length === 0 ? (
         <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          No documents available yet. Upload a PDF in the Documents tab first.
+          No documents available yet. Upload a PDF on the Documents page first.
         </p>
       ) : (
         <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -157,7 +157,7 @@ function SymptomCreateForm({
       id="create-symptom"
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
     >
-      <h2 className="text-lg font-semibold text-slate-900">new symptom</h2>
+      <h2 className="text-lg font-semibold text-slate-900">Create symptom</h2>
       <p className="mt-1 text-sm text-slate-600">
         Save what you observed and link it to useful documents.
       </p>
@@ -492,7 +492,7 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
 
         {procedures.length === 0 ? (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            No procedures available yet. Create one in the Procedures tab first.
+            No procedures available yet. Create one on the Procedures page first.
           </p>
         ) : (
           <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -548,7 +548,7 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
             {suggestState.loading ? "Finding fixes..." : "Suggest fixes"}
           </button>
           <span className="text-xs text-slate-500">
-            Suggests stored procedures grounded in your uploaded documents.
+            Suggests saved procedures grounded in your uploaded documents.
           </span>
         </div>
 

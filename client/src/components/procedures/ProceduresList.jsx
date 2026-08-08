@@ -37,12 +37,26 @@ export function ProceduresList({
             <span>Updated</span>
           </div>
 
+          {/* Mirrors SymptomsList: an empty library and a filter that hides
+              everything need different next steps, and the third branch keeps
+              an empty list from rendering an empty box with no message at all. */}
           {procedures.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-600">
-              {totalProcedures === 0 ? "No procedures saved yet." : null}
-              {totalProcedures > 0 && hasActiveFilters
-                ? "No procedures match the current filters."
-                : null}
+            <div className="px-4 py-8 text-sm text-slate-600">
+              {totalProcedures === 0 ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">No procedures yet.</p>
+                  <p>Create your first procedure above to save its tools, parts, and steps.</p>
+                </div>
+              ) : hasActiveFilters ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">
+                    No procedures match these filters.
+                  </p>
+                  <p>Change the filters or use Clear filters to see your saved procedures.</p>
+                </div>
+              ) : (
+                <p>No procedures are available right now.</p>
+              )}
             </div>
           ) : null}
 
