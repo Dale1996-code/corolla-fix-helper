@@ -44,7 +44,7 @@ export function AttachmentPanel({ entityType, entityId }) {
         }
       } catch (error) {
         if (active) {
-          setLoadError(error.message || "Could not load attachments.");
+          setLoadError(error.message || "Could not load photos.");
         }
       } finally {
         if (active) {
@@ -69,7 +69,7 @@ export function AttachmentPanel({ entityType, entityId }) {
     event.preventDefault();
 
     if (!selectedFile) {
-      setActionError("Choose an image to upload.");
+      setActionError("Choose a photo to upload.");
       return;
     }
 
@@ -92,7 +92,7 @@ export function AttachmentPanel({ entityType, entityId }) {
         fileInputRef.current.value = "";
       }
     } catch (error) {
-      setActionError(error.message || "Could not upload the image.");
+      setActionError(error.message || "Could not upload the photo.");
     } finally {
       setUploading(false);
     }
@@ -115,7 +115,7 @@ export function AttachmentPanel({ entityType, entityId }) {
         current.filter((item) => item.id !== attachment.id)
       );
     } catch (error) {
-      setActionError(error.message || "Could not delete the attachment.");
+      setActionError(error.message || "Could not delete the photo.");
     } finally {
       setDeletingId(null);
     }
@@ -165,7 +165,7 @@ export function AttachmentPanel({ entityType, entityId }) {
                   disabled={deletingId === attachment.id}
                   className="text-xs font-medium text-red-700 hover:text-red-900 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {deletingId === attachment.id ? "Removing..." : "Remove"}
+                  {deletingId === attachment.id ? "Deleting..." : "Delete"}
                 </button>
               </div>
             </li>

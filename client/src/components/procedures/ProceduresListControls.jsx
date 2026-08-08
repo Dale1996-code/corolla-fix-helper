@@ -1,3 +1,5 @@
+import { formatResultRange } from "../../lib/resultRange";
+
 export function ProceduresListControls({
   searchValue,
   onSearchChange,
@@ -87,10 +89,20 @@ export function ProceduresListControls({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+        {/* The whole filtered list is on screen (procedures do not page), so
+            the range runs first row to last. The library total lives in the
+            banner above this card, so it is not restated here. */}
         <p className="text-sm text-slate-600">
-          Showing <span className="font-semibold text-slate-900">{visibleCount}</span> of{" "}
-          <span className="font-semibold text-slate-900">{totalCount}</span> procedure
-          {totalCount === 1 ? "" : "s"}.
+          {formatResultRange({
+            from: 1,
+            to: visibleCount,
+            total: visibleCount,
+            noun: "procedure",
+            nounPlural: "procedures",
+            emptyText: totalCount
+              ? "No procedures match these filters."
+              : "No procedures yet.",
+          })}
         </p>
 
         {hasActiveFilters ? (

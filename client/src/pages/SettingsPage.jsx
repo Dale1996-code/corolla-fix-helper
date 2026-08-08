@@ -608,8 +608,8 @@ export function SettingsPage() {
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-semibold text-slate-900">Document defaults</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Save the common labels you want ready when importing PDFs. These stay on
-                this computer only and show up as suggestions in the Documents page.
+                Save the common labels you want ready when uploading PDFs. These stay on this
+                computer only and show up as suggestions on the Documents page.
               </p>
 
               <form className="mt-5 grid gap-4" onSubmit={handleDocumentDefaultsSave}>
@@ -645,7 +645,7 @@ export function SettingsPage() {
                     {defaultsSaving ? "Saving..." : "Save document defaults"}
                   </button>
                   <p className="text-xs text-slate-500">
-                    These lists are stored in the local app database only.
+                    These lists are saved on this computer only.
                   </p>
                 </div>
               </form>

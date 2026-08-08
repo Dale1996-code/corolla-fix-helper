@@ -26,6 +26,8 @@ export const documentsListTable = {
 
 export function DocumentsList({
   documents,
+  totalDocuments = 0,
+  hasActiveFilters = false,
   selectedDocumentId,
   onSelectDocument,
   onToggleFavorite,
@@ -48,9 +50,26 @@ export function DocumentsList({
             <span>Updated</span>
           </div>
 
+          {/* An empty library and a filter that hides everything are different
+              problems, so they get different next steps. The upload panel this
+              points at sits directly above the list on the Documents page. */}
           {documents.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-600">
-              No documents match these filters.
+            <div className="px-4 py-8 text-sm text-slate-600">
+              {totalDocuments === 0 ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">No documents yet.</p>
+                  <p>Upload your first PDF above to start your library.</p>
+                </div>
+              ) : hasActiveFilters ? (
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-900">
+                    No documents match these filters.
+                  </p>
+                  <p>Change the filters above to see more of your library.</p>
+                </div>
+              ) : (
+                <p>No documents are available right now.</p>
+              )}
             </div>
           ) : null}
 

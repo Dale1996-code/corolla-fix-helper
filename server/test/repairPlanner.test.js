@@ -449,6 +449,54 @@ test("runRepairPlannerAgent emits tool events and a server-rendered plan", async
   assert.equal(events.at(-1).type, "done");
 });
 
+// The tool_result summaries stream straight into the Repair Planner's activity
+// log, so they are user-facing copy: real plurals rather than "task(s)", and a
+// readiness label rather than the raw `almost_ready` enum.
+test("runRepairPlannerAgent summarizes tool results in owner-readable copy", async () => {
+  const events = [];
+
+  await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads.", skillLevel: "intermediate" },
+    {
+      emit: (event) => events.push(event),
+      streamTurn: createMockStreamTurn(),
+      retrieve: mockRetrieve,
+      isAiConfigured: true,
+    }
+  );
+
+  const summaries = events
+    .filter((event) => event.type === "tool_result")
+    .map((event) => event.summary);
+
+  assert.ok(summaries.length >= 1, "expected at least one tool_result event");
+
+  for (const summary of summaries) {
+    assert.doesNotMatch(summary, /\(s\)/, `"(s)" plural reached the activity log: ${summary}`);
+    assert.doesNotMatch(
+      summary,
+      /almost_ready|not_ready|\bchunk\b/,
+      `internal vocabulary reached the activity log: ${summary}`
+    );
+  }
+
+  const taskSummary = summaries.find((summary) => summary.startsWith("Found "));
+
+  if (taskSummary) {
+    assert.match(taskSummary, /^Found \d+ tasks?\.$/);
+    // One task is "1 task", not "1 tasks".
+    if (taskSummary.startsWith("Found 1 ")) {
+      assert.equal(taskSummary, "Found 1 task.");
+    }
+  }
+
+  const readinessSummary = summaries.find((summary) => summary.startsWith("Readiness "));
+
+  if (readinessSummary) {
+    assert.match(readinessSummary, /^Readiness \d+\/100 \((Ready|Almost ready|Not ready)\)\.$/);
+  }
+});
+
 test("runRepairPlannerAgent returns a tool error result when one tool throws", async () => {
   const events = [];
   let sawToolErrorOutput = false;

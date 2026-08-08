@@ -39,10 +39,14 @@ function formatVehicleProfile(vehicle) {
     .join(" ");
 }
 
+// Each label uses the same verb as the control it lands on: the Documents page
+// heads its panel "Upload PDF", and the three entity pages head theirs "Create
+// symptom/procedure/note". "Add Symptom" pointing at a form headed "Create
+// symptom" was the kind of drift this list exists to prevent.
 const quickActions = [
   {
     label: "Upload document",
-    description: "Import one PDF into your local document library.",
+    description: "Upload one PDF to your document library.",
     to: "/documents#document-upload",
   },
   {
@@ -59,17 +63,17 @@ const quickActions = [
     to: "/search",
   },
   {
-    label: "Add Symptom",
+    label: "Create symptom",
     description: "Log what the car is doing right now.",
     to: "/symptoms#create-symptom",
   },
   {
-    label: "Add Procedure",
-    description: "Save a repair process or checklist.",
+    label: "Create procedure",
+    description: "Save a repair procedure with its tools, parts, and steps.",
     to: "/procedures#create-procedure",
   },
   {
-    label: "Add Note",
+    label: "Create note",
     description: "Write down a quick observation or reminder.",
     to: "/notes#create-note",
   },
@@ -178,7 +182,9 @@ function DashboardItem({
 
 function FavoriteDocumentsSection({ documents }) {
   if (!documents.length) {
-    return <EmptyState message="No favorite documents yet." />;
+    return (
+      <EmptyState message="No favorite documents yet. Mark a document as a favorite to see it here." />
+    );
   }
 
   return (
@@ -210,7 +216,9 @@ function FavoriteDocumentsSection({ documents }) {
 
 function RecentDocumentsSection({ documents }) {
   if (!documents.length) {
-    return <EmptyState message="No documents yet." />;
+    return (
+      <EmptyState message="No documents yet. Use Upload document in Quick actions above." />
+    );
   }
 
   return (
@@ -279,7 +287,9 @@ function RecentEntitySection({
 
 function ActiveSymptomsSection({ items }) {
   if (!items.length) {
-    return <EmptyState message="No active symptoms." />;
+    return (
+      <EmptyState message="No active symptoms. Symptoms that are open or being monitored show up here." />
+    );
   }
 
   return (
@@ -417,7 +427,7 @@ export function DashboardPage() {
               <SummaryCard
                 label="Documents"
                 value={dashboardData.summary.totalDocuments}
-                helperText="My Library"
+                helperText="PDFs saved in your library."
               />
               <SummaryCard
                 label="Favorites"
@@ -432,7 +442,7 @@ export function DashboardPage() {
               <SummaryCard
                 label="Procedures"
                 value={dashboardData.summary.totalProcedures}
-                helperText="Saved repair procedures and checklists."
+                helperText="Saved repair procedures for this Corolla."
               />
               <SummaryCard
                 label="Notes"
@@ -488,7 +498,7 @@ export function DashboardPage() {
                 <RecentEntitySection
                   items={dashboardData.recentSymptoms}
                   entityType="symptom"
-                  emptyMessage="No symptoms yet."
+                  emptyMessage="No symptoms yet. Use Create symptom in Quick actions above."
                   buildMeta={(symptom) =>
                     `${symptom.system || "No system"} - ${labelize(symptom.status)}`
                   }
@@ -508,7 +518,7 @@ export function DashboardPage() {
                 <RecentEntitySection
                   items={dashboardData.recentProcedures}
                   entityType="procedure"
-                  emptyMessage="No procedures yet."
+                  emptyMessage="No procedures yet. Use Create procedure in Quick actions above."
                   buildMeta={(procedure) =>
                     `${procedure.system || "No system"} - ${labelize(procedure.difficulty)} difficulty`
                   }
@@ -528,7 +538,7 @@ export function DashboardPage() {
                 <RecentEntitySection
                   items={dashboardData.recentNotes}
                   entityType="note"
-                  emptyMessage="No notes yet."
+                  emptyMessage="No notes yet. Use Create note in Quick actions above."
                   buildMeta={(note) => getNoteMeta(note)}
                 />
               </SectionCard>

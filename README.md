@@ -12,7 +12,7 @@ Storage is local, but the AI features are not offline: when `OPENAI_API_KEY` is 
 
 ## Main Features
 
-- **Documents** — upload PDFs, edit metadata, tag, favorite, bookmark, open the stored file, re-run text extraction, and delete with full cleanup
+- **Documents** — upload PDFs, edit details, tag, favorite, bookmark, open the saved file, re-run text extraction, and delete with full cleanup
 - **Bulk import** — resumable folder import for many PDFs with MD5 duplicate detection and an image-only report (`npm run import`)
 - **OCR (optional)** — scanned or image-only PDF pages become searchable text when local Tesseract and Poppler are installed
 - **Ask AI** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, OpenAI-generated answers with citations, and a deliberate `not in documents` refusal when your PDFs don't contain the answer. Can optionally include one saved photo (Vision Ask). Sidebar **Ask AI**, route `/search`; the panel on that page is headed "Ask a question".

@@ -91,7 +91,7 @@ export async function uploadAttachment({
   const payload = await requestJson("/api/attachments", {
     method: "POST",
     body: formData,
-    errorMessage: "Could not upload the image.",
+    errorMessage: "Could not upload the photo.",
   });
 
   return payload.attachment;

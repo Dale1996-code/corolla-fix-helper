@@ -12,6 +12,7 @@ import {
 } from "../components/forms/FormFields";
 import { setProcedureSymptoms } from "../lib/apiClient";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { formatLibraryTotal } from "../lib/resultRange";
 import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
@@ -96,7 +97,7 @@ function LinkedDocumentsSelector({
 
       {documents.length === 0 ? (
         <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          No documents available yet. Upload a PDF in the Documents tab first.
+          No documents available yet. Upload a PDF on the Documents page first.
         </p>
       ) : (
         <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -413,7 +414,7 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
 
         {symptoms.length === 0 ? (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            No symptoms available yet. Create one in the Symptoms tab first.
+            No symptoms available yet. Create one on the Symptoms page first.
           </p>
         ) : (
           <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1128,8 +1129,11 @@ export function ProceduresPage() {
           {!loading && !loadError ? (
             <>
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                You have <span className="font-semibold text-slate-900">{procedures.length}</span>{" "}
-                procedure{procedures.length === 1 ? "" : "s"} saved.
+                {formatLibraryTotal({
+                  total: procedures.length,
+                  noun: "procedure",
+                  nounPlural: "procedures",
+                })}
               </section>
 
               <ProceduresListControls

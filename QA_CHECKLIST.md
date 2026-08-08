@@ -41,12 +41,12 @@ Check:
 
 1. Open Documents.
 2. Upload a fake or sample PDF.
-3. Fill in the required metadata.
+3. Fill in the required details.
 4. Open the uploaded PDF from the detail panel.
 5. Click **Re-run extraction**.
 6. Mark the document as a favorite.
 7. Click **Bookmark** to flag the document.
-8. Edit document metadata and add a few comma separated tags.
+8. Use **Edit details** and add a few comma separated tags.
 9. Filter the list by Bookmark and by Tag.
 
 Check:
@@ -56,7 +56,7 @@ Check:
 - Extraction status and page count are shown.
 - The PDF opens from the app.
 - Re-run extraction finishes with a clear success or error message and refreshes searchable chunks.
-- Favorites, bookmarks, tags, and metadata changes persist after refresh.
+- Favorites, bookmarks, tags, and detail changes persist after refresh.
 - Bookmark and Tag filters narrow the list as expected, and tag chips show on the cards.
 
 ## 4. Document Delete Cleanup
@@ -179,7 +179,7 @@ Use a test checklist, not an important repair record.
 5. Create or update a second checklist, then confirm the checklist with the
    newest activity appears first in the list. An item write should update the
    parent checklist's activity time too.
-6. Use the browser Network panel while saving. Each successful create, metadata
+6. Use the browser Network panel while saving. Each successful create, detail
    edit, item add/edit/check/move/delete, or status change should update the
    visible checklist from the returned whole-checklist payload without an
    unnecessary second `GET /api/repair-checklists` request.
@@ -192,7 +192,7 @@ Check:
   page opens at `/repair-checklists`.
 - Loading, empty, success, and failure messages are clear and do not leave stale
   data or banners on another selected checklist.
-- Creating and editing metadata persists title, description, notes, and status.
+- Creating and editing details persists title, description, notes, and status.
 - Items remain in their saved order, and Up/Down changes that order.
 - Check and uncheck updates the item and the done count.
 - Successful writes apply the server-returned full checklist in place; the UI
@@ -264,7 +264,39 @@ Check:
 - `npm run backup:drill` still passes and reports that the attachment image came
   back intact.
 
-## 13. Build And Tests
+## 13. Copy Consistency
+
+A visual pass over the words themselves, not the behaviour. Walk Documents, Ask
+AI, Symptoms, Procedures, Notes, Repair Checklists, Repair Planner, and
+Settings.
+
+Check:
+
+- Every visible range counter reads `Showing 1–25 of 1,443 documents.` — en dash,
+  thousands separators, and a noun that agrees with the total (`Showing 1–1 of 1
+  document.`). No screen still says "Showing 25 of 143 matching", "Found 40
+  document results", or "Showing all 3 symptoms".
+- The last page stops at the total: with 33 records and a page size of 25, page 2
+  reads `Showing 26–33 of 33 documents.`, never `26–50`.
+- An empty result set never renders a range. It reads as a sentence
+  ("No documents match these filters."), not "Showing 1–0 of 0".
+- Lists that are always shown whole (Repair Checklists, the Procedures banner)
+  use the total form: `12 checklists in your library.`
+- The Documents detail panel offers **Edit details** / **Save details** and
+  confirms with "Details saved." Nothing says "metadata" except the genuinely
+  technical **Stored filename** row.
+- Adding a PDF says **Upload** throughout (panel heading and submit button);
+  only the file picker says **Choose PDF**, because picking a file is a
+  different action.
+- Every empty state names a next step, and that control really exists on the
+  screen it points at ("Upload your first PDF above" with the upload panel open
+  above it; "use Clear filters" with that button in the filter bar).
+- No screen shows a raw stored value: extraction status reads "Not attempted",
+  planner difficulty reads "Intermediate", and the planner's activity log reads
+  "Found 1 task." and "Readiness 80/100 (Almost ready)."
+- Labels still fit their controls at phone width, with no new wrapping.
+
+## 14. Build And Tests
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper
@@ -282,7 +314,7 @@ Check:
 - Backend tests pass.
 - Frontend tests pass.
 
-## 14. Bulk Import Smoke Test
+## 15. Bulk Import Smoke Test
 
 Use a small folder with fake or safe PDFs first.
 
@@ -299,7 +331,7 @@ Check:
 - Text PDFs and OCR-readable scanned PDFs create searchable chunks for Ask Your Documents.
 - If OCR tools are missing, scanned PDFs show a clear `ocr_unavailable:` extraction status instead of breaking text-PDF imports.
 
-## 15. Local Production Smoke Test
+## 16. Local Production Smoke Test
 
 ```powershell
 cd C:\Users\daleb\source\corolla-fix-helper

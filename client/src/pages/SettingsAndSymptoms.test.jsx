@@ -321,8 +321,14 @@ test("SymptomsPage supports search, filters, sorting, and empty filtered states"
     },
   });
 
+  // The counter in the filter bar and the list's own empty state both report
+  // the zero result, so this asserts the pair rather than a single node.
   expect(
-    await screen.findByText("No symptoms match the current filters.")
+    await screen.findAllByText("No symptoms match these filters.")
+  ).toHaveLength(2);
+  // The empty state names a control that really exists in the filter bar.
+  expect(
+    screen.getByText("Change the filters or use Clear filters to see your saved symptoms.")
   ).toBeInTheDocument();
   expect(screen.getByText("Select a symptom to view details.")).toBeInTheDocument();
 });
@@ -420,7 +426,7 @@ test("SymptomsPage helps narrow to active and high-confidence symptoms, then cle
   expect(
     await screen.findByRole("heading", { name: "Brake squeal during cold start" })
   ).toBeInTheDocument();
-  expect(screen.getByText("Showing all 3 symptoms")).toBeInTheDocument();
+  expect(screen.getByText("Showing 1–3 of 3 symptoms.")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Status filter"), {
     target: {
@@ -434,7 +440,7 @@ test("SymptomsPage helps narrow to active and high-confidence symptoms, then cle
       "Engine hesitation under load",
     ]);
   });
-  expect(screen.getByText("Showing 2 of 3 symptoms")).toBeInTheDocument();
+  expect(screen.getByText("Showing 1–2 of 2 symptoms.")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Confidence filter"), {
     target: {
@@ -445,7 +451,8 @@ test("SymptomsPage helps narrow to active and high-confidence symptoms, then cle
   await waitFor(() => {
     expect(getRowTitles()).toEqual(["Engine hesitation under load"]);
   });
-  expect(screen.getByText("Showing 1 of 3 symptoms")).toBeInTheDocument();
+  // A single match keeps singular grammar rather than "1 symptoms".
+  expect(screen.getByText("Showing 1–1 of 1 symptom.")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
@@ -456,5 +463,5 @@ test("SymptomsPage helps narrow to active and high-confidence symptoms, then cle
       "Cabin rattle near glove box",
     ]);
   });
-  expect(screen.getByText("Showing all 3 symptoms")).toBeInTheDocument();
+  expect(screen.getByText("Showing 1–3 of 3 symptoms.")).toBeInTheDocument();
 });
