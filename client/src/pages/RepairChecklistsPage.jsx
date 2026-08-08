@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
+import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
@@ -113,8 +114,12 @@ function ChecklistCreateForm({ form, creating, createMessage, createError, onCha
 }
 
 function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
+  // Checklist titles are long and were the most cramped column on the page at
+  // 11rem; Status (60px), Progress (an 82px header over "3/8"), and Updated
+  // (a 102px date) funded the increase.
+  // Tracks 224+96+96+120 = 536px, +3x12px gap +32px padding = 604px.
   const listGridClass =
-    "grid grid-cols-[minmax(11rem,2.4fr)_minmax(7rem,1fr)_minmax(6rem,0.9fr)_minmax(8rem,1fr)] gap-3";
+    "grid grid-cols-[minmax(14rem,2.4fr)_minmax(6rem,1fr)_minmax(6rem,0.9fr)_minmax(7.5rem,1fr)] gap-3";
 
   return (
     <section
@@ -122,7 +127,7 @@ function ChecklistList({ checklists, selectedChecklistId, onSelectChecklist }) {
       className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
     >
       <div className="overflow-x-auto">
-        <div className="min-w-[620px]">
+        <div className="min-w-[38rem]">
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >
@@ -1009,7 +1014,7 @@ export function RepairChecklistsPage() {
                 checklist{checklists.length === 1 ? "" : "s"}.
               </section>
 
-              <div className="grid gap-6 xl:grid-cols-2">
+              <ListDetailLayout>
                 <ChecklistList
                   checklists={checklists}
                   selectedChecklistId={selectedChecklistId}
@@ -1029,7 +1034,7 @@ export function RepairChecklistsPage() {
                   onSaveEdit={handleSaveChecklist}
                   onDelete={handleDeleteChecklist}
                 />
-              </div>
+              </ListDetailLayout>
             </>
           ) : null}
         </div>

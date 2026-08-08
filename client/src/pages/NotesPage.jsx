@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
+import { ListDetailLayout } from "../components/ListDetailLayout";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
@@ -385,13 +386,16 @@ function NotesListControls({
 }
 
 function NotesList({ notes, selectedNoteId, onSelectNote }) {
+  // Title grew and the three trailing columns shrank to what they measure:
+  // a note type is 71px, a linked-item label 103px, a formatted date 102px.
+  // Tracks 224+96+136+120 = 576px, +3x12px gap +32px padding = 644px.
   const listGridClass =
-    "grid grid-cols-[minmax(13rem,2.5fr)_minmax(7rem,1fr)_minmax(10rem,1.4fr)_minmax(9rem,1fr)] gap-3";
+    "grid grid-cols-[minmax(14rem,2.5fr)_minmax(6rem,1fr)_minmax(8.5rem,1.4fr)_minmax(7.5rem,1fr)] gap-3";
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[680px]">
+        <div className="min-w-[41rem]">
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >
@@ -1192,7 +1196,7 @@ export function NotesPage() {
                 note{notes.length === 1 ? "" : "s"}.
               </section>
 
-              <div className="grid gap-6 xl:grid-cols-2">
+              <ListDetailLayout>
                 <NotesList
                   notes={filteredNotes}
                   selectedNoteId={selectedNoteId}
@@ -1216,7 +1220,7 @@ export function NotesPage() {
               onSaveEdit={handleSaveNote}
               onDelete={handleDeleteNote}
             />
-              </div>
+              </ListDetailLayout>
             </>
           ) : null}
         </div>

@@ -9,13 +9,19 @@ export function SymptomsList({
   selectedSymptomId,
   onSelectSymptom,
 }) {
+  // Sized against measured content, not guessed: "Linked docs" grew from 6rem
+  // because its own 108px header label did not fit the 96px it reserved, while
+  // System (73px), Status (a ~90px badge), and Updated (a 102px date) all gave
+  // width back. See DocumentsList for why the minimums, not the wrapper's
+  // min-w, decide this table's width.
+  // Tracks 240+96+104+112+112+120 = 784px, +5x12px gap +32px padding = 876px.
   const listGridClass =
-    "grid grid-cols-[minmax(16rem,2.8fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(6rem,0.8fr)_minmax(9rem,1fr)] gap-3";
+    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(6rem,1fr)_minmax(6.5rem,1fr)_minmax(7rem,1fr)_minmax(7rem,0.8fr)_minmax(7.5rem,1fr)] gap-3";
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[880px]">
+        <div className="min-w-[55rem]">
           <div
             className={`${listGridClass} border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600`}
           >

@@ -9,13 +9,23 @@ export function DocumentsList({
   onToggleFavorite,
   favoriteUpdateState,
 }) {
+  // Column minimums are what actually set this table's width -- the wrapper's
+  // min-w below only has to match them so row backgrounds and borders paint
+  // across the full scroll width. They are sized against measured content:
+  // System needs 73px, the Favorite button 77px, an extraction badge ~110px,
+  // and a formatted date 102px, against the 128/116/144/152px they used to
+  // reserve. Reclaiming that padding is what lets the whole table fit beside a
+  // detail panel instead of hiding three columns inside the scroller.
+  // Title keeps the largest minimum: it stacks the title, the original
+  // filename, and the tag chips.
+  // Tracks 240+96+136+88+120+120 = 800px, +5x12px gap +32px padding = 892px.
   const listGridClass =
-    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(8rem,1.1fr)_minmax(9rem,1.2fr)_minmax(7.25rem,0.9fr)_minmax(9rem,1.1fr)_minmax(9.5rem,1.1fr)] gap-3";
+    "grid grid-cols-[minmax(15rem,2.8fr)_minmax(6rem,1.1fr)_minmax(8.5rem,1.2fr)_minmax(5.5rem,0.9fr)_minmax(7.5rem,1.1fr)_minmax(7.5rem,1.1fr)] gap-3";
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <div className="min-w-[820px]">
+        <div className="min-w-[56rem]">
           <div
             className={`${listGridClass} border-b border-slate-800 bg-slate-950 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-200`}
           >
@@ -103,9 +113,18 @@ export function DocumentsList({
                     <p className="mt-1 text-xs text-red-700">Failed</p>
                   ) : null}
                 </div>
-                <div>
+                <div className="min-w-0">
+                  {/* normalizeExtractionStatus falls through to the raw status
+                      string for anything it does not recognise, and those can be
+                      a full sentence ("completed_with_warning: ocr_unavailable:
+                      OCR needs Tesseract and Poppler..."). Left to wrap, one such
+                      row measured 932px of content in a 144px column and grew
+                      several lines tall, wrecking the density of every other row.
+                      Truncating keeps rows scannable; the untruncated status
+                      stays on the row's `title` and in the detail panel. */}
                   <span
-                    className={`rounded-full px-2 py-1 text-xs font-semibold ${extraction.className}`}
+                    title={extraction.label}
+                    className={`block max-w-full truncate rounded-full px-2 py-1 text-xs font-semibold ${extraction.className}`}
                   >
                     {extraction.label}
                   </span>
