@@ -22,6 +22,7 @@ const { createRepairPlanRouter, PLAN_RUN_EXPIRED_MESSAGE } = await import(
 );
 const { createPlanRunStore } = await import("../src/services/agent/planRunStore.js");
 const { runRepairPlannerAgent } = await import("../src/services/agent/repairPlannerAgent.js");
+const { checkRepairReadiness } = await import("../src/services/agent/repairTools.js");
 
 after(() => {
   if (typeof db.close === "function") {
@@ -398,6 +399,56 @@ test("a stored run cannot be mutated through the record the store hands back", (
 
   assert.equal(planRuns.get(runId).skillLevel, "beginner");
   assert.equal(planRuns.get(runId).tasks[0].system, "Brakes");
+});
+
+test("later mutation of the caller's requirements cannot change a saved run", () => {
+  const planRuns = createPlanRunStore();
+  const requirements = structuredClone(SATISFIED_REQUIREMENTS);
+  const runId = planRuns.save({ tasks: [BRAKE_TASK], skillLevel: "beginner", requirements });
+
+  // The same object the run was scored with is also emitted as a run artifact,
+  // so a later edit to it must not reach the stored copy.
+  requirements.tools.status = "unmet";
+  requirements.tools.missing.push("floor jack");
+
+  const stored = planRuns.get(runId).requirements;
+
+  assert.equal(stored.tools.status, "satisfied");
+  assert.deepEqual(stored.tools.missing, []);
+  assert.throws(() => {
+    stored.tools.missing.push("floor jack");
+  }, TypeError);
+});
+
+test("a task's safety flags cannot be emptied through the caller's copy or the stored record", () => {
+  const planRuns = createPlanRunStore();
+  const task = structuredClone(BRAKE_TASK);
+  const runId = planRuns.save({
+    tasks: [task],
+    skillLevel: "beginner",
+    requirements: SATISFIED_REQUIREMENTS,
+  });
+
+  // `resolveTaskSafety` reads these flags when readiness is recomputed: an empty
+  // array is one of the two inputs that make a task non-critical.
+  task.safetyFlags.length = 0;
+
+  const stored = planRuns.get(runId).tasks[0];
+
+  assert.deepEqual(stored.safetyFlags, ["Brake work affects stopping safety."]);
+  assert.throws(() => {
+    stored.safetyFlags.length = 0;
+  }, TypeError);
+
+  // The rubric row it guards still cannot be earned without an acknowledgment.
+  const readiness = checkRepairReadiness({
+    tasks: planRuns.get(runId).tasks,
+    skillLevel: "beginner",
+    ackSafety: false,
+    requirements: planRuns.get(runId).requirements,
+  });
+
+  assert.equal(readiness.safetyCritical, true);
 });
 
 // --- The model still cannot acknowledge for the owner -------------------------
