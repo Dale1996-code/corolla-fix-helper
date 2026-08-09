@@ -68,6 +68,36 @@ export const MAX_ID_ATTEMPTS = 5;
  * }} ChecklistDraftRecord
  */
 
+/**
+ * Detaches server-owned JSON-like data from its caller and freezes it all the
+ * way down.
+ *
+ * Both halves matter, and a shallow freeze delivers neither. The clone breaks
+ * every reference the caller still holds -- the same `requirements` object and
+ * the same task list are also emitted as run artifacts, so without it a later
+ * edit to either would silently change what a re-score reads back. The
+ * recursion covers the nested groups and arrays a shallow freeze leaves
+ * writable: `requirements.tools.missing` and a task's `safetyFlags` are both
+ * read when readiness is recomputed, and emptying a task's `safetyFlags` array
+ * is enough to turn safety-critical work non-critical.
+ *
+ * Throws on anything `structuredClone` cannot copy. Everything stored here is
+ * plain JSON, so that is a loud failure for a real mistake, not a live path.
+ */
+function cloneAndDeepFreeze(value) {
+  function deepFreeze(current) {
+    if (current === null || typeof current !== "object" || Object.isFrozen(current)) {
+      return current;
+    }
+
+    Object.freeze(current);
+    Object.values(current).forEach(deepFreeze);
+    return current;
+  }
+
+  return deepFreeze(structuredClone(value));
+}
+
 /** Deep-freezes a draft so no later caller can edit what will be written to SQLite. */
 function freezeDraft(draft) {
   const items = Object.freeze(
@@ -137,8 +167,10 @@ export function createPlanRunStore({
   return {
     /**
      * Stores the server-owned readiness inputs for a completed run and returns
-     * its id. The record is frozen so a later caller cannot mutate the tasks the
-     * safety classifier will be re-run against.
+     * its id. Both readiness inputs are cloned and deep-frozen, so neither the
+     * caller's copy nor the record handed back by `get` can change the tasks the
+     * safety classifier will be re-run against or the requirement groups the
+     * rubric will be re-scored from.
      */
     save({ tasks = [], skillLevel = "beginner", requirements = null, evidenceStatus = null } = {}) {
       evictExpired();
@@ -150,9 +182,9 @@ export function createPlanRunStore({
         runId,
         Object.freeze({
           runId,
-          tasks: Object.freeze(tasks.map((task) => Object.freeze({ ...task }))),
+          tasks: cloneAndDeepFreeze(tasks),
           skillLevel,
-          requirements,
+          requirements: cloneAndDeepFreeze(requirements),
           evidenceStatus,
           createdAt: now(),
         })
