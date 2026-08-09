@@ -386,3 +386,160 @@ test("the route response shape stays an explicit allowlist", async () => {
     ["answer", "citations", "question", "retrievedContext", "standaloneQuestion", "status"]
   );
 });
+
+// ---- Rejection telemetry over HTTP (issue #107) ----
+
+/** A sanitized rejection entry as buildRejectedMetrics produces it. */
+function rejectionMetrics() {
+  return {
+    retrievalMs: 5,
+    answerMs: 10,
+    totalMs: 20,
+    chunkCount: 2,
+    rejectedCount: 1,
+    rejected: [
+      {
+        channel: "documentSupported",
+        itemIndex: 0,
+        reason: "numeric_anomaly",
+        sourceId: "S1",
+        unsupportedSpecCount: 1,
+      },
+    ],
+  };
+}
+
+test("POST /api/ask exposes rejection reasons only behind the debug flag", async () => {
+  const app = makeApp({
+    includeMetrics: true,
+    askQuestion: async (question) => ({
+      status: "not_found",
+      answer: "not in documents",
+      standaloneQuestion: question,
+      citations: [],
+      metrics: rejectionMetrics(),
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.metrics.rejectedCount, 1);
+  assert.deepEqual(response.body.metrics.rejected, [
+    {
+      channel: "documentSupported",
+      itemIndex: 0,
+      reason: "numeric_anomaly",
+      sourceId: "S1",
+      unsupportedSpecCount: 1,
+    },
+  ]);
+});
+
+test("POST /api/ask sends no rejection reasons when the debug flag is off", async () => {
+  // The default production shape must be byte-identical to what it was before
+  // this channel existed.
+  const app = makeApp({
+    askQuestion: async (question) => ({
+      status: "not_found",
+      answer: "not in documents",
+      standaloneQuestion: question,
+      citations: [],
+      metrics: rejectionMetrics(),
+    }),
+  });
+
+  const response = await request(app)
+    .post("/api/ask")
+    .send({ question: "What is the oil drain plug torque?" });
+
+  assert.equal(response.status, 200);
+  assert.ok(!("metrics" in response.body));
+  assert.ok(!JSON.stringify(response.body).includes("numeric_anomaly"));
+  assert.deepEqual(Object.keys(response.body).sort(), [
+    "answer",
+    "citations",
+    "question",
+    "standaloneQuestion",
+    "status",
+  ]);
+});
+
+test("a payload that violates the response contract is still answered, and logged", async () => {
+  // The tripwire is deliberately NOT a gate. A shape bug in this server must not
+  // become an outage for a user who asked a perfectly good question, so the
+  // answer goes out and the mismatch is recorded instead.
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+
+  try {
+    const app = makeApp({
+      includeMetrics: true,
+      askQuestion: async (question) => ({
+        status: "not_found",
+        answer: "not in documents",
+        standaloneQuestion: question,
+        citations: [],
+        // A reason the contract does not declare, plus a field that was never
+        // reviewed for safety. Both must be reported.
+        metrics: {
+          rejected: [
+            {
+              channel: "documentSupported",
+              itemIndex: 0,
+              reason: "brand_new_reason",
+              sourceId: "S1",
+              unsupportedSpecCount: 0,
+              claim: "Torque the oil drain plug to 54 Nm.",
+            },
+          ],
+        },
+      }),
+    });
+
+    const response = await request(app)
+      .post("/api/ask")
+      .send({ question: "What is the oil drain plug torque?" });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.answer, "not in documents");
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /metrics\.rejected\[0\]\.reason: unknown_reason/);
+    assert.match(warnings[0], /metrics\.rejected\[0\]\.claim: unexpected_field/);
+
+    // The log names the offending FIELD, never its value. Logging the value
+    // would put the unverified specification into the log the moment the
+    // sanitizer failed to keep it out of the response.
+    assert.ok(!warnings[0].includes("54 Nm"), "the log leaked the rejected value");
+  } finally {
+    console.warn = realWarn;
+  }
+});
+
+test("a well-formed response logs nothing", async () => {
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+
+  try {
+    const app = makeApp({
+      includeMetrics: true,
+      askQuestion: async (question) => ({
+        status: "not_found",
+        answer: "not in documents",
+        standaloneQuestion: question,
+        citations: [],
+        metrics: rejectionMetrics(),
+      }),
+    });
+
+    await request(app).post("/api/ask").send({ question: "torque?" });
+
+    assert.deepEqual(warnings, []);
+  } finally {
+    console.warn = realWarn;
+  }
+});

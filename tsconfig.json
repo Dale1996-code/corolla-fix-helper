@@ -24,6 +24,8 @@
   "files": [
     "server/test/aiAnswerService.test.js",
     "server/test/ask.test.js",
+    "server/test/askResponseContract.test.js",
+    "server/test/answerRejectionProbes.test.js",
     "server/test/chunkRerankService.test.js",
     "server/test/chunkRerankRetrieval.test.js",
     "server/test/answerQualityCases.test.js",

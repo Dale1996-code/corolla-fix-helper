@@ -14,9 +14,16 @@
 // FIELDS
 //   id               short unique name
 //   question         what to ask
-//   category         "torque" | "capacity" | "procedure" | "refusal" | "behavior"
+//   category         "torque" | "capacity" | "procedure" | "refusal" | "verifier" | "behavior"
 //   system           vehicle system label (Engine, Brakes, ...) for coverage (optional)
-//   expect           "answered" or "refused"
+//   expect           "answered", "refused", or "rejected"
+//
+// REFUSED VS REJECTED — these are different failures and must not be conflated:
+//   refused   the application honestly found no support in the documents. The
+//             not-found gate fired; no claim was ever proposed.
+//   rejected  a claim WAS proposed with evidence, and the server verifier tore
+//             it out. Same visible status, completely different cause. Telling
+//             them apart in production is what metrics.rejected exists for.
 //   mustIncludeAny   answer must contain at least ONE of these (string = contains, /regex/ = matches)
 //   mustIncludeAll   answer must contain ALL of these (optional)
 //   citationDocLike  answer must cite a document whose title/filename matches this (optional)
@@ -24,6 +31,11 @@
 //                    cited chunk text actually backs the asserted spec, not just the prose (optional)
 //   mustCite         require at least one citation (default true for answered cases)
 //   image            a data: URI sent with the question to exercise Vision Ask (optional)
+//   rejectionProbe   name of a probe in answerRejectionProbes.js that replaces the
+//                    model reply with one crafted to fail a specific check (optional)
+//   expectedStatus   required with expect: "rejected" — the status the server must derive
+//   requiredRejectedReasons  reasons that must appear in metrics.rejected (optional)
+//   mustNotIncludeAny  patterns that must appear NOWHERE in the response (optional)
 //   followUp         a second question in the same conversation (tests multi-turn memory).
 //                    standaloneIncludes checks the rewritten follow-up query.
 //
@@ -31,6 +43,10 @@
 //   1. Ask the question in the app. 2. Confirm the number against the cited PDF page.
 //   3. Copy the question here, set mustIncludeAny to the exact value (e.g. /37\s*N/i),
 //      set citationDocLike to part of the source name, set verified: true.
+
+import {
+  REJECTION_PROBE_SENTINEL_PATTERN,
+} from "./answerRejectionProbes.js";
 
 export const answerQualityCases = [
   // ---- VERIFIED: confirmed against the real documents ----
@@ -333,6 +349,46 @@ export const answerQualityCases = [
     mustIncludeAny: [/\b37\s*N/i, /\b27\s*ft/i],
     citationDocLike: /oil/i,
     citationSupportsAny: [/\b37\s*N/i, /\b27\s*ft/i, /\b377\s*kgf/i],
+    verified: true,
+  },
+
+  // ---- VERIFIED: verifier rejection paths (issue #107) ----
+  //
+  // These are verified:true even though every other verified case had to be
+  // confirmed against the corpus, and the reason is worth stating: they assert
+  // nothing about what the manuals contain. The model reply is supplied by a
+  // probe, so the expected outcome follows from the verifier's own rules rather
+  // than from a fact that a re-import could invalidate. Their only corpus
+  // dependency is that "What is the oil drain plug torque?" retrieves at least
+  // one citable chunk — already required by oil-drain-plug-torque above.
+  //
+  // What they gate: if a refactor ever lets a rejected claim reach the owner as
+  // `answered`, or lets a rejected specification value survive into the rendered
+  // response, these fail. That was previously untested at the eval layer.
+  {
+    id: "reject-invented-drain-plug-torque",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["numeric_anomaly"],
+    rejectionProbe: "numeric_anomaly",
+    // The probe cites a real source and quotes it verbatim, then asserts an
+    // impossible figure. Nothing in the response may carry that figure — not the
+    // answer, not a gap, not a citation snippet.
+    mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
+    verified: true,
+  },
+  {
+    id: "reject-unknown-source-label",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["unknown_source"],
+    rejectionProbe: "unknown_source",
     verified: true,
   },
 

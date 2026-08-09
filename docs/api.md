@@ -370,6 +370,24 @@ truncated, filtered, cancelled, still generating, refused, or malformed — the
 request fails with a `500` and a short safe `error` string rather than returning
 a partial answer. Provider error text is never forwarded to the client.
 
+#### Machine-readable response contract
+
+`server/src/services/askResponseContract.js` describes this success payload:
+`ASK_RESPONSE_STATUSES`, `ASK_REJECTION_REASONS`, `ASK_RESPONSE_SCHEMA`, and
+`validateAskResponse(payload)`. The route validates every successful response
+against it, and `eval:answers` validates each result before scoring, so the two
+cannot disagree about the shape.
+
+The route's check is a **tripwire, not a gate**: a mismatch is logged and the
+response still goes out, because a shape bug in this server should not become an
+outage for a user who asked a valid question. Validation errors are `path:
+reason_code` strings carrying no field values, so they are safe to log verbatim.
+
+This validates shape and enum membership only. It is not the evidence-integrity
+check — the client separately binds each claim to a citation by `evidenceId` and
+exact quote, which is a stronger guarantee than any schema. A payload passing
+validation is **not** a statement that its answer is grounded.
+
 When `ASK_DEBUG_METRICS=true`, the response also includes a development-only
 `metrics` object. The flag is off by default, so normal responses keep the shape
 shown above. The object is log-safe: it contains measurements and numeric
@@ -390,6 +408,16 @@ references, never document text, titles, filenames, or citation snippets.
     "retrievalMode": "hybrid",
     "chunkRefs": [
       { "documentId": 3, "pageNumber": 14, "chunkIndex": 2 }
+    ],
+    "rejectedCount": 1,
+    "rejected": [
+      {
+        "channel": "documentSupported",
+        "itemIndex": 0,
+        "reason": "numeric_anomaly",
+        "sourceId": "S1",
+        "unsupportedSpecCount": 1
+      }
     ]
   }
 }
@@ -407,6 +435,44 @@ The fields come directly from `buildAskMetrics` in
   `approxContextTokens` is `Math.ceil(contextChars / 4)`, a rough token estimate.
 - `topSemanticScore` and `retrievalMode` describe the first retrieved chunk, or
   are `null` when there is no such value.
+
+##### `metrics.rejected[]` — what the verifier removed
+
+This reports **verifier activity, not retrieval misses**. An ordinary "the
+documents do not cover this" answer retrieves nothing usable and rejects
+nothing, so `rejected` is `[]`. An entry appears only when the model proposed a
+claim, guidance line, or gap *with* evidence and the server-side checks above
+tore it out. Distinguishing the two was previously impossible from outside the
+process: both end at `status: "not_found"`.
+
+`rejected` is always an array when metrics are present, including `[]`.
+`rejectedCount` is the number of items the verifier rejected, counted before
+sanitization — if it disagrees with `rejected.length`, an entry was dropped as
+unrecognized and the two enums below have drifted from the verifier.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `channel` | enum | Which part of the model's reply it came from: `documentSupported`, `generalGuidance`, or `gaps`. |
+| `itemIndex` | integer | Its position in that channel of the model's original reply, so a rejection can be lined up against what produced it. |
+| `reason` | enum | Which check removed it (below). |
+| `sourceId` | string or `null` | The prompt-local `S1`…`Sn` label the claim named. `null` for guidance and gaps, which are not sourced, and `null` for any value that is not a plain S-label. |
+| `unsupportedSpecCount` | integer | How many unit-bearing specifications in the item were not supported by its evidence — a count only, never the values. |
+
+`reason` is one of `unknown_source`, `quote_not_in_source`, `numeric_anomaly`,
+`subject_mismatch`, `unsourced_specification`, or
+`unsourced_gap_specification`, matching the verification steps listed earlier.
+
+**What this deliberately does not contain.** The verifier keeps the rejected
+claim text, the specific unsupported values, and the parsed part name for
+server-side diagnosis; none of them appear here. Those fields carry document
+text and the very specifications verification refused to display, and
+`ASK_DEBUG_METRICS` is not a sufficient boundary for them: the app binds to
+loopback by default, but `NETWORK_MODE=1` opens it to the LAN or Tailscale, and
+these responses may be logged. `sourceId` is shape-checked for the same reason —
+it is the one field in the record the model chooses.
+
+To diagnose a specific rejection, reproduce it on the server, where the full
+record is available.
 - `chunkRefs` contains one reference per retrieved chunk with only its numeric
   `documentId`, `pageNumber`, and `chunkIndex` values (or `null` when a value is
   unavailable).

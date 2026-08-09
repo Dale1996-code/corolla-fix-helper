@@ -13,6 +13,8 @@ import {
 import { applyRelevanceFloor } from "./relevanceFloor.js";
 import { buildModelTuning } from "./openAiModelCapabilities.js";
 import {
+  ASK_REJECTION_CHANNELS,
+  ASK_REJECTION_REASONS,
   buildEvidenceContext,
   buildEvidencePromptLines,
   deriveEvidenceStatus,
@@ -270,6 +272,70 @@ function buildModelContext(chunks) {
     .join("\n\n");
 }
 
+const REJECTION_CHANNELS = new Set(ASK_REJECTION_CHANNELS);
+const REJECTION_REASONS = new Set(ASK_REJECTION_REASONS);
+
+/**
+ * Prompt-local source label. The model CHOOSES this string and the payload
+ * validator never constrains its shape, so on the unknown_source path it can be
+ * arbitrary model-authored text. Anything that is not a plain S-label is
+ * reported as null rather than echoed into a field advertised as log-safe.
+ */
+const SOURCE_LABEL_PATTERN = /^S\d{1,4}$/;
+
+/**
+ * Sanitize the verifier's rejection records for the debug metrics channel.
+ *
+ * verifyEvidence keeps the full detail server-side — `claim` is model prose
+ * built from document text, `unsupported` holds the very specification values
+ * that failed verification, and `subject` is a parsed part name. None of those
+ * may leave the server, not even behind ASK_DEBUG_METRICS: this app is
+ * loopback-only by DEFAULT but NETWORK_MODE=1 opens it to the LAN or Tailscale,
+ * and an unverified torque figure is exactly what the verifier just refused to
+ * put on screen. Only the count of unsupported specifications survives.
+ *
+ * Entries whose channel, reason, or index the contract does not recognize are
+ * dropped rather than passed through. That path should be unreachable —
+ * askEvidenceContract.test.js asserts the enums cover every rejection the
+ * verifier emits — and `rejectedCount` in buildAskMetrics reports the raw total
+ * independently, so a drop shows up as a mismatch instead of vanishing.
+ *
+ * @param {any[]} rejected raw records from verifyEvidence
+ * @returns {Array<{ channel: string, itemIndex: number, reason: string,
+ *   sourceId: string|null, unsupportedSpecCount: number }>}
+ */
+export function buildRejectedMetrics(rejected) {
+  if (!Array.isArray(rejected)) {
+    return [];
+  }
+
+  const entries = [];
+
+  for (const entry of rejected) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    if (!REJECTION_CHANNELS.has(entry.channel) || !REJECTION_REASONS.has(entry.reason)) {
+      continue;
+    }
+
+    if (!Number.isInteger(entry.itemIndex) || entry.itemIndex < 0) {
+      continue;
+    }
+
+    entries.push({
+      channel: entry.channel,
+      itemIndex: entry.itemIndex,
+      reason: entry.reason,
+      sourceId: SOURCE_LABEL_PATTERN.test(String(entry.sourceId ?? "")) ? entry.sourceId : null,
+      unsupportedSpecCount: Array.isArray(entry.unsupported) ? entry.unsupported.length : 0,
+    });
+  }
+
+  return entries;
+}
+
 /**
  * Build a log-safe metrics summary for one Ask request.
  *
@@ -288,6 +354,7 @@ function buildModelContext(chunks) {
  *   answerMs?: number,
  *   totalMs?: number,
  *   relevanceFloor?: any,
+ *   rejected?: any[],
  * }} [params]
  */
 export function buildAskMetrics({
@@ -298,6 +365,11 @@ export function buildAskMetrics({
   answerMs = 0,
   totalMs = 0,
   relevanceFloor = null,
+  // RAW verifier records, sanitized below rather than by the caller. Taking the
+  // raw array is the safer seam: a future call site cannot leak claim text by
+  // forgetting to sanitize first, because there is no way to pass this through
+  // unsanitized.
+  rejected = [],
 } = {}) {
   const roundMs = (value) => Math.round(Number(value) || 0);
   const contextChars = chunks.reduce(
@@ -327,6 +399,18 @@ export function buildAskMetrics({
     // Shadow-mode visibility for the relevance floor. Numeric references and
     // scores only, so this stays safe to log.
     relevanceFloor,
+    // Why the evidence verifier removed something, when it did. This answers a
+    // question production previously could not: a false rejection and an honest
+    // "the documents do not cover this" both surfaced as `not_found` with no way
+    // to tell them apart. `rejectedCount` counts what the verifier actually
+    // rejected; `rejected` describes each one in sanitized form. The two lengths
+    // agreeing is itself the signal that nothing was dropped in sanitization.
+    //
+    // Always an array, including [] — the absence of rejections is a fact worth
+    // reporting, and a caller should not have to distinguish "none" from "this
+    // build does not report them".
+    rejectedCount: Array.isArray(rejected) ? rejected.length : 0,
+    rejected: buildRejectedMetrics(rejected),
   };
 }
 
@@ -586,6 +670,10 @@ export async function askQuestionUsingDocuments(
   let retrievedChunks = [];
   let builtCitations = [];
   let relevanceFloorReport = null;
+  // Raw verifier rejections for this request. Set only on the evidence-contract
+  // path (the legacy prose path has no verifier and therefore nothing to
+  // report). buildAskMetrics sanitizes before any of it can leave the server.
+  let rejectedEvidence = [];
 
   // Passages that were retrieved but that the response does not cite.
   //
@@ -657,6 +745,7 @@ export async function askQuestionUsingDocuments(
             answerMs,
             totalMs: performance.now() - startedAt,
             relevanceFloor: relevanceFloorReport,
+            rejected: rejectedEvidence,
           }),
         }
       : withContext;
@@ -782,6 +871,11 @@ export async function askQuestionUsingDocuments(
     // Server-side verification: every quote must really be in the chunk it
     // names, and every unit-bearing number must be present in that quote.
     const verified = verifyEvidence(raw, chunks);
+    // Kept for the metrics channel. Without this the ONLY record that a claim
+    // was verified and thrown out lived inside this function and died with it,
+    // so a false rejection in production was indistinguishable from a document
+    // that genuinely says nothing on the subject.
+    rejectedEvidence = verified.rejected;
     // Status is DERIVED, never taken from the model -- a model-supplied status
     // could contradict its own claims.
     const status = deriveEvidenceStatus(verified);
