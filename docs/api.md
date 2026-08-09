@@ -347,7 +347,8 @@ the same chunk remain separate because each may support a different atomic claim
 
 **Current integrity limits:** `ASK_EVIDENCE_CONTRACT` defaults to `true`. The
 checks deterministically prove source identity, quote presence, supported
-unit-bearing numbers, and lexical subject agreement for common torque wording.
+unit-bearing numbers, and lexical subject agreement for common specification
+wording (torque, capacity, pressure, clearance, thickness).
 They are not a general semantic-entailment engine: unrecognized sentence shapes,
 non-numeric claims, pronouns, synonyms, and a long quote that mentions several
 parts can still require human judgment. The subject rule intentionally favors a

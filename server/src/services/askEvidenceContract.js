@@ -503,18 +503,33 @@ function subjectTokens(text) {
     .filter((token) => token && !ignored.has(token));
 }
 
+// Head nouns that make a specification component-scoped: in "<part> <noun> is
+// <value>" the words before the noun name the part. Torque was the first, but a
+// capacity, a pressure, and a clearance are just as component-specific -- "4.2
+// liters" is the right number for the wrong system if the quote says coolant and
+// the claim says engine oil.
+const SPEC_SUBJECT_NOUNS = [
+  "torque",
+  "capacity",
+  "pressure",
+  "clearance",
+  "thickness",
+  "diameter",
+  "depth",
+];
+
 /**
- * Extract the named part from common torque-claim shapes.
+ * Extract the named part from common specification-claim shapes.
  *
  * This is intentionally conservative. If the claim uses a shape the server
  * cannot parse, this check does not pretend to understand it; the quote and
  * numeric checks still run. When a subject is parsed, however, its complete
  * normalized token sequence must occur in the evidence quote.
  */
-function extractTorqueSubject(text) {
+function extractSpecSubject(text) {
   const normalized = normalizeForMatch(text);
   const imperative = normalized.match(
-    /\b(?:torque|tighten)\s+(?:the\s+)?([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
+    /\b(?:torque|tighten|inflate|fill)\s+(?:the\s+)?([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
   );
 
   if (imperative) {
@@ -522,13 +537,18 @@ function extractTorqueSubject(text) {
   }
 
   for (const clause of normalized.split(/[.!?;,:]/)) {
-    const torqueIndex = clause.lastIndexOf(" torque");
+    // The LAST head noun in the clause wins, matching the torque-only behavior
+    // this generalizes: the nearest noun is the one the part name qualifies.
+    const nounIndex = SPEC_SUBJECT_NOUNS.reduce(
+      (found, noun) => Math.max(found, clause.lastIndexOf(` ${noun}`)),
+      -1
+    );
 
-    if (torqueIndex < 0) {
+    if (nounIndex < 0) {
       continue;
     }
 
-    let prefix = clause.slice(0, torqueIndex).trim();
+    let prefix = clause.slice(0, nounIndex).trim();
     const lastDeterminer = prefix.lastIndexOf(" the ");
 
     if (lastDeterminer >= 0) {
@@ -557,23 +577,27 @@ function containsTokenSequence(haystack, needle) {
 }
 
 /**
- * Deterministic subject guard for torque specifications.
+ * Deterministic subject guard for convertible specifications.
  *
  * A matching number is not enough: "oil filter cap, 37 Nm" must not be
- * certified by a quote about an "oil drain plug, 37 Nm". This lexical check is
- * deliberately fail-closed for recognized torque-claim shapes. It is not a
- * general semantic-entailment engine, which is documented as a remaining limit.
+ * certified by a quote about an "oil drain plug, 37 Nm", and "engine oil
+ * capacity, 4.2 liters" must not be certified by a coolant capacity that
+ * happens to print the same figure. Every unit family we convert is gated, not
+ * torque alone; units outside those families (volts, ohms, rpm, temperature)
+ * keep the numeric check only. This lexical check is deliberately fail-closed
+ * for recognized claim shapes. It is not a general semantic-entailment engine,
+ * which is documented as a remaining limit.
  */
 export function checkClaimSubject(claimText, evidenceText) {
-  const hasTorqueSpec = extractSpecNumbers(claimText).some(
-    (spec) => spec.unit !== "viscosity" && canonicalize(spec.value, spec.unit)?.family === "torque"
+  const hasConvertibleSpec = extractSpecNumbers(claimText).some(
+    (spec) => spec.unit !== "viscosity" && Boolean(canonicalize(spec.value, spec.unit))
   );
 
-  if (!hasTorqueSpec) {
+  if (!hasConvertibleSpec) {
     return { grounded: true, checked: false, subject: "" };
   }
 
-  const subject = extractTorqueSubject(claimText);
+  const subject = extractSpecSubject(claimText);
 
   if (!subject.length) {
     return { grounded: true, checked: false, subject: "" };

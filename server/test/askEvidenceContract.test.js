@@ -297,6 +297,108 @@ test("the subject guard also covers asterisk-formatted torque units from PDF tex
   assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
+test("a volume claim citing a different system with the same figure is rejected", () => {
+  // The number is real and the quote is real -- but 4.2 liters of coolant does
+  // not establish the engine oil capacity.
+  const quote = "Coolant capacity: 4.2 liters";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The engine oil capacity is 4.2 liters.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.doesNotMatch(result.gaps.join(" "), /4\.2 liters/);
+});
+
+test("a pressure claim citing the other axle with the same figure is rejected", () => {
+  const quote = "Rear tire pressure: 220 kPa";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The front tire pressure is 220 kPa.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.doesNotMatch(result.gaps.join(" "), /220 kPa/);
+});
+
+test("a length claim citing a different component with the same figure is rejected", () => {
+  const quote = "Rear brake pad minimum thickness: 1.0 mm";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The front brake pad thickness is 1.0 mm.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+});
+
+test("the widened subject guard still accepts a matching non-torque subject", () => {
+  // Fail-closed must not mean fail-always: the same component in claim and quote
+  // passes, including the imperative "inflate ... to <value>" shape.
+  const cases = [
+    ["The engine oil capacity is 4.2 liters.", "Engine oil capacity (with filter): 4.2 liters"],
+    ["Inflate the front tires to 220 kPa.", "Front tires: 220 kPa cold"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("units outside the convertible families keep the numeric check only", () => {
+  // Volts, ohms, rpm, and temperature are not converted, so the subject guard
+  // does not gate them -- widening it that far would reject ordinary readings
+  // whose surrounding wording the parser was never built to understand.
+  const quote = "Charging system output: 13.5 volts at idle";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The battery voltage should read 13.5 volts.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
