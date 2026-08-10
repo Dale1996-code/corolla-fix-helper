@@ -642,11 +642,43 @@ export function redactSpecNumbers(text) {
 }
 
 /**
+ * Every reason this module can remove a claim, guidance line, or gap for.
+ *
+ * Exported so the response contract and the metrics sanitizer describe exactly
+ * the set the verifier can actually produce, instead of a hand-copied list that
+ * drifts. verifyEvidence still writes the literals inline, where they read
+ * naturally; askEvidenceContract.test.js drives every rejection path and asserts
+ * each emitted reason appears here, so the two cannot diverge silently.
+ */
+export const ASK_REJECTION_REASONS = Object.freeze([
+  "unknown_source",
+  "quote_not_in_source",
+  "numeric_anomaly",
+  "subject_mismatch",
+  "unsourced_specification",
+  "unsourced_gap_specification",
+]);
+
+/** The channel of the model's reply a rejected item came from. */
+export const ASK_REJECTION_CHANNELS = Object.freeze([
+  "documentSupported",
+  "generalGuidance",
+  "gaps",
+]);
+
+/**
  * Verify every claim and gate every channel.
  *
  * Fails CLOSED for unsupported technical numeric claims: they are removed from
  * the actionable answer and converted into explicit gaps, rather than rendered
  * with a warning decoration next to a number that may be invented.
+ *
+ * Each entry in the returned `rejected` array carries both the safe metadata a
+ * caller may expose (`channel`, `itemIndex`, `reason`, `sourceId`) and the
+ * detailed fields kept for server-side diagnosis only (`claim`, `unsupported`,
+ * `subject`). The detailed fields hold document text and the very specification
+ * values that failed verification, so anything shipping this off the server must
+ * sanitize first — see buildRejectedMetrics in aiAnswerService.js.
  *
  * @param {{ documentSupported: any[], generalGuidance: string[], gaps: string[] }} validated
  * @param {any[]} chunks - retrieval order; index maps to S1..Sn
@@ -660,11 +692,14 @@ export function verifyEvidence(validated, chunks) {
   // Gaps are model-authored too. They describe missing evidence, so a technical
   // value inside one is unsupported by definition and must not leak back onto
   // the screen under a safer-sounding heading.
-  for (const gap of validated.gaps) {
+  for (const [itemIndex, gap] of validated.gaps.entries()) {
     const specs = extractSpecNumbers(gap);
 
     if (specs.length) {
       rejected.push({
+        channel: "gaps",
+        itemIndex,
+        sourceId: null,
         claim: gap,
         reason: "unsourced_gap_specification",
         unsupported: specs.map((spec) => spec.raw),
@@ -676,17 +711,21 @@ export function verifyEvidence(validated, chunks) {
     gaps.push(gap);
   }
 
-  for (const claim of validated.documentSupported) {
+  for (const [itemIndex, claim] of validated.documentSupported.entries()) {
+    // Carried on every rejection from this channel. `sourceId` is the label the
+    // MODEL supplied, so it is echoed here as-is for diagnosis but must be
+    // shape-checked before it can leave the server.
+    const origin = { channel: "documentSupported", itemIndex, sourceId: claim.sourceId };
     const mapped = byLabel.get(claim.sourceId.toUpperCase());
 
     if (!mapped) {
-      rejected.push({ claim: claim.claim, reason: "unknown_source" });
+      rejected.push({ ...origin, claim: claim.claim, reason: "unknown_source" });
       gaps.push(`Unverified (source not recognized): ${redactSpecNumbers(claim.claim)}`);
       continue;
     }
 
     if (!quoteAppearsInChunk(claim.evidenceQuote, mapped.chunk.chunkText)) {
-      rejected.push({ claim: claim.claim, reason: "quote_not_in_source" });
+      rejected.push({ ...origin, claim: claim.claim, reason: "quote_not_in_source" });
       gaps.push(
         `Unverified (quote not found in the cited page): ${redactSpecNumbers(claim.claim)}`
       );
@@ -698,6 +737,7 @@ export function verifyEvidence(validated, chunks) {
 
     if (!numeric.grounded) {
       rejected.push({
+        ...origin,
         claim: claim.claim,
         reason: "numeric_anomaly",
         unsupported: numeric.unsupported,
@@ -715,6 +755,7 @@ export function verifyEvidence(validated, chunks) {
 
     if (!subject.grounded) {
       rejected.push({
+        ...origin,
         claim: claim.claim,
         reason: "subject_mismatch",
         subject: subject.subject,
@@ -749,11 +790,14 @@ export function verifyEvidence(validated, chunks) {
   // reads. Step numbers and counts are untouched (no unit, no match).
   const generalGuidance = [];
 
-  for (const guidance of validated.generalGuidance) {
+  for (const [itemIndex, guidance] of validated.generalGuidance.entries()) {
     const specs = extractSpecNumbers(guidance);
 
     if (specs.length) {
       rejected.push({
+        channel: "generalGuidance",
+        itemIndex,
+        sourceId: null,
         claim: guidance,
         reason: "unsourced_specification",
         unsupported: specs.map((spec) => spec.raw),

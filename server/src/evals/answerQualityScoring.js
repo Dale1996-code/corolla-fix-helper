@@ -161,6 +161,70 @@ function checkAnswered(result, spec, label) {
   return checks;
 }
 
+/**
+ * Score a verifier-rejection case.
+ *
+ * Distinct from a refusal on purpose. A refusal means retrieval found nothing to
+ * support an answer; a rejection means a claim arrived WITH evidence and the
+ * server threw it out. Both end at `not_found`, so checking the status alone
+ * would let one silently stand in for the other — which is the whole reason this
+ * path was invisible in production before metrics.rejected existed.
+ */
+function checkRejected(result, spec) {
+  const checks = [];
+  const status = result?.status;
+
+  // Must never be `answered`: a rejected claim reaching the owner as a confirmed
+  // answer is the failure this case exists to catch.
+  checks.push({
+    name: `status is ${spec.expectedStatus} and not answered`,
+    pass: status === spec.expectedStatus && status !== "answered",
+    detail: `status=${status}`,
+  });
+
+  const citationCount = Array.isArray(result?.citations) ? result.citations.length : 0;
+  checks.push({
+    name: "no citations survive when every claim was rejected",
+    pass: citationCount === 0,
+    detail: `${citationCount} citations`,
+  });
+
+  // The metrics channel is the point of the exercise: without it, a rejection is
+  // indistinguishable from an ordinary retrieval miss.
+  const rejected = Array.isArray(result?.metrics?.rejected) ? result.metrics.rejected : null;
+  checks.push({
+    name: "metrics report the rejection",
+    pass: Boolean(rejected && rejected.length),
+    detail: rejected ? `${rejected.length} rejected` : "metrics.rejected missing",
+  });
+
+  for (const reason of spec.requiredRejectedReasons || []) {
+    checks.push({
+      name: `metrics.rejected includes ${reason}`,
+      pass: Boolean(rejected?.some((entry) => entry?.reason === reason)),
+      detail: rejected ? rejected.map((entry) => entry?.reason).join(", ") || "(none)" : "(no metrics)",
+    });
+  }
+
+  // Scan the WHOLE serialized response, not just `answer`. A rejected
+  // specification that reappears inside a gap, a citation snippet, or the
+  // evidence block is just as much on screen as one in the answer text.
+  if (Array.isArray(spec.mustNotIncludeAny) && spec.mustNotIncludeAny.length) {
+    const serialized = JSON.stringify(result ?? null);
+
+    for (const pattern of spec.mustNotIncludeAny) {
+      const found = textMatches(serialized, pattern);
+      checks.push({
+        name: `the rejected value ${String(pattern)} appears nowhere in the response`,
+        pass: !found,
+        detail: found ? "LEAKED into the response" : "absent",
+      });
+    }
+  }
+
+  return checks;
+}
+
 export function evaluateAnswerCase(testCase, primaryResult, followUpResult = null) {
   const checks = [];
 
@@ -170,6 +234,8 @@ export function evaluateAnswerCase(testCase, primaryResult, followUpResult = nul
       pass: isRefusal(primaryResult),
       detail: `status=${primaryResult?.status}`,
     });
+  } else if (testCase.expect === "rejected") {
+    checks.push(...checkRejected(primaryResult, testCase));
   } else {
     checks.push(...checkAnswered(primaryResult, testCase, "answer"));
 

@@ -21,6 +21,8 @@ const { db } = await import("../database.js");
 const { askQuestionUsingDocuments } = await import("../services/aiAnswerService.js");
 const { answerQualityCases } = await import("../evals/answerQualityCases.js");
 const { evaluateAnswerCase, summarize } = await import("../evals/answerQualityScoring.js");
+const { createRejectionProbe } = await import("../evals/answerRejectionProbes.js");
+const { validateAskResponse } = await import("../services/askResponseContract.js");
 const { NEGATIVE_CASE_PRECONDITIONS } = await import(
   "../evals/negativeCorpusPreconditions.js"
 );
@@ -132,7 +134,27 @@ for (const testCase of answerQualityCases) {
     const primary = await askWithRetry(testCase.question, {
       image: testCase.image || null,
       includeMetrics: true,
+      // Rejection cases replace the model reply with a probe crafted to fail one
+      // specific check, and pin the contract on so the local ASK_EVIDENCE_CONTRACT
+      // setting cannot quietly route the case past the verifier it is testing.
+      ...(testCase.rejectionProbe
+        ? {
+            evidenceContract: true,
+            generateEvidenceAnswer: createRejectionProbe(testCase.rejectionProbe),
+          }
+        : {}),
     });
+
+    // Validate against the shared contract before scoring. The eval calls the
+    // service directly rather than over HTTP, so `question` (which the route
+    // adds) is supplied here; everything else is the payload as-is. A scorer
+    // reading a malformed response would report a product regression for what is
+    // really a shape bug, so name it as the shape bug it is.
+    const contract = validateAskResponse({ question: testCase.question, ...primary });
+
+    if (!contract.ok) {
+      console.log(`    ! response contract: ${contract.errors.join("; ")}`);
+    }
 
     let followUp = null;
     if (testCase.followUp) {

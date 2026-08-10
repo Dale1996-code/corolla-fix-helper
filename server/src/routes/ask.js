@@ -3,6 +3,7 @@ import path from "node:path";
 import { Router } from "express";
 import { config } from "../config.js";
 import { askQuestionUsingDocuments } from "../services/aiAnswerService.js";
+import { validateAskResponse } from "../services/askResponseContract.js";
 import {
   getAttachmentById,
   getAttachmentsImageDir,
@@ -171,6 +172,20 @@ export function createAskRouter({
       // flag is on. Off by default, so the response shape is unchanged.
       if (includeMetrics && result.metrics) {
         payload.metrics = result.metrics;
+      }
+
+      // Contract tripwire, not a gate. A shape mismatch is a bug in this server,
+      // and refusing to answer would turn that bug into an outage for a user who
+      // asked a perfectly good question — so the payload still goes out and the
+      // mismatch is recorded here instead. validateAskResponse reports field
+      // paths and reason codes only, never field values, so this line cannot put
+      // document text or a citation snippet into the log.
+      const contract = validateAskResponse(payload);
+
+      if (!contract.ok) {
+        console.warn(
+          `Ask response did not match the contract: ${contract.errors.join("; ")}`
+        );
       }
 
       response.json(payload);

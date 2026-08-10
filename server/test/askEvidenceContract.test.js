@@ -3,6 +3,8 @@ import test from "node:test";
 
 // Pure contract logic: no database, no network. Safe to import directly.
 import {
+  ASK_REJECTION_CHANNELS,
+  ASK_REJECTION_REASONS,
   checkClaimNumbers,
   deriveEvidenceStatus,
   extractSpecNumbers,
@@ -467,4 +469,99 @@ test("the rendered answer keeps the two channels visibly distinct", () => {
   assert.match(text, /Torque is 37 Nm\. \[Oil Manual, page 1\]/);
   assert.match(text, /General guidance — not from your documents/);
   assert.match(text, /Not covered by your documents/);
+});
+
+// ---- Rejection metadata ----
+//
+// The declared enums are what the response contract and the metrics sanitizer
+// are built from. If verifyEvidence ever emits a reason or channel that is not
+// declared, the sanitizer drops the entry and the telemetry silently loses a
+// rejection — so drive every path and check the declarations cover them.
+
+/** One payload that trips all six rejection paths at once. */
+function everyRejection() {
+  return verifyEvidence(
+    payload({
+      documentSupported: [
+        // unknown_source
+        { claim: "a", sourceId: "S9", evidenceQuote: "Torque : 37 Nm" },
+        // quote_not_in_source
+        { claim: "b", sourceId: "S1", evidenceQuote: "A sentence not on the page." },
+        // numeric_anomaly
+        {
+          claim: "The oil drain plug torque is 54 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm",
+        },
+        // subject_mismatch — a genuinely verbatim quote carrying the same
+        // value, so it clears the source, quote, and numeric checks and can
+        // only fail on the part name.
+        {
+          claim: "Torque the oil filter cap to 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+      ],
+      // unsourced_specification
+      generalGuidance: ["Tighten it to about 40 Nm."],
+      // unsourced_gap_specification
+      gaps: ["The manual does not give the 12 Nm sensor torque."],
+    }),
+    [chunk()]
+  );
+}
+
+test("every rejection reason the verifier can emit is declared", () => {
+  const emitted = new Set(everyRejection().rejected.map((entry) => entry.reason));
+
+  assert.equal(emitted.size, ASK_REJECTION_REASONS.length, "not every path was exercised");
+
+  for (const reason of emitted) {
+    assert.ok(ASK_REJECTION_REASONS.includes(reason), `undeclared reason: ${reason}`);
+  }
+});
+
+test("every rejection carries a declared channel and its index in that channel", () => {
+  const rejected = everyRejection().rejected;
+
+  for (const entry of rejected) {
+    assert.ok(
+      ASK_REJECTION_CHANNELS.includes(entry.channel),
+      `undeclared channel: ${entry.channel}`
+    );
+    assert.ok(Number.isInteger(entry.itemIndex) && entry.itemIndex >= 0, "bad itemIndex");
+  }
+
+  const byReason = new Map(rejected.map((entry) => [entry.reason, entry]));
+
+  // The index must point back into the model's ORIGINAL channel array, so a
+  // reader can line a rejection up against the reply that produced it.
+  assert.equal(byReason.get("unknown_source").channel, "documentSupported");
+  assert.equal(byReason.get("unknown_source").itemIndex, 0);
+  assert.equal(byReason.get("subject_mismatch").itemIndex, 3);
+  assert.equal(byReason.get("unsourced_specification").channel, "generalGuidance");
+  assert.equal(byReason.get("unsourced_specification").itemIndex, 0);
+  assert.equal(byReason.get("unsourced_gap_specification").channel, "gaps");
+  assert.equal(byReason.get("unsourced_gap_specification").itemIndex, 0);
+});
+
+test("a document-channel rejection reports the source label the model named", () => {
+  const byReason = new Map(everyRejection().rejected.map((entry) => [entry.reason, entry]));
+
+  // Including the label that did not resolve — that is the diagnostic value.
+  assert.equal(byReason.get("unknown_source").sourceId, "S9");
+  assert.equal(byReason.get("numeric_anomaly").sourceId, "S1");
+  // Guidance and gaps are not sourced, so there is no label to report.
+  assert.equal(byReason.get("unsourced_specification").sourceId, null);
+  assert.equal(byReason.get("unsourced_gap_specification").sourceId, null);
+});
+
+test("the detailed rejection fields stay available for server-side diagnosis", () => {
+  // These are what the metrics sanitizer must strip. Their continued presence
+  // here is the reason the sanitizer exists, so assert they are still produced.
+  const byReason = new Map(everyRejection().rejected.map((entry) => [entry.reason, entry]));
+
+  assert.match(byReason.get("numeric_anomaly").claim, /54 Nm/);
+  assert.ok(byReason.get("numeric_anomaly").unsupported.some((raw) => raw.includes("54")));
+  assert.equal(byReason.get("subject_mismatch").subject, "oil filter cap");
 });

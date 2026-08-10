@@ -32,6 +32,7 @@ const { db } = await import("../src/database.js");
 const {
   askQuestionUsingDocuments,
   buildAskMetrics,
+  buildRejectedMetrics,
   generateAnswerTextFromOpenAi,
   NOT_FOUND_MESSAGE,
   rewriteQuestionFromOpenAi,
@@ -532,4 +533,233 @@ test("the answer call receives no history, but still receives citations", async 
   // citations is NOT dead -- it is part of this injection seam's contract and
   // several injected test doubles read it. Deleting it would be a contract change.
   assert.ok(seenKeys.includes("citations"), `citations must still be passed, got: ${seenKeys}`);
+});
+
+// ---- Rejection telemetry (issue #107) ----
+//
+// Before this, verifyEvidence built a `rejected` array and askQuestionUsingDocuments
+// dropped it, so production could not tell a FALSE rejection ("the manual says
+// this and we threw it out") from an honest miss ("the manual says nothing").
+// Both surfaced as not_found. These tests pin the two properties that make the
+// new channel usable: it explains every rejection, and it exposes none of the
+// rejected content.
+
+/** A chunk whose text supports one real torque figure and no other. */
+const evidenceChunk = () =>
+  strongChunk({
+    chunkText:
+      "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+  });
+
+test("buildRejectedMetrics keeps the safe metadata and drops the rejected content", () => {
+  const sanitized = buildRejectedMetrics([
+    {
+      channel: "documentSupported",
+      itemIndex: 0,
+      sourceId: "S1",
+      claim: "Torque the oil drain plug to 54 Nm.",
+      reason: "numeric_anomaly",
+      unsupported: ["54 Nm"],
+    },
+    {
+      channel: "documentSupported",
+      itemIndex: 1,
+      sourceId: "S2",
+      claim: "Torque the oil filter cap to 37 Nm.",
+      reason: "subject_mismatch",
+      subject: "oil filter cap",
+    },
+    {
+      channel: "gaps",
+      itemIndex: 0,
+      sourceId: null,
+      claim: "No 12 Nm sensor torque is given.",
+      reason: "unsourced_gap_specification",
+      unsupported: ["12 Nm"],
+    },
+  ]);
+
+  assert.deepEqual(sanitized, [
+    {
+      channel: "documentSupported",
+      itemIndex: 0,
+      reason: "numeric_anomaly",
+      sourceId: "S1",
+      unsupportedSpecCount: 1,
+    },
+    {
+      channel: "documentSupported",
+      itemIndex: 1,
+      reason: "subject_mismatch",
+      sourceId: "S2",
+      unsupportedSpecCount: 0,
+    },
+    {
+      channel: "gaps",
+      itemIndex: 0,
+      reason: "unsourced_gap_specification",
+      sourceId: null,
+      unsupportedSpecCount: 1,
+    },
+  ]);
+
+  // The point of the sanitizer. An unverified torque figure is exactly what the
+  // verifier just refused to put on screen; a debug flag must not put it back.
+  const serialized = JSON.stringify(sanitized);
+  assert.ok(!serialized.includes("54 Nm"), "leaked the unsupported value");
+  assert.ok(!serialized.includes("12 Nm"), "leaked the unsupported gap value");
+  assert.ok(!serialized.includes("oil drain plug"), "leaked claim text");
+  assert.ok(!serialized.includes("oil filter cap"), "leaked the parsed subject");
+});
+
+test("buildRejectedMetrics refuses a source label the model invented", () => {
+  // sourceId is chosen by the MODEL and its shape is never validated upstream,
+  // so on the unknown_source path it can be arbitrary text. Anything that is not
+  // a plain S-label must not be echoed into a field advertised as log-safe.
+  const sanitized = buildRejectedMetrics([
+    {
+      channel: "documentSupported",
+      itemIndex: 0,
+      sourceId: "S1 (the oil manual, page 4, drain plug 37 Nm)",
+      claim: "x",
+      reason: "unknown_source",
+    },
+  ]);
+
+  assert.equal(sanitized.length, 1);
+  assert.equal(sanitized[0].sourceId, null);
+  assert.ok(!JSON.stringify(sanitized).includes("37 Nm"));
+});
+
+test("buildRejectedMetrics drops an entry whose channel or reason is undeclared", () => {
+  const sanitized = buildRejectedMetrics([
+    { channel: "somethingNew", itemIndex: 0, reason: "numeric_anomaly", claim: "x" },
+    { channel: "gaps", itemIndex: 0, reason: "brand_new_reason", claim: "x" },
+    { channel: "gaps", itemIndex: -1, reason: "numeric_anomaly", claim: "x" },
+    null,
+  ]);
+
+  assert.deepEqual(sanitized, []);
+});
+
+test("metrics report a verifier rejection when metrics are enabled", async () => {
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    includeMetrics: true,
+    evidenceContract: true,
+    retrieveChunks: async () => [evidenceChunk()],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [
+        {
+          // A real, verbatim quote carrying an invented value: the shape that
+          // looks grounded and is not.
+          claim: "The oil drain plug torque is 54 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm",
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    }),
+  });
+
+  assert.equal(result.status, "not_found");
+  assert.equal(result.citations.length, 0);
+  assert.equal(result.metrics.rejectedCount, 1);
+  assert.deepEqual(result.metrics.rejected, [
+    {
+      channel: "documentSupported",
+      itemIndex: 0,
+      reason: "numeric_anomaly",
+      sourceId: "S1",
+      unsupportedSpecCount: 1,
+    },
+  ]);
+
+  // Nowhere in the response, under any heading: not the answer, not the gap
+  // text, not the metrics.
+  assert.ok(!JSON.stringify(result).includes("54 Nm"), "the rejected value leaked");
+});
+
+test("a partial answer still reports the claim that was rejected", async () => {
+  // The mixed case. One claim verifies and renders; the other is torn out. A
+  // status of `partial` must not hide the second half of that story.
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    includeMetrics: true,
+    evidenceContract: true,
+    retrieveChunks: async () => [evidenceChunk()],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+        {
+          claim: "The oil drain plug torque is 54 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm",
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    }),
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.metrics.rejectedCount, 1);
+  assert.equal(result.metrics.rejected[0].reason, "numeric_anomaly");
+  assert.ok(!JSON.stringify(result).includes("54 Nm"));
+});
+
+test("metrics report an empty rejection list when nothing was rejected", async () => {
+  // [] is a fact worth stating. A caller must not have to distinguish "no
+  // rejections" from "this build does not report them".
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    includeMetrics: true,
+    evidenceContract: true,
+    retrieveChunks: async () => [evidenceChunk()],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 37 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    }),
+  });
+
+  assert.equal(result.status, "answered");
+  assert.deepEqual(result.metrics.rejected, []);
+  assert.equal(result.metrics.rejectedCount, 0);
+});
+
+test("no metrics at all reach the caller when the debug flag is off", async () => {
+  const result = await askQuestionUsingDocuments("What is the oil drain plug torque?", {
+    isAiConfigured: true,
+    includeMetrics: false,
+    evidenceContract: true,
+    retrieveChunks: async () => [evidenceChunk()],
+    generateEvidenceAnswer: async () => ({
+      documentSupported: [
+        {
+          claim: "The oil drain plug torque is 54 Nm.",
+          sourceId: "S1",
+          evidenceQuote: "Torque : 37 Nm",
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    }),
+  });
+
+  assert.equal(result.status, "not_found");
+  assert.equal(result.metrics, undefined);
+  assert.ok(!("rejected" in result), "rejections must not appear outside metrics");
 });

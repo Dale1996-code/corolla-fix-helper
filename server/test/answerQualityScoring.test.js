@@ -423,3 +423,141 @@ test("partial does not excuse a missing value or citation", () => {
   });
   assert.equal(noCitation.pass, false);
 });
+
+// ---- expect: "rejected" (issue #107) ----
+//
+// A rejection is NOT a refusal. Both land on not_found, so the scorer has to
+// look past the status: a refusal means retrieval found nothing, a rejection
+// means a claim arrived with evidence and the verifier tore it out. Scoring them
+// the same way would let a broken verifier pass as an honest miss.
+
+const rejectionCase = (overrides = {}) => ({
+  id: "reject-invented-drain-plug-torque",
+  category: "verifier",
+  expect: "rejected",
+  expectedStatus: "not_found",
+  requiredRejectedReasons: ["numeric_anomaly"],
+  rejectionProbe: "numeric_anomaly",
+  mustNotIncludeAny: [/999999/],
+  ...overrides,
+});
+
+const rejectedResult = (overrides = {}) => ({
+  status: "not_found",
+  answer: "not in documents",
+  citations: [],
+  metrics: {
+    rejectedCount: 1,
+    rejected: [
+      {
+        channel: "documentSupported",
+        itemIndex: 0,
+        reason: "numeric_anomaly",
+        sourceId: "S1",
+        unsupportedSpecCount: 1,
+      },
+    ],
+  },
+  ...overrides,
+});
+
+test("a genuine verifier rejection passes", () => {
+  const result = evaluateAnswerCase(rejectionCase(), rejectedResult());
+
+  assert.equal(result.pass, true, JSON.stringify(result.checks, null, 2));
+});
+
+test("a rejected claim that reaches the owner as answered fails", () => {
+  // The regression this case exists to catch.
+  const result = evaluateAnswerCase(
+    rejectionCase(),
+    rejectedResult({
+      status: "answered",
+      answer: "The oil drain plug torque is 999999 N-m.",
+      citations: [{ documentTitle: "Oil", snippet: "..." }],
+    })
+  );
+
+  assert.equal(result.pass, false);
+});
+
+test("a rejection with no telemetry fails even when the status is right", () => {
+  // Without metrics.rejected the run cannot tell this apart from a plain
+  // retrieval miss, which is exactly the gap issue #107 opened on.
+  const noMetrics = rejectedResult();
+  delete noMetrics.metrics;
+
+  const result = evaluateAnswerCase(rejectionCase(), noMetrics);
+
+  assert.equal(result.pass, false);
+  assert.ok(
+    result.checks.some(
+      (check) => check.name === "metrics report the rejection" && !check.pass
+    )
+  );
+});
+
+test("the wrong rejection reason fails", () => {
+  const result = evaluateAnswerCase(
+    rejectionCase(),
+    rejectedResult({
+      metrics: {
+        rejectedCount: 1,
+        rejected: [
+          {
+            channel: "documentSupported",
+            itemIndex: 0,
+            reason: "quote_not_in_source",
+            sourceId: "S1",
+            unsupportedSpecCount: 0,
+          },
+        ],
+      },
+    })
+  );
+
+  assert.equal(result.pass, false);
+  assert.ok(
+    result.checks.some(
+      (check) => check.name === "metrics.rejected includes numeric_anomaly" && !check.pass
+    )
+  );
+});
+
+test("citations surviving a fully-rejected answer fail", () => {
+  const result = evaluateAnswerCase(
+    rejectionCase(),
+    rejectedResult({ citations: [{ documentTitle: "Oil Manual", snippet: "..." }] })
+  );
+
+  assert.equal(result.pass, false);
+});
+
+test("the rejected value leaking anywhere in the response fails", () => {
+  // Not just the answer text. A value that reappears in a gap or a citation
+  // snippet is just as much on screen.
+  const inGap = evaluateAnswerCase(
+    rejectionCase(),
+    rejectedResult({
+      evidence: {
+        documentSupported: [],
+        generalGuidance: [],
+        gaps: ["Unverified specification: the torque is 999999 N-m."],
+      },
+    })
+  );
+
+  assert.equal(inGap.pass, false);
+  assert.ok(
+    inGap.checks.some((check) => /appears nowhere/.test(check.name) && !check.pass)
+  );
+});
+
+test("a rejection case never scores as an answered case", () => {
+  // checkAnswered would happily pass a not_found with no citations if it were
+  // ever routed there by mistake, so confirm the branch is chosen by `expect`.
+  const checks = evaluateAnswerCase(rejectionCase(), rejectedResult()).checks;
+
+  assert.ok(checks.some((check) => /status is not_found and not answered/.test(check.name)));
+  assert.ok(!checks.some((check) => /has at least one citation/.test(check.name)));
+});
