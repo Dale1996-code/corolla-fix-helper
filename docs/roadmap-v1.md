@@ -1,6 +1,9 @@
+******Historical roadmap: this document describes the original V1 development plan.
+ For the current roadmap, see docs/roadmap-2026-2027.md.
+
 # Corolla Fix Helper Roadmap
 
-This roadmap separates current code from future ideas. A checked item here should mean the current repo supports it, not just that it was planned.
+This roadmap separates current code from future ideas. 
 
 ## Current V1 Baseline
 
