@@ -117,17 +117,44 @@ Closing run after `temperature: 0` landed: **6/6 verified cases still pass.**
    templates and do not gate the result. Attribute this on the next full eval run by
    saving complete output to a file first.
 
-2. **429 TPM pacing.** `startup-squeal-belt-triage` failed the closing run with
+2. **429 TPM pacing. — RESOLVED.** `startup-squeal-belt-triage` failed the closing run with
    `rate_limit_exceeded` — `gpt-4.1` at 30000 tokens/min, 27464 used. Running all 28 cases
    back-to-back exceeds the tier limit; this is an infrastructure artifact, not a
-   regression (the case passed both earlier runs). `scripts/evalAnswers.js` needs simple
-   pacing (or a retry on 429) before the eval can be trusted end-to-end.
+   regression (the case passed both earlier runs). `scripts/evalAnswers.js` needed simple
+   pacing (or a retry on 429) before the eval could be trusted end-to-end.
 
-3. **Invalid vision fixture.** `vision-refuses-unsupported-spec` fails in every run with
-   OpenAI 400 `"The image data you provided does not represent a valid image"`. The 1x1
-   placeholder PNG data URI in `answerQualityCases.js` is not accepted. This is a fixture
-   bug, independent of Milestone 1, and the case stays unverified until a real image is
-   substituted.
+   `scripts/evalAnswers.js` now has both: a `CASE_DELAY_MS` gap between cases
+   (`EVAL_CASE_DELAY_MS`, default 2000 ms) and `askWithRetry`, which retries a 429 up to
+   four times with 5s/10s/15s/20s backoff and counts rate-limited cases separately from
+   failures. Rate limiting is classified as infrastructure rather than a product signal,
+   so it can no longer masquerade as a regression in the results table.
+
+   **Consequence to plan around when growing the suite (roadmap N1):** the pacing is real
+   wall-clock time. At 2 s between cases the current 35 cases cost about 70 s of deliberate
+   idling on top of model latency, and that grows linearly with the case count. Budget for
+   it, and tune `EVAL_CASE_DELAY_MS` to the account's actual tier rather than lowering it
+   blindly — a 429 storm mid-run is far more expensive than the delay.
+
+3. **Invalid vision fixture. — FIXTURE REPLACED 16 August 2026; awaiting a run to confirm.**
+   `vision-refuses-unsupported-spec` failed in every run with OpenAI 400
+   `"The image data you provided does not represent a valid image"`. The 1x1 placeholder
+   PNG data URI in `answerQualityCases.js` was not accepted.
+
+   Worth recording precisely, because the obvious reading was wrong: the 1x1 data URI is a
+   **structurally valid PNG** — correct signature, IHDR, IDAT, IEND, and it decodes
+   cleanly. It was rejected for its *dimensions*, not its encoding. "Not a valid image"
+   in the provider's wording means "not a usable image", which is why inspecting the
+   base64 never revealed anything wrong with it.
+
+   Replaced with a real 512x512 RGB PNG at `server/src/evals/fixtures/vision-placeholder.png`
+   (~10 KB), generated with Node's `zlib` alone so no dependency was added, and loaded from
+   disk at module load rather than inlined. Overwriting that file with an actual photo of
+   the car needs no code change.
+
+   **Not yet confirmed against the provider** — verifying it costs a keyed eval run. The
+   case stays `verified: false` until it has been observed passing once; flip it to `true`
+   at that point, because it pins a safety property (an attached photo must never become a
+   source for a specification).
 
 4. **`citations` is NOT a dead parameter — the audit and its review both got this wrong.**
    Milestone 1 planned to delete both `history` and `citations` from the

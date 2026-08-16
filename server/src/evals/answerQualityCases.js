@@ -44,9 +44,35 @@
 //   3. Copy the question here, set mustIncludeAny to the exact value (e.g. /37\s*N/i),
 //      set citationDocLike to part of the source name, set verified: true.
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   REJECTION_PROBE_SENTINEL_PATTERN,
 } from "./answerRejectionProbes.js";
+
+// The vision case needs an image the provider will actually accept. It used to
+// carry an inline 1x1 PNG, which is a structurally valid PNG but not a usable
+// photograph, so the case could never pass and sat permanently red in a suite
+// where red is supposed to mean something. The fixture is a real 512x512 image
+// loaded from disk instead: big enough to be a legitimate vision input, small
+// enough (about 10 KB) to keep in the repository, and out of line so this file
+// stays readable.
+//
+// Swap in an actual photo of the car whenever convenient -- overwrite the file,
+// no code change needed. The case does not depend on what the picture shows:
+// the refusal is driven by the not-found gate, and the point is that an
+// attached image never becomes a source for a specification.
+const VISION_FIXTURE_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "vision-placeholder.png"
+);
+
+const VISION_FIXTURE_DATA_URI = `data:image/png;base64,${fs
+  .readFileSync(VISION_FIXTURE_PATH)
+  .toString("base64")}`;
 
 export const answerQualityCases = [
   // ---- VERIFIED: confirmed against the real documents ----
@@ -395,8 +421,14 @@ export const answerQualityCases = [
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
   // The model may describe the attached photo, but it must STILL refuse a spec
   // the uploaded PDF chunks do not support — an image is never a source for a
-  // torque/capacity/procedure value. A 1x1 placeholder PNG stands in for a real
-  // photo; the refusal is driven by the not-found gate, not the image content.
+  // torque/capacity/procedure value. See VISION_FIXTURE_DATA_URI above for why
+  // the image is a real 512x512 file rather than the 1x1 pixel this used to
+  // send; the refusal is driven by the not-found gate, not the image content.
+  //
+  // Still verified:false until it has been observed passing against the real
+  // model with a key. Flip it to true at that point — it tests a safety
+  // property (a photo must not become a source for a specification), which is
+  // exactly the kind of case that deserves to gate the build.
   {
     id: "vision-refuses-unsupported-spec",
     question:
@@ -404,8 +436,7 @@ export const answerQualityCases = [
     category: "refusal",
     system: "Electrical",
     expect: "refused",
-    image:
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    image: VISION_FIXTURE_DATA_URI,
     verified: false,
   },
 

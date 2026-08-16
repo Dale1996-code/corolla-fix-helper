@@ -4,8 +4,14 @@
 > Anything else that looks like a roadmap lives in [`docs/archive/`](archive/) and is history, not a plan.
 >
 > - **Covers:** August 2026 → August 2027
-> - **Last reviewed:** 10 August 2026
+> - **Last reviewed:** 16 August 2026
 > - **Supersedes:** [`docs/archive/roadmap-v1.md`](archive/roadmap-v1.md) and the strategy review in [`docs/archive/strategy-review-2026-08.pdf`](archive/strategy-review-2026-08.pdf)
+>
+> **16 August 2026 correction.** An audit checked this document's claims against the
+> code and the live database. Most held exactly. Two did not, and both were
+> understatements of how weak the foundations are — the eval set is smaller than
+> claimed (8 gating cases, not 13) and 128 documents are silently unreadable by Ask.
+> Section 2 and items **N1** and **N8** are rewritten below with measured numbers.
 
 **Naming rule so this never gets confusing again:** the current roadmap is always this
 file, `docs/roadmap.md`, with no date in the filename. A roadmap file *with* a date in its
@@ -49,10 +55,28 @@ state a plan imagined.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
-- **The answer-quality eval set is too small to steer by.** 13 of 35 cases are verified
-  against the real manuals; the other 22 are unconfirmed templates that report but do not
-  gate. Almost every remaining idea in this roadmap is a change whose value can only be
-  judged by that suite.
+- **The answer-quality eval set barely exists.** Not "too small" — measured on
+  16 August 2026, **8 of 35 cases are verified** and gate the build; the other 27 are
+  unconfirmed templates that report but never fail. Worse than the count: of those 8,
+  four are refusals of nonsense (`refuse-flux-capacitor`, `refuse-boeing-tire`,
+  `refuse-warp-core`, `refuse-turbo-boost-pressure`), two are verifier-rejection probes
+  with a stubbed model, and the remaining two — `oil-drain-plug-torque` and
+  `oil-drain-plug-torque-citation-support` — check **the same single fact**.
+  So the gating suite proves the app refuses nonsense and rejects a forged citation, and
+  verifies exactly **one** real specification from the manuals. Almost every remaining
+  idea in this roadmap is a change whose value can only be judged by that suite, and
+  right now that suite can detect a regression in one torque figure.
+- **128 documents are phantom inventory — Ask AI cannot read them at all.** Measured
+  against the live database on 16 August 2026: **128 of 1,443 documents (8.9%) have zero
+  chunks.** They are listed on the Documents page, they are counted in the library total,
+  they can be linked to a symptom — and they can never appear in an answer, because
+  retrieval only ever sees chunks. 137 documents carry the status `no_text_found`
+  (image-only scans, contributing 17 chunks between them), one failed to parse, one was
+  never attempted. The library reports 1,443 documents; roughly one in eleven of them is
+  a document the app cannot read a single word of, and nothing in the UI says so. This
+  was previously folded into N8 as a reporting gap. It is not a reporting gap — it is a
+  correctness bug with a reporting symptom, and it is now item **N0**.
+
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
@@ -97,7 +121,8 @@ this alone.
 
 | # | Item | Priority | Maintenance |
 | --- | --- | --- | --- |
-| N1 | Grow the verified answer-eval set | Critical | Slight increase (test data only) |
+| **N0** | **Make the 128 unreadable documents readable (or visibly broken)** | **Blocker** | Slight increase |
+| **N1** | **Grow the verified answer-eval set** | **Emergency** | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | High | Reduces |
 | N3 | Repair history and maintenance records | Critical | Increase (one migration, one page) |
 | N4 | Close the two named evidence gaps | High | Slight increase |
@@ -106,23 +131,87 @@ this alone.
 | N7 | Stop the four pages downloading the whole library | High | Slight increase |
 | N8 | Document-health report | High | Slight increase |
 
-**N1 — Grow the verified answer-eval set from 13 to about 30 cases.**
+**N0 — Make the 128 unreadable documents readable, or make them visibly broken. Priority: Blocker.**
+*Problem it solves:* 128 of 1,443 documents (8.9%) have zero chunks and cannot appear in
+any answer, while the app presents them as ordinary library members. This is the worst
+failure shape the app has: not a wrong answer, but a **silently incomplete** one. Ask says
+"the documents do not cover that" while holding a document that does cover it, in a picture
+the app never converted to text. The owner cannot tell that apart from a genuine gap.
+*Diagnosis, already done — do not re-derive it:*
+
+- Poppler is installed and working (`pdftoppm` 25.07.0). **Tesseract is not installed at
+  all** — running the current extractor over `Alarm_Module-8618784e.pdf` fails with
+  `spawn tesseract ENOENT`, and it only reaches Tesseract *because* Poppler succeeded.
+- Every affected document predates working OCR. Their stored status is a bare
+  `no_text_found`, which `buildExtractionStatus` only returns when **no OCR warning was
+  recorded at all** — so OCR never ran on them. If OCR had run and the tools were missing,
+  the status would read `ocr_unavailable: …`. Not one document in the corpus carries any
+  OCR status: no `completed_with_ocr`, no `ocr_unavailable`, no `ocr_failed`.
+- The stored statuses are therefore **stale**, not current truth. The extractor as it
+  stands today returns `completed_with_warning: ocr_unavailable: …` for these files.
+
+*The trap, and the reason ordering matters:* these PDFs are not textless. They carry a
+tiny title-only text layer — `"Alarm Module"` is 12 characters, `"Ampli fi er"` is 11 —
+which is below the 20-character `OCR_MIN_TEXT_CHARACTERS` threshold, so OCR is correctly
+attempted. But that title text is enough to make `extractedText` non-empty. **Re-extracting
+before Tesseract is installed would flip all 128 from "0 chunks, `no_text_found`" to
+"1 title-only chunk, `completed_with_warning`" — a state that looks repaired, pollutes
+retrieval with meaningless chunks, and still contains none of the wiring-diagram content.**
+Install Tesseract first, prove it on one page, then re-extract. Never the other way round.
+*Scope:* 137 candidate documents, 705 pages total — small enough to re-run in one sitting.
+*Acceptance:* no document in the library has zero chunks without the UI saying so. A scan
+that genuinely cannot be read after OCR is an acceptable outcome; a scan that is silently
+absent from retrieval is not.
+
+**N1 — Grow the verified answer-eval set from 8 to about 30 cases. Priority: Emergency.**
 *Problem it solves:* right now most quality changes cannot be judged. Every retrieval,
 prompt, chunking, and model change below is a coin flip without this.
-*Why it matters:* it is the single highest-leverage engineering task in this document,
-because it is what makes all the others decidable. Target the failure classes that actually
-occur on this corpus: the correct number attached to the wrong component, two manual
-sections that disagree, table-derived values, OCR-noisy pages, follow-up questions, and
-questions the manuals genuinely do not answer. Do not chase a case count — stop when the
-failure classes are covered.
+*The real starting position, stated plainly:* the suite has **8 gating cases, and exactly
+one verified fact** — oil drain plug torque, checked twice. Four cases refuse invented
+nonsense, two drive a stubbed model through the verifier. Those are worth keeping and they
+prove real properties, but none of them reads a number out of your manuals. A retrieval
+change that broke every specification lookup except the oil drain plug would pass this
+suite clean. That is not a safety net; it is a single tripwire across one doorway.
+*Why it is an emergency rather than merely critical:* it is not the highest-value feature
+in this document — it is the item without which the value of every other item is unknowable.
+N4, N5, N6's reranker decision, and all of M2 are gated on it. Building features on top of
+a suite this thin means shipping changes whose effect on answer quality is literally
+unmeasured, in an app whose entire premise is trustworthy answers.
+*How to do it:* target the failure classes that actually occur on this corpus — the correct
+number attached to the wrong component, two manual sections that disagree, table-derived
+values, OCR-noisy pages, follow-up questions, and questions the manuals genuinely do not
+answer. Convert the 27 existing templates first: each already has a question and a shape,
+and needs only a value confirmed against the cited page. Do not chase a case count — stop
+when the failure classes are covered.
+*Sequencing note:* N0 changes what is retrievable, so cases written against the corpus
+before the OCR re-extraction may need re-confirming after it. Do N0 first, or write cases
+that avoid the 137 affected documents until it lands.
+*Budget the run, not just the writing:* `evalAnswers.js` deliberately paces itself
+(`EVAL_CASE_DELAY_MS`, default 2 s per case, plus 429 backoff) because running cases
+back-to-back trips the account's tokens-per-minute tier and a 429 reads exactly like a
+product regression. That pacing is linear in case count, so growing the suite grows every
+future run's wall-clock and spend. It is worth it — but it means "run the evals" stops
+being free, which is the practical argument for N2's written rule about *when* they run.
 
-**N2 — Repair the eval suite's own defects.**
-*Problem it solves:* the vision case `vision-refuses-unsupported-spec` fails every run
-because its 1×1 placeholder image is not a valid image, so a permanently red case sits in
-the suite teaching everyone to ignore red. Replace the fixture with a real photo or delete
-the case. Alongside it, write down when evals run — the answer eval costs money and needs
-the real corpus, so it cannot live in CI, which means the rule has to be explicit: run it
-before merging any retrieval, prompt, chunking, or model change, and record the result in
+**N2 — Repair the eval suite's own defects. Partly done, 16 August 2026.**
+*Problem it solves:* red that means nothing teaches you to ignore red. Two instances of
+that were fixed on 16 August 2026:
+
+- The vision case `vision-refuses-unsupported-spec` sent a 1×1 PNG — structurally a valid
+  PNG, but not a usable photograph. It now loads a real 512×512 fixture from
+  `server/src/evals/fixtures/vision-placeholder.png`, swappable for an actual photo of the
+  car by overwriting the file. It stays `verified: false` until it has been observed
+  passing against the real model with a key; flip it to `true` then, because it tests a
+  safety property — a photo must never become a source for a specification.
+- The client test suite had no `testTimeout`, so vitest's 5000 ms default applied to files
+  that take 40–70 seconds. It failed 2–9 tests per run with a *different* set each time,
+  always a bare timeout and never an assertion, while CI's faster runner stayed green.
+  `client/vite.config.js` now sets `testTimeout` and `hookTimeout` to 30000; the suite went
+  from 2–9 spurious failures to 337/337 passing.
+
+*Still to do:* write down when evals run. The answer eval costs money and needs the real
+corpus, so it cannot live in CI, which means the rule has to be explicit: run it before
+merging any retrieval, prompt, chunking, or model change, and record the result in
 [`docs/evals/ask-rag-iteration-log.md`](evals/ask-rag-iteration-log.md).
 
 **N3 — Repair history and maintenance records.**
@@ -185,10 +274,21 @@ and it is felt most on the device you actually use while working.
 regression is caught rather than absorbed.
 
 **N8 — Document-health report.**
+*Scope changed 16 August 2026:* the "128 documents Ask cannot read" problem was pulled out
+of this item into **N0**, because it is a correctness bug that happens to be invisible, not
+a reporting gap. N8 is now the standing instrument, and N0 is the one-time repair. Build N0
+first: fixing the documents does not need a dashboard, and a dashboard whose first render
+lists 128 broken documents is a worse outcome than one that lists none.
 *Problem it solves:* there is no way to answer "why didn't Ask find that?" Flag documents
 and pages that are low-text, OCR'd, missing embeddings, failed to parse, look like a table,
 or contain overprinted duplicate text. Present it as a maintenance view listing only what
 needs attention.
+*One hard requirement carried over from N0:* zero chunks must be a first-class, loud state —
+it is the condition under which the app confidently tells you it has nothing while holding
+a document that does. A stale `extraction_status` is not sufficient evidence of health; N0
+established that the stored statuses are historical artifacts of whatever extractor version
+ran at import time, and disagree with what the current extractor produces. Derive health
+from the chunk and embedding rows, not from the stored status string.
 *Why it matters:* it makes the corpus auditable, and it is the prerequisite for judging any
 future extraction change. Include the already-measured overprinting artifact — 366 of
 19,636 chunks across 75 documents contain a three-times-repeated phrase — as a display-only
