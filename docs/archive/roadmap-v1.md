@@ -1,7 +1,25 @@
-******Historical roadmap: this document describes the original V1 development plan.
- For the current roadmap, see docs/roadmap-2026-2027.md.
+# Corolla Fix Helper Roadmap (V1) — HISTORICAL
 
-# Corolla Fix Helper Roadmap
+> ## ⚠️ This is not the current roadmap. Do not plan work from this file.
+>
+> **The current roadmap is [`docs/roadmap.md`](../roadmap.md).**
+>
+> This was the V1 baseline-and-next-work document. It was maintained continuously from the
+> first commit until August 2026, when the 2026–2027 roadmap replaced it as the forward
+> plan and it moved into `docs/archive/`.
+>
+> **How to read what is below.** The feature inventory ("Current V1 Baseline") was accurate
+> when archived, but [`README.md`](../../README.md) and
+> [`docs/architecture.md`](../architecture.md) are the maintained descriptions of what the
+> app does — prefer those. The "Best Next Work" and "Future AI Work" lists are superseded:
+>
+> - **Still valid, and carried into the current roadmap:** confirming the unverified answer
+>   templates against the real manuals; measuring the reranker before enabling it; the
+>   first-stage retrieval tuning pass; adding real-manual eval cases; a maintenance path for
+>   rebuilding chunks; and tightening `strictNullChecks` incrementally.
+> - **Deliberately dropped:** hardening the Google Compute Engine deployment path for a
+>   public URL. The project settled on local-first with loopback-by-default binding, so
+>   preparing a public deployment is no longer a goal. See section 6 of the current roadmap.
 
 This roadmap separates current code from future ideas. 
 

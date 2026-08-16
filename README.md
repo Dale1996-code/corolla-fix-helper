@@ -214,7 +214,7 @@ Operating it:
 
 Planning:
 
-- [Roadmap](ROADMAP.md)
+- [Roadmap](docs/roadmap.md) — the current plan, and the only one. Older roadmaps live in `docs/archive/` and are history; a roadmap filename with a date in it is a snapshot, the undated `docs/roadmap.md` is current.
 - [Google Cloud deployment](docs/gcp-deployment.md) (intended path, not a live deployment) and [Cost control](docs/cost-control.md)
 - `docs/archive/` holds superseded plans — do not treat as current
 
