@@ -99,6 +99,7 @@ Everything lives in one SQLite file (`server/data/` by default) plus `server/upl
 
 ## Docs worth knowing
 
+- `docs/roadmap.md` — the **current** roadmap and the only forward plan. `docs/archive/` holds the superseded ones (`roadmap-v1.md`, `strategy-review-2026-08.pdf`, and `project-health-report-2026-06-20.docx`, which is an audit rather than a roadmap despite its original filename). A dated roadmap filename is a historical snapshot; the undated `docs/roadmap.md` is current. Never plan or justify work from an archived one.
 - `AGENTS.md` — the most detailed running log of conventions, env vars, and recently-verified commands; check it first when this file is thin on a topic
 - `docs/architecture.md` — current app structure; `docs/api.md` — per-route `/api` endpoint reference; `docs/onboarding.md` — new-developer walkthrough
 - `QA_CHECKLIST.md` — manual verification steps after changes

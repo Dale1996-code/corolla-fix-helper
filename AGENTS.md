@@ -179,6 +179,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 ## Useful Docs
 
 - `README.md` is the main entry point.
+- `docs/roadmap.md` is the CURRENT roadmap and the only forward plan. Everything roadmap-shaped in `docs/archive/` is history — `roadmap-v1.md`, `strategy-review-2026-08.pdf`, and `project-health-report-2026-06-20.docx` (an audit, not a roadmap, despite its original filename). The rule: a dated roadmap filename is a snapshot, the undated `docs/roadmap.md` is current. Do not plan or justify work from an archived one.
 - `docs/onboarding.md` is the new-developer guide with a file walkthrough and first-day checklist.
 - `docs/getting-started-windows.md` explains the interactive `start-corolla-helper.ps1` setup path.
 - `docs/api.md` is the endpoint reference for every `/api` route.
