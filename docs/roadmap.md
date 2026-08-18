@@ -46,6 +46,9 @@ state a plan imagined.
   proves the round trip.
 - CI runs lint, typecheck, both test suites, the production build, and a smoke test.
 - The 2026-06-20 health report's findings are, with two exceptions noted below, shipped.
+- **The corpus is no longer silently incomplete.** 128 documents held zero chunks and were
+  invisible to Ask regardless of how good their PDFs were. That is now diagnosed, recovered,
+  and embedded — see **N0**, which is complete.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
@@ -97,6 +100,7 @@ this alone.
 
 | # | Item | Priority | Maintenance |
 | --- | --- | --- | --- |
+| N0 | Recover the zero-chunk corpus | **Done** | Neutral (on-demand batch tooling) |
 | N1 | Grow the verified answer-eval set | Critical | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | High | Reduces |
 | N3 | Repair history and maintenance records | Critical | Increase (one migration, one page) |
@@ -105,6 +109,44 @@ this alone.
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | High | Slight increase |
 | N8 | Document-health report | High | Slight increase |
+
+**N0 — Recover the zero-chunk corpus. Done, August 2026.**
+*Problem it solved:* 128 of 1,443 documents held zero `document_chunks`. A document with no
+chunks is invisible to Ask no matter how good its PDF is, so the corpus was quietly smaller
+than the library implied — and nothing in the app said so.
+*What the diagnosis actually found:* not one problem but four. 120 scanned electrical wiring
+diagrams with no text layer at all, needing OCR; one real 34-page DTC chart (doc #9) whose
+stored text was already correct and simply had never been chunked; six dev/test fixtures;
+and one malformed PDF. An important secondary finding: the scanned diagrams are **not**
+duplicates of prose already in the corpus. Where a text "twin" exists it is a 593–725
+character stub — breadcrumb, title, `Locations:` — so the scans are the only source of the
+component, connector and signal names on those sheets.
+*Measured outcome:* zero-chunk **128 → 13**. Doc #9 recovered by re-chunking its existing
+text, no OCR. The scanned diagrams recovered through the production extractor with local
+OCR: a single resumable batch processed 115 candidates to 109 recovered, 6 needs-review,
+**0 failed, 0 OCR warnings**. The corpus went from 19,742 to **20,447 chunks** and from 5 to
+**114** `completed_with_ocr` documents. All 20,447 chunks are embedded on the current
+contract (`text-embedding-3-small@512`) with **0 missing**, and database integrity is `ok`.
+*Why the OCR chunks were embedded whole, with no quality filter:* a noise gate was designed
+and then rejected on measurement. Embedding all 757 OCR chunks costs about $0.002 in total,
+so there was no spend to protect; meanwhile a gate would have dropped chunks carrying real
+connector IDs and signal labels, 20 of which were the only chunk representing their page.
+Filtering would have cost evidence to save nothing.
+***What "complete" means here, because it is not "every PDF produced chunks":*** the 13
+documents still holding zero chunks are all explained — 1 malformed source, 6 dev/test
+fixtures, and 6 genuinely sparse diagrams whose OCR yield (165–239 characters) fell under the
+recovery confidence threshold and were therefore **deliberately left unrecovered**. The
+recovery contract only ever persists a `recovered` verdict; `needs-review`, `failed`, and
+`skipped` write nothing at all. A document that stays visibly unrecovered is the safety
+system working, not a gap. Forcing thin or meaningless extractions through to make the count
+reach zero would make the corpus look healthier than it is, which is the failure this item
+existed to prevent.
+*What it deliberately did not touch, and what it surfaced for later:* retrieval was measured
+but not tuned. Two findings belong to **M2**: one wiring diagram can occupy several top
+retrieval slots because its title repeats on every page (an "interior light wiring" query
+returned only 4 distinct documents across 8 hybrid results), and the corpus contains
+duplicate-text document groups (#835/#836/#837 and #839/#840) that amplify the same effect.
+Neither is fixed here.
 
 **N1 — Grow the verified answer-eval set from 13 to about 30 cases.**
 *Problem it solves:* right now most quality changes cannot be judged. Every retrieval,

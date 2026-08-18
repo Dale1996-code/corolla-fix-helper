@@ -6,6 +6,7 @@ server/dist/
 server/data/*.db
 server/data/*.db-shm
 server/data/*.db-wal
+server/data/diagnostics/
 server/uploads/*
 !server/uploads/.gitkeep
 .env

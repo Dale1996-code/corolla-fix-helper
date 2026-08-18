@@ -816,9 +816,21 @@ export async function createDocument({
 // Re-run extraction for an existing document from its stored bytes: refresh the
 // extracted text/status/page count and rebuild its chunks, returning the freshly
 // mapped document.
-export async function reextractDocument(documentId, fileBuffer) {
-  const extractionResult = await extractPdfData(fileBuffer);
-
+/**
+ * Write an already-computed extraction result over a document: text, status,
+ * page count, then its chunks.
+ *
+ * Split out of `reextractDocument` so a caller that must inspect an extraction
+ * before trusting it (the N0 recovery batch checks OCR actually produced
+ * substantive text) can run the same persistence the upload route runs, instead
+ * of extracting twice or hand-rolling a second copy of these writes.
+ *
+ * Order matters: the row is updated before the chunks are rebuilt, so an
+ * interruption between the two leaves a document with text and no chunks --
+ * still visibly unrecovered, and safe to reprocess -- rather than chunks whose
+ * document row claims there is no text.
+ */
+export function persistExtractionResult(documentId, extractionResult) {
   db.prepare(`
     UPDATE documents
     SET
@@ -834,7 +846,13 @@ export async function reextractDocument(documentId, fileBuffer) {
     documentId
   );
 
-  rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+  return rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+}
+
+export async function reextractDocument(documentId, fileBuffer) {
+  const extractionResult = await extractPdfData(fileBuffer);
+
+  persistExtractionResult(documentId, extractionResult);
 
   return getDocument(documentId);
 }
