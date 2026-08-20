@@ -16,6 +16,10 @@
 // redaction, and the metrics sanitizer. Those are what a rejection regression
 // would break, and they are what these cases pin.
 
+// The source-label format is owned by the evidence contract; importing it keeps
+// the probe and the verifier from drifting apart on what "S1" means.
+import { sourceLabel } from "../services/askEvidenceContract.js";
+
 /**
  * An impossible torque figure. Chosen so it cannot collide with a real value in
  * any manual, and so a plain substring scan of the response proves the value
@@ -25,6 +29,33 @@ export const REJECTION_PROBE_SENTINEL = "999999 N·m";
 
 /** Matches the sentinel's digits alone, so a reformatted unit cannot hide it. */
 export const REJECTION_PROBE_SENTINEL_PATTERN = /999999/;
+
+/**
+ * A component name no repair manual can contain.
+ *
+ * The subject guard is lexical: it asks whether the part named in the claim
+ * appears in the quote. A probe that named a PLAUSIBLE neighbouring part would
+ * be testing the corpus rather than the guard, because whether it rejects then
+ * depends on which chunk retrieval happened to rank first -- and real pages mix
+ * parts freely (the drain-plug page also says "oil filter cap", so a claim about
+ * the filter cap would be ACCEPTED there, which the verification boundary in
+ * CLAUDE.md documents as expected). Confirmed against the local corpus: "flux"
+ * appears in 0 of 20,447 chunks, so this sequence cannot be present in any
+ * quote, whichever chunk is retrieved. Adversarial subtlety belongs in the
+ * contract unit tests, which control the quote; this probe exists to prove the
+ * END-TO-END path rejects, and for that it must be deterministic.
+ */
+export const REJECTION_PROBE_SENTINEL_PART = "flux capacitor mounting bolt";
+
+/**
+ * A quote that is in no document, for the same reason as the part name above.
+ * It must fail `quoteAppearsInChunk` no matter what retrieval returned.
+ */
+export const REJECTION_PROBE_FABRICATED_QUOTE =
+  "Tighten the flux capacitor mounting bolt with the calibrated dilithium wrench.";
+
+/** A torque value as printed in these manuals ("37 Nm", "5.5 N*m", "27 N·m"). */
+const TORQUE_VALUE_PATTERN = /\d+(?:\.\d+)?\s*N\s*[*·.]?\s*m\b/i;
 
 /** Longest verbatim slice we quote back. Bounded so a probe stays readable. */
 const QUOTE_LENGTH = 400;
@@ -39,6 +70,28 @@ const QUOTE_LENGTH = 400;
  */
 function verbatimQuote(chunk) {
   return String(chunk?.chunkText || "").slice(0, QUOTE_LENGTH);
+}
+
+/**
+ * Find the first retrieved chunk whose quote states a torque, with the source
+ * label that chunk will be given.
+ *
+ * Labels are POSITIONAL -- verifyEvidence maps S1..Sn onto the retrieval order
+ * -- so the label has to be derived from the same index the quote came from.
+ * Hard-coding "S1" here would make the probe depend on the drain-plug page
+ * still ranking first, which is a retrieval fact and not the thing under test.
+ */
+function findTorqueEvidence(chunks) {
+  for (const [index, chunk] of chunks.entries()) {
+    const quote = verbatimQuote(chunk);
+    const match = quote.match(TORQUE_VALUE_PATTERN);
+
+    if (match) {
+      return { sourceId: sourceLabel(index), quote, torque: match[0] };
+    }
+  }
+
+  return null;
 }
 
 const PROBES = {
@@ -73,6 +126,93 @@ const PROBES = {
     ],
     generalGuidance: [],
     gaps: [],
+  }),
+  /**
+   * A real source, a real verbatim quote, a real NUMBER -- and the wrong part.
+   *
+   * This is the failure class the roadmap names first: "the correct number
+   * attached to the wrong component". It is the only probe whose claim clears
+   * every earlier check -- known source, verbatim quote, and a value the
+   * evidence really does state -- so it can only be stopped by the subject
+   * guard. The torque is read back OUT of the retrieved evidence at run time
+   * rather than hard-coded, so the probe keeps testing the guard rather than
+   * testing whether one particular chunk still ranks first.
+   */
+  subject_mismatch: (chunks) => {
+    const evidence = findTorqueEvidence(chunks);
+
+    if (!evidence) {
+      // Loudly, not silently. A probe that quietly fell back to some other
+      // claim shape would still "reject", and the case would go green while
+      // testing a different check than the one it is named for.
+      throw new Error(
+        "subject_mismatch probe: no torque value in the retrieved evidence, " +
+          "so the claim could not clear the numeric check first"
+      );
+    }
+
+    return {
+      documentSupported: [
+        {
+          claim: `The ${REJECTION_PROBE_SENTINEL_PART} torque is ${evidence.torque}.`,
+          sourceId: evidence.sourceId,
+          evidenceQuote: evidence.quote,
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    };
+  },
+
+  /**
+   * A real source label with a quote that is in no document at all.
+   *
+   * Distinct from numeric_anomaly on purpose: that probe proves a real quote
+   * with a bad number is caught, this one proves the quote itself is checked
+   * against the chunk the label maps to, rather than trusted because the label
+   * resolved.
+   */
+  quote_not_in_source: () => ({
+    documentSupported: [
+      {
+        claim: `The oil drain plug torque is ${REJECTION_PROBE_SENTINEL}.`,
+        sourceId: "S1",
+        evidenceQuote: REJECTION_PROBE_FABRICATED_QUOTE,
+      },
+    ],
+    generalGuidance: [],
+    gaps: [],
+  }),
+
+  /**
+   * A specification smuggled through the UNSOURCED channel.
+   *
+   * General guidance carries no source id and no quote, so any unit-bearing
+   * value in it is unsupported by definition however confidently it reads.
+   * Worth an end-to-end case because this channel bypasses source mapping and
+   * quote checking entirely -- it is gated only by the specification detector.
+   */
+  unsourced_specification: () => ({
+    documentSupported: [],
+    generalGuidance: [
+      `As a general rule, tighten the drain plug to ${REJECTION_PROBE_SENTINEL}.`,
+    ],
+    gaps: [],
+  }),
+
+  /**
+   * The same value smuggled through the channel that describes what is MISSING.
+   *
+   * A gap is model-authored text rendered to the owner, so an invented figure
+   * inside one is still on screen -- under a heading that reads as a caveat,
+   * which is worse than stating it outright.
+   */
+  unsourced_gap_specification: () => ({
+    documentSupported: [],
+    generalGuidance: [],
+    gaps: [
+      `The documents do not confirm the ${REJECTION_PROBE_SENTINEL} drain plug torque.`,
+    ],
   }),
 };
 

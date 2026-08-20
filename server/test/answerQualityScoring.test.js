@@ -561,3 +561,219 @@ test("a rejection case never scores as an answered case", () => {
   assert.ok(checks.some((check) => /status is not_found and not answered/.test(check.name)));
   assert.ok(!checks.some((check) => /has at least one citation/.test(check.name)));
 });
+
+// ---- N1: an answered case can forbid a claim, not only a rejection case ----
+
+const applicabilityCase = () => ({
+  id: "applicability",
+  category: "capacity",
+  verified: false,
+  expect: "answered",
+  mustIncludeAny: [/\b92\s*mm/i],
+  mustNotIncludeAny: [/\b96\s*mm/i, /\b51\s*mm/i],
+  citationDocLike: /alignment/i,
+});
+
+/**
+ * The real shape of this evidence: one cited table listing BOTH engines. Any
+ * assertion that scanned citations instead of the answer would fail here for
+ * quoting the source correctly.
+ */
+const alignmentCitation = {
+  documentTitle: "Alignment - Front Wheel Alignment - Adjustment",
+  pageNumber: 2,
+  snippet:
+    "Vehicle Height (Unloaded Vehicle): for TMC Made 2ZR-FE 92 mm (3.62 in.) 45 mm (1.77 in.) " +
+    "except TMC Made 2ZR-FE 92 mm 80 mm* 2AZ-FE 96 mm (3.78 in.) 81 mm* 51 mm (2.01 in.)",
+};
+
+test("an answered case passes when the answer names only this car's variant", () => {
+  const result = {
+    status: "answered",
+    answer:
+      "For the 1.8L 2ZR-FE the unloaded vehicle height is 92 mm (3.62 in.) at the front.",
+    citations: [alignmentCitation],
+  };
+
+  assert.equal(evaluateAnswerCase(applicabilityCase(), result).pass, true);
+});
+
+test("an answered case fails when the answer asserts the other engine's figure", () => {
+  // The applicability failure this field exists to catch: correctly retrieved,
+  // correctly cited, and wrong for this car.
+  const result = {
+    status: "answered",
+    answer: "The unloaded vehicle height is 96 mm (3.78 in.) at the front.",
+    citations: [alignmentCitation],
+  };
+
+  const scored = evaluateAnswerCase(applicabilityCase(), result);
+
+  assert.equal(scored.pass, false);
+  assert.ok(
+    scored.checks.some((check) => !check.pass && /does not assert/.test(check.name)),
+    "the forbidden-claim check should be the one that failed"
+  );
+});
+
+test("a citation may quote the wrong variant; only the answer may not assert it", () => {
+  // Deliberate asymmetry with rejection cases, which scan the whole response.
+  // Here the cited snippet contains 96 mm and 51 mm because the manual's table
+  // really does, and showing the source honestly is not the failure.
+  const result = {
+    status: "answered",
+    answer: "For your 2ZR-FE the figure is 92 mm; the 2AZ-FE row does not apply.",
+    citations: [alignmentCitation],
+  };
+
+  assert.equal(evaluateAnswerCase(applicabilityCase(), result).pass, true);
+  assert.match(alignmentCitation.snippet, /96 mm/);
+});
+
+test("the forbidden-claim check still runs alongside the conjunctive citation check", () => {
+  // checkAnswered returns early once citationDocLike and citationSupportsAny are
+  // both set. The forbidden-claim check must be evaluated before that return, or
+  // it would silently vanish on exactly the strictest cases.
+  const testCase = {
+    ...applicabilityCase(),
+    citationSupportsAny: [/\b92\s*mm/i],
+  };
+  const result = {
+    status: "answered",
+    answer: "The unloaded vehicle height is 96 mm.",
+    citations: [alignmentCitation],
+  };
+
+  const scored = evaluateAnswerCase(testCase, result);
+
+  assert.ok(
+    scored.checks.some((check) => /does not assert/.test(check.name)),
+    "the forbidden-claim check was skipped by the early return"
+  );
+  assert.equal(scored.pass, false);
+});
+
+test("cases without mustNotIncludeAny are scored exactly as before", () => {
+  const { mustNotIncludeAny, ...withoutField } = applicabilityCase();
+  const result = {
+    status: "answered",
+    answer: "The unloaded vehicle height is 92 mm, and the 2AZ-FE figure is 96 mm.",
+    citations: [alignmentCitation],
+  };
+
+  assert.ok(mustNotIncludeAny, "the fixture should have had the field to remove");
+  assert.equal(evaluateAnswerCase(withoutField, result).pass, true);
+});
+
+// ---- N1 preflight: every rejection case scores PASS on correct behavior ----
+//
+// These cases are marked verified:true without a live run, so something has to
+// show they are not red for a mechanical reason -- a probe that trips a
+// different check, a required reason the sanitizer strips, a sentinel that
+// survives into the serialized response. This rebuilds the exact response shape
+// aiAnswerService returns for an all-rejected answer and scores the real case
+// definitions against it. No database, no network, no model.
+
+const { verifyEvidence, deriveEvidenceStatus } = await import(
+  "../src/services/askEvidenceContract.js"
+);
+const { buildRejectedMetrics, NOT_FOUND_MESSAGE } = await import(
+  "../src/services/aiAnswerService.js"
+);
+const { createRejectionProbe } = await import("../src/evals/answerRejectionProbes.js");
+
+/**
+ * Retrieval as it really arrives: several chunks, the torque page not first.
+ * Source labels are positional, so this also proves a case does not quietly
+ * depend on one document ranking top.
+ */
+const retrievedChunks = () => [
+  {
+    documentId: 748,
+    documentTitle: "Oil and Oil Filter Replacement",
+    originalFilename: "oil.pdf",
+    pageNumber: 1,
+    chunkIndex: 2,
+    chunkText: "engine oil. Do not use gasoline, thinners or solvents.",
+  },
+  {
+    documentId: 748,
+    documentTitle: "Oil and Oil Filter Replacement",
+    originalFilename: "oil.pdf",
+    pageNumber: 1,
+    chunkIndex: 3,
+    chunkText:
+      "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm " +
+      "(377 kgf-cm, 27 ft-lbf) 2. REMOVE OIL FILTER CAP ASSEMBLY",
+  },
+];
+
+/** The response askQuestionUsingDocuments builds once every claim is rejected. */
+async function runRejectionCaseThroughPipeline(testCase) {
+  const chunks = retrievedChunks();
+  const reply = await createRejectionProbe(testCase.rejectionProbe)({ chunks });
+  const verified = verifyEvidence(reply, chunks);
+  const status = deriveEvidenceStatus(verified);
+
+  return {
+    status,
+    answer: status === "not_found" ? NOT_FOUND_MESSAGE : "(rendered answer)",
+    citations: status === "not_found" ? [] : [{ documentTitle: "Oil", pageNumber: 1 }],
+    standaloneQuestion: testCase.question,
+    evidence: {
+      documentSupported: verified.documentSupported,
+      generalGuidance: verified.generalGuidance,
+      gaps: verified.gaps,
+    },
+    metrics: { rejected: buildRejectedMetrics(verified.rejected) },
+  };
+}
+
+test("preflight: every verified rejection case passes on correct pipeline behavior", async () => {
+  const rejectionCases = answerQualityCases.filter(
+    (testCase) => testCase.expect === "rejected" && testCase.verified
+  );
+
+  assert.equal(rejectionCases.length, 6, "expected all six rejection reasons to be gated");
+
+  for (const testCase of rejectionCases) {
+    const result = await runRejectionCaseThroughPipeline(testCase);
+    const scored = evaluateAnswerCase(testCase, result);
+    const failed = scored.checks.filter((check) => !check.pass);
+
+    assert.equal(
+      scored.pass,
+      true,
+      `${testCase.id} would fail: ${failed.map((c) => `${c.name} (${c.detail})`).join("; ")}`
+    );
+  }
+});
+
+test("preflight: a rejection case fails if its own reason stops being reported", async () => {
+  // Proves the assertion above is load-bearing rather than vacuously true.
+  const testCase = answerQualityCases.find(
+    (entry) => entry.id === "reject-wrong-component-torque"
+  );
+  const result = await runRejectionCaseThroughPipeline(testCase);
+
+  assert.equal(evaluateAnswerCase(testCase, { ...result, metrics: { rejected: [] } }).pass, false);
+});
+
+test("preflight: the wrong-component case fails if the value survives beside the part", async () => {
+  // The redaction this case exists to guard. If a gap ever reprinted the torque
+  // next to the part name the claim invented, this must go red.
+  const testCase = answerQualityCases.find(
+    (entry) => entry.id === "reject-wrong-component-torque"
+  );
+  const result = await runRejectionCaseThroughPipeline(testCase);
+  const leaked = {
+    ...result,
+    evidence: {
+      ...result.evidence,
+      gaps: ["Unverified: The flux capacitor mounting bolt torque is 37 Nm."],
+    },
+  };
+
+  assert.equal(evaluateAnswerCase(testCase, result).pass, true);
+  assert.equal(evaluateAnswerCase(testCase, leaked).pass, false);
+});

@@ -49,6 +49,21 @@ const VERIFIED_IDS = [
   // note on the cases themselves in src/evals/answerQualityCases.js.
   "reject-invented-drain-plug-torque",
   "reject-unknown-source-label",
+  // N1. Same probe-driven reasoning as the two above, extended to the four
+  // rejection reasons that had no end-to-end case. askEvidenceContract.test.js
+  // drives all six reasons, but against a hand-built chunk -- these are the only
+  // cases that put them through real retrieval, real source mapping, status
+  // derivation, citation suppression and the metrics sanitizer.
+  "reject-wrong-component-torque",
+  "reject-fabricated-quote",
+  "reject-unsourced-guidance-spec",
+  "reject-unsourced-gap-spec",
+  // N1. Verified the same way refuse-turbo-boost-pressure was: by proving
+  // ABSENCE across the whole corpus rather than by observing one run. "timing
+  // belt" and "cam belt" match 0 of 20,447 chunks because this engine uses a
+  // chain, while "timing" (809) and "belt" (589) are both common -- so the
+  // refusal has to come from the missing PART, not from missing words.
+  "refuse-timing-belt-interval",
 ];
 
 const VALID_CATEGORIES = new Set([
@@ -186,6 +201,115 @@ test("golden repair topics are covered by eval cases", () => {
       /citation/i.test(testCase.id) && Array.isArray(testCase.citationSupportsAny)
   );
   assert.ok(citationCase, "no citation-support golden case");
+});
+
+test("every rejection reason the verifier can produce has an eval case (N1)", () => {
+  // The invariant that keeps this suite honest as the verifier grows. Adding a
+  // seventh reason to ASK_REJECTION_REASONS without an eval case for it now
+  // fails here instead of shipping an untested rejection path, the same way
+  // safetyClassifier.test.js asserts over its whole rule table rather than over
+  // a hand-copied subset.
+  //
+  // Why it belongs at the EVAL layer when askEvidenceContract.test.js already
+  // drives all six: that suite calls verifyEvidence directly on a chunk it
+  // built itself. It cannot see source labels assigned across really-retrieved
+  // chunks, status derivation in askQuestionUsingDocuments, citation
+  // suppression, or buildRejectedMetrics -- the sanitizer deciding what leaves
+  // the server. Those are exactly what an end-to-end rejection regression
+  // breaks, and before N1 four of the six reasons never went through them.
+  const covered = new Set(
+    answerQualityCases
+      .filter((testCase) => testCase.expect === "rejected")
+      .flatMap((testCase) => testCase.requiredRejectedReasons || [])
+  );
+
+  const uncovered = ASK_REJECTION_REASONS.filter((reason) => !covered.has(reason));
+
+  assert.deepEqual(
+    uncovered,
+    [],
+    `rejection reasons with no eval case: ${uncovered.join(", ")}`
+  );
+});
+
+test("every rejection probe is a real rejection reason (N1)", () => {
+  // Probes are named after the reason they trip. A probe whose name is not in
+  // the contract's table is either misnamed or testing something the verifier
+  // no longer produces, and both make a green case meaningless.
+  for (const name of REJECTION_PROBE_NAMES) {
+    assert.ok(
+      ASK_REJECTION_REASONS.includes(name),
+      `probe ${name} does not name a rejection reason`
+    );
+  }
+});
+
+test("applicability cases name the variant axis they are scoped to (N1)", () => {
+  // The most dangerous failure this app can produce is a confident answer for
+  // the wrong variant, because it is indistinguishable from a correct one. Each
+  // applicability case therefore has to require the ANSWER to carry a condition
+  // -- engine, build plant, or optional equipment -- rather than merely mention
+  // the topic.
+  const applicabilityCases = answerQualityCases.filter((testCase) =>
+    /^applicability-/.test(testCase.id)
+  );
+
+  assert.ok(
+    applicabilityCases.length >= 3,
+    "expected applicability cases across more than one variant axis"
+  );
+
+  const axes = new Set();
+
+  for (const testCase of applicabilityCases) {
+    assert.ok(
+      Array.isArray(testCase.mustIncludeAny) && testCase.mustIncludeAny.length,
+      `${testCase.id} must require the answer to name its condition`
+    );
+
+    const patterns = testCase.mustIncludeAny.map(String).join(" ");
+
+    if (/2ZR|2AZ|engine/i.test(patterns)) axes.add("engine");
+    if (/TMC|TMMT|plant|build|manufactur/i.test(patterns)) axes.add("build");
+    if (/ABS|VSC|TRAC/i.test(patterns) || /ABS|VSC/i.test(testCase.question || "")) {
+      axes.add("equipment");
+    }
+  }
+
+  for (const axis of ["engine", "build", "equipment"]) {
+    assert.ok(axes.has(axis), `no applicability case covers the ${axis} axis`);
+  }
+});
+
+test("an answered case can forbid a claim, not only a rejection case (N1)", () => {
+  // Before N1 mustNotIncludeAny was honored only for expect:"rejected", so no
+  // answered case could say "the other variant's number must not be presented
+  // as mine" -- which is the entire applicability failure mode. Guard the field
+  // is actually reachable from an answered case, or the assertions above would
+  // silently never run.
+  const answeredWithForbidden = answerQualityCases.filter(
+    (testCase) =>
+      testCase.expect === "answered" &&
+      Array.isArray(testCase.mustNotIncludeAny) &&
+      testCase.mustNotIncludeAny.length
+  );
+
+  assert.ok(
+    answeredWithForbidden.length >= 1,
+    "expected at least one answered case that forbids a wrong-variant claim"
+  );
+});
+
+test("OCR-recovered diagram evidence is represented in the suite (N1)", () => {
+  // N0 recovered 114 scanned wiring diagrams through OCR and no eval case
+  // touched one. OCR pages behave differently from clean text -- noisy tables,
+  // near-duplicate titles, variant headers repeated inline -- so a retrieval or
+  // chunking change can move them without anything else noticing.
+  const hasDiagramCase = answerQualityCases.some((testCase) =>
+    /wiring|diagram/i.test(testCase.question || "")
+  );
+
+  assert.ok(hasDiagramCase, "no eval case exercises an OCR-recovered diagram page");
 });
 
 test("failing unverified template cases never gate the result", () => {

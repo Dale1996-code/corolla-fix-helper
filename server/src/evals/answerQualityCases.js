@@ -35,7 +35,13 @@
 //                    model reply with one crafted to fail a specific check (optional)
 //   expectedStatus   required with expect: "rejected" — the status the server must derive
 //   requiredRejectedReasons  reasons that must appear in metrics.rejected (optional)
-//   mustNotIncludeAny  patterns that must appear NOWHERE in the response (optional)
+//   mustNotIncludeAny  patterns that must NOT appear (optional). Scope depends on the
+//                    expectation, deliberately: on a REJECTED case it scans the whole
+//                    serialized response, because a rejected value is on screen wherever
+//                    it surfaces. On an ANSWERED case it scans the answer text only --
+//                    a citation legitimately quotes a page that also lists the variant
+//                    this car does not have, and quoting evidence correctly is not the
+//                    failure; ASSERTING the wrong figure is.
 //   followUp         a second question in the same conversation (tests multi-turn memory).
 //                    standaloneIncludes checks the rewritten follow-up query.
 //
@@ -498,6 +504,223 @@ export const answerQualityCases = [
     system: "Brakes",
     expect: "answered",
     mustIncludeAny: [/abs/i, /bleed/i],
+    verified: false,
+  },
+
+  // ---- VERIFIED: the remaining four verifier rejection paths (N1) ----
+  //
+  // Same reasoning as the two cases above: the model is supplied by a probe, so
+  // the expected outcome follows from the verifier's rules and not from a fact a
+  // re-import could invalidate. What these add is COVERAGE OF THE REASON TABLE.
+  // askEvidenceContract.test.js already drives all six reasons, but it calls
+  // verifyEvidence directly with a hand-built chunk; it never exercises source
+  // mapping over really-retrieved chunks, status derivation inside
+  // askQuestionUsingDocuments, citation suppression, or buildRejectedMetrics --
+  // the sanitizer that decides what actually leaves the server. Before N1 only
+  // two of the six reasons were checked through that path.
+  {
+    id: "reject-wrong-component-torque",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["subject_mismatch"],
+    rejectionProbe: "subject_mismatch",
+    // THE failure class the roadmap names first: a correct number attached to
+    // the wrong component. The probe reads a real torque back out of the
+    // retrieved evidence, so the claim clears the source, quote and numeric
+    // checks and can only die on the subject guard.
+    //
+    // The assertion is that the number must not be reprinted NEXT TO the wrong
+    // part. The rejection becomes a gap reading "...the flux capacitor mounting
+    // bolt torque is [unverified value]." - if redaction ever regressed a digit
+    // would follow the part name and this fails.
+    mustNotIncludeAny: [/flux capacitor[^.]*\d/i],
+    verified: true,
+  },
+  {
+    id: "reject-fabricated-quote",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["quote_not_in_source"],
+    rejectionProbe: "quote_not_in_source",
+    // A resolvable source label with a quote that is in no document. Proves the
+    // quote is checked against the chunk the label maps to, rather than trusted
+    // because the label resolved.
+    mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
+    verified: true,
+  },
+  {
+    id: "reject-unsourced-guidance-spec",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["unsourced_specification"],
+    rejectionProbe: "unsourced_specification",
+    // The general-guidance channel carries no source id and no quote, so it
+    // bypasses source mapping and quote verification entirely. A specification
+    // arriving there is unsupported by definition, and this is the only eval
+    // case that walks that channel end to end.
+    mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
+    verified: true,
+  },
+  {
+    id: "reject-unsourced-gap-spec",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["unsourced_gap_specification"],
+    rejectionProbe: "unsourced_gap_specification",
+    // A value hidden inside the channel that describes what is MISSING. It is
+    // still rendered to the owner, under a heading that reads as a caveat.
+    mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
+    verified: true,
+  },
+
+  // ---- VERIFIED: a plausible specification this engine cannot have (N1) ----
+  {
+    id: "refuse-timing-belt-interval",
+    question: "When should the timing belt be replaced on this Corolla?",
+    category: "refusal",
+    system: "Engine",
+    expect: "refused",
+    // CONFIRMED against the local corpus (1,443 documents / 20,447 chunks):
+    //   /timing[\s-]*belt/i -> 0 chunks
+    //   /cam[\s-]*belt/i    -> 0 chunks
+    // The 2ZR-FE drives its camshafts with a timing CHAIN, so no replacement
+    // interval for a timing belt exists anywhere in these manuals.
+    //
+    // Why this is a stronger refusal than the fictional ones, and stronger than
+    // refuse-turbo-boost-pressure: the distractors are not glossary rows, they
+    // are REAL PARTS THAT REALLY GET REPLACED.
+    //   /\btiming\b/i   -> 809 chunks (timing chain, valve timing, VVT)
+    //   /\bbelt\b/i     -> 589 chunks (V-ribbed drive belt)
+    //   /timing chain/i -> 118 chunks
+    //   belt within 40 chars of replace|interval|mile|km -> 39 chunks, every one
+    //   inspected and all drive-belt content: documents 438/439/440 "Drive Belt
+    //   ... Removal and Replacement", 654 "Engine General Maintenance", and
+    //   689/701 "Maintenance Service Intervals".
+    // Both halves of the question are richly represented and belt-replacement
+    // mileage text is sitting right there, so the refusal has to come from the
+    // absence of the PART, not the absence of the words. Inventing a 60,000 or
+    // 90,000 mile timing-belt interval is one of the most common wrong answers
+    // given about Toyotas, which is exactly why it is worth gating.
+    //
+    // Registered in negativeCorpusPreconditions.js: importing a manual for a
+    // belt-driven engine would make this case pass for the wrong reason, so the
+    // live runner checks the premise before trusting the expectation.
+    verified: true,
+  },
+
+  // ---- TEMPLATES: applicability, backed by CONFIRMED conflicting evidence (N1) ----
+  //
+  // Read the classification carefully. The EVIDENCE below is verified - the
+  // quoted rows were read out of the live corpus and the chunk ids are exact.
+  // What is NOT yet verified is the BEHAVIOR: nobody has observed what Ask
+  // answers for these questions, and the rule in this repository is that a
+  // verified case gates the build, so a case whose outcome has never been seen
+  // must not gate it. They stay verified:false until one live eval:answers run
+  // confirms them, and the evidence is recorded here so that run is a
+  // confirmation rather than a fresh investigation.
+  //
+  // Why they matter more than the count suggests: applicability is the most
+  // dangerous failure this app can produce, because a wrong-variant answer looks
+  // exactly like a right one. Before N1 no case could even EXPRESS it - a
+  // must-not-appear assertion only worked on rejection cases, so no answered
+  // case could say "the other engine's number must not be presented as mine".
+  {
+    id: "applicability-vehicle-height-wrong-engine",
+    question:
+      "What is the correct unloaded vehicle height when checking the front wheel alignment?",
+    category: "capacity",
+    system: "Suspension",
+    expect: "answered",
+    // CONFIRMED: chunk #236, document 109, page 2, "Alignment - Service and
+    // Repair - Procedures - Front Wheel Alignment - Adjustment". One table,
+    // four applicability axes at once:
+    //   for TMC Made    2ZR-FE  92 mm (3.62 in.)                45 mm (1.77 in.)
+    //   except TMC Made 2ZR-FE  92 mm (3.62 in.) 80 mm (3.15 in.)*  45 / 32 mm*
+    //                   2AZ-FE  96 mm (3.78 in.) 81 mm (3.19 in.)*  51 / 36 mm*
+    //   * for vehicle height for Mexico, add 15 mm (0.591 in.)
+    // This vehicle is the 1.8L 2ZR-FE, so 96 mm and 51 mm are the 2.4L 2AZ-FE
+    // figures and are WRONG here - yet they sit two lines away inside the same
+    // chunk, which is exactly the misleading-nearby-text shape.
+    mustIncludeAny: [/\b92\s*mm/i, /3\.62\s*in/i],
+    // The wrong engine's numbers must not be asserted. Answered cases scan the
+    // ANSWER text only, never the citations: the cited snippet legitimately
+    // shows the whole table, and the failure under test is asserting the wrong
+    // row as this car's figure.
+    mustNotIncludeAny: [/\b96\s*mm/i, /\b3\.78\s*in/i, /\b51\s*mm/i],
+    citationDocLike: /alignment/i,
+    verified: false,
+  },
+  {
+    id: "applicability-engine-mount-build-variant",
+    question:
+      "What is the torque for the front engine mounting insulator to the front crossmember?",
+    category: "torque",
+    system: "Engine",
+    expect: "answered",
+    // CONFIRMED: chunk #18768, document 1269, page 1, "Engine Mechanical -
+    // Torque Specifications", whose header names 2ZR-FE, so the ENGINE is not
+    // in doubt here. The build plant is:
+    //   Front engine mounting insulator x Front crossmember
+    //       for TMMT made  81 N*m  826 kgf*cm  60 ft.*lbf
+    //       for TMC  made  52 N*m  520 kgf*cm  38 ft.*lbf
+    // One fastener, one engine, two torques 29 N*m apart. A bare number is wrong
+    // for half of all cars however well it is cited, and the deterministic
+    // verifier cannot catch it: both values are in the quote and both name the
+    // same part, so either passes the numeric and subject checks. Only an answer
+    // carrying the CONDITION is safe, which is why this belongs in the
+    // answer-quality suite and not in a contract test.
+    //
+    // Systemic rather than anecdotal: /except TMC Made/i matches 825 chunks and
+    // /for TMC Made/i matches 139 across the corpus.
+    mustIncludeAny: [/TMC/i, /TMMT/i, /built|build|plant|manufactur/i],
+    citationDocLike: /torque/i,
+    verified: false,
+  },
+  {
+    id: "applicability-abs-wiring-variant",
+    question: "Which wiring diagram covers the ABS speed sensor circuit on my car?",
+    category: "behavior",
+    system: "Brakes",
+    expect: "answered",
+    // CONFIRMED: four documents that differ only by option and build plant -
+    //   91 "ABS (w o VSC) (Except TMC Made)"   7 chunks
+    //   92 "ABS (w o VSC) (TMC Made)"          8 chunks
+    //   93 "ABS (w VSC) (Except TMC Made), TRAC (Except TMC Made), VSC (...)"
+    //   94 "ABS (w VSC) (TMC Made), TRAC (TMC Made), VSC (TMC Made)"
+    // All four are scanned diagrams recovered by N0 through OCR
+    // (extraction_status completed_with_ocr, 114 documents in total), and every
+    // chunk repeats its variant header inline: "ABS <w/o VSC , Except TMC Made>".
+    //
+    // Three gaps in one case. (1) OCR-noisy evidence: the pin tables come back
+    // as "1@0 = 3 5 = eu 5 5 5 Ss" while the real signal names survive ("Park/
+    // Neutral Position Switch Assembly", "Combination Meter Assembly", "ECM",
+    // "VTA1"). No eval case touched an OCR'd page before N1, though N0 had just
+    // added 114 of them. (2) Near-duplicate sources competing for the same
+    // retrieval slots. (3) Right topic, wrong configuration - silently picking
+    // one diagram of four.
+    //
+    // The expected behavior is a CAUTIOUS answer rather than a precise one: name
+    // the variant axis (VSC fitment, build plant) instead of asserting a single
+    // diagram as though the question had one answer.
+    // Only the first two alternatives are real applicability signals; "variant"
+    // and "depends" are the looser wording an answer may use instead. Note what
+    // is NOT accepted: matching merely on "ABS" or "wiring" would make this a
+    // topic test rather than an applicability test, which is the flaw the two
+    // pre-N1 applicability templates have -- applicability-abs-variant-qualified
+    // passes on /bleed/i, which any brake-bleeding answer satisfies.
+    mustIncludeAny: [/VSC/i, /TMC/i, /variant|depends on|which version/i],
     verified: false,
   },
 ];

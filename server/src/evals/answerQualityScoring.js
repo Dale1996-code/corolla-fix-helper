@@ -99,6 +99,28 @@ function checkAnswered(result, spec, label) {
     });
   }
 
+  // Claims that must NOT appear in the answer.
+  //
+  // Scope is deliberately narrower than the rejection-case version, which scans
+  // the whole serialized response. An answered case cites real pages, and a real
+  // page routinely contains the very value that would be wrong for this car --
+  // the alignment table prints the 2ZR-FE and 2AZ-FE vehicle heights two lines
+  // apart, so a whole-response scan would fail every applicability case for
+  // quoting its own evidence correctly. What must not happen is the ANSWER
+  // ASSERTING the wrong figure, so that is what is checked.
+  //
+  // This only ever adds a way to fail. Cases without the field are unchanged.
+  if (Array.isArray(spec.mustNotIncludeAny) && spec.mustNotIncludeAny.length) {
+    for (const pattern of spec.mustNotIncludeAny) {
+      const found = textMatches(result?.answer, pattern);
+      checks.push({
+        name: `${label}: does not assert ${String(pattern)}`,
+        pass: !found,
+        detail: found ? "present in the answer" : "absent",
+      });
+    }
+  }
+
   const supportsAny =
     Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length
       ? spec.citationSupportsAny

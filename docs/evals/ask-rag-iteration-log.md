@@ -711,3 +711,161 @@ no benefit.
 
 Neither is implemented. The corpus, extraction pipeline, evidence contract, and
 UI are unchanged.
+
+## N1 — grow the VERIFIED answer-eval set (2026-08-20)
+
+Roadmap item N1. Nothing in the Ask pipeline changed: this is work on the
+measuring instrument only. No live `eval:answers` run was made — every number
+below comes from a read-only scan of the local corpus or from the deterministic
+unit suite.
+
+### The baseline was 8 verified cases, not 13
+
+The roadmap says "13 of 35 cases are verified against the real manuals". The
+real figure is **8 of 35**. `grep -c "verified: true"` returns 13 because five of
+those hits are the words *verified: true* inside instructional comments
+("...then flip it to verified: true"). Counting the flag at runtime gives 8, and
+`VERIFIED_IDS` in `answerQualityCases.test.js` — which is what actually gates —
+listed exactly those 8.
+
+What those 8 covered is thinner than the count suggests:
+
+| Verified case | What it really proves |
+| --- | --- |
+| `oil-drain-plug-torque` | one physical specification, 37 N·m |
+| `oil-drain-plug-torque-citation-support` | the same fact, plus the anti-laundering citation check |
+| `refuse-flux-capacitor` / `refuse-boeing-tire` / `refuse-warp-core` | refusal on fictional topics |
+| `refuse-turbo-boost-pressure` | refusal on a plausible-but-absent automotive spec |
+| `reject-invented-drain-plug-torque` | `numeric_anomaly` end to end |
+| `reject-unknown-source-label` | `unknown_source` end to end |
+
+So the gate rested on **one specification** and **one non-fictional refusal**.
+Nothing verified covered capacities, procedures, diagnosis, applicability,
+multi-source synthesis, OCR'd pages, or four of the verifier's six rejection
+reasons.
+
+### The two pre-N1 applicability cases do not test applicability
+
+`applicability-engine-variant-qualified` requires `[/2ZR-FE/i, /1\.8/i,
+/engine/i]` and `applicability-abs-variant-qualified` requires `[/abs/i,
+/bleed/i]`. Milestone 5 recorded both as passing live, and they would: almost any
+answer about a spark-plug gap contains "engine", and any answer about brake
+bleeding contains "bleed". They are topic tests wearing an applicability name.
+Neither can fail when the model silently picks one variant, which is the failure
+they were written for.
+
+### What N1 added
+
+**Five new verified cases (8 → 13).** Two families, both provable without a live
+run, and both matching a precedent already in the file.
+
+*Four probe-driven rejection cases* — `reject-wrong-component-torque`
+(`subject_mismatch`), `reject-fabricated-quote` (`quote_not_in_source`),
+`reject-unsourced-guidance-spec` (`unsourced_specification`),
+`reject-unsourced-gap-spec` (`unsourced_gap_specification`). Their expected
+outcome is a property of the verifier's rules rather than of a document, which is
+the same reason the two existing `reject-*` cases are verified without a corpus
+confirmation.
+
+`askEvidenceContract.test.js` already drives all six reasons, so state precisely
+what these add: that suite calls `verifyEvidence` directly on a chunk it builds
+itself. It never sees source labels assigned across really-retrieved chunks,
+status derivation inside `askQuestionUsingDocuments`, citation suppression, or
+`buildRejectedMetrics` — the sanitizer that decides what leaves the server.
+Before N1, four of the six reasons had never been through any of that.
+
+`subject_mismatch` matters most: it is the roadmap's first-named failure class,
+"the correct number attached to the wrong component", and it had no end-to-end
+case at all.
+
+*One corpus-proven refusal* — `refuse-timing-belt-interval`. Verified the way
+`refuse-turbo-boost-pressure` was, by proving absence over the whole corpus:
+
+| Pattern | Chunks (of 20,447) |
+| --- | --- |
+| `/timing[\s-]*belt/i` | **0** |
+| `/cam[\s-]*belt/i` | **0** |
+| `/\btiming\b/i` | 809 |
+| `/\bbelt\b/i` | 589 |
+| `/timing chain/i` | 118 |
+| belt within 40 chars of replace/interval/mile/km | 39 |
+
+The 2ZR-FE uses a timing chain, so the part does not exist on this car. This is a
+harder refusal than the turbo case: the turbo distractors are glossary rows,
+while these are real parts that really do get replaced on a schedule (documents
+438/439/440 Drive Belt, 654 Engine General Maintenance, 689/701 Maintenance
+Service Intervals). The refusal has to come from the absent PART, not from absent
+words. Inventing a 60,000- or 90,000-mile timing-belt interval is among the most
+common wrong answers given about Toyotas.
+
+Registered in `negativeCorpusPreconditions.js` so importing a belt-driven
+engine's manual asks for a human instead of leaving a stale case green. Run
+against the live database, the rule scanned **591 belt-mentioning chunks and
+raised 0 false alarms**.
+
+**One instrument capability.** `mustNotIncludeAny` now works on `expect:
+"answered"` cases, not only on rejections. Scope differs on purpose: a rejection
+case scans the whole serialized response, an answered case scans the answer text
+only. An answered case cites real pages, and the alignment table prints the
+2ZR-FE and 2AZ-FE heights two lines apart — a whole-response scan would fail
+every applicability case for quoting its own evidence correctly. Asserting the
+wrong figure is the failure; showing the source honestly is not. The change only
+ever adds a way to fail.
+
+**Three template cases whose EVIDENCE is verified but whose BEHAVIOR is not.**
+Classified separately and deliberately left `verified:false`, because a verified
+case gates the build and nobody has yet observed what Ask answers here.
+
+- `applicability-vehicle-height-wrong-engine` — chunk #236, doc 109 p2. One
+  table carrying four applicability axes at once: `for TMC Made 2ZR-FE 92 mm
+  (3.62 in.)`, `except TMC Made 2ZR-FE 92 mm / 80 mm*`, `2AZ-FE 96 mm (3.78 in.)
+  / 81 mm*`, and `* for vehicle height for Mexico, add 15 mm`. This car is the
+  2ZR-FE, so 96 mm and 51 mm are the 2.4L figures — sitting two lines from the
+  right ones inside the same chunk. First case in the suite that forbids the
+  wrong-variant number.
+- `applicability-engine-mount-build-variant` — chunk #18768, doc 1269 p1, header
+  `2ZR-FE`, so the engine is not in doubt: `Front engine mounting insulator x
+  Front crossmember — for TMMT made 81 N*m / for TMC made 52 N*m`. One fastener,
+  one engine, two torques 29 N*m apart. The deterministic verifier cannot catch
+  this: both values are in the quote and both name the same part, so either
+  passes the numeric and subject checks. Only an answer carrying the condition is
+  safe. Systemic rather than anecdotal — `/except TMC Made/i` matches 825 chunks,
+  `/for TMC Made/i` 139, and 326 chunks name both engines within 400 characters.
+- `applicability-abs-wiring-variant` — documents 91/92/93/94 differ only by VSC
+  fitment and build plant, are all `completed_with_ocr` diagrams recovered by N0,
+  and repeat their variant header inline (`ABS <w/o VSC , Except TMC Made>`).
+  Covers three untested things at once: OCR-noisy evidence, near-duplicate
+  sources competing for retrieval slots, and right-topic/wrong-configuration.
+
+**Five coverage invariants** in `answerQualityCases.test.js`, so the suite polices
+itself rather than relying on someone remembering. The load-bearing one asserts
+that **every reason in `ASK_REJECTION_REASONS` has an eval case** — adding a
+seventh reason without a case now fails the unit suite instead of shipping an
+untested rejection path. Same shape as `safetyClassifier.test.js` asserting over
+its whole rule table.
+
+### Deliberately not done
+
+- **No live evaluation.** `eval:answers` costs money and needs the real corpus,
+  so it is the owner's call. The three applicability templates and the four
+  pre-existing hazard-tier templates are what a run would resolve.
+- **No production change.** Nothing in `aiAnswerService.js`,
+  `askEvidenceContract.js`, or retrieval was touched.
+- **No retrieval tuning, and `RETRIEVAL_MAX_CHUNKS_PER_SOURCE` untouched.** M2 is
+  separate and still open as PR #127. N1 exists so that a later cap-2-versus-3
+  experiment can be judged on answer quality rather than on retrieval overlap.
+- **`vision-refuses-unsupported-spec` left failing.** Its 1×1 placeholder is not
+  a valid image; replacing or deleting it is N2, not N1.
+- **The judge was not loosened.** Every scoring change adds an assertion.
+
+### Not a defect, worth writing down
+
+The subject guard accepts a claim about any part named anywhere in the quote. The
+drain-plug page reads `...oil drain plug ... Torque : 37 Nm ... 2. REMOVE OIL
+FILTER CAP ASSEMBLY`, so a claim that the *oil filter cap* torque is 37 N·m
+passes verification on that page. That is the documented boundary in CLAUDE.md —
+verification proves quote presence and lexical subject agreement, not entailment
+— and it is why the `subject_mismatch` probe uses an impossible part name
+(`/flux/i` matches 0 of 20,447 chunks) instead of a subtle one. A plausible
+neighbouring part would make the probe's outcome depend on which page ranked
+first, testing retrieval instead of the guard.
