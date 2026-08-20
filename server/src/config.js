@@ -1,6 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+// Imported rather than re-typed so the default cannot drift away from the policy
+// that documents it. retrievalDiversity.js is a leaf module that imports
+// nothing, so this cannot cycle back into config.
+import { DEFAULT_MAX_CHUNKS_PER_SOURCE } from "./services/retrievalDiversity.js";
 
 dotenv.config();
 
@@ -96,6 +100,16 @@ export const config = {
   // threshold has been calibrated on a real corpus (npm run eval:relevance-floor).
   askRelevanceFloor: readBoolean(process.env.ASK_RELEVANCE_FLOOR, false),
   rerankCandidateLimit: readPositiveInteger(process.env.RERANK_CANDIDATE_LIMIT, 20),
+  // Result diversity: the most chunks one logical source may contribute to a
+  // single retrieval result set. A source is a content group, so exact-duplicate
+  // documents share one budget. Unlike the relevance floor this drops no
+  // evidence -- capped chunks backfill any slot the cap leaves empty -- so it is
+  // ON by default. 0 disables it (same "0 means off" convention as
+  // AI_DAILY_CALL_LIMIT) and restores the plain ranked slice.
+  retrievalMaxChunksPerSource: readNonNegativeInteger(
+    process.env.RETRIEVAL_MAX_CHUNKS_PER_SOURCE,
+    DEFAULT_MAX_CHUNKS_PER_SOURCE
+  ),
   openAiRerankModel,
   openAiEmbeddingModel,
   openAiEmbeddingDimensions,

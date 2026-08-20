@@ -3,6 +3,7 @@ import path from "node:path";
 import { config } from "../config.js";
 import { db } from "../database.js";
 import { clearChunkEmbeddingCache } from "./chunkEmbeddingService.js";
+import { clearDocumentContentIdentityCache } from "./documentContentIdentity.js";
 import { extractPdfData } from "./pdfService.js";
 
 const DEFAULT_CHUNK_WORD_SIZE = 200;
@@ -148,6 +149,9 @@ export function rebuildDocumentChunksFromPages(
   }
 
   clearChunkEmbeddingCache();
+  // Chunks are only ever rebuilt after the document's extracted text was
+  // rewritten, which is exactly when a cached content-group key goes stale.
+  clearDocumentContentIdentityCache();
 
   return {
     documentId: normalizedDocumentId,

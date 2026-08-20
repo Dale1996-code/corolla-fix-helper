@@ -1192,3 +1192,161 @@ Two observations were not a sufficient basis for promotion. A case whose outcome
 varies at the PRODUCT level cannot gate the build however sound its scoring rule
 is, and the rule here is sound — its negative controls in
 `answerQualityScoring.test.js` are unchanged and still pass.
+
+## Milestone 6 — retrieval result diversity (RETRIEVAL_MAX_CHUNKS_PER_SOURCE)
+
+N0 made the recovered wiring diagrams retrievable. Doing so exposed a separate
+defect it deliberately did not fix: an `interior light wiring` query filled all
+eight hybrid slots from only four logically distinct sources.
+
+### What the corpus actually contains
+
+Measured read-only over `documents.extracted_text`, normalized (whitespace
+collapsed, lowercased) and hashed:
+
+- **310 of 1,443 documents (21%) fall into 130 exact-duplicate-text groups.**
+- Largest groups hold **19** and **17** documents. The pairs named in the N0
+  notes (#835/#836/#837, #839/#840) are two of the smaller ones.
+- Every document in a duplicate group has a **different `file_md5`** — necessarily,
+  because that column carries a unique index and import-time dedup already
+  rejected the byte-identical files. File-level dedup is structurally blind to
+  this class.
+
+### Why a per-document cap alone would not have worked
+
+On the reported query, the eight slots already held **eight different document
+ids**. The redundancy was entirely between documents, not within one:
+
+```
+1. doc#331 p1/c0 score=18 group=067569b1
+2. doc#332 p1/c0 score=18 group=067569b1   <- identical text to #331
+3. doc#333 p1/c0 score=18 group=415bd950
+4. doc#334 p1/c0 score=18 group=415bd950   <- identical text to #333
+5. doc#339 ... 8. doc#342                  (two more identical pairs)
+```
+
+A cap keyed on `documentId` would have moved zero slots here.
+
+### What shipped
+
+`services/retrievalDiversity.js`, a pure post-ranking selection step applied in
+`chunkRetrievalService` after fusion and after any reranking:
+
+1. identical evidence (normalized chunk text) is returned once;
+2. one **logical source** contributes at most `RETRIEVAL_MAX_CHUNKS_PER_SOURCE`
+   chunks (default 3), where a source is a content group keyed on normalized
+   `extracted_text`, so a duplicate group shares one budget;
+3. chunks the cap holds back **backfill** any slot it leaves empty.
+
+The cap is 3 rather than 1 because measured on this corpus a drain-plug torque
+spans two overlapping chunks of one page and a brake-bleeding procedure spans
+three. `0` disables the step entirely.
+
+### Measured before/after — real corpus, 1,443 documents, 8 slots per query
+
+Deterministic keyword/fusion ranking, no API key. `sources` = distinct content
+groups; `evidence` = distinct normalized chunk texts.
+
+| query | sources before/after | evidence before/after | top-1 kept |
+| --- | --- | --- | --- |
+| interior light wiring | 4 → **8** | 4 → **8** | yes |
+| front brake pad thickness specification | 5 → **8** | 5 → **8** | yes |
+| engine oil drain plug torque | 6 → 6 | 8 → 8 | yes |
+| smart key system immobiliser | 5 → **6** | 7 → **8** | yes |
+| how do I bleed the brakes | 3 → **5** | 6 → **8** | yes |
+| headlight bulb replacement | 7 → 7 | 6 → **8** | yes |
+| coolant capacity | 4 → **5** | 3 → **8** | yes |
+| automatic transmission fluid type | 6 → **5** | 6 → **8** | yes |
+| spark plug gap specification | 6 → **7** | 4 → **8** | yes |
+| check engine light P0420 | 5 → 5 | 8 → 8 | yes |
+| wiper blade size | 6 → 6 | 8 → 8 | yes |
+| alternator removal procedure | 3 → **5** | 8 → 8 | yes |
+
+**Distinct evidence rose on 8 queries and fell on none. The top result was
+preserved on all 12. No query returned fewer than 8 filled slots.**
+`npm run eval:retrieval` is unchanged at 12/12 (keyword wrong, hybrid right).
+
+### The one query whose source count went DOWN, and why that is correct
+
+`automatic transmission fluid type` went 6 → 5 sources. Slots 2, 4 and 5 held
+**byte-identical text** from three unrelated documents (#657, #737, #740) — an
+`8. ENGINE OIL LEVEL` paragraph, not a transmission fluid specification at all.
+Collapsing those three to one and backfilling gained two genuinely new passages,
+so distinct evidence went 6 → 8 while the source count fell.
+
+This is why the measurement carries three numbers. `distinctDocumentCount` is
+actively misleading (it was already 8/8 on the defect query).
+`distinctSourceCount` is the headline but can legitimately fall.
+**`distinctEvidenceCount` is the one that must never regress**, and did not.
+
+### The same 12 queries on the HYBRID path (real embeddings)
+
+Run with the configured key against the same read-only corpus copy: **12
+`text-embedding-3-small@512` calls**, one per query, reused for the before and
+after run so the only difference between them is the safeguard.
+
+| query | sources before/after | evidence before/after | top-1 kept |
+| --- | --- | --- | --- |
+| interior light wiring | 4 → 4 | 8 → 8 | yes |
+| front brake pad thickness specification | 8 → 8 | 6 → **8** | yes |
+| engine oil drain plug torque | 3 → **4** | 8 → 8 | yes |
+| smart key system immobiliser | 4 → 4 | 6 → **8** | yes |
+| how do I bleed the brakes | 5 → **3** | 5 → **8** | yes |
+| headlight bulb replacement | 6 → **5** | 6 → **8** | yes |
+| coolant capacity | 8 → 8 | 7 → **8** | yes |
+| automatic transmission fluid type | 7 → 7 | 6 → **8** | yes |
+| spark plug gap specification | 2 → **5** | 4 → **8** | yes |
+| check engine light P0420 | 6 → **5** | 5 → **8** | yes |
+| wiper blade size | 8 → 8 | 8 → 8 | yes |
+| alternator removal procedure | 4 → **5** | 7 → **8** | yes |
+
+**Distinct evidence rose on 9 queries and fell on none; every query now returns 8
+distinct passages in its 8 slots. Top-1 preserved on all 12. No query lost a
+slot.** Source count moved both ways (3 up, 3 down) for the reason given above —
+collapsing several sources that were each repeating one paragraph lowers the
+source count while raising the evidence count.
+
+### The originally-reported query is UNCHANGED on the hybrid path — read this before claiming it is fixed
+
+`interior light wiring` returns 4 sources across 8 slots both before and after.
+The rows say why:
+
+```
+1-3. doc#637 p5, p8, p1   Interior Light <Except TMC Made>   sem 0.56-0.63
+4-6. doc#638 p4, p1, p9   Interior Light <TMC Made>          sem 0.56-0.60
+7.   doc#189 p1/c3        INTERIOR LIGHTS, DOOR LOCKS ...    sem 0.54
+8.   doc#479 p1/c0        Diagrams Electrical overall        sem 0.53
+```
+
+These are **four different documents**, not a duplicate group, and #637 and #638
+contribute **exactly three chunks each — at the cap, not over it**. So the
+safeguard correctly does nothing here. Note also what those chunks are: three
+*different sheets* of the correct Interior Light diagram, which is the
+"legitimate multiple chunks" case, not repetition. Distinct evidence is already
+8 of 8 before the change.
+
+The keyword path on the same query is a genuinely different failure (8 documents,
+4 duplicate groups, 4 distinct texts) and *is* fixed, 4 → 8.
+
+**What would change the hybrid case is the cap value, not the policy.** Measured:
+at `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=2` the same query returns 6 sources, trading
+the third sheet of each diagram for doc#737 p314 and doc#309 p1 — both also
+wiring sheets carrying `ILL-`/`ILL+`, `IG` and fuse data. Whether that trade
+improves an *answer* is not knowable from a counter; it is exactly the kind of
+depth-versus-breadth question that needs **N1**'s verified answer evals. The
+default therefore stays at 3, which is the value real multi-chunk evidence on
+this corpus justifies (a drain-plug torque spans two overlapping chunks, a
+bleeding procedure three). `retrievalDiversity.test.js` pins both settings on
+this exact shape so the trade is visible if anyone revisits it.
+
+The safeguard removes repetition; it does not manufacture document variety, and
+no query is held to a required source count.
+
+### Limits, stated plainly
+
+- **Near-duplicate documents are not detected**, only byte-identical ones. Three
+  brake-bleeding documents (#172, #193, #194) are near-copies with slightly
+  different text; they are treated as three sources, correctly under this design.
+  Fuzzy similarity was deliberately not built.
+- The step is **blind to what a document is**. It has no notion of diagram versus
+  prose, so it can neither promote nor suppress the recovered wiring diagrams.
