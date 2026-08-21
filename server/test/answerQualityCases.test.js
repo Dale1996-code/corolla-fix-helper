@@ -64,6 +64,15 @@ const VERIFIED_IDS = [
   // chain, while "timing" (809) and "belt" (589) are both common -- so the
   // refusal has to come from the missing PART, not from missing words.
   "refuse-timing-belt-interval",
+  // Promoted 2026-08-20 after the live baseline run, taking the gate from 13
+  // to 14. The only applicability case promoted: its evidence is a single
+  // unambiguous chunk carrying exactly two variants, Ask produced both
+  // values correctly scoped on every observed run, and the qualifiedValues
+  // rule was proven against the dangerous alternatives (one variant only,
+  // values swapped, numbers with no plant) rather than against the one
+  // answer that happened to pass. applicability-vehicle-height-wrong-engine
+  // and applicability-abs-wiring-variant stay templates -- see their notes.
+  "applicability-engine-mount-build-variant",
 ];
 
 const VALID_CATEGORIES = new Set([
@@ -250,6 +259,12 @@ test("applicability cases name the variant axis they are scoped to (N1)", () => 
   // applicability case therefore has to require the ANSWER to carry a condition
   // -- engine, build plant, or optional equipment -- rather than merely mention
   // the topic.
+  //
+  // Two mechanisms satisfy that, and qualifiedValues is the stronger one: rather
+  // than asking that a condition appear somewhere, it binds a specific value to
+  // a specific condition in the same sentence. The 2026-08-20 live run is why
+  // both are accepted -- the engine-mount case moved off mustIncludeAny because
+  // an answer could satisfy it by naming one plant and giving one number.
   const applicabilityCases = answerQualityCases.filter((testCase) =>
     /^applicability-/.test(testCase.id)
   );
@@ -262,16 +277,25 @@ test("applicability cases name the variant axis they are scoped to (N1)", () => 
   const axes = new Set();
 
   for (const testCase of applicabilityCases) {
+    const includePatterns = Array.isArray(testCase.mustIncludeAny)
+      ? testCase.mustIncludeAny.map(String)
+      : [];
+    const qualifiers = Array.isArray(testCase.qualifiedValues)
+      ? testCase.qualifiedValues.map((rule) => String(rule.qualifier))
+      : [];
+
     assert.ok(
-      Array.isArray(testCase.mustIncludeAny) && testCase.mustIncludeAny.length,
+      includePatterns.length || qualifiers.length,
       `${testCase.id} must require the answer to name its condition`
     );
 
-    const patterns = testCase.mustIncludeAny.map(String).join(" ");
+    // Only the CONDITION half counts toward axis coverage. A value pattern such
+    // as /\b92\s*mm/i says nothing about which variant it belongs to.
+    const conditions = [...includePatterns, ...qualifiers].join(" ");
 
-    if (/2ZR|2AZ|engine/i.test(patterns)) axes.add("engine");
-    if (/TMC|TMMT|plant|build|manufactur/i.test(patterns)) axes.add("build");
-    if (/ABS|VSC|TRAC/i.test(patterns) || /ABS|VSC/i.test(testCase.question || "")) {
+    if (/2ZR|2AZ|engine/i.test(conditions)) axes.add("engine");
+    if (/TMC|TMMT|plant|build|manufactur/i.test(conditions)) axes.add("build");
+    if (/ABS|VSC|TRAC/i.test(conditions) || /ABS|VSC/i.test(testCase.question || "")) {
       axes.add("equipment");
     }
   }
@@ -281,23 +305,114 @@ test("applicability cases name the variant axis they are scoped to (N1)", () => 
   }
 });
 
-test("an answered case can forbid a claim, not only a rejection case (N1)", () => {
-  // Before N1 mustNotIncludeAny was honored only for expect:"rejected", so no
-  // answered case could say "the other variant's number must not be presented
-  // as mine" -- which is the entire applicability failure mode. Guard the field
-  // is actually reachable from an answered case, or the assertions above would
-  // silently never run.
-  const answeredWithForbidden = answerQualityCases.filter(
+test("an answered case constrains a wrong-variant claim, not only a rejection case (N1)", () => {
+  // Before N1 nothing an answered case could declare would fail an answer for
+  // WHAT IT ASSERTED -- mustNotIncludeAny ran only for expect:"rejected". This
+  // guards that at least one answered case still carries such a constraint, or
+  // the applicability assertions above would silently never run.
+  //
+  // The 2026-08-20 run showed a flat ban is the wrong shape: it failed an answer
+  // that correctly reported every variant. qualifiedValues replaced it, and both
+  // mechanisms count here -- mustNotIncludeAny is still honored on answered
+  // cases (see answerQualityScoring.test.js) and remains right for a value that
+  // must never appear under any condition.
+  const constrained = answerQualityCases.filter(
     (testCase) =>
       testCase.expect === "answered" &&
-      Array.isArray(testCase.mustNotIncludeAny) &&
-      testCase.mustNotIncludeAny.length
+      ((Array.isArray(testCase.mustNotIncludeAny) && testCase.mustNotIncludeAny.length) ||
+        (Array.isArray(testCase.qualifiedValues) && testCase.qualifiedValues.length))
   );
 
   assert.ok(
-    answeredWithForbidden.length >= 1,
-    "expected at least one answered case that forbids a wrong-variant claim"
+    constrained.length >= 1,
+    "expected at least one answered case that constrains a wrong-variant claim"
   );
+});
+
+/**
+ * Every reason a qualifiedValues rule is malformed, as a list.
+ *
+ * Shared by the invariant over the real cases and by the synthetic test below,
+ * so the rejection path is proven rather than merely asserted. Testing a COPY of
+ * these rules would prove nothing: the copy could stay correct while the
+ * invariant quietly became a no-op.
+ *
+ * The flag check is not pedantry. `g` and `y` make a regex carry lastIndex
+ * between calls, and scanning happens once per sentence, so a stateful pattern
+ * resumes the next sentence mid-string and can MISS an unqualified statement --
+ * a false PASS on a build gate. Rejecting the definition tells the author
+ * exactly what is wrong; quietly rewriting their pattern would hide it. The
+ * scorer separately builds its own non-global scanner, and that defence stays:
+ * validation catches the author, the scanner catches everything else.
+ */
+function qualifiedValueRuleProblems(rule) {
+  const problems = [];
+
+  for (const field of ["value", "qualifier"]) {
+    const pattern = rule[field];
+
+    if (!(pattern instanceof RegExp) && typeof pattern !== "string") {
+      problems.push(`${field} is missing`);
+      continue;
+    }
+
+    if (pattern instanceof RegExp) {
+      if (pattern.global) {
+        problems.push(`${field} uses the g flag`);
+      }
+
+      if (pattern.sticky) {
+        problems.push(`${field} uses the y flag`);
+      }
+    }
+  }
+
+  return problems;
+}
+
+test("every qualifiedValues rule is well formed (N1)", () => {
+  // A rule missing its qualifier would silently pass everything, which is worse
+  // than no rule at all: the case would look like an applicability gate and gate
+  // nothing.
+  for (const testCase of answerQualityCases) {
+    for (const rule of testCase.qualifiedValues || []) {
+      assert.deepEqual(
+        qualifiedValueRuleProblems(rule),
+        [],
+        `${testCase.id}: malformed qualifiedValues rule`
+      );
+    }
+  }
+});
+
+test("a stateful qualifiedValues pattern is rejected as malformed (N1)", () => {
+  // Exercises the REJECTION path, which the real cases never reach because they
+  // are all well formed. Without this the invariant above could be refactored
+  // into a no-op and nothing would notice.
+  assert.deepEqual(
+    qualifiedValueRuleProblems({ value: /96 mm/i, qualifier: /2AZ-FE/i }),
+    [],
+    "an ordinary regex rule must be accepted"
+  );
+  assert.deepEqual(
+    qualifiedValueRuleProblems({ value: "96 mm", qualifier: "2AZ-FE" }),
+    [],
+    "a string rule must be accepted"
+  );
+
+  assert.deepEqual(qualifiedValueRuleProblems({ value: /96 mm/gi, qualifier: /2AZ-FE/i }), [
+    "value uses the g flag",
+  ]);
+  assert.deepEqual(qualifiedValueRuleProblems({ value: /96 mm/i, qualifier: /2AZ-FE/gi }), [
+    "qualifier uses the g flag",
+  ]);
+  assert.deepEqual(qualifiedValueRuleProblems({ value: /96 mm/iy, qualifier: /2AZ-FE/i }), [
+    "value uses the y flag",
+  ]);
+  assert.deepEqual(qualifiedValueRuleProblems({ value: /96 mm/i, qualifier: /2AZ-FE/iy }), [
+    "qualifier uses the y flag",
+  ]);
+  assert.deepEqual(qualifiedValueRuleProblems({ value: /96 mm/i }), ["qualifier is missing"]);
 });
 
 test("OCR-recovered diagram evidence is represented in the suite (N1)", () => {

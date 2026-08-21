@@ -777,3 +777,368 @@ test("preflight: the wrong-component case fails if the value survives beside the
   assert.equal(evaluateAnswerCase(testCase, result).pass, true);
   assert.equal(evaluateAnswerCase(testCase, leaked).pass, false);
 });
+
+// ---- qualifiedValues: "this value only when this condition is stated with it" ----
+//
+// Added after the 2026-08-20 live run, which failed
+// applicability-vehicle-height-wrong-engine on an answer that was CORRECT. The
+// positive controls below are the real answer text from that run, trimmed, so
+// these tests pin the instrument against observed behaviour rather than against
+// a sentence invented to make the rule pass.
+
+const vehicleHeightCase = () =>
+  answerQualityCases.find((entry) => entry.id === "applicability-vehicle-height-wrong-engine");
+const engineMountCase = () =>
+  answerQualityCases.find((entry) => entry.id === "applicability-engine-mount-build-variant");
+
+const alignmentCitations = [
+  {
+    documentTitle: "Alignment Service and Repair Procedures Front Wheel Alignment Adjustment",
+    pageNumber: 2,
+    snippet:
+      "Vehicle Height (Unloaded Vehicle): for TMC Made 2ZR-FE 92 mm (3.62 in.) 45 mm (1.77 in.) " +
+      "except TMC Made 2ZR-FE 92 mm 80 mm* 2AZ-FE 96 mm (3.78 in.) 81 mm* 51 mm (2.01 in.)",
+  },
+];
+const torqueCitations = [
+  {
+    documentTitle: "torque Engine Mechanical Torque Specifications (Engine) ALLDATA diy",
+    pageNumber: 1,
+    snippet:
+      "Front engine mounting insulator x Front crossmember for TMMT made 81 826 60 for TMC made 52 520 38",
+  },
+];
+
+const answered = (answer, citations) => ({ status: "partial", answer, citations });
+const failedChecks = (scored) => scored.checks.filter((check) => !check.pass).map((c) => c.name);
+
+// Verbatim from the 2026-08-20 run (claim lines, citation markers removed).
+const LIVE_VEHICLE_HEIGHT_ANSWER = [
+  "Before inspecting front wheel alignment, adjust the vehicle height to the specified value.",
+  "For TMC Made 2ZR-FE, unloaded vehicle height is Front C - A 92 mm (3.62 in.).",
+  "For TMC Made 2ZR-FE, unloaded vehicle height is Rear D - B 45 mm (1.77 in.).",
+  "For except TMC Made 2ZR-FE, unloaded vehicle height is Front C - A 92 mm (3.62 in.).",
+  "For except TMC Made 2ZR-FE Mexico vehicle height, Front C - A is 80 mm (3.15 in.).",
+  "For 2AZ-FE, unloaded vehicle height is Front C - A 96 mm (3.78 in.).",
+  "For 2AZ-FE, unloaded vehicle height is Rear D - B 51 mm (2.01 in.).",
+  "For vehicle height for Mexico, add 15 mm (0.591 in.).",
+].join("\n");
+
+test("vehicle height: the real multi-variant live answer now PASSES", () => {
+  // The regression this rule exists to undo. Under the old mustNotIncludeAny
+  // this exact answer failed three checks for correctly reporting the 2AZ-FE row.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(LIVE_VEHICLE_HEIGHT_ANSWER, alignmentCitations)
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("vehicle height: the wrong engine's figure asserted BARE fails", () => {
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "The unloaded vehicle height is 92 mm (3.62 in.) at the front and 96 mm at the rear.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(
+    failedChecks(scored).some((name) => /never states .*96/.test(name)),
+    `expected the 96 mm qualification check to fail, got: ${failedChecks(scored).join("; ")}`
+  );
+});
+
+test("vehicle height: naming the other engine elsewhere does not launder a bare value", () => {
+  // The hole a whole-answer scan would leave: mention 2AZ-FE in one sentence and
+  // assert its number, unconditioned, in another.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "This car may be a 2ZR-FE or a 2AZ-FE. The unloaded vehicle height is 92 mm. " +
+        "The rear figure is 51 mm.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /never states .*51/.test(name)));
+});
+
+test("vehicle height: an answer giving ONLY this car's figures passes", () => {
+  // The alternate values are permitted, not required. A correct narrow answer
+  // must not be punished for omitting the other engine.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For the 2ZR-FE, the unloaded vehicle height is 92 mm (3.62 in.) at the front.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("engine mount: both associations stated correctly PASSES", () => {
+  // Verbatim shape from the 2026-08-20 run.
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered(
+      "The torque for the front engine mounting insulator to the front crossmember is " +
+        "81 N·m (826 kgf·cm, 60 ft·lbf) for TMMT-made vehicles.\n" +
+        "The torque for the front engine mounting insulator to the front crossmember is " +
+        "52 N·m (520 kgf·cm, 38 ft·lbf) for TMC-made vehicles.",
+      torqueCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("engine mount: only the TMMT variant fails", () => {
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered("The torque is 81 N·m (60 ft·lbf) for TMMT-made vehicles.", torqueCitations)
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /states 52 N\*m/.test(name)));
+});
+
+test("engine mount: only the TMC variant fails", () => {
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered("The torque is 52 N·m (38 ft·lbf) for TMC-made vehicles.", torqueCitations)
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /states 81 N\*m/.test(name)));
+});
+
+test("engine mount: the values swapped between plants fails", () => {
+  // Both numbers, both plants, every token the old rule looked for -- and
+  // dangerously wrong. This is the case the old mustIncludeAny could not see.
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered(
+      "The torque is 81 N·m for TMC-made vehicles.\nThe torque is 52 N·m for TMMT-made vehicles.",
+      torqueCitations
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  const failed = failedChecks(scored);
+  assert.ok(failed.some((name) => /never states .*81/.test(name)), failed.join("; "));
+  assert.ok(failed.some((name) => /never states .*52/.test(name)), failed.join("; "));
+});
+
+test("engine mount: both numbers with no plant attached fails", () => {
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered("The torque is 81 N·m, or 52 N·m depending on the vehicle.", torqueCitations)
+  );
+
+  assert.equal(scored.pass, false);
+  // Assert WHY. Both values are present, so this must fail on the missing
+  // conditions rather than on some unrelated requirement.
+  const failed = failedChecks(scored);
+  assert.ok(failed.some((name) => /never states .*81/.test(name)), failed.join("; "));
+  assert.ok(failed.some((name) => /never states .*52/.test(name)), failed.join("; "));
+});
+
+test("engine mount: one bare number presented as universal fails", () => {
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered("The front engine mounting insulator torque is 52 N·m (38 ft·lbf).", torqueCitations)
+  );
+
+  assert.equal(scored.pass, false);
+  // Distinct from "only the TMC variant fails", which drops 81 while qualifying
+  // 52 correctly. Here the stated value is itself unconditioned, so the
+  // qualification check must be among the failures -- not just the missing 81.
+  const failed = failedChecks(scored);
+  assert.ok(failed.some((name) => /never states .*52/.test(name)), failed.join("; "));
+  assert.ok(failed.some((name) => /states 81 N\*m/.test(name)), failed.join("; "));
+});
+
+test("engine mount: a plant named without its value does not satisfy the rule", () => {
+  // Exactly what the old rule accepted: the vocabulary without the structure.
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered(
+      "The torque depends on whether the vehicle is TMC-made or TMMT-made; it is 52 N·m.",
+      torqueCitations
+    )
+  );
+
+  assert.equal(scored.pass, false, "mentioning both plants must not be enough");
+});
+
+test("qualifiedValues is inert on cases that do not use it", () => {
+  const scored = evaluateAnswerCase(
+    { id: "plain", category: "torque", expect: "answered", mustIncludeAny: [/\b37\s*N/i] },
+    answered("The oil drain plug torque is 37 N·m.", [{ documentTitle: "Oil", pageNumber: 1 }])
+  );
+
+  assert.equal(scored.pass, true);
+  assert.ok(!scored.checks.some((check) => /never states/.test(check.name)));
+});
+
+test("qualifiedValues survives decimals and bracketed units when segmenting", () => {
+  // "3.78 in.)" must not split into fragments that separate a value from its
+  // qualifier -- the reason the splitter keys on punctuation FOLLOWED BY space.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For 2AZ-FE, unloaded vehicle height is Front C - A 96 mm (3.78 in.). " +
+        "For 2ZR-FE it is 92 mm (3.62 in.).",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+// ---- review fixes: segmentation, competing qualifiers, stateful flags ----
+
+test("segmentation: an abbreviation does not orphan a value from its qualifier", () => {
+  // These manuals say "No. 1 lower suspension arm bushing" and answers restate
+  // it. Splitting on every period-space cut this sentence in two and failed a
+  // correctly qualified statement -- a false FAIL of exactly the kind this case
+  // was repaired to stop producing.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For the 2ZR-FE the height is 92 mm. For 2AZ-FE, the No. 1 bushing clearance is 96 mm.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("segmentation: a real sentence boundary still separates value from qualifier", () => {
+  // The other half of the same fix: making abbreviations safe must not make
+  // sentence ends permissive, or the laundering control below stops working.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "This car may be a 2ZR-FE or a 2AZ-FE. The unloaded vehicle height is 92 mm. " +
+        "The rear figure is 51 mm.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /never states .*51/.test(name)));
+});
+
+test("engine mount: a ONE-SENTENCE swap fails, not only a two-sentence one", () => {
+  // The defect the review found. Same segment, both values, both plants, and
+  // exactly backwards -- membership alone accepted it. No distance bound could
+  // reject it either: TMMT sits 31 characters from "81 N" both here and in the
+  // correct live answer. The competing qualifier being NEARER is the signal.
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered(
+      "The torque is 81 N·m for TMC-made and 52 N·m for TMMT-made vehicles.",
+      torqueCitations
+    )
+  );
+
+  assert.equal(scored.pass, false, "a one-sentence swap must not pass");
+  const failed = failedChecks(scored);
+  assert.ok(failed.some((name) => /never states .*81/.test(name)), failed.join("; "));
+  assert.ok(failed.some((name) => /never states .*52/.test(name)), failed.join("; "));
+});
+
+test("engine mount: a ONE-SENTENCE correct pairing still passes", () => {
+  // Guards against over-correcting: the fix must reject the swap without
+  // rejecting the same structure stated the right way round.
+  const scored = evaluateAnswerCase(
+    engineMountCase(),
+    answered(
+      "The torque is 81 N·m for TMMT-made and 52 N·m for TMC-made vehicles.",
+      torqueCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("qualifiedValues rules sharing one qualifier do not compete with each other", () => {
+  // The vehicle-height case writes /2AZ-FE/i three times. Three separate regex
+  // literals with the same source are one condition, not three rivals -- if they
+  // were compared by object identity, every rule would treat the others as
+  // competing and the case could never pass.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For 2AZ-FE the front height is 96 mm (3.78 in.) and the rear is 51 mm.\n" +
+        "For the 2ZR-FE it is 92 mm.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("a global-flag pattern cannot silently hide an unqualified statement", () => {
+  // Proven in review: with /g, lastIndex carries between sentences, the scanner
+  // starts the next one mid-string, misses the bare "It is 96 mm." and reports
+  // PASS. The scorer now builds its own non-global scanner, so the verdict is
+  // the same either way -- and case definitions are rejected outright for
+  // declaring the flag (answerQualityCases.test.js).
+  const answerText = "For 2AZ-FE the front figure measured at the wheel centre is 96 mm. It is 96 mm.";
+  const build = (value) => ({
+    id: "flags",
+    category: "capacity",
+    expect: "answered",
+    mustCite: false,
+    qualifiedValues: [{ value, qualifier: /2AZ-FE/i }],
+  });
+
+  const withGlobal = evaluateAnswerCase(build(/96 mm/gi), answered(answerText, []));
+  const withoutGlobal = evaluateAnswerCase(build(/96 mm/i), answered(answerText, []));
+
+  assert.equal(withoutGlobal.pass, false, "the bare statement must fail");
+  assert.equal(withGlobal.pass, false, "a global pattern must not change the verdict");
+});
+
+// ---- the laundering hole the capital-lookahead segmentation opened ----
+//
+// Requiring the next sentence to start with a capital fixed "No. 1" but stopped
+// splitting sentences that open with a digit or a lowercase word, so a stale
+// qualifier from the previous sentence silently qualified a bare value. These
+// two are the controls that keep that hole shut; they FAILED to fail before the
+// splitter was changed to exclude "No." instead.
+
+test("segmentation: a sentence starting with a DIGIT still ends the previous one", () => {
+  // "92 mm is the front figure." is entirely natural phrasing here, so this is
+  // not a contrived shape.
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For the 2ZR-FE it is 92 mm. This car may be a 2AZ-FE. 96 mm is the front figure.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, false, "a bare value must not borrow the previous sentence's qualifier");
+  assert.ok(failedChecks(scored).some((name) => /never states .*96/.test(name)));
+});
+
+test("segmentation: a sentence starting LOWERCASE still ends the previous one", () => {
+  const scored = evaluateAnswerCase(
+    vehicleHeightCase(),
+    answered(
+      "For the 2ZR-FE it is 92 mm. This car may be a 2AZ-FE. the front figure is 96 mm.",
+      alignmentCitations
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /never states .*96/.test(name)));
+});

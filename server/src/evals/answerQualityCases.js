@@ -42,6 +42,11 @@
 //                    a citation legitimately quotes a page that also lists the variant
 //                    this car does not have, and quoting evidence correctly is not the
 //                    failure; ASSERTING the wrong figure is.
+//   qualifiedValues  applicability rules: [{ value, qualifier, required?, label? }].
+//                    Wherever `value` appears in the answer, the SAME sentence must also
+//                    carry `qualifier`; `required: true` also demands the pairing appear
+//                    at all. Lets a correct multi-variant answer quote another variant's
+//                    figure while still failing a bare unconditional assertion (optional)
 //   followUp         a second question in the same conversation (tests multi-turn memory).
 //                    standaloneIncludes checks the rewritten follow-up query.
 //
@@ -654,11 +659,31 @@ export const answerQualityCases = [
     // figures and are WRONG here - yet they sit two lines away inside the same
     // chunk, which is exactly the misleading-nearby-text shape.
     mustIncludeAny: [/\b92\s*mm/i, /3\.62\s*in/i],
-    // The wrong engine's numbers must not be asserted. Answered cases scan the
-    // ANSWER text only, never the citations: the cited snippet legitimately
-    // shows the whole table, and the failure under test is asserting the wrong
-    // row as this car's figure.
-    mustNotIncludeAny: [/\b96\s*mm/i, /\b3\.78\s*in/i, /\b51\s*mm/i],
+    // The 2026-08-20 live run failed this case on an answer that was RIGHT, and
+    // the rule was what was wrong. Ask attributed every figure to its variant
+    // ("For TMC Made 2ZR-FE ... 92 mm", "For 2AZ-FE ... 96 mm") and flagged that
+    // the sources never say how to tell which engine a car has. The old
+    // mustNotIncludeAny banned the 2AZ-FE numbers outright, which a correct
+    // multi-variant answer cannot satisfy -- naming the other engine's figure is
+    // exactly how you scope your own.
+    //
+    // What is dangerous is the wrong variant's number presented as THIS car's
+    // specification. qualifiedValues says that directly: 96 mm, 3.78 in. and
+    // 51 mm may appear, but only in a statement that also says 2AZ-FE. They are
+    // deliberately NOT `required` -- an answer giving only the 2ZR-FE figures is
+    // correct and must still pass.
+    //
+    // Answer text only, never citations: the cited snippet legitimately prints
+    // the whole table with both engines two lines apart.
+    qualifiedValues: [
+      { value: /\b96\s*mm/i, qualifier: /2AZ-FE/i, label: "the 2AZ-FE front height" },
+      {
+        value: /\b3\.78\s*in/i,
+        qualifier: /2AZ-FE/i,
+        label: "the 2AZ-FE front height in inches",
+      },
+      { value: /\b51\s*mm/i, qualifier: /2AZ-FE/i, label: "the 2AZ-FE rear height" },
+    ],
     citationDocLike: /alignment/i,
     verified: false,
   },
@@ -684,9 +709,47 @@ export const answerQualityCases = [
     //
     // Systemic rather than anecdotal: /except TMC Made/i matches 825 chunks and
     // /for TMC Made/i matches 139 across the corpus.
-    mustIncludeAny: [/TMC/i, /TMMT/i, /built|build|plant|manufactur/i],
+    //
+    // The 2026-08-20 live run passed this case, and passing was too easy. The
+    // old rule was mustIncludeAny [/TMC/i, /TMMT/i, /built|build|plant|...],
+    // which an answer satisfies by giving ONE number and mentioning ONE plant --
+    // the single-variant answer this case exists to catch. It required the
+    // condition to be mentioned, not the values to be scoped by it.
+    //
+    // Both associations are now required, so a passing answer has to reproduce
+    // the applicability STRUCTURE rather than its vocabulary. One rule rejects
+    // all four dangerous shapes: only TMMT, only TMC, the values swapped, and
+    // both numbers stated with no plant attached.
+    qualifiedValues: [
+      {
+        value: /\b81\s*N/i,
+        qualifier: /TMMT/i,
+        required: true,
+        label: "81 N*m as the TMMT figure",
+      },
+      {
+        value: /\b52\s*N/i,
+        qualifier: /TMC\b/i,
+        required: true,
+        label: "52 N*m as the TMC figure",
+      },
+    ],
     citationDocLike: /torque/i,
-    verified: false,
+    // PROMOTED after the 2026-08-20 live run, on all four conditions rather
+    // than on one passing answer. Corpus: chunk #18768 is the ONLY chunk
+    // stating this fastener, and it carries exactly two variants, so there is
+    // no third value to be ambiguous about. Behaviour: Ask gave both values
+    // with their plants, twice, and declared the gap that the sources never
+    // say how to tell which plant built a car. Rule: qualifiedValues now
+    // rejects only-TMMT, only-TMC, the values swapped, both numbers with no
+    // plant, and one bare number -- proven by negative controls in
+    // answerQualityScoring.test.js, not by the one answer that passed.
+    //
+    // Residual risk, stated because a verified case gates the build: the rule
+    // needs the literal TMMT / TMC tokens beside the values. It is bounded by
+    // the evidence contract, which requires a verbatim quote of the table row,
+    // so a grounded answer restates the manual's own vocabulary.
+    verified: true,
   },
   {
     id: "applicability-abs-wiring-variant",
