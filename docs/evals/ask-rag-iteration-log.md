@@ -1024,3 +1024,14 @@ None promoted. Scoring rules are unchanged; the notes below are findings, not ed
 
 Nothing was changed in response to this run: no eval case, no scoring rule, no
 production Ask behaviour, no retrieval setting, no roadmap content.
+
+### After this run
+
+`applicability-engine-mount-build-variant` was promoted to verified on
+2026-08-20, taking the gate from 13 to **14**. The 13/13 result above reflects
+the verified set **at the time of the live run** and is intentionally preserved
+as recorded; the later promotion was proven deterministically against the
+captured answer rather than by a second live evaluation.
+
+So the progression reads **8 verified before N1 → 13 at this baseline → 14
+after the promotion**. No second `eval:answers` run has been made.
