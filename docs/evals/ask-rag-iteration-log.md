@@ -1161,3 +1161,34 @@ pre-M2 observation, to be settled by the post-M2 run and not before.
 
 Nothing was changed in response to this run: no eval case, no scoring rule, no
 production Ask behaviour, no retrieval setting, no roadmap content.
+
+### Demotion, 2026-08-22 — applicability-engine-mount-build-variant
+
+`applicability-engine-mount-build-variant` is **demoted from `verified: true`
+back to a template**, taking the gate 13 → 14 → 13. No live run was made for
+this change and none was needed: the evidence is the run recorded above.
+
+- It was promoted on 2026-08-20 after **two** successful observations.
+- It **failed the corrected-instrument live run** of 2026-08-22, returning
+  `status: not_found` with zero citations.
+- **Retrieval was independently confirmed successful.** `retrieveRelevantChunks`
+  alone returns chunk #18768 — the row reading `Front engine mounting insulator
+  x Front crossmember / for TMMT made 81 826 60 / for TMC made 52 520 38` — at
+  rank 6 of 8.
+- **Generation returned `not_found`** with that chunk in context, reproduced by a
+  direct re-ask, against production code byte-identical to the run where it
+  answered twice.
+- Therefore it is demoted **until answer-generation behaviour is reproducible
+  enough for verified gating**, not because anything about the case is wrong.
+
+What deliberately did **not** change: the question, the expectation, and the
+`qualifiedValues` rule are exactly as promoted, and `not_found` is still scored
+as a failure. Making the case pass — by weakening its expectations or by
+accepting `not_found` — would have destroyed the signal that produced this
+finding. The case stays in the suite and stays useful: it is the only probe of
+one-fastener-two-torques applicability, and it now reports instead of gating.
+
+Two observations were not a sufficient basis for promotion. A case whose outcome
+varies at the PRODUCT level cannot gate the build however sound its scoring rule
+is, and the rule here is sound — its negative controls in
+`answerQualityScoring.test.js` are unchanged and still pass.

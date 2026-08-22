@@ -56,8 +56,10 @@ state a plan imagined.
   against the real manuals before N1; the other 27 were unconfirmed templates that report
   but do not gate. A text search for `verified: true` returned 13 because five matches
   occurred inside instructional comments; the runtime `VERIFIED_IDS` set is the gating
-  authority. N1 raised the suite to 14 verified of 43. Almost every remaining idea in this
-  roadmap is a change whose value can only be judged by that suite.
+  authority. N1 raised the suite to 14 verified of 43, then back to 13 when
+  `applicability-engine-mount-build-variant` was demoted for varying at the product level.
+  Almost every remaining idea in this roadmap is a change whose value can only be judged by
+  that suite.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.

@@ -64,15 +64,10 @@ const VERIFIED_IDS = [
   // chain, while "timing" (809) and "belt" (589) are both common -- so the
   // refusal has to come from the missing PART, not from missing words.
   "refuse-timing-belt-interval",
-  // Promoted 2026-08-20 after the live baseline run, taking the gate from 13
-  // to 14. The only applicability case promoted: its evidence is a single
-  // unambiguous chunk carrying exactly two variants, Ask produced both
-  // values correctly scoped on every observed run, and the qualifiedValues
-  // rule was proven against the dangerous alternatives (one variant only,
-  // values swapped, numbers with no plant) rather than against the one
-  // answer that happened to pass. applicability-vehicle-height-wrong-engine
-  // and applicability-abs-wiring-variant stay templates -- see their notes.
-  "applicability-engine-mount-build-variant",
+  // applicability-engine-mount-build-variant was promoted here on 2026-08-20
+  // and DEMOTED on 2026-08-22, taking the gate 13 -> 14 -> 13. It is still a
+  // case, and its rules are unchanged; it is only no longer allowed to gate the
+  // build. See the note on the case itself for why.
 ];
 
 const VALID_CATEGORIES = new Set([

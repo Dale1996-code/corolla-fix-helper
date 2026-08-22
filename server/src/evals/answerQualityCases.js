@@ -745,11 +745,23 @@ export const answerQualityCases = [
     // plant, and one bare number -- proven by negative controls in
     // answerQualityScoring.test.js, not by the one answer that passed.
     //
-    // Residual risk, stated because a verified case gates the build: the rule
-    // needs the literal TMMT / TMC tokens beside the values. It is bounded by
-    // the evidence contract, which requires a verbatim quote of the table row,
-    // so a grounded answer restates the manual's own vocabulary.
-    verified: true,
+    // DEMOTED 2026-08-22, back to a template. Two observations were not enough.
+    // On the corrected-instrument run this returned status `not_found` with
+    // zero citations, and the causes were separated rather than guessed:
+    // chunk #18768 still carries the row, retrieveRelevantChunks alone returns
+    // it at rank 6 of 8, and a direct re-ask reproduced `not_found` with that
+    // chunk in context. So RETRIEVAL SUCCEEDED and GENERATION declined, against
+    // production code byte-identical to the run where it answered twice.
+    //
+    // Nothing about the case is wrong, which is why nothing about it changed:
+    // the question, the expectation, and the qualifiedValues rule are all as
+    // promoted. `not_found` is still a failure here and must stay one -- the
+    // fix is not to accept it. What is unsafe is letting a case whose outcome
+    // varies at the PRODUCT level gate the build, so it goes back to being
+    // reported for information until answer generation is reproducible enough
+    // to gate on. It remains valuable as a diagnostic: it is the suite's only
+    // probe of one-fastener-two-torques applicability.
+    verified: false,
   },
   {
     id: "applicability-abs-wiring-variant",
