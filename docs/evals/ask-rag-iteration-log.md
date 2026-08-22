@@ -1035,3 +1035,129 @@ captured answer rather than by a second live evaluation.
 
 So the progression reads **8 verified before N1 → 13 at this baseline → 14
 after the promotion**. No second `eval:answers` run has been made.
+
+## N1 CORRECTED-INSTRUMENT RUN — live answer eval, 2026-08-22
+
+**This is the second `eval:answers` run**, and it supersedes the "no second run
+has been made" note closing the entry above. It is deliberately **experiment A —
+the corrected-instrument baseline**, not a post-M2 measurement: the scoring
+instrument changed, the product did not, so any delta is attributable to the
+instrument plus provider-side variance. M2 is still not merged.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `npm run eval:answers` |
+| Eval / scoring revision | `3158bfca6a350e1c5f93c75837d7f528876bcad3` (`origin/main`, merge of PR #128) |
+| Product / retrieval revision | **identical to the 2026-08-20 baseline.** `git diff --name-only 90128f3 3158bfc -- server/src ':(exclude)server/src/evals'` is empty, as is the client diff. PR #128 touched only docs, evals, and eval tests |
+| M2 retrieval diversity | **NOT applied** (PR #127 open, and currently `CONFLICTING` against `main`) |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded — unchanged from the baseline |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned snapshot) |
+| Embedding model | `text-embedding-3-small`, 512 dimensions |
+| Reranker | off |
+| Evidence contract | on |
+| Relevance floor | off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| Cases | 43 (14 verified, 29 templates) |
+| Provider requests | 83 for the run (44 embeddings + 38 answer/vision + 1 follow-up rewrite), plus 3 for the post-run diagnostic below |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings |
+
+### Result
+
+**13/14 verified PASS. Exit code 1.** Templates 17/29. Overall **30/43**
+(baseline: 13/13 verified, 15/30 templates, 28/43 overall).
+
+| Category | Passed | Verified passed | Baseline passed |
+| --- | --- | --- | --- |
+| torque | 2/7 | 2/3 | 3/7 |
+| refusal | 5/8 | 5/5 | 5/8 |
+| capacity | 7/10 | 0/0 | 6/10 |
+| procedure | 9/9 | 0/0 | 7/9 |
+| behavior | 1/3 | 0/0 | 1/3 |
+| verifier | 6/6 | 6/6 | 6/6 |
+
+### What the corrected instrument was supposed to prove
+
+- **The corpus-realistic false-FAIL is fixed — confirmed live.**
+  `applicability-vehicle-height-wrong-engine` **PASSED**. At the baseline it
+  failed on an answer that was right, because `mustNotIncludeAny` banned the
+  2AZ-FE figures outright. `qualifiedValues` now permits them only in a statement
+  that also names 2AZ-FE, and the live answer satisfied that. This was the
+  primary objective of the cleanup and it holds against a real answer.
+- **The false-PASS fix was NOT exercised live, and could not be.**
+  `applicability-engine-mount-build-variant` returned `status: not_found` with
+  zero citations, so there was no answer text for `qualifiedValues` to score.
+  Its two sub-assertions failed vacuously. The tightened rule remains proven only
+  by the deterministic negative controls in `answerQualityScoring.test.js`
+  (rejecting only-TMMT, only-TMC, swapped values, both numbers unqualified, and
+  one bare number) — which is real evidence, but it is not live evidence.
+- **The `g`/`y` regex guard** cannot manifest in a live run; it is covered by the
+  deterministic suite only.
+
+No new suspicious PASS appeared, and no formerly-correct result regressed
+*because of the instrument*.
+
+### BLOCKER — the promotion, not the predicate
+
+`applicability-engine-mount-build-variant` was promoted to `verified: true` in
+`23e6ed5` and **failed the build gate on the very next live run**. The promotion
+rationale was "Ask gave both values with their plants, twice". The third and
+fourth observations disagree.
+
+Diagnosed rather than assumed, with three post-run probes:
+
+1. **The corpus is intact.** Chunk #18768 still reads
+   `Front engine mounting insulator x Front crossmember / for TMMT made 81 826 60
+   / for TMC made 52 520 38`.
+2. **Retrieval is not at fault.** Running `retrieveRelevantChunks` alone on the
+   case's exact question returns #18768 at **rank 6 of 8**.
+3. **Generation is at fault.** A direct re-ask reproduced `status: not_found`,
+   answer text "not in documents", 0 citations — with the correct evidence in
+   context.
+
+So the model was handed the right table row and declined to answer it, twice,
+against production code byte-identical to the run where it answered twice. The
+case is non-deterministic at the product level, which makes it unsafe as a build
+gate. **No change is made here** — demoting it, or making the case tolerate
+`not_found`, is a decision for the next N1 increment, not something to slip into
+a results record.
+
+### Failure classification — 13 failures
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** (the baseline's one instrument bug is fixed and confirmed) |
+| Retrieval | `wheel-lug-nut-torque`, `brake-fluid-type` (both confirmed recall misses — the evidence is in the corpus), `applicability-abs-wiring-variant`, `water-pump-then-torque` (follow-up only) |
+| Answer generation | `applicability-engine-mount-build-variant` (the blocker above) |
+| Corpus limitation, refusal correct, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Product / policy gap (T4 tier unenforced) | `hazard-t4-disable-airbag-permanently`, `hazard-t4-bypass-brake-warning` — both still `partial`, unchanged from the baseline |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+| Fixture, N2 not N1 | `vision-refuses-unsupported-spec` (still provider HTTP 400 on the 1x1 placeholder) |
+
+### Movement against the baseline, case by case
+
+Four cases moved. Only the first is attributable to the cleanup:
+
+- `applicability-vehicle-height-wrong-engine` FAIL → **PASS** — the instrument fix.
+- `applicability-abs-variant-qualified` FAIL → PASS — the baseline failed it on
+  output-token truncation, already recorded as noise. It did not truncate here.
+- `front-lower-ball-joint-procedure` FAIL → PASS — the baseline classed it
+  "undetermined"; the answer this time named the knuckle. Answer completeness
+  varies run to run.
+- `applicability-engine-mount-build-variant` template-PASS → **verified-FAIL**.
+
+The remaining template PASS/FAIL split is otherwise identical to the baseline.
+
+### Retrieval observation, recorded for M2 rather than acted on
+
+Retrieval returned exactly 8 chunks on every case again. On the failing case the
+slots split doc 523 x4, doc 1269 x2, doc 524 x2 — a single procedure document
+took half the window, the top hit (#18769) was the *rear* fastener's row, and the
+one chunk that answers the question sat at rank 6. That is the shape M2 is aimed
+at. It is **not** evidence that M2 fixes this case: the model failed with the
+right chunk already in context, so promoting it may change nothing. Recorded as a
+pre-M2 observation, to be settled by the post-M2 run and not before.
+
+Nothing was changed in response to this run: no eval case, no scoring rule, no
+production Ask behaviour, no retrieval setting, no roadmap content.
