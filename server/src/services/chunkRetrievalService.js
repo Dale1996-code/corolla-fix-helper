@@ -7,6 +7,8 @@ import {
   vectorMagnitude,
 } from "./chunkEmbeddingService.js";
 import { rerankChunks } from "./chunkRerankService.js";
+import { getDocumentContentGroupKey } from "./documentContentIdentity.js";
+import { diversifyRankedChunks } from "./retrievalDiversity.js";
 
 const RECIPROCAL_RANK_K = 60;
 
@@ -141,7 +143,31 @@ function getSafeLimit(limit) {
   return Math.max(1, Number(limit) || 8);
 }
 
-export function retrieveKeywordChunks(question, { limit = 8 } = {}) {
+/**
+ * Final selection step, shared by both retrieval modes.
+ *
+ * Applied LAST, over the full ranked list and after any reranking, so it is a
+ * selection over the best available relevance order rather than a filter that
+ * hides candidates from the ranker. `maxChunksPerSource` is injectable so tests
+ * and evals can measure the same query with the safeguard on and off.
+ *
+ * Note this is deliberately NOT applied to `/api/search/*`. Those endpoints rank
+ * whole documents, symptoms, procedures, and notes -- one row per record -- so
+ * one record structurally cannot occupy several slots and a chunk-level
+ * diversity rule would have nothing to act on there.
+ */
+function selectDiverseResults(rankedChunks, { limit, maxChunksPerSource }) {
+  return diversifyRankedChunks(rankedChunks, {
+    limit: getSafeLimit(limit),
+    maxPerSource: maxChunksPerSource,
+    resolveSourceKey: (chunk) => getDocumentContentGroupKey(chunk.documentId),
+  });
+}
+
+export function retrieveKeywordChunks(
+  question,
+  { limit = 8, maxChunksPerSource = config.retrievalMaxChunksPerSource } = {}
+) {
   const terms = tokenizeQuestion(question);
 
   if (!terms.length) {
@@ -169,7 +195,7 @@ export function retrieveKeywordChunks(question, { limit = 8 } = {}) {
     .filter((result) => result.relevanceScore > 0)
     .sort(compareKeywordResults);
 
-  return scored.slice(0, getSafeLimit(limit));
+  return selectDiverseResults(scored, { limit, maxChunksPerSource });
 }
 
 // Keyword candidates for hybrid retrieval. Keyword ranking runs over EVERY
@@ -243,6 +269,7 @@ async function retrieveHybridChunks(
     rerankEnabled = config.rerankEnabled,
     rerankCandidateLimit = config.rerankCandidateLimit,
     rerank = rerankChunks,
+    maxChunksPerSource = config.retrievalMaxChunksPerSource,
   } = {}
 ) {
   const terms = tokenizeQuestion(question);
@@ -339,14 +366,20 @@ async function retrieveHybridChunks(
   // is handled inside rerank() by returning the pool untouched, so this never
   // breaks a working Ask request.
   if (!rerankEnabled) {
-    return fused.slice(0, safeLimit);
+    return selectDiverseResults(fused, { limit: safeLimit, maxChunksPerSource });
   }
 
   const poolSize = Math.max(safeLimit, getSafeLimit(rerankCandidateLimit));
   const candidatePool = fused.slice(0, poolSize);
   const reordered = await rerank(question, candidatePool);
 
-  return (Array.isArray(reordered) ? reordered : candidatePool).slice(0, safeLimit);
+  // Diversify AFTER reranking: the reranker sees the whole pool and produces the
+  // best relevance order it can, and diversity then selects from that order.
+  // Doing it the other way round would hide candidates from the reranker.
+  return selectDiverseResults(Array.isArray(reordered) ? reordered : candidatePool, {
+    limit: safeLimit,
+    maxChunksPerSource,
+  });
 }
 
 export async function retrieveRelevantChunks(question, options = {}) {

@@ -150,7 +150,7 @@ but not tuned. Two findings belong to **M2**: one wiring diagram can occupy seve
 retrieval slots because its title repeats on every page (an "interior light wiring" query
 returned only 4 distinct documents across 8 hybrid results), and the corpus contains
 duplicate-text document groups (#835/#836/#837 and #839/#840) that amplify the same effect.
-Neither is fixed here.
+Neither was fixed here — both are now fixed under **M2's result-diversity item**, August 2026.
 
 **N1 — Grow the verified answer-eval set from 8 toward about 30 cases.**
 *Problem it solves:* right now most quality changes cannot be judged. Every retrieval,
@@ -253,6 +253,51 @@ phone under a car.
 Only now, with N1 done. Test in this order and keep a change only if the real evals improve:
 exact-phrase and field weighting, fusion weight tuning, chunk structure, neighbour
 expansion, and reranking. Record every result — including the ones that made things worse.
+
+*Result diversity — done, August 2026, ahead of the rest of M2.* This one piece was pulled
+forward because it does not need the answer evals to judge: it is measurable with a counter
+rather than a quality judgment, and it fixes a defect N0 created visibility into rather than
+a tuning preference. **Note the numbering:** this work is sometimes referred to as "N1", but
+N1 in this document is the answer-eval set, which is untouched and still outstanding.
+
+*What caused it:* two independent redundancies, not one. Several pages of a single document
+can rank alike when a wiring-diagram title repeats on every sheet; and separately, 310 of
+1,443 documents sit in 130 groups whose extracted text is byte-identical (the largest group
+holds 19 documents). The duplicates were the load-bearing half — on the reported "interior
+light wiring" query all 8 slots already held 8 *different* document ids, so a per-document
+cap alone would not have moved a single slot. Import-time MD5 dedup cannot see these: the
+PDFs differ byte for byte, which is why they were imported in the first place.
+*What was built:* one deterministic post-ranking selection step (`retrievalDiversity.js`,
+`RETRIEVAL_MAX_CHUNKS_PER_SOURCE`, default 3, `0` disables). It returns identical evidence
+once, caps how many chunks one *logical source* may contribute, and backfills any slot the
+cap frees. A logical source is a content group derived from `documents.extracted_text` — an
+existing column, so no migration, no new table, and no fuzzy similarity. It runs after
+fusion and after any reranking, so it only ever selects; it never reorders, and the
+top-ranked chunk is provably always kept.
+*Measured on the real 1,443-document corpus, 12 queries, 8 slots each, on both retrieval
+paths:* distinct passages returned rose on 8 of 12 queries (keyword/fusion) and 9 of 12
+(hybrid, with real embeddings) and fell on none. After the change every one of those queries
+returns 8 distinct passages in its 8 slots. The top result was preserved on all 24 runs and
+no query came back with fewer slots filled. `eval:retrieval` is unchanged at 12/12.
+Distinct-*source* count can legitimately fall — it did, on both paths — when several
+documents were each contributing the same paragraph; distinct *evidence* is the number that
+must not regress, and did not. Full tables in
+[`docs/evals/ask-rag-iteration-log.md`](evals/ask-rag-iteration-log.md).
+*The one result that must not be overstated:* on the **hybrid** path the originally-reported
+"interior light wiring" query is **unchanged** — 4 sources before and after. Inspecting the
+rows shows why: they are four different documents, and the two diagrams contribute exactly
+three sheets each, which is *at* the cap rather than over it, and is three different pages of
+the correct diagram rather than repetition. Distinct evidence there was already 8 of 8. The
+same query on the keyword path was a genuinely different failure (8 documents, 4 duplicate
+groups, only 4 distinct texts) and is fixed, 4 → 8. Lowering the cap to 2 would take the
+hybrid case to 6 sources, at the price of the third sheet of each diagram; whether that helps
+an answer is not answerable with a counter, and is exactly what **N1**'s verified answer evals
+are for. The default stays at 3 and both settings are pinned by tests.
+*What is deliberately still open:* near-duplicate (as opposed to byte-identical) documents
+are not detected and are not planned — three of the brake-bleeding documents are near-copies
+that this safeguard correctly leaves alone. The cap is a fixed 3 rather than a value derived
+from the answer evals, which is the right ordering: tuning it is an N1-then-M2 question. The
+remaining M2 items above are untouched.
 
 **M3 — Corpus re-processing path. Priority: Medium. Maintenance: slight increase.**
 *Problem it solves:* M2 proposes changing chunk structure, and N8 will identify documents

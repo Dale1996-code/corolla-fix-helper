@@ -49,6 +49,7 @@ ASK_DEBUG_METRICS=false
 ASK_EVIDENCE_CONTRACT=true
 RERANK_ENABLED=false
 RERANK_CANDIDATE_LIMIT=20
+RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3
 OPENAI_RERANK_MODEL=
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIMENSIONS=512
@@ -78,6 +79,7 @@ What each one means:
 - `ASK_EVIDENCE_CONTRACT` enables Ask's verified, structured evidence response. The default is `true`: document-supported claims need a real source, a verbatim quote, supported technical numbers, and a matching subject for recognized torque statements. Set it to `false` only when an older integration cannot yet consume the additive `evidence` fields. The compatibility response is deliberately `status: "unverified"`, returns `citations: []`, and exposes retrieved passages only as `retrievedContext`, so neither the API nor UI presents unchecked prose as document-backed.
 - `RERANK_ENABLED` turns the optional Ask reranker on or off. The default is `false`. When `true`, Ask retrieval over-fetches a wider candidate pool and asks the model to reorder it before the final result slice. It needs an API key; with no key, a malformed reply, or any error it silently falls back to the existing hybrid order.
 - `RERANK_CANDIDATE_LIMIT` is how many fused candidates the reranker is allowed to reorder. The default is `20`.
+- `RETRIEVAL_MAX_CHUNKS_PER_SOURCE` is the most chunks one logical source may contribute to a single retrieval result set. The default is `3`. A *source* is a content group, not a document id: documents whose extracted text is identical share one budget, so duplicating a PDF cannot buy extra slots. The step runs after ranking and after any reranking, so it only selects — it never reorders, never demotes the top result, and never favours or penalizes a kind of document. Chunks held back by the cap backfill any slot it leaves empty, so a question whose only relevant evidence lives in one document still gets a full result set. Set it to `0` to disable the safeguard and return the plain ranked slice. This applies to chunk retrieval (Ask, the repair planner, procedure suggestions), not to `/api/search/*`, which ranks whole records and cannot monopolize.
 - `OPENAI_RERANK_MODEL` is the OpenAI model name used by the reranker. Leave blank to reuse `OPENAI_ANSWER_MODEL`.
 - `OPENAI_EMBEDDING_MODEL` is the OpenAI model name used to embed document chunks and questions.
 - `OPENAI_EMBEDDING_DIMENSIONS` is the embedding size stored in SQLite. The current value is `512`.
