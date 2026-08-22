@@ -5,6 +5,7 @@ import test from "node:test";
 // live eval (scripts/evalAnswers.js) because it reads the mutable local corpus;
 // these tests pin the DETECTION RULES with no database and no network.
 import {
+  checkTimingBeltRefusalPrecondition,
   checkTurboRefusalPrecondition,
   NEGATIVE_CASE_PRECONDITIONS,
 } from "../src/evals/negativeCorpusPreconditions.js";
@@ -89,4 +90,69 @@ test("the turbo refusal case is registered as having a precondition", () => {
     typeof NEGATIVE_CASE_PRECONDITIONS["refuse-turbo-boost-pressure"],
     "function"
   );
+});
+
+// ---- N1: the timing-belt refusal premise ----
+
+test("real drive-belt content does NOT trigger timing-belt re-verification", () => {
+  // These lines are the actual corpus. 589 chunks say "belt" and 39 of them
+  // discuss belt replacement or intervals -- if any of that tripped the check,
+  // the warning would fire on every run and stop being read.
+  const { stale, matches } = checkTimingBeltRefusalPrecondition(
+    fakeDb([
+      row("2ZR-FE ENGINE MECHANICAL: DRIVE BELT: INSTALLATION 1. INSTALL V-RIBBED BELT"),
+      row("Inspect drive belts for cracks, excessive wear and oilyness. Check belt tension."),
+      row("Fan belt adjusting bar x Cylinder head 19 190 14"),
+      row("REPLACE DRIVE BELT Type See Procedure 2ZR-FE 2AZ-FE"),
+      row("No. 1 chain vibration damper x Cylinder head. Timing chain cover 10 102 7"),
+      row("Check the valve timing and reinstall the timing chain tensioner."),
+      row("Replace the seat belt assembly if the pretensioner has deployed."),
+    ])
+  );
+
+  assert.equal(stale, false, `unexpected matches: ${JSON.stringify(matches)}`);
+});
+
+test("a real timing belt in the corpus triggers re-verification", () => {
+  const { stale, matches } = checkTimingBeltRefusalPrecondition(
+    fakeDb([
+      row(
+        "Replace the timing belt every 90,000 miles.",
+        "1ZZ-FE Engine Mechanical Supplement"
+      ),
+    ])
+  );
+
+  assert.equal(stale, true);
+  assert.equal(matches[0].ruleId, "timing_belt_phrase");
+  assert.equal(matches[0].documentTitle, "1ZZ-FE Engine Mechanical Supplement");
+});
+
+test("cam belt and toothed belt are recognized as the same part", () => {
+  // The refusal is about the PART, not the phrasing, so a manual using either
+  // of the other common names must still ask for a human.
+  for (const text of [
+    "Remove the cam belt cover and align the crankshaft pulley.",
+    "Inspect the toothed belt for cracks before reassembly.",
+  ]) {
+    assert.equal(checkTimingBeltRefusalPrecondition(fakeDb([row(text)])).stale, true, text);
+  }
+});
+
+test("the timing-belt refusal case is registered as having a precondition", () => {
+  assert.equal(
+    NEGATIVE_CASE_PRECONDITIONS["refuse-timing-belt-interval"],
+    checkTimingBeltRefusalPrecondition
+  );
+});
+
+test("only verified refusal cases carry a precondition", () => {
+  // A template case does not gate the run, so a stale premise costs nothing
+  // until someone promotes it; and the fictional refusals can never be made
+  // answerable by an import, so a check for them would be maintenance for
+  // nothing. Both are deliberate, and this pins the intent.
+  assert.deepEqual(Object.keys(NEGATIVE_CASE_PRECONDITIONS).sort(), [
+    "refuse-timing-belt-interval",
+    "refuse-turbo-boost-pressure",
+  ]);
 });

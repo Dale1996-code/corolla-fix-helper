@@ -52,10 +52,12 @@ state a plan imagined.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
-- **The answer-quality eval set is too small to steer by.** 13 of 35 cases are verified
-  against the real manuals; the other 22 are unconfirmed templates that report but do not
-  gate. Almost every remaining idea in this roadmap is a change whose value can only be
-  judged by that suite.
+- **The answer-quality eval set is too small to steer by.** 8 of 35 cases were verified
+  against the real manuals before N1; the other 27 were unconfirmed templates that report
+  but do not gate. A text search for `verified: true` returned 13 because five matches
+  occurred inside instructional comments; the runtime `VERIFIED_IDS` set is the gating
+  authority. N1 raised the suite to 14 verified of 43. Almost every remaining idea in this
+  roadmap is a change whose value can only be judged by that suite.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
@@ -148,7 +150,7 @@ returned only 4 distinct documents across 8 hybrid results), and the corpus cont
 duplicate-text document groups (#835/#836/#837 and #839/#840) that amplify the same effect.
 Neither is fixed here.
 
-**N1 — Grow the verified answer-eval set from 13 to about 30 cases.**
+**N1 — Grow the verified answer-eval set from 8 toward about 30 cases.**
 *Problem it solves:* right now most quality changes cannot be judged. Every retrieval,
 prompt, chunking, and model change below is a coin flip without this.
 *Why it matters:* it is the single highest-leverage engineering task in this document,
