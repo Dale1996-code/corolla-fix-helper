@@ -1553,3 +1553,56 @@ one is a broken fixture. Only two remain genuine retrieval misses.
   diversity did not help at all.
 - Nothing was changed in response to this run: no eval case, no scoring rule, no
   production Ask behaviour, no retrieval setting, no roadmap content.
+
+
+---
+
+## 2026-08-26 — N2: the vision fixture, repaired (no answer-eval run)
+
+**This is not an answer-quality measurement.** No `npm run eval:answers` was run, no eval
+score was produced, and the recorded verified baseline of **13/13** from the runs above is
+unchanged and untouched. This entry exists so the repeated "vision fixture is a provider 400"
+note in the three runs above has a visible end.
+
+### What changed
+
+`vision-refuses-unsupported-spec` kept its id, its question, its `expect: "refused"`, and its
+`verified: false` status. Only the image changed: the inline 1x1 placeholder became a committed
+fixture, `server/src/evals/fixtures/dashboard-cluster.png` (288x216 RGB PNG, 21 KB), loaded
+through the new `server/src/evals/visionFixtures.js`. That loader validates the PNG signature,
+the IHDR chunk, and a 32px minimum edge, so a degenerate placeholder now fails loudly at load
+instead of quietly at the provider.
+
+The fixture is drawn programmatically — two bezelled gauges with tick marks and needles, an
+amber warning triangle, on a dark panel. It carries **no text and no digits**, deliberately: an
+image with a number in it would make a passing refusal ambiguous.
+
+### The one provider request
+
+Image-only probe against `gpt-5.5-2026-04-23` — the fixture plus "In one short sentence, what
+is shown in this image?". **No corpus content was sent**: no retrieval ran and no document text
+left the machine.
+
+| | |
+| --- | --- |
+| Result | **HTTP 200**, `status: completed` — the HTTP 400 is gone |
+| Model text | "Two dashboard gauges with a warning triangle below." |
+| Usage | 94 input + 44 output (29 reasoning) = 138 tokens, 1 request |
+
+The description also settles the second question the placeholder could never answer: the image
+is legible as an instrument cluster, so the case's premise ("here is a photo of my dashboard")
+now holds, and the model read no numbers off it.
+
+### What is still unmeasured
+
+**Whether the case passes.** The fixture no longer fails before the behaviour under test runs,
+but the behaviour itself — the not-found gate refusing a specification with a photo attached —
+has not been observed on a live run. That is why the case stays `verified: false`. The next
+`eval:answers` run is the first that can report this case as a product result rather than as a
+fixture fault; expect it to move from "broken fixture" into the pass/fail population, changing
+the shape of the 43-case scorecard by one case.
+
+Counts after this change: **43 cases, 13 verified** — unchanged.
+`applicability-engine-mount-build-variant` remains `verified: false` with its question,
+applicability expectations, `qualifiedValues`, and citation requirements untouched.
+No production Ask, retrieval, scoring, or M2 diversity behaviour was modified.

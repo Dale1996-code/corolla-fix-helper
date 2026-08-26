@@ -52,6 +52,7 @@
     "server/test/suggestedProcedures.test.js",
     "server/test/symptomProcedureLinks.test.js",
     "server/test/symptomService.test.js",
-    "server/test/seedData.test.js"
+    "server/test/seedData.test.js",
+    "server/test/visionFixtures.test.js"
   ]
 }
