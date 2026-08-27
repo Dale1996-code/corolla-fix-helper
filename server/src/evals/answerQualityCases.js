@@ -30,7 +30,10 @@
 //   citationSupportsAny  at least one CITED SNIPPET must match one of these — proves the
 //                    cited chunk text actually backs the asserted spec, not just the prose (optional)
 //   mustCite         require at least one citation (default true for answered cases)
-//   image            a data: URI sent with the question to exercise Vision Ask (optional)
+//   image            a data: URI sent with the question to exercise Vision Ask
+//                    (optional). Build it with loadVisionFixtureDataUri() from a
+//                    committed fixture — never paste a base64 blob inline, and
+//                    never use an image containing text or numbers
 //   rejectionProbe   name of a probe in answerRejectionProbes.js that replaces the
 //                    model reply with one crafted to fail a specific check (optional)
 //   expectedStatus   required with expect: "rejected" — the status the server must derive
@@ -58,6 +61,7 @@
 import {
   REJECTION_PROBE_SENTINEL_PATTERN,
 } from "./answerRejectionProbes.js";
+import { loadVisionFixtureDataUri } from "./visionFixtures.js";
 
 export const answerQualityCases = [
   // ---- VERIFIED: confirmed against the real documents ----
@@ -406,8 +410,17 @@ export const answerQualityCases = [
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
   // The model may describe the attached photo, but it must STILL refuse a spec
   // the uploaded PDF chunks do not support — an image is never a source for a
-  // torque/capacity/procedure value. A 1x1 placeholder PNG stands in for a real
-  // photo; the refusal is driven by the not-found gate, not the image content.
+  // torque/capacity/procedure value. The refusal is driven by the not-found
+  // gate, not by the image content.
+  //
+  // The fixture is a real committed image (see src/evals/fixtures/README.md).
+  // It replaced a 1x1 placeholder that made this case fail every live run on a
+  // provider HTTP 400 before the behavior above was ever reached — a fixture
+  // defect wearing the costume of a product failure, which is what N2 repaired.
+  // It deliberately carries no text and no digits, so a passing run cannot be
+  // explained by there being nothing legible in the picture to launder into a
+  // specification. Still verified:false: the fixture is now sound, but the
+  // product behavior has not been confirmed over enough live runs to gate on.
   {
     id: "vision-refuses-unsupported-spec",
     question:
@@ -415,8 +428,7 @@ export const answerQualityCases = [
     category: "refusal",
     system: "Electrical",
     expect: "refused",
-    image:
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    image: loadVisionFixtureDataUri("dashboard-cluster.png"),
     verified: false,
   },
 

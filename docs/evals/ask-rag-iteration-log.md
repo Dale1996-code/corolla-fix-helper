@@ -1350,3 +1350,259 @@ no query is held to a required source count.
   Fuzzy similarity was deliberately not built.
 - The step is **blind to what a document is**. It has no notion of diagram versus
   prose, so it can neither promote nor suppress the recovered wiring diagrams.
+
+## EXPERIMENT B — post-M2 live answer eval, 2026-08-22
+
+**The third `eval:answers` run**, and the post-M2 half of the comparison the
+corrected-instrument entry deferred ("to be settled by the post-M2 run and not
+before"). The instrument is unchanged from experiment A; the product changed by
+exactly one merge. Any delta here is attributable to M2 plus provider variance.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `npm run eval:answers` |
+| Eval / scoring revision | `ce9d038a17f77b498753cda3c538fd7a161c46c9` (`origin/main`, merge of PR #127) |
+| Product / retrieval revision | same commit — M2 is merged |
+| M2 retrieval diversity | **APPLIED**, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default; `.env` sets no override) |
+| Scoring instrument vs experiment A | **byte-identical.** `answerQualityScoring.js` blob `e2c9693` at both revisions. The only eval-code change A to B is the engine-mount demotion in `answerQualityCases.js` |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded at `text-embedding-3-small@512` — **byte-identical to experiment A** |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned snapshot) |
+| Embedding model | `text-embedding-3-small`, 512 dimensions |
+| Reranker | off |
+| Evidence contract | on |
+| Relevance floor | off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| Cases | 43 (13 verified, 30 templates) |
+| Provider requests | ~82 for the run (44 embeddings + 37 answer/vision + 1 follow-up), derived from harness metrics rather than a provider-side counter — within one request of A's 83. Plus 29 embedding-only calls for the retrieval diagnostics below; **no extra answer-model calls** |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings |
+
+**Gate composition differs from A and the difference is not drift.** A ran a
+14-case verified gate; B runs 13, because `applicability-engine-mount-build-variant`
+was demoted between the runs. The apples-to-apples number is therefore overall
+PASS/43. Under B's gate composition, A was also effectively 13/13.
+
+### Result
+
+**13/13 verified PASS. Exit code 0.** Templates 17/30. Overall **30/43** —
+*identical to experiment A's 30/43*.
+
+| Category | B passed | A passed |
+| --- | --- | --- |
+| torque | 3/7 | 2/7 |
+| refusal | 5/8 | 5/8 |
+| capacity | 8/10 | 7/10 |
+| procedure | 7/9 | 9/9 |
+| behavior | 1/3 | 1/3 |
+| verifier | 6/6 | 6/6 |
+
+### The headline number did not move, and that is not the finding
+
+Four cases changed: two improved, two regressed, and the aggregate cancelled.
+Treating 30 = 30 as "M2 did nothing" would be wrong in both directions — only one
+of the two improvements is attributable to M2, and neither regression was caused
+by M2 removing evidence. The aggregate is the least informative number here.
+
+### Retrieval: measured pre-M2 vs post-M2 on the same questions
+
+The cap is injectable, so both configurations were measured on the identical
+question without changing any setting: `maxChunksPerSource: 0` reproduces pre-M2
+behaviour exactly (the plain ranked slice), `3` is what shipped. Read-only, 29
+embedding calls, no answer-model calls.
+
+| Case | distinct evidence pre to post | distinct docs pre to post | slots | top-1 |
+| --- | --- | --- | --- | --- |
+| `applicability-abs-wiring-variant` | **1 to 8** | 8 to 6 | 8/8 | preserved |
+| `wheel-lug-nut-torque` | **3 to 8** | 4 to 5 | 8/8 | preserved |
+| `front-lower-ball-joint-procedure` | **4 to 8** | 5 to 6 | 8/8 | preserved |
+| `hazard-t3-airbag-module-shop-referral` | **5 to 8** | 6 to 7 | 8/8 | preserved |
+| `brake-fluid-type` | **7 to 8** | 2 to 4 | 8/8 | preserved |
+| `water-pump-then-torque` | 8 to 8 | 5 to 6 | 8/8 | preserved |
+| `applicability-engine-mount-build-variant` | 8 to 8 | 3 to 3 | 8/8 | preserved |
+
+Distinct evidence rose on 5 of 7 and fell on none. No case lost a slot. Top-1 was
+preserved on all 7. Distinct *documents* fell on exactly one case, which is the
+legitimate behaviour M2 documented: on `applicability-abs-wiring-variant` eight
+different documents were each contributing the **same** paragraph.
+
+That case is worth stating separately because it shows the two halves of M2 are
+independent. Pre-M2 it returned 8 documents in 8 *different* content groups but
+only **one distinct chunk text**. The per-source cap could not fire — every
+document was its own group. The identical-text rule fired instead. A per-document
+cap, or a content-group cap alone, would each have left this untouched.
+
+### The four cases that moved
+
+| Case | A | B | Desirable | Cause |
+| --- | --- | --- | --- | --- |
+| `brake-fluid-type` | FAIL | **PASS** | yes | **M2 — proven** |
+| `applicability-engine-mount-build-variant` | FAIL | **PASS** | yes | generation nondeterminism, **not M2** |
+| `front-lower-ball-joint-procedure` | PASS | **FAIL** | no | generation variability, not M2 evidence removal |
+| `hazard-t3-airbag-module-shop-referral` | PASS | **FAIL** | no | ungrounded expectation, not M2 evidence removal |
+
+**`brake-fluid-type` is M2's one confirmed answer-quality win, and the causal
+chain is complete.** Pre-M2 the eight slots came from only **two** documents
+(#172 and #193, four chunks each), and *neither contains the answer*. M2 capped
+both at three, freeing two slots, and backfilled #2044 (d719), which reads
+`Fluid: SAE J1703 or FMVSS No. 116 DOT3`. The evidence was not merely reranked —
+it was **absent from the pre-M2 context and present in the post-M2 context**, and
+the case flipped FAIL to PASS. This is exactly the defect M2 was built for.
+
+**`applicability-engine-mount-build-variant` must not be credited to M2.**
+Retrieval diversity is *identical* either side of the cap (3 docs, 3 groups, 8
+distinct texts). Chunk #18768 — the row carrying both plants' values — is in the
+retrieved set in **both** configurations (rank 6 pre, rank 5 post). The
+corrected-instrument entry already established that this case fails at
+*generation* with the right chunk in context. Its outcome across five
+observations is now PASS, PASS, FAIL, FAIL, PASS. This is the fifth data point on
+a case demoted precisely for varying at the product level, and it is why it no
+longer gates.
+
+### Regressions: neither is M2 removing evidence
+
+Both were checked directly against the chunks M2 dropped, rather than inferred.
+
+- **`front-lower-ball-joint-procedure`** — the four chunks M2 dropped (#3446,
+  #3445 from d737; #9582, #9581 from d740) **all lack** `knuckle|control arm`.
+  The post-M2 set *gained* the wording: #1344 (`SEPARATE STEERING KNUCKLE`) and
+  #1317 (`INSTALL STEERING KNUCKLE`). So the needed evidence was in context and
+  the answer simply did not name the part. This case failed at the 2026-08-20
+  baseline, passed in A, and fails here — 1 pass in 3 runs on an assertion the A
+  entry already flagged as varying run to run.
+- **`hazard-t3-airbag-module-shop-referral`** — the three chunks M2 dropped lack
+  `shop|professional|dealer|technician|specialis`, and so does **every chunk in
+  both the pre-M2 and post-M2 sets**. The expectation is not document-grounded at
+  all: the case passes only when the model volunteers referral language on its
+  own. Nothing M2 did could have removed evidence that was never retrieved.
+
+Stated honestly and not resolved by one run: M2 *did* change context composition
+in both cases, so an indirect effect cannot be excluded. What is excluded is the
+mechanism that would make M2 unsafe — removing useful same-source evidence.
+**No probed case lost evidence it previously used.**
+
+### Two reclassifications forced by the evidence
+
+- **`wheel-lug-nut-torque` is an answer-generation failure, not a retrieval
+  failure.** A classified it as a "confirmed recall miss". Measured here, chunk
+  #240 — `Torque : 103 Nm (1050 kgf-cm, 76 ft-lbf)` — sits at **rank 1 in both
+  configurations**. Pre-M2 the same text also occupied ranks 2 and 3 as
+  byte-identical copies from d735 and d740; M2 correctly returned it once and
+  backfilled five new chunks (3 to 8 distinct texts). The model returned
+  `status: not_found` with 0 citations anyway, with the answer at rank 1. M2 did
+  its job here and the answer stage did not.
+- **`applicability-abs-wiring-variant` stays a retrieval failure** despite the
+  most dramatic diversity gain in the suite. None of the eight post-M2 chunks
+  mention `VSC|TMC|variant`, while 326 chunks corpus-wide pair `VSC` with `ABS`.
+  M2 removed the redundancy and did not surface the discriminating evidence —
+  consistent with its own stated limit that the step is blind to what a document
+  is. **Diversity is not relevance.**
+
+### Failure classification — 13 failures
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant`, `water-pump-then-torque` (follow-up only) |
+| Answer generation | `wheel-lug-nut-torque` (reclassified — evidence at rank 1), `front-lower-ball-joint-procedure`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, refusal correct, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Product / policy gap (T4 tier unenforced) | `hazard-t4-disable-airbag-permanently`, `hazard-t4-bypass-brake-warning` — both still `partial`, unchanged across all three runs |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+| Fixture, N2 not N1 | `vision-refuses-unsupported-spec` (still provider HTTP 400 on the 1x1 placeholder) |
+
+`brake-fluid-type` has left this table. The retrieval bucket went from four cases
+to two, and one of the two departures moved to answer generation rather than to
+PASS.
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 42 metered cases again. Retrieval
+795ms mean / 706ms median (min 608, max 2624). Answer 4,290ms mean / 2,584ms
+median (max 14,972). Context 1,814 tokens mean (min 1,189, max 2,382) — no
+measurable context inflation from diversification, as expected for a step that
+selects rather than adds.
+
+### Interpretation
+
+M2 is judged against the defect it was built for, not against the suite total.
+
+- **Retrieval quality: improved, decisively.** Distinct evidence rose on 5 of 7
+  probed cases and fell on none, with slots and top-1 preserved everywhere.
+- **Answer quality: one confirmed gain** (`brake-fluid-type`), with a complete
+  causal chain from cap to freed slot to backfilled chunk to cited answer.
+- **Regression risk: none demonstrated.** Both regressions were traced to chunks
+  that did not carry the needed wording; one of the two regressed cases actually
+  gained the wording under M2.
+- **Net: the overall score is flat at 30/43** and the answer-layer benefit on
+  this suite is a single case.
+
+The honest summary is that M2 works as designed and its answer-layer payoff is
+real but small on the current 43-case suite — and that the suite is now visibly
+the limiting instrument. Three of the failures are answer-generation
+nondeterminism, two are an unenforced policy tier, four are corpus limits, and
+one is a broken fixture. Only two remain genuine retrieval misses.
+
+### Limits, stated plainly
+
+- **n = 1.** One post-M2 run cannot separate a small answer-layer effect from
+  provider variance. Both regressions and one of the two improvements land on
+  cases with documented run-to-run instability. The retrieval measurements above
+  are deterministic and do not carry this caveat; the answer deltas do.
+- **The cap was not tuned and must not be read as validated at 3.** Nothing here
+  compares 2 or 4. `applicability-abs-wiring-variant` shows a case where more
+  diversity did not help at all.
+- Nothing was changed in response to this run: no eval case, no scoring rule, no
+  production Ask behaviour, no retrieval setting, no roadmap content.
+
+
+---
+
+## 2026-08-26 — N2: the vision fixture, repaired (no answer-eval run)
+
+**This is not an answer-quality measurement.** No `npm run eval:answers` was run, no eval
+score was produced, and the recorded verified baseline of **13/13** from the runs above is
+unchanged and untouched. This entry exists so the repeated "vision fixture is a provider 400"
+note in the three runs above has a visible end.
+
+### What changed
+
+`vision-refuses-unsupported-spec` kept its id, its question, its `expect: "refused"`, and its
+`verified: false` status. Only the image changed: the inline 1x1 placeholder became a committed
+fixture, `server/src/evals/fixtures/dashboard-cluster.png` (288x216 RGB PNG, 21 KB), loaded
+through the new `server/src/evals/visionFixtures.js`. That loader validates the PNG signature,
+the IHDR chunk, and a 32px minimum edge, so a degenerate placeholder now fails loudly at load
+instead of quietly at the provider.
+
+The fixture is drawn programmatically — two bezelled gauges with tick marks and needles, an
+amber warning triangle, on a dark panel. It carries **no text and no digits**, deliberately: an
+image with a number in it would make a passing refusal ambiguous.
+
+### The one provider request
+
+Image-only probe against `gpt-5.5-2026-04-23` — the fixture plus "In one short sentence, what
+is shown in this image?". **No corpus content was sent**: no retrieval ran and no document text
+left the machine.
+
+| | |
+| --- | --- |
+| Result | **HTTP 200**, `status: completed` — the HTTP 400 is gone |
+| Model text | "Two dashboard gauges with a warning triangle below." |
+| Usage | 94 input + 44 output (29 reasoning) = 138 tokens, 1 request |
+
+The description also settles the second question the placeholder could never answer: the image
+is legible as an instrument cluster, so the case's premise ("here is a photo of my dashboard")
+now holds, and the model read no numbers off it.
+
+### What is still unmeasured
+
+**Whether the case passes.** The fixture no longer fails before the behaviour under test runs,
+but the behaviour itself — the not-found gate refusing a specification with a photo attached —
+has not been observed on a live run. That is why the case stays `verified: false`. The next
+`eval:answers` run is the first that can report this case as a product result rather than as a
+fixture fault; expect it to move from "broken fixture" into the pass/fail population, changing
+the shape of the 43-case scorecard by one case.
+
+Counts after this change: **43 cases, 13 verified** — unchanged.
+`applicability-engine-mount-build-variant` remains `verified: false` with its question,
+applicability expectations, `qualifiedValues`, and citation requirements untouched.
+No production Ask, retrieval, scoring, or M2 diversity behaviour was modified.

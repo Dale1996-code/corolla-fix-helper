@@ -52,6 +52,54 @@ the broader engine/brakes/cooling/electrical/suspension/transmission/fuel/HVAC c
 Vision Ask refusal guard) stay `verified: false` until you confirm them, so they report but
 never gate the run.
 
+### When to run it, and how to record it
+
+`eval:answers` is **not part of CI, and cannot be.** It needs your real embedded corpus,
+which exists only on your machine, and every run spends real money at the model provider. CI
+runs lint, typecheck, both test suites, the build, and the smoke test — none of which call the
+answer model. This eval is a **pre-merge step you run by hand.**
+
+Run it before merging a change to any of these four things:
+
+- **retrieval** — fusion, result diversity, reranking, the relevance floor, chunk selection
+- **answer prompting** — the Ask prompt, the evidence contract, how accepted claims are rendered
+- **chunking** — how PDFs become `document_chunks`
+- **the answer model** — `OPENAI_ANSWER_MODEL`, `OPENAI_VISION_MODEL`, or their sampling settings
+
+Changes elsewhere — UI copy, routes, unrelated services, documentation — do not need a paid run.
+
+Then record the run in [`docs/evals/ask-rag-iteration-log.md`](evals/ask-rag-iteration-log.md),
+with enough detail that the next run can be *compared* against it instead of guessed against:
+
+- the **revision** the eval ran at — and separately the revision of the *product* code, when a
+  change touched only evals or docs and left retrieval untouched
+- the **configuration**: the model pins, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE`, `RERANK_ENABLED`,
+  `ASK_RELEVANCE_FLOOR`, `OPENAI_MAX_OUTPUT_TOKENS`
+- the **result**: verified passes out of the verified total, plus which templates moved
+- anything that was **noise rather than signal** — rate limiting, a bad fixture, output-token
+  truncation — named as such, so a later reader does not mistake it for a quality regression
+
+An unrecorded run is worse than no run. It produces a number that a future comparison treats as
+a baseline and cannot reproduce.
+
+### What may gate the build, and what may not
+
+- **The runtime verified set is the gating authority.** That is the cases actually carrying
+  `verified: true` in `answerQualityCases.js`, pinned by `VERIFIED_IDS` in
+  `server/test/answerQualityCases.test.js`. Do not count them with a text search — some matches
+  sit inside instructional comments, which is how the count was once overstated by five.
+- **A failing template is not a build-gating failure.** Templates run and report so movement is
+  visible; they never fail the run. Treating them as red is how a suite becomes noise people
+  learn to skip — which is exactly what the permanently-failing vision fixture was doing.
+- **Never promote a case to `verified: true` to make a run look better.** A case earns the gate
+  only when both hold: its expectation has been **independently confirmed** (against the cited
+  PDF page, or by proving absence across the whole corpus for a refusal), and its product
+  behavior is **reproducible enough to gate on**.
+- A case can satisfy the first and fail the second. That is not a defeat, and demotion is a
+  normal outcome: `applicability-engine-mount-build-variant` was promoted on 2026-08-20 and
+  demoted on 2026-08-22 — its expectations were never weakened, it simply varied at the product
+  level, and a gate that flickers is worse than no gate.
+
 ## 3. Relevance-floor calibration (only when tuning `ASK_RELEVANCE_FLOOR`)
 
 ```powershell

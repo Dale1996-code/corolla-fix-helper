@@ -18,6 +18,7 @@ const { answerQualityCases } = await import("../src/evals/answerQualityCases.js"
 const { summarize } = await import("../src/evals/answerQualityScoring.js");
 const { REJECTION_PROBE_NAMES } = await import("../src/evals/answerRejectionProbes.js");
 const { ASK_REJECTION_REASONS } = await import("../src/services/askEvidenceContract.js");
+const { describePngFixture } = await import("../src/evals/visionFixtures.js");
 const { db } = await import("../src/database.js");
 
 after(() => {
@@ -186,6 +187,28 @@ test("a vision case guards that an image cannot unlock an unsupported spec", () 
     visionCases.every((testCase) => testCase.expect === "refused"),
     "vision guard cases must expect a refusal when the chunks do not support the spec"
   );
+});
+
+// N2. The fixture defect this repaired was invisible to the suite: a 1x1
+// placeholder is a structurally valid PNG, so nothing here objected while every
+// live run died on a provider 400 before the guard above was reached. Judging
+// the image itself is what keeps the case failing only for product reasons.
+test("every vision fixture is a real image, so the case can actually run", () => {
+  const visionCases = answerQualityCases.filter((testCase) => testCase.image);
+
+  for (const testCase of visionCases) {
+    const uri = testCase.image;
+    assert.match(
+      uri,
+      /^data:image\/png;base64,/,
+      `${testCase.id} must carry a PNG data URI built from a committed fixture`
+    );
+
+    const bytes = Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64");
+    const { width, height } = describePngFixture(bytes, testCase.id);
+
+    assert.ok(width > 1 && height > 1, `${testCase.id} still uses a placeholder image`);
+  }
 });
 
 test("golden repair topics are covered by eval cases", () => {
