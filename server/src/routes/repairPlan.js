@@ -2,6 +2,10 @@ import { Router } from "express";
 import { runRepairPlannerAgent, SKILL_LEVELS } from "../services/agent/repairPlannerAgent.js";
 import { planRunStore } from "../services/agent/planRunStore.js";
 import { buildOwnerChecklist, checkRepairReadiness } from "../services/agent/repairTools.js";
+import {
+  DEFEAT_REFUSAL_MESSAGE,
+  isSafetySystemDefeatRequest,
+} from "../services/defeatRequestClassifier.js";
 
 // Cap the brief (and each optional field) so a giant pasted payload cannot be
 // forwarded to the model. Briefs are longer-form than an Ask question, hence the
@@ -70,6 +74,33 @@ export function createRepairPlanRouter({
       response.status(400).json({
         error: `Field "skillLevel" must be one of: ${SKILL_LEVELS.join(", ")}.`,
       });
+      return;
+    }
+
+    // T4 policy gate (roadmap N2.5). Last check before the stream opens, so a
+    // defeat request never starts the agent loop, never calls a tool, and never
+    // reaches the model.
+    //
+    // The optional free-text fields are checked too, each as its own clause block
+    // (joined with newlines, which the classifier treats as a clause break) so a
+    // defeat verb in `constraints` cannot pair with a safety system named in the
+    // brief and manufacture a false positive across fields.
+    //
+    // Refused with the same 400 + `{ error }` shape as the validation failures
+    // above, which RepairPlannerPage already renders -- no new event type and no
+    // UI change. This runs before writeHead, so the response is still ordinary
+    // JSON rather than a half-opened SSE stream.
+    const plannerText = [
+      brief,
+      request.body?.constraints,
+      request.body?.availableTools,
+      request.body?.availableParts,
+    ]
+      .filter((field) => typeof field === "string" && field.trim())
+      .join("\n");
+
+    if (isSafetySystemDefeatRequest(plannerText)) {
+      response.status(400).json({ error: DEFEAT_REFUSAL_MESSAGE });
       return;
     }
 

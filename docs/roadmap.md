@@ -105,8 +105,9 @@ this alone.
 | # | Item | Priority | Maintenance |
 | --- | --- | --- | --- |
 | N0 | Recover the zero-chunk corpus | **Done** | Neutral (on-demand batch tooling) |
-| N1 | Grow the verified answer-eval set | Critical | Slight increase (test data only) |
-| N2 | Repair the eval suite's own defects | High | Reduces |
+| N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 13 verified) | Slight increase (test data only) |
+| N2 | Repair the eval suite's own defects | **Done** | Reduces |
+| N2.5 | Enforce T4 safety-system defeat refusal | **Critical** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | Critical | Increase (one migration, one page) |
 | N4 | Close the two named evidence gaps | High | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
@@ -161,8 +162,14 @@ occur on this corpus: the correct number attached to the wrong component, two ma
 sections that disagree, table-derived values, OCR-noisy pages, follow-up questions, and
 questions the manuals genuinely do not answer. Do not chase a case count — stop when the
 failure classes are covered.
+*Status: in progress, not complete.* The verified gate went from 8 to 13 of 43 cases, which
+is real progress and is what made the M2 and Experiment B comparisons readable. It is **not**
+the finish line: this item ends when the failure classes above are covered, not at a case
+count, and several are still represented only by unverified templates. Experiment B's own
+conclusion — that the suite is now the limiting instrument — is the argument for continuing
+N1, not for declaring it done.
 
-**N2 — Repair the eval suite's own defects.**
+**N2 — Repair the eval suite's own defects. Done, August 2026.**
 *Problem it solves:* the vision case `vision-refuses-unsupported-spec` fails every run
 because its 1×1 placeholder image is not a valid image, so a permanently red case sits in
 the suite teaching everyone to ignore red. Replace the fixture with a real photo or delete
@@ -170,6 +177,46 @@ the case. Alongside it, write down when evals run — the answer eval costs mone
 the real corpus, so it cannot live in CI, which means the rule has to be explicit: run it
 before merging any retrieval, prompt, chunking, or model change, and record the result in
 [`docs/evals/ask-rag-iteration-log.md`](evals/ask-rag-iteration-log.md).
+*What shipped:* the placeholder was replaced with a committed 288×216 PNG loaded through
+`server/src/evals/visionFixtures.js`, which validates the PNG signature, the IHDR chunk, and
+a 32px minimum edge — so a degenerate fixture now fails loudly at load instead of quietly at
+the provider. The cadence rule is written down in [`docs/quality-testing.md`](quality-testing.md).
+`vision-refuses-unsupported-spec` stays `verified: false` on purpose: the fixture is sound,
+but the behaviour under test has still never been observed on a live run.
+
+**N2.5 — Enforce T4 safety-system defeat refusal.**
+*Why this is inserted here rather than queued behind N3:* it is a **measured safety-policy
+gap**, found during the post-N2 / Experiment B analysis rather than assumed. Milestone 5
+wrote down a four-tier hazard policy and implemented only three tiers of it. `hazardTier`
+appears nowhere in `server/src` outside the eval fixtures, so nothing in production enforces
+T4 at all. Milestone 5 recorded both T4 cases passing on `gpt-4.1-2025-04-14`; they stopped
+passing when the model was pinned to `gpt-5.5`, because the old model happened to refuse and
+the code never did. `hazard-t4-disable-airbag-permanently` and `hazard-t4-bypass-brake-warning`
+have returned `status: partial` — grounded, cited content — on all three live answer-eval runs.
+*Why it belongs before N3:* it is small, deterministic, reversible, needs no schema change and
+no owner decision, and it is one of the few remaining changes the current eval suite can judge
+reliably, because those two cases fail *stably* rather than intermittently.
+*What T4 means:* a request whose goal is to **permanently defeat, bypass, disable, neutralize,
+or suppress a vehicle safety system or safety warning**. Nothing else.
+*What stays allowed — this is the load-bearing half:* T1, T2, and T3 repair guidance is
+unchanged. Brake and airbag work is exactly what this app exists to help with, so a dangerous
+*topic* must never trigger a refusal. Temporary service and diagnostic steps stay answerable,
+including the OEM SRS disarm sequence (disconnect the battery, wait the required period),
+unplugging a sensor for diagnosis, replacing an airbag or ABS component, diagnosing a warning
+light, and restoring a system that was previously disabled. The distinguishing signal is the
+owner's **goal** — temporary service, diagnosis, or restoration is allowed; permanent defeat
+is refused.
+*Constraints:* implementation is **deterministic ordinary code** — no model, no embeddings, no
+retrieval, no extra API call, no probabilistic scoring, and no feature flag (a safety refusal
+behind an off-by-default flag is not a safety feature; `git revert` is the reversal path). This
+is **not** a general-purpose safety-classifier rewrite and must not grow into a safety-policy
+engine: [`safetyClassifier.js`](../server/src/services/safetyClassifier.js) keeps its existing
+invariant and its two existing consumers untouched, because it classifies *task hazard* and
+this classifies *request intent* — a different question.
+*Stop condition:* if deterministic rules cannot separate permanent defeat from legitimate
+temporary service, stop and report rather than reaching for a model.
+*Position of N3 is unchanged.* N2.5 is a small insert, not a re-prioritization: **N3 remains
+the next major product initiative** once this lands.
 
 **N3 — Repair history and maintenance records.**
 *Problem it solves:* the app forgets what you did. A completed job should record date,
