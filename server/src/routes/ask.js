@@ -5,6 +5,10 @@ import { config } from "../config.js";
 import { askQuestionUsingDocuments } from "../services/aiAnswerService.js";
 import { validateAskResponse } from "../services/askResponseContract.js";
 import {
+  DEFEAT_REFUSAL_MESSAGE,
+  isSafetySystemDefeatRequest,
+} from "../services/defeatRequestClassifier.js";
+import {
   getAttachmentById,
   getAttachmentsImageDir,
   isAllowedImageMimeType,
@@ -99,6 +103,30 @@ export function createAskRouter({
     if (question.length > MAX_QUESTION_LENGTH) {
       response.status(400).json({
         error: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.`,
+      });
+      return;
+    }
+
+    // T4 policy gate (roadmap N2.5), at the HTTP boundary.
+    //
+    // askQuestionUsingDocuments carries the same gate, and BOTH are load-bearing:
+    // this one proves at the route that a defeat request never enters the service
+    // (and never loads an attachment), while the service one covers the callers
+    // that bypass HTTP entirely -- notably scripts/evalAnswers.js, which calls the
+    // service directly, so a route-only gate would leave the two T4 eval cases
+    // failing. One rule module, two boundaries; the policy itself is not
+    // duplicated.
+    //
+    // Answered with 200 and the same not_found payload shape the service would
+    // have produced, so the Ask UI renders its existing "No answer found" banner
+    // rather than an error banner.
+    if (isSafetySystemDefeatRequest(question)) {
+      response.json({
+        question,
+        standaloneQuestion: question,
+        status: "not_found",
+        answer: DEFEAT_REFUSAL_MESSAGE,
+        citations: [],
       });
       return;
     }

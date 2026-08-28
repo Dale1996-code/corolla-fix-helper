@@ -4,6 +4,12 @@ import {
   retrieveRelevantChunks,
 } from "./chunkRetrievalService.js";
 import { reserveAiCall } from "./aiUsageBudget.js";
+// Leaf module: imports nothing, so gating here does not deepen the existing
+// aiAnswerService -> chunkRetrievalService -> chunkRerankService cycle.
+import {
+  DEFEAT_REFUSAL_MESSAGE,
+  isSafetySystemDefeatRequest,
+} from "./defeatRequestClassifier.js";
 import { isDocumentFileAvailable } from "./documentService.js";
 import {
   createRedactedOpenAiHttpError,
@@ -756,6 +762,32 @@ export async function askQuestionUsingDocuments(
 
   if (!normalizedQuestion) {
     throw new Error("Question is required.");
+  }
+
+  // T4 policy gate (roadmap N2.5). Deterministic, and deliberately placed BEFORE
+  // the AI-configured check, the history rewrite, and retrieval:
+  //
+  //  - Refusing to help defeat a safety system is policy, not a capability
+  //    question, so the answer must not depend on whether a key is set.
+  //  - Everything below this line costs money: the rewrite and the answer are
+  //    model calls and retrieval embeds the question. A refusal must cost none.
+  //
+  // `not_found` is the honest status here as well as the existing one -- the
+  // manuals do not document how to defeat a restraint system, so there is
+  // genuinely nothing to cite. Reusing it means no response-contract change and
+  // no new branch in the Ask UI.
+  //
+  // The gate reads the RAW question, not the rewritten standalone question,
+  // because the rewrite is itself a provider call. A follow-up whose defeat
+  // intent only becomes visible after rewriting is a known and accepted gap;
+  // closing it would mean paying for a model call before refusing.
+  if (isSafetySystemDefeatRequest(normalizedQuestion)) {
+    return finalize({
+      status: "not_found",
+      answer: DEFEAT_REFUSAL_MESSAGE,
+      citations: [],
+      standaloneQuestion: normalizedQuestion,
+    });
   }
 
   if (!isAiConfigured) {

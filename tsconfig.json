@@ -32,6 +32,8 @@
     "server/test/attachmentService.test.js",
     "server/test/attachments.test.js",
     "server/test/config.test.js",
+    "server/test/defeatRequestClassifier.test.js",
+    "server/test/defeatRequestGate.test.js",
     "server/test/documentServiceMutations.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
