@@ -24,8 +24,20 @@
 // THE BIAS IS DELIBERATE AND ASYMMETRIC. Over-refusing is the worse failure:
 // brake and airbag work is precisely what this app exists to help with, so a
 // dangerous *topic* must never trigger a refusal. Every rule below therefore
-// requires a defeat GOAL, not a hazardous subject, and any legitimate-intent
-// marker anywhere in the text wins outright.
+// requires a defeat GOAL, not a hazardous subject, and a legitimate-intent
+// marker exempts the defeat-looking action it qualifies.
+//
+// THE EXEMPTION IS CLAUSE-LOCAL, AND THAT IS THE POINT. It was once checked
+// across the whole request, which meant an unrelated second sentence could
+// pardon an explicit defeat in the first:
+//
+//   "How do I permanently disable the airbag so it never works again?
+//    Also, how do I diagnose the ABS warning?"
+//
+// The word "diagnose" there qualifies the ABS question, not the airbag one. A
+// marker now only excuses a match in its OWN clause, and a single unpardoned
+// defeat clause refuses the whole request however many legitimate clauses
+// surround it.
 //
 // WHAT IT IS NOT. This is an owner-facing policy gate for a single-user local
 // app, not adversarial defense. Someone who deliberately words a defeat request
@@ -102,9 +114,12 @@ const SAFETY_SYSTEM_TARGETS = [
   /\bsafety system\b/,
 ];
 
-// Legitimate goals. Checked across the WHOLE request, not per clause, because
-// "..., then reconnect it" is usually a separate clause from the disconnect. Any
-// hit here allows the request outright -- see the asymmetric-bias note above.
+// Legitimate goals. Checked WITHIN the matching clause only -- see the
+// clause-local note above.
+//
+// A separate "..., then reconnect it" clause needs no cross-clause pardon: the
+// disconnect clause it follows carries no permanence marker, so it never
+// matched in the first place and there is nothing to excuse.
 const LEGITIMATE_INTENT_MARKERS = [
   /\btemporar(?:y|ily)\b/,
   /\bbefore (?:working|servicing|service|removing|replacing|starting|you work|any work|disassembl\w*)\b/,
@@ -159,6 +174,35 @@ function toClauses(text) {
     .filter(Boolean);
 }
 
+// A negator immediately before a restoration phrase inverts it: "so it never
+// works again" is the permanence marker wearing the restoration marker's words.
+// Allows up to two intervening words so "never comes back on" is caught too.
+const NEGATED = /\b(?:never|no longer|not|cannot|can t|won t|don t|doesn t)\s+(?:\w+\s+){0,2}$/;
+
+/**
+ * First legitimate-intent marker in a clause, ignoring negated ones.
+ *
+ * @param {string} clause normalized clause text
+ * @returns {string|null}
+ */
+function firstExemption(clause) {
+  for (const pattern of LEGITIMATE_INTENT_MARKERS) {
+    const found = clause.match(pattern);
+
+    if (!found || found.index === undefined) {
+      continue;
+    }
+
+    if (NEGATED.test(clause.slice(0, found.index))) {
+      continue;
+    }
+
+    return found[0].trim();
+  }
+
+  return null;
+}
+
 /** @param {RegExp[]} patterns @param {string} text @returns {string|null} */
 function firstMatch(patterns, text) {
   for (const pattern of patterns) {
@@ -179,27 +223,32 @@ function firstMatch(patterns, text) {
  * @property {string|null} verb the defeat verb that matched, if any.
  * @property {string|null} target the safety system that matched, if any.
  * @property {string|null} permanence the permanence marker, when one was needed.
- * @property {string|null} allowedBy the legitimate-intent marker that allowed an
- *   otherwise-matching request. Non-null only when `refuse` is false.
+ * @property {string|null} allowedBy the legitimate-intent marker, found in the
+ *   SAME clause, that excused an otherwise-matching clause. Non-null only when
+ *   `refuse` is false.
  */
 
 /**
  * Classify one free-text request for safety-system defeat intent.
  *
- * Refuses only when a single clause carries BOTH a defeat goal and a named
- * safety system, AND the request states no legitimate service, diagnostic, or
- * restoration intent anywhere.
+ * Refuses when any single clause carries BOTH a defeat goal and a named safety
+ * system and states no legitimate service, diagnostic, or restoration intent of
+ * its own. One such clause refuses the whole request; a marker in a different
+ * clause qualifies that clause's action, not this one.
  *
  * @param {string} text the owner's question or repair brief, as typed
  * @returns {DefeatRequestVerdict}
  */
 export function classifyDefeatRequest(text) {
   const empty = { refuse: false, verb: null, target: null, permanence: null, allowedBy: null };
-  const whole = normalize(text);
 
-  if (!whole) {
+  if (!normalize(text)) {
     return empty;
   }
+
+  // An excused match is remembered rather than returned, so scanning continues:
+  // a later clause may hold a defeat this one has no standing to pardon.
+  let excused = null;
 
   for (const clause of toClauses(text)) {
     const target = firstMatch(SAFETY_SYSTEM_TARGETS, clause);
@@ -216,30 +265,26 @@ export function classifyDefeatRequest(text) {
       continue;
     }
 
-    // Only now is the exemption worth checking: a request that never matched is
+    // Only now is the exemption worth checking: a clause that never matched is
     // allowed anyway, and reporting `allowedBy` on it would be noise.
-    const allowedBy = firstMatch(LEGITIMATE_INTENT_MARKERS, whole);
-
-    if (allowedBy) {
-      return {
-        refuse: false,
-        verb: defeatVerb || ambiguousVerb,
-        target,
-        permanence,
-        allowedBy,
-      };
-    }
-
-    return {
-      refuse: true,
+    const allowedBy = firstExemption(clause);
+    const verdict = {
+      refuse: !allowedBy,
       verb: defeatVerb || ambiguousVerb,
       target,
       permanence,
-      allowedBy: null,
+      allowedBy,
     };
+
+    // One unpardoned defeat clause decides the whole request.
+    if (verdict.refuse) {
+      return verdict;
+    }
+
+    excused = excused || verdict;
   }
 
-  return empty;
+  return excused || empty;
 }
 
 /**
