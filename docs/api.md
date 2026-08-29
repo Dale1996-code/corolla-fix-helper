@@ -43,6 +43,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `GET/POST /api/notes`, `PUT/DELETE /api/notes/:id` | Note CRUD |
 | `GET/POST /api/repair-checklists`, `GET/PUT/DELETE /api/repair-checklists/:id` | Repair checklist CRUD |
 | `POST /api/repair-checklists/:id/items`, `PUT/DELETE .../items/:itemId`, `POST .../items/:itemId/move` | Checklist item add / edit / delete / reorder |
+| `GET/POST /api/repair-history`, `GET/PUT/DELETE /api/repair-history/:id` | Repair history CRUD — what work was done, when, at what mileage, and which pages backed it |
 | `GET/POST /api/attachments`, `GET /api/attachments/all`, `GET /api/attachments/:id/file`, `DELETE /api/attachments/:id` | Image attachments |
 | `GET /api/settings`, `PUT /api/settings/vehicle`, `PUT /api/settings/document-defaults` | Settings |
 | `GET /api/settings/backup-export` | Download a `.tar.gz` backup |
@@ -643,6 +644,85 @@ Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-checklists 
 **Idempotency.** Saving the same draft twice returns the checklist it already became (`200`) instead of creating a duplicate. If that checklist has since been deleted, the draft is saved again.
 
 The result is an **ordinary** checklist: `planned`, fully editable, with no stored link back to the plan it came from. Nothing about the saved statements is a check-off repair instruction — they are reference notes, and this route creates no schema change or planner-to-checklist relationship.
+
+---
+
+## Repair History
+
+The durable record that a repair was actually carried out — the roadmap's **N3** foundation. Persistence only: there is **no UI for this yet**, and nothing else in the app writes to it.
+
+It answers "what did I do, when, at what mileage, why, and which manual pages backed it?" — and keeps answering after the symptom is renamed, the checklist is edited, or the document is deleted.
+
+Allowed values — `outcome`: `fixed` | `partial` | `not_fixed` | `unknown` (default).
+
+| Endpoint | Notes |
+| --- | --- |
+| `GET /api/repair-history` | `{ "repairHistory": [...], "total": n }`, ordered by the day the work happened, newest first |
+| `GET /api/repair-history/:id` | `{ "repairHistory": {...} }` |
+| `POST /api/repair-history` | `201` → `{ "message", "repairHistory" }` |
+| `PUT /api/repair-history/:id` | partial update — see the snapshot rules below |
+| `DELETE /api/repair-history/:id` | deletes the record; its source rows cascade away |
+
+### Body fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `title` | ✅ | what the job was |
+| `performedOn` | ✅ | the calendar day the work happened, exactly `YYYY-MM-DD` |
+| `odometerMiles` | | whole miles as a JSON **number**, or `null`/omitted when not recorded |
+| `outcome` | | one of the four values above; blank defaults to `unknown` |
+| `summary` | | what actually happened |
+| `followUp` | | anything to check later. Free text — not a reminder or a schedule |
+| `symptomId` | | an existing symptom, or `null` |
+| `checklistId` | | an existing repair checklist, or `null` |
+| `sources` | | `[{ "documentId": 12, "pageNumber": 412 }]` — the pages that backed the work. `pageNumber` may be `null` |
+
+`odometerMiles` must be a real JSON number. A numeric **string** is rejected rather than coerced, unlike the path-parameter ids elsewhere in this API: `Number("")` is `0`, so coercing would turn a blank field into a legitimate-looking reading of zero miles. `null` ("I did not write it down") and `0` (a reading) stay different facts. Mileage is stored as whole miles on the repair record; there is no vehicle-level current odometer.
+
+`performedOn` is validated strictly and is not passed to JavaScript's permissive date parser. `2026-02-30` (not a real day), `08/29/2026` (wrong format), and `2026-8-29` (unpadded) are all `400`. There is no "cannot be in the future" rule.
+
+### Response shape
+
+Each record returns its own fields plus `sources`, `sourceCount`, `symptomTitle`, and `checklistTitle`. Every source carries:
+
+- `documentId` — the **live** link, or `null` once that document has been deleted
+- `documentTitle` — the **snapshot**, which always survives
+- `pageNumber` — the snapshot of the cited page
+
+The current title of a still-existing document is deliberately not returned. Showing a live title over a historical record is the drift this feature exists to prevent.
+
+### Snapshot rules on `PUT`
+
+This is the one place where "field omitted" and "field explicitly set" mean different things, and the difference is load-bearing:
+
+- Editing `summary`, `outcome`, `followUp`, `odometerMiles`, `performedOn`, or `title` **never** refreshes a snapshot. A symptom renamed after the fact stays recorded under the name it had when the work was done.
+- Supplying `symptomId` or `checklistId` re-snapshots that relationship from the newly selected record. Setting it to `null` clears the link **and** its snapshot — that is the owner correcting the record, which is different from the record's symptom having been deleted.
+- Supplying `sources` replaces the whole set and snapshots the new documents' titles; `[]` removes them all. Omitting it leaves the existing provenance untouched.
+
+### Validation and integrity
+
+| Status | Meaning |
+| --- | --- |
+| `400` | any invalid value — bad date, out-of-range or non-integer odometer, unknown outcome, malformed `sources`, or an id naming a symptom/checklist/document that does not exist |
+| `404` | no such record |
+
+Unknown link ids are refused, never silently stored. A malformed `sources` payload is a `400` rather than being treated as empty — quietly dropping evidence is the failure this feature exists to prevent. Duplicate `{ documentId, pageNumber }` entries are collapsed deterministically, first-seen order kept, rather than raising an error.
+
+Creates and updates write both tables inside one transaction, so a record can never commit its header without its citations. Validation happens before the transaction opens, so a rejected request performs no write at all.
+
+Deleting a **document** does not delete a repair record or its provenance row: the `documentId` becomes `null` and the snapshot title and page number remain. The same holds for a deleted symptom or checklist — the link clears, the snapshot stays.
+
+```powershell
+$body = @{
+  title = "Front brake pads and rotors"
+  performedOn = "2026-08-14"
+  odometerMiles = 142350
+  outcome = "fixed"
+  sources = @(@{ documentId = 12; pageNumber = 412 })
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-history `
+  -ContentType "application/json" -Body $body
+```
 
 ---
 

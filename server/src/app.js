@@ -14,6 +14,7 @@ import { healthRouter } from "./routes/health.js";
 import { notesRouter } from "./routes/notes.js";
 import { proceduresRouter } from "./routes/procedures.js";
 import { repairChecklistsRouter } from "./routes/repairChecklists.js";
+import { repairHistoryRouter } from "./routes/repairHistory.js";
 import { searchRouter } from "./routes/search.js";
 import { settingsRouter } from "./routes/settings.js";
 import { symptomsRouter } from "./routes/symptoms.js";
@@ -127,6 +128,7 @@ export function createApp(options = {}) {
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/repair-checklists", repairChecklistsRouter);
+  app.use("/api/repair-history", repairHistoryRouter);
   app.use("/api/attachments", attachmentsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/ask", aiLimiter, createAskRouter({ askQuestion }));

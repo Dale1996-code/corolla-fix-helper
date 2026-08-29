@@ -301,6 +301,111 @@ function createLinkAndSortIndexes() {
   `);
 }
 
+// Migration 004: repair history (roadmap N3). Two additive, vehicle-scoped
+// tables recording a repair that was actually carried out. Nothing existing is
+// touched — no ALTER on `vehicles`, no change to `repair_checklists`.
+//
+// The odometer lives HERE, on the repair, and there is deliberately no
+// `vehicles.current_odometer`. A reading taken on the day of a job is a
+// historical fact; a "current" odometer is a derived maximum, and storing both
+// would create two writable sources of truth for one number with no rule for
+// reconciling them. Nothing in the app reads a current odometer today, and
+// `SELECT MAX(odometer_miles) FROM repair_history` answers the question if
+// anything ever does.
+//
+// The integrity strategy is LIVE FOREIGN KEY + HISTORICAL SNAPSHOT, and both
+// halves are load-bearing:
+//
+//   - Every inbound foreign key is ON DELETE SET NULL, never CASCADE. Deleting a
+//     symptom, a checklist, or a document must not delete the owner's record
+//     that they did the work. This matches what documentService.deleteDocument
+//     already does by hand for note links.
+//   - The *_title columns are snapshots taken when the row is written. They are
+//     what keeps a history row readable after its links are gone or its linked
+//     records have been renamed: a completed repair must never silently change
+//     because a current record changed.
+//
+// The one CASCADE is repair_history -> repair_history_documents, where the child
+// genuinely belongs to the parent.
+//
+// What is deliberately NOT stored: planner `sourceId` values (S1, S2, ...) and
+// chunk ids. Source ids are request-local (Ask) or run-wide (planner)
+// identifiers with no meaning outside the run that minted them, and
+// documentChunkService rebuilds chunk rows on re-extraction, so a chunk id is
+// stale the next time a PDF is re-extracted. `document_id` + `page_number`
+// survives both, and is exactly what the client's buildDocumentFileLink already
+// needs to deep-link a cited page.
+function createRepairHistoryTables() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS repair_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      performed_on TEXT NOT NULL,
+      odometer_miles INTEGER
+        CHECK (
+          odometer_miles IS NULL
+          OR (odometer_miles >= 0 AND odometer_miles <= 2000000)
+        ),
+      title TEXT NOT NULL,
+      outcome TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (outcome IN ('fixed', 'partial', 'not_fixed', 'unknown')),
+      summary TEXT NOT NULL DEFAULT '',
+      follow_up TEXT NOT NULL DEFAULT '',
+      symptom_id INTEGER,
+      symptom_title TEXT NOT NULL DEFAULT '',
+      checklist_id INTEGER,
+      checklist_title TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+      FOREIGN KEY (symptom_id) REFERENCES symptoms(id) ON DELETE SET NULL,
+      FOREIGN KEY (checklist_id) REFERENCES repair_checklists(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS repair_history_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repair_history_id INTEGER NOT NULL,
+      document_id INTEGER,
+      document_title TEXT NOT NULL,
+      page_number INTEGER CHECK (page_number IS NULL OR page_number > 0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (repair_history_id) REFERENCES repair_history(id) ON DELETE CASCADE,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_repair_history_vehicle_performed
+      ON repair_history (vehicle_id, performed_on, id);
+
+    CREATE INDEX IF NOT EXISTS idx_repair_history_symptom
+      ON repair_history (symptom_id);
+
+    CREATE INDEX IF NOT EXISTS idx_repair_history_checklist
+      ON repair_history (checklist_id);
+
+    -- Not redundant with the partial unique index below: that one is filtered on
+    -- document_id IS NOT NULL, so SQLite cannot use it for the ordinary read
+    -- that must also return provenance rows whose document was deleted.
+    CREATE INDEX IF NOT EXISTS idx_repair_history_documents_history
+      ON repair_history_documents (repair_history_id, id);
+
+    -- Covers the ON DELETE SET NULL sweep when a document is deleted, the same
+    -- way migration 003's reverse-link indexes cover their cascades.
+    CREATE INDEX IF NOT EXISTS idx_repair_history_documents_document
+      ON repair_history_documents (document_id);
+
+    -- Partial ON PURPOSE. Once a document is deleted its provenance rows keep
+    -- their snapshot and drop to document_id NULL; several such rows can belong
+    -- to one history record, and an unfiltered unique index would have to treat
+    -- them as colliding. Note this is a BACKSTOP, not the deduplication
+    -- guarantee: SQLite treats NULLs as distinct, so two citations of the same
+    -- document with no page number would both pass here. Deduplication of
+    -- caller input is done deterministically in repairHistoryService.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repair_history_documents_unique
+      ON repair_history_documents (repair_history_id, document_id, page_number)
+      WHERE document_id IS NOT NULL;
+  `);
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -571,6 +676,7 @@ export function initializeDatabase() {
   runMigration("001_initial_schema", createTables);
   runMigration("002_repair_checklists", createRepairChecklistsTables);
   runMigration("003_link_and_sort_indexes", createLinkAndSortIndexes);
+  runMigration("004_repair_history", createRepairHistoryTables);
 
   ensureAppSettingsRecord();
   seedVehicle();

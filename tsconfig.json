@@ -49,6 +49,7 @@
     "server/test/askRouteSafety.test.js",
     "server/test/negativeCorpusPreconditions.test.js",
     "server/test/repairSafetyEndToEnd.test.js",
+    "server/test/repairHistoryService.test.js",
     "server/test/sanitizeFilename.test.js",
     "server/test/searchService.test.js",
     "server/test/suggestedProcedures.test.js",
