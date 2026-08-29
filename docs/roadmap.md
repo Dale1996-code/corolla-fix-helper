@@ -107,7 +107,7 @@ this alone.
 | N0 | Recover the zero-chunk corpus | **Done** | Neutral (on-demand batch tooling) |
 | N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 13 verified) | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | **Done** | Reduces |
-| N2.5 | Enforce T4 safety-system defeat refusal | **Critical** | Slight increase (one leaf module) |
+| N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | Critical | Increase (one migration, one page) |
 | N4 | Close the two named evidence gaps | High | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
@@ -184,7 +184,7 @@ the provider. The cadence rule is written down in [`docs/quality-testing.md`](qu
 `vision-refuses-unsupported-spec` stays `verified: false` on purpose: the fixture is sound,
 but the behaviour under test has still never been observed on a live run.
 
-**N2.5 — Enforce T4 safety-system defeat refusal.**
+**N2.5 — Enforce T4 safety-system defeat refusal. Done, August 2026 (PR #132).**
 *Why this is inserted here rather than queued behind N3:* it is a **measured safety-policy
 gap**, found during the post-N2 / Experiment B analysis rather than assumed. Milestone 5
 wrote down a four-tier hazard policy and implemented only three tiers of it. `hazardTier`
