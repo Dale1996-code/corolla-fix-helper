@@ -406,6 +406,119 @@ function createRepairHistoryTables() {
   `);
 }
 
+// Migration 005: durable checklist provenance (roadmap N3.2). One additive
+// table, plus one partial unique index on the EXISTING `repair_history` table.
+// Nothing in migrations 001-004 is edited.
+//
+// THE GAP THIS CLOSES. A Repair Planner run produces structured citations that
+// each carry a `documentId` and a `pageNumber`. `buildPlannerChecklistDraft`
+// rendered those into prose ("Brake Service Guide, page 4") and then dropped the
+// structure on the floor: the saved checklist held a sentence a human could
+// read, and nothing a query could follow. N3.1 built the destination
+// (`repair_history_documents`); this table is the missing middle, so evidence
+// survives the walk from a plan to a completed repair.
+//
+// `repair_checklist_documents` deliberately mirrors `repair_history_documents`
+// column for column, because it is the same kind of fact at an earlier moment
+// and completion copies one into the other verbatim. Same LIVE FOREIGN KEY +
+// HISTORICAL SNAPSHOT strategy, and both halves are load-bearing for the reasons
+// documented on migration 004:
+//
+//   - `document_id` is ON DELETE SET NULL. Deleting a PDF must not delete the
+//     record of which page backed the work.
+//   - `document_title` is a snapshot taken at write time, which is what keeps
+//     the row readable after the document is renamed or removed.
+//
+// The CASCADE on `repair_checklist_id` is the ordinary parent/child one: these
+// rows belong to the checklist and mean nothing without it. That is safe
+// precisely BECAUSE completion copies them into `repair_history_documents`
+// rather than pointing at them -- deleting a completed checklist later drops
+// these rows and leaves the history copy untouched.
+//
+// What is deliberately NOT stored here, exactly as on migration 004: planner
+// `sourceId` values (S1, S2, ...), chunk ids, embedding ids, and the plan run
+// id. Source ids are scoped to the run that minted them, chunk rows are rebuilt
+// on re-extraction, and the run itself is an in-memory record that expires in
+// hours. `document_id` + title snapshot + `page_number` is the only identity
+// that outlives all three.
+function createRepairChecklistProvenance() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS repair_checklist_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repair_checklist_id INTEGER NOT NULL,
+      document_id INTEGER,
+      document_title TEXT NOT NULL,
+      page_number INTEGER CHECK (page_number IS NULL OR page_number > 0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (repair_checklist_id) REFERENCES repair_checklists(id) ON DELETE CASCADE,
+      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
+    );
+
+    -- The ordinary read: every provenance row for one checklist, including the
+    -- rows whose document has since been deleted. The partial unique index below
+    -- is filtered, so SQLite cannot serve this read from it.
+    CREATE INDEX IF NOT EXISTS idx_repair_checklist_documents_checklist
+      ON repair_checklist_documents (repair_checklist_id, id);
+
+    -- Covers the ON DELETE SET NULL sweep when a document is deleted.
+    CREATE INDEX IF NOT EXISTS idx_repair_checklist_documents_document
+      ON repair_checklist_documents (document_id);
+
+    -- Partial for the same reason as its repair_history_documents twin: once a
+    -- document is deleted its rows drop to document_id NULL, and several such
+    -- rows can belong to one checklist. A BACKSTOP, not the deduplication
+    -- guarantee -- SQLite treats NULLs as distinct, so deduplication of planner
+    -- citations is done deterministically in repairChecklistProvenanceService.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repair_checklist_documents_unique
+      ON repair_checklist_documents (repair_checklist_id, document_id, page_number)
+      WHERE document_id IS NOT NULL;
+  `);
+
+  // ONE CHECKLIST IS ONE REPAIR. Completing a checklist writes a repair_history
+  // row that links back to it, and a second completion of the same checklist
+  // would record the same physical job twice with no way to tell the copies
+  // apart afterwards.
+  //
+  // This is enforced in the SCHEMA rather than by a read-then-write check in the
+  // service, because a check is only ever as good as the window between it and
+  // the insert. The service does check first -- so a repeat completion gets a
+  // clean, explanatory response instead of a constraint error -- but the index is
+  // what makes the guarantee true. Partial on IS NOT NULL because `checklist_id`
+  // is ON DELETE SET NULL: once a completed checklist is deleted its history row
+  // drops to NULL, and any number of such orphaned records may coexist.
+  //
+  // It binds BOTH entry points, not just completion: the N3.1 CRUD route can
+  // also link a history record to a checklist, and one repair recorded twice is
+  // the same mistake whichever door it came through.
+  const duplicateChecklistLink = db
+    .prepare(`
+      SELECT checklist_id, COUNT(*) AS total
+      FROM repair_history
+      WHERE checklist_id IS NOT NULL
+      GROUP BY checklist_id
+      HAVING total > 1
+      LIMIT 1
+    `)
+    .get();
+
+  // Checked up front so a pre-existing duplicate fails with a sentence naming
+  // the offending checklist, rather than a bare "UNIQUE constraint failed"
+  // during startup.
+  if (duplicateChecklistLink) {
+    throw new Error(
+      `Cannot apply migration 005: repair checklist ${duplicateChecklistLink.checklist_id} is linked ` +
+        `to ${duplicateChecklistLink.total} repair history records, but one checklist records one ` +
+        "repair. Delete or re-link the duplicate repair_history rows, then restart."
+    );
+  }
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repair_history_checklist_unique
+      ON repair_history (checklist_id)
+      WHERE checklist_id IS NOT NULL;
+  `);
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -677,6 +790,7 @@ export function initializeDatabase() {
   runMigration("002_repair_checklists", createRepairChecklistsTables);
   runMigration("003_link_and_sort_indexes", createLinkAndSortIndexes);
   runMigration("004_repair_history", createRepairHistoryTables);
+  runMigration("005_repair_checklist_provenance", createRepairChecklistProvenance);
 
   ensureAppSettingsRecord();
   seedVehicle();

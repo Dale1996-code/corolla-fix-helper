@@ -108,7 +108,7 @@ this alone.
 | N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 13 verified) | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | **Done** | Reduces |
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
-| N3 | Repair history and maintenance records | Critical | Increase (one migration, one page) |
+| N3 | Repair history and maintenance records | Critical — **in progress** (N3.1 and N3.2 done; no UI yet) | Increase (two migrations, one page) |
 | N4 | Close the two named evidence gaps | High | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
@@ -231,6 +231,29 @@ built around breaks at exactly the moment work starts.
 needs a decision (see section 6) and a migration before any of this is buildable.
 *Explicitly not in scope:* customers, invoicing, labor billing, technician scheduling,
 parts stock levels, suppliers, purchase orders.
+
+*Status: in progress, not complete.* Two slices have landed, both server-side only:
+
+- **N3.1 — Repair history foundation. Done, August 2026 (PR #133).** Migration
+  `004_repair_history` adds `repair_history` and `repair_history_documents`, plus the CRUD
+  service and `/api/repair-history`. The mileage decision was resolved by putting the
+  odometer on the repair record and adding **no** `vehicles.current_odometer`: a reading is
+  a historical fact, a "current" odometer is a derived maximum, and storing both would
+  create two writable sources of truth for one number.
+- **N3.2 — Planner evidence into repair history. Done, August 2026.** Migration
+  `005_repair_checklist_provenance` adds `repair_checklist_documents`, so a planner
+  citation's `documentId` + `pageNumber` stops being discarded at the moment a checklist is
+  saved. `POST /api/repair-checklists/:id/complete` then turns that checklist into a
+  `repair_history` record and copies its provenance across. The evidence now survives
+  plan-run expiry, a server restart, a document rename, and a document deletion, which are
+  the four things that used to break the trail. One checklist records one repair, enforced
+  by a partial unique index rather than an application check.
+
+*What N3 still needs:* the repair-history UI — a page, a navigation destination, and a
+completion form — none of which exist. `status = 'done'` on a checklist remains an
+organizational state and deliberately does not record a repair.
+*Still out of scope for every N3 slice:* parts used, cost tracking, maintenance reminders,
+service intervals, dashboard history widgets, and a vehicle-level current odometer.
 
 **N4 — Close the two named evidence gaps.**
 *Problem it solves:* electrical and rpm/temperature specifications (volts, ohms, rpm,

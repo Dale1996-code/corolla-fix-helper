@@ -5,6 +5,7 @@ import {
   deleteRepairHistory,
   findChecklistForVehicle,
   findMissingDocumentIds,
+  findRepairHistoryIdForChecklist,
   findSymptomForVehicle,
   getRepairHistory,
   getRepairHistoryRecord,
@@ -57,17 +58,32 @@ repairHistoryRouter.use((request, _response, next) => {
  *
  * Returns an error message, or `null` when everything resolves.
  */
-function findLinkProblem(vehicleId, { symptomId, checklistId, sources }) {
+function findLinkProblem(
+  vehicleId,
+  { symptomId, checklistId, sources },
+  { excludeRepairHistoryId = null } = {}
+) {
   if (symptomId !== null && symptomId !== undefined && !findSymptomForVehicle(vehicleId, symptomId)) {
     return "Linked symptom does not exist.";
   }
 
-  if (
-    checklistId !== null &&
-    checklistId !== undefined &&
-    !findChecklistForVehicle(vehicleId, checklistId)
-  ) {
-    return "Linked checklist does not exist.";
+  if (checklistId !== null && checklistId !== undefined) {
+    if (!findChecklistForVehicle(vehicleId, checklistId)) {
+      return "Linked checklist does not exist.";
+    }
+
+    // ONE CHECKLIST IS ONE REPAIR (roadmap N3.2). Migration 005's partial unique
+    // index is the actual guarantee; this check is here so the caller is told
+    // which record already claims the checklist instead of receiving a database
+    // 500. `excludeRepairHistoryId` lets an update re-save the link it already
+    // holds without colliding with itself.
+    const alreadyLinkedId = findRepairHistoryIdForChecklist(vehicleId, checklistId, {
+      excludeRepairHistoryId,
+    });
+
+    if (alreadyLinkedId !== null) {
+      return `That checklist is already recorded as repair history record ${alreadyLinkedId}. One checklist records one repair.`;
+    }
   }
 
   if (sources && sources.length) {
@@ -272,11 +288,15 @@ repairHistoryRouter.put("/:id", (request, response) => {
       return;
     }
 
-    const linkProblem = findLinkProblem(vehicleId, {
-      symptomId: symptomChange?.symptomId,
-      checklistId: checklistChange?.checklistId,
-      sources,
-    });
+    const linkProblem = findLinkProblem(
+      vehicleId,
+      {
+        symptomId: symptomChange?.symptomId,
+        checklistId: checklistChange?.checklistId,
+        sources,
+      },
+      { excludeRepairHistoryId: repairHistoryId }
+    );
 
     if (linkProblem) {
       response.status(400).json({ error: linkProblem });

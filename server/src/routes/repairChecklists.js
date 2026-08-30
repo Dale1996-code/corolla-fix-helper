@@ -2,6 +2,21 @@ import { Router } from "express";
 import { db } from "../database.js";
 import { getVehicleId } from "../services/vehicleService.js";
 import { planRunStore } from "../services/agent/planRunStore.js";
+import {
+  completeChecklistIntoHistory,
+  insertChecklistSources,
+  listChecklistSources,
+  listChecklistSourcesForVehicle,
+  normalizeChecklistSources,
+} from "../services/repairChecklistProvenanceService.js";
+import {
+  findChecklistForVehicle,
+  findSymptomForVehicle,
+  normalizeOdometerMiles,
+  normalizeOptionalEntityId,
+  normalizeOutcome,
+  normalizePerformedOn,
+} from "../services/repairHistoryService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
 
@@ -49,7 +64,7 @@ function mapItemRow(row) {
   };
 }
 
-function buildChecklist(row, items) {
+function buildChecklist(row, items, sources = []) {
   const doneItemCount = items.filter((item) => item.isDone).length;
 
   return {
@@ -63,6 +78,12 @@ function buildChecklist(row, items) {
     items,
     itemCount: items.length,
     doneItemCount,
+    // Structured planner provenance (roadmap N3.2). Additive: a checklist
+    // created by hand has none, and every existing client ignores the field.
+    // The human-readable citation text in `notes` is unchanged and stays -- this
+    // is the queryable twin, not a replacement.
+    sources,
+    sourceCount: sources.length,
   };
 }
 
@@ -117,8 +138,12 @@ function listChecklistsForVehicle(vehicleId) {
     itemsByChecklist.get(itemRow.checklist_id).push(mapItemRow(itemRow));
   }
 
+  // Batched the same way the items are, so adding provenance to the list view
+  // costs one more query rather than one per checklist.
+  const sourcesByChecklist = listChecklistSourcesForVehicle(vehicleId);
+
   return checklistRows.map((row) =>
-    buildChecklist(row, itemsByChecklist.get(row.id) || [])
+    buildChecklist(row, itemsByChecklist.get(row.id) || [], sourcesByChecklist.get(row.id) || [])
   );
 }
 
@@ -135,7 +160,7 @@ function getChecklistForVehicle(vehicleId, checklistId) {
     return null;
   }
 
-  return buildChecklist(row, listItemsForChecklist(row.id));
+  return buildChecklist(row, listItemsForChecklist(row.id), listChecklistSources(row.id));
 }
 
 // Confirm a checklist exists for this vehicle before touching its items.
@@ -179,10 +204,16 @@ function swapItemOrder(firstItem, secondItem) {
   }
 }
 
-// Writes a whole checklist -- its header row and every item -- in ONE
-// transaction, so a plan is never saved as a titled checklist with half its
-// tasks missing. A partial save is worse than a failed one here: it looks
-// finished, and the owner has no way to tell which tasks were dropped.
+// Writes a whole checklist -- its header row, every item, and every structured
+// planner citation -- in ONE transaction, so a plan is never saved as a titled
+// checklist with half its tasks missing. A partial save is worse than a failed
+// one here: it looks finished, and the owner has no way to tell what was
+// dropped.
+//
+// Provenance joined that transaction in N3.2 for the same reason (and it is the
+// sharper case): a checklist that committed its text but lost its citations is
+// indistinguishable afterwards from a plan that grounded nothing. If the
+// provenance insert fails, the checklist is not saved at all.
 function insertChecklistWithItems(vehicleId, draft) {
   db.exec("BEGIN IMMEDIATE TRANSACTION");
 
@@ -209,6 +240,11 @@ function insertChecklistWithItems(vehicleId, draft) {
     (draft.items || []).forEach((item, index) => {
       insertItem.run(checklistId, item.text, index);
     });
+
+    // `draft.sources` is the server's own, built by buildPlannerChecklistDraft
+    // from the evidence contract's citations and frozen in the plan run store.
+    // No request field reaches here.
+    insertChecklistSources(vehicleId, checklistId, normalizeChecklistSources(draft.sources));
 
     db.exec("COMMIT");
 
@@ -245,10 +281,14 @@ export function createRepairChecklistsRouter({ planRuns = planRunStore } = {}) {
   // Saves a completed Repair Planner result as an ordinary checklist.
   //
   // TRUST BOUNDARY: the body carries a draft id and nothing else. Title, items,
-  // notes, claims, source labels, and safety warnings all come out of the
-  // server's own draft (built in plannerChecklistDraft.js from validated
-  // planner output), so no request can write invented repair text into SQLite
-  // under the planner's name. Any other field in the body is ignored.
+  // notes, claims, source labels, safety warnings, AND the structured
+  // `documentId` / `pageNumber` provenance all come out of the server's own
+  // draft (built in plannerChecklistDraft.js from validated planner output), so
+  // no request can write invented repair text into SQLite under the planner's
+  // name. Any other field in the body is ignored -- including a `sources` array,
+  // which is read from `record.draft` and never from `request.body`. Keeping
+  // that boundary was a design constraint of N3.2: the browser must not become
+  // the authority for which document backed a repair.
   //
   // Registered before the parameterized routes so a future `POST /:id` cannot
   // shadow it.
@@ -300,6 +340,107 @@ export function createRepairChecklistsRouter({ planRuns = planRunStore } = {}) {
     } catch (error) {
       response.status(500).json({
         error: error.message || "Could not save the plan as a checklist.",
+      });
+    }
+  });
+
+  // Completes a checklist into a durable repair-history record (roadmap N3.2).
+  //
+  // AN EXPLICIT ACTION, NOT A STATUS CHANGE. `PUT /:id` with `status: "done"`
+  // stays exactly what it was: an organizational state the owner picks from a
+  // dropdown on the Checklists page, alongside Planned / In progress / Blocked.
+  // It does NOT create history, and it deliberately was not overloaded to --
+  // recording a repair needs facts nothing on the server can derive (the day the
+  // work happened, the odometer reading, how it turned out), and a dropdown has
+  // nowhere to ask for them. Silently writing a permanent record with a guessed
+  // date, from a control that today just re-files a checklist, would also break
+  // the current client.
+  //
+  // The implication runs one way and only one way: completing sets the checklist
+  // to `done`, but marking a checklist `done` completes nothing.
+  //
+  // WHAT THE BODY MAY SAY: the historical facts, and nothing else. Provenance is
+  // read from the checklist's own saved rows, and the title from the checklist
+  // itself -- both inside the writing transaction, not here. A `sources` or
+  // `title` field in the body is ignored.
+  router.post("/:id/complete", (request, response) => {
+    const checklistId = parsePositiveInt(request.params.id);
+
+    if (checklistId === null) {
+      response.status(400).json({
+        error: "Checklist ID must be a positive number.",
+      });
+      return;
+    }
+
+    let performedOn;
+    let odometerMiles;
+    let outcome;
+    let symptomId;
+
+    // The N3.1 validators, reused rather than reimplemented. Two entry points
+    // writing repair history must agree on what a valid date, odometer reading,
+    // and outcome are; a second, subtly different copy here is how they would
+    // stop agreeing.
+    try {
+      performedOn = normalizePerformedOn(request.body.performedOn);
+      odometerMiles = normalizeOdometerMiles(request.body.odometerMiles);
+      outcome = normalizeOutcome(request.body.outcome);
+      symptomId = normalizeOptionalEntityId(request.body.symptomId, "Symptom ID");
+    } catch (error) {
+      response.status(400).json({
+        error: error.message || "Invalid repair completion values.",
+      });
+      return;
+    }
+
+    try {
+      const vehicleId = getVehicleId();
+
+      // These two lookups exist ONLY to answer a bad request cleanly -- 404 for a
+      // checklist that is not there, 400 for a symptom that is not. They are
+      // deliberately NOT the source of anything that gets written: the service
+      // re-reads the checklist and the symptom inside its own transaction and
+      // takes the historical titles from there. A snapshot read out here could
+      // be stale by the time the row is inserted, and passing one in would make
+      // this route an authority on history that it has no lock to back up.
+      if (!findChecklistForVehicle(vehicleId, checklistId)) {
+        response.status(404).json({
+          error: "Checklist not found.",
+        });
+        return;
+      }
+
+      if (symptomId !== null && !findSymptomForVehicle(vehicleId, symptomId)) {
+        response.status(400).json({
+          error: "Linked symptom does not exist.",
+        });
+        return;
+      }
+
+      const { created, repairHistory } = completeChecklistIntoHistory(vehicleId, checklistId, {
+        performedOn,
+        odometerMiles,
+        outcome,
+        summary: normalizeText(request.body.summary),
+        followUp: normalizeText(request.body.followUp),
+        symptomId,
+      });
+
+      // A repeated completion is answered, not failed: one checklist is one
+      // repair, so the honest response to "complete this again" is the record it
+      // already became. 200 rather than 201 because nothing was created.
+      response.status(created ? 201 : 200).json({
+        message: created
+          ? "Repair recorded from your checklist."
+          : "This checklist was already completed as a repair.",
+        repairHistory,
+        checklist: getChecklistForVehicle(vehicleId, checklistId),
+        created,
+      });
+    } catch (error) {
+      response.status(500).json({
+        error: error.message || "Could not complete the checklist.",
       });
     }
   });
