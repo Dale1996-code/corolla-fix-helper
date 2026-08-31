@@ -599,7 +599,9 @@ Plan a repair as a list of steps you can check off. Each checklist belongs to th
 
 Allowed values — `status`: `planned` (default) | `in_progress` | `blocked` | `done`. A move takes `direction`: `up` | `down`.
 
-Every write returns the **whole** checklist — its own fields plus `items`, `itemCount`, and `doneItemCount` — so the UI can re-render after any change without a second fetch. Editing, adding, deleting, or moving an item also bumps the parent checklist's `updatedAt`, which is why the list is ordered newest-activity-first.
+Every write returns the **whole** checklist — its own fields plus `items`, `itemCount`, `doneItemCount`, `sources`, and `sourceCount` — so the UI can re-render after any change without a second fetch. Editing, adding, deleting, or moving an item also bumps the parent checklist's `updatedAt`, which is why the list is ordered newest-activity-first.
+
+`sources` is the checklist's **durable planner provenance**: `[{ id, documentId, documentTitle, pageNumber }]`, empty for a checklist created by hand. `documentId` is the live link and becomes `null` once that document is deleted; `documentTitle` and `pageNumber` are snapshots taken when the checklist was saved and always survive. It is written only by `POST /api/repair-checklists/from-planner`, from server-derived planner output — never from a request body.
 
 | Endpoint | Notes |
 | --- | --- |
@@ -613,6 +615,7 @@ Every write returns the **whole** checklist — its own fields plus `items`, `it
 | `DELETE /api/repair-checklists/:id/items/:itemId` | removes one item |
 | `POST /api/repair-checklists/:id/items/:itemId/move` | body `{ "direction": "up" }` — swaps the item with its neighbor. At the top/bottom of the list it is a no-op, not an error. |
 | `POST /api/repair-checklists/from-planner` | body: `checklistDraftId` (required). Saves a completed Repair Planner result — see below |
+| `POST /api/repair-checklists/:id/complete` | records the checklist as a repair that actually happened → a `repair_history` record. See below |
 
 ```powershell
 $body = @{ title = "Front brake job"; status = "in_progress" } | ConvertTo-Json
@@ -633,9 +636,13 @@ Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-checklists 
 | `400` | `checklistDraftId` is missing or not a string |
 | `404` | the draft is unknown or expired — the message tells the owner to build the plan again |
 
-**Trust boundary.** The body carries a draft id and nothing else of consequence. The title, items, notes, verified statements, source labels, and safety warnings all come from the server's own draft, built from validated planner output when the run completed. Task text, claims, warnings, or evidence sent in the body are **ignored** — a request cannot write invented repair text into SQLite wearing the planner's authority.
+**Trust boundary.** The body carries a draft id and nothing else of consequence. The title, items, notes, verified statements, source labels, safety warnings, **and the structured `documentId` / `pageNumber` provenance** all come from the server's own draft, built from validated planner output when the run completed. Task text, claims, warnings, evidence, or a `sources` array sent in the body are **ignored** — a request cannot write invented repair text into SQLite wearing the planner's authority, and the browser is never the authority for which document backed a repair.
 
 **What the draft contains:** a `planned` checklist titled from the canonical tasks, one normal item per high-level task, and notes holding the statements the evidence contract accepted (each with its document and page), the verified tool/part requirements, and the safety warnings raised for those tasks. A `not_found` run saves only the tasks and the warnings, plus an explicit notice that nothing was verified.
+
+**Structured provenance (N3.2).** Alongside that prose, the save writes one `repair_checklist_documents` row per distinct cited page — `documentId`, a `documentTitle` snapshot, and `pageNumber` — returned as the checklist's `sources`. The human-readable citation text in `notes` is **unchanged and kept**; the rows are its queryable twin, not a replacement. Duplicate citations of one page collapse to a single row (first-seen order). The checklist, its items, and its provenance are written in one transaction: if the provenance insert fails, no checklist is saved at all.
+
+**Not stored as provenance:** planner `sourceId` values (`S1`, `S2`, …), chunk ids, embedding ids, and the plan run id. Source ids are scoped to the run that minted them, chunk rows are rebuilt on re-extraction, and a plan run expires in hours. The durable identity is `documentId` + title snapshot + `pageNumber`.
 
 **What it never contains:** the model's own prose, the run's gaps, the placeholder owner-checklist steps, the handoff drafts, the readiness score or acknowledgment state, or any rejected claim.
 
@@ -643,13 +650,45 @@ Invoke-RestMethod -Method Post -Uri http://localhost:4000/api/repair-checklists 
 
 **Idempotency.** Saving the same draft twice returns the checklist it already became (`200`) instead of creating a duplicate. If that checklist has since been deleted, the draft is saved again.
 
-The result is an **ordinary** checklist: `planned`, fully editable, with no stored link back to the plan it came from. Nothing about the saved statements is a check-off repair instruction — they are reference notes, and this route creates no schema change or planner-to-checklist relationship.
+The result is an **ordinary** checklist: `planned`, fully editable, with no stored link back to the plan run it came from. Nothing about the saved statements is a check-off repair instruction — they are reference notes. The only durable relationship the save creates is to the **documents** it cited.
+
+### `POST /api/repair-checklists/:id/complete`
+
+Records that the checklist's repair was actually carried out, creating one `repair_history` record from it. Server-side only in this slice — there is no completion UI yet.
+
+| Body field | Required | Notes |
+| --- | --- | --- |
+| `performedOn` | ✅ | `YYYY-MM-DD`, validated as a real calendar date |
+| `odometerMiles` | | whole number of miles, or `null`/omitted for "not written down". A JSON number, not a string; `0` is a genuine reading |
+| `outcome` | | `fixed` \| `partial` \| `not_fixed` \| `unknown` (default) |
+| `summary` | | free text |
+| `followUp` | | free text |
+| `symptomId` | | optional link; must name a symptom that exists |
+
+| Status | Meaning |
+| --- | --- |
+| `201` | the repair was recorded → `{ "message", "repairHistory", "checklist", "created": true }` |
+| `200` | this checklist was **already** completed → the existing record, `"created": false` |
+| `400` | invalid date, odometer, or outcome; or an unknown `symptomId` |
+| `404` | no such checklist |
+
+**Only the facts come from the body.** The record's `title` is the checklist's title, and its provenance is copied from the checklist's own `sources`. A `title` or `sources` field in the body is ignored: completion reads the evidence the checklist already owns rather than trusting a claim about it. The body supplies only what nothing on the server can derive — when the work happened, the mileage, how it went.
+
+**Plan-run independence.** Completion never consults the plan run store. The run that produced the evidence has almost certainly expired by then — the store is in-memory and bounded to a few hours — which is exactly why the provenance was made durable at save time. A checklist saved weeks ago, on a server that has since restarted, completes with its full evidence intact.
+
+**Provenance is copied, not referenced.** The history record gets its own `repair_history_documents` rows, snapshotted from the checklist's. Deleting the completed checklist afterwards cascades away the checklist's provenance, sets `repair_history.checklistId` to `null`, and leaves the history record's `checklistTitle` and copied sources whole.
+
+**Deleted documents.** A citation whose document was deleted at any point — before the checklist was saved, between saving and completing, or after — carries through as `documentId: null` with its `documentTitle` and `pageNumber` snapshots intact. The document does not have to still exist for the evidence to survive.
+
+**Exactly once.** One checklist records one repair. A repeated request returns the existing record with `created: false` and `200` rather than creating a second historical repair, and the guarantee behind that is a partial unique index on `repair_history(checklist_id)` — not the read-then-write check above it. The same rule binds `POST /api/repair-history`, which returns `400` if you try to link a checklist that is already recorded.
+
+**`status = "done"` is not completion.** `PUT /api/repair-checklists/:id` with `status: "done"` remains an organizational state and creates no history — it was deliberately not overloaded, because recording a repair needs a date, an odometer reading, and an outcome that a status dropdown has nowhere to ask for. Completing a checklist *does* set it to `done`; the implication runs one way only.
 
 ---
 
 ## Repair History
 
-The durable record that a repair was actually carried out — the roadmap's **N3** foundation. Persistence only: there is **no UI for this yet**, and nothing else in the app writes to it.
+The durable record that a repair was actually carried out — the roadmap's **N3** foundation. Persistence only: there is **no UI for this yet**. Since **N3.2** one other thing writes here: [`POST /api/repair-checklists/:id/complete`](#post-apirepair-checklistsidcomplete), which creates a record from a completed checklist and copies that checklist's provenance into it. Both entry points share one set of validators, so a date, odometer reading, or outcome that is valid at one is valid at the other.
 
 It answers "what did I do, when, at what mileage, why, and which manual pages backed it?" — and keeps answering after the symptom is renamed, the checklist is edited, or the document is deleted.
 
@@ -674,7 +713,7 @@ Allowed values — `outcome`: `fixed` | `partial` | `not_fixed` | `unknown` (def
 | `summary` | | what actually happened |
 | `followUp` | | anything to check later. Free text — not a reminder or a schedule |
 | `symptomId` | | an existing symptom, or `null` |
-| `checklistId` | | an existing repair checklist, or `null` |
+| `checklistId` | | an existing repair checklist, or `null`. **One checklist records one repair**: linking a checklist that another record already claims is a `400`, naming the record that has it |
 | `sources` | | `[{ "documentId": 12, "pageNumber": 412 }]` — the pages that backed the work. `pageNumber` may be `null` |
 
 `odometerMiles` must be a real JSON number. A numeric **string** is rejected rather than coerced, unlike the path-parameter ids elsewhere in this API: `Number("")` is `0`, so coercing would turn a blank field into a legitimate-looking reading of zero miles. `null` ("I did not write it down") and `0` (a reading) stay different facts. Mileage is stored as whole miles on the repair record; there is no vehicle-level current odometer.

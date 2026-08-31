@@ -98,13 +98,27 @@ function cloneAndDeepFreeze(value) {
   return deepFreeze(structuredClone(value));
 }
 
-/** Deep-freezes a draft so no later caller can edit what will be written to SQLite. */
+/**
+ * Deep-freezes a draft so no later caller can edit what will be written to
+ * SQLite.
+ *
+ * `sources` is frozen element-by-element for the same reason `items` is, and the
+ * reason is sharper for provenance than for text: these entries carry the
+ * `documentId` and `pageNumber` that become durable checklist evidence and are
+ * later copied into a repair-history record. A shallow freeze would leave every
+ * entry writable, so anything holding the draft could repoint a citation at a
+ * different document between the plan being built and the checklist being saved.
+ */
 function freezeDraft(draft) {
   const items = Object.freeze(
     (Array.isArray(draft?.items) ? draft.items : []).map((item) => Object.freeze({ ...item }))
   );
 
-  return Object.freeze({ ...draft, items });
+  const sources = Object.freeze(
+    (Array.isArray(draft?.sources) ? draft.sources : []).map((source) => Object.freeze({ ...source }))
+  );
+
+  return Object.freeze({ ...draft, items, sources });
 }
 
 export function createPlanRunStore({

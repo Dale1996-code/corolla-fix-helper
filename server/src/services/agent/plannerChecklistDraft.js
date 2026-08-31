@@ -15,7 +15,11 @@ import { STATEMENT_CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
 //   - one normal checklist item per canonical, server-derived task,
 //   - notes carrying the statements the evidence contract ACCEPTED, each with
 //     its document and page, the verified tool/part requirements, and the
-//     safety warnings the classifier raised for those tasks.
+//     safety warnings the classifier raised for those tasks,
+//   - `sources`: the same citations again, but STRUCTURED -- `documentId` +
+//     `pageNumber` + a title snapshot (roadmap N3.2). The prose above is for a
+//     human to read; these rows are what survives a rename, a deletion, and the
+//     walk into a repair-history record. See `buildDraftSources`.
 //
 // What deliberately stays out:
 //   - the model's own prose (the planner discards it before this point anyway),
@@ -32,6 +36,13 @@ import { STATEMENT_CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
 
 /** Notes never grow past this many verified statements. */
 export const MAX_DRAFT_STATEMENTS = 60;
+
+/**
+ * Cap on the structured citations one draft carries into SQLite. Mirrors
+ * `MAX_SOURCES_PER_RECORD` in repairHistoryService so a checklist cannot carry
+ * provenance that its own repair-history record could not later accept.
+ */
+export const MAX_DRAFT_SOURCES = 100;
 
 /** Checklist titles stay short enough to read in the list column. */
 export const MAX_DRAFT_TITLE_LENGTH = 120;
@@ -100,6 +111,70 @@ function describeSource(citation) {
   return Number.isInteger(citation.pageNumber) && citation.pageNumber > 0
     ? `${name}, page ${citation.pageNumber}`
     : name;
+}
+
+/**
+ * The draft's STRUCTURED provenance: the durable half of a citation.
+ *
+ * `describeSource` above renders a citation into a sentence a human reads
+ * ("Brake Service Guide, page 4"). That sentence is not queryable, does not
+ * survive a rename, and cannot be copied into a repair-history record. Before
+ * N3.2 it was the only thing a saved checklist kept, so the `documentId` and
+ * `pageNumber` the evidence contract had already resolved were discarded at
+ * exactly the moment the plan became durable. This function keeps them.
+ *
+ * The prose is deliberately NOT replaced -- both are emitted. They answer
+ * different questions ("what should I read?" versus "which row is this?"), and
+ * dropping the sentence would make a saved checklist less readable to buy
+ * nothing.
+ *
+ * The input is `citations`, which the evidence contract has already filtered to
+ * the sources that actually backed an ACCEPTED claim. A chunk that was retrieved
+ * and never cited is not evidence and does not appear here.
+ *
+ * `documentTitle` is carried alongside the id as a fallback snapshot, for the
+ * narrow case where the document is deleted between building the plan and saving
+ * the checklist. The save path prefers the live title when the document still
+ * exists; see repairChecklistProvenanceService.
+ *
+ * Deduplication is first-seen order on `documentId:pageNumber`, matching
+ * `normalizeSourceInputs` in repairHistoryService. Two accepted claims citing the
+ * same page is the normal case, not an error, and it must produce one row.
+ */
+export function buildDraftSources(citations) {
+  const seen = new Set();
+  const sources = [];
+
+  for (const citation of Array.isArray(citations) ? citations : []) {
+    if (sources.length >= MAX_DRAFT_SOURCES) {
+      break;
+    }
+
+    const documentId = Number(citation?.documentId);
+
+    // A citation with no resolvable document id has no durable identity at all,
+    // so there is nothing to store. It keeps its prose in the notes above.
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      continue;
+    }
+
+    const rawPage = Number(citation?.pageNumber);
+    const pageNumber = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : null;
+    const key = `${documentId}:${pageNumber === null ? "" : pageNumber}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    sources.push({
+      documentId,
+      documentTitle: String(citation?.documentTitle || citation?.originalFilename || "").trim(),
+      pageNumber,
+    });
+  }
+
+  return sources;
 }
 
 function describeRequirementGroup(label, group) {
@@ -229,6 +304,10 @@ export function buildPlannerChecklistDraft({
     description: `Saved from a Repair Planner run (evidence: ${evidenceStatus}).`,
     notes: notes.join("\n").trim(),
     items: tasks.map((task) => ({ text: truncate(task.title, MAX_DRAFT_TITLE_LENGTH) })),
+    // The structured twin of the citations rendered into `notes` above. Saved as
+    // its own rows so the evidence outlives the prose, the plan run, and the
+    // document itself.
+    sources: buildDraftSources(citations),
     evidenceStatus,
   };
 }

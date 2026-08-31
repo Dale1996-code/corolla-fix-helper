@@ -112,14 +112,25 @@ planner's authority.
   has anything to acknowledge, while every completed plan is saveable. One id
   doing both jobs would leave non-safety-critical plans unsaveable.
 - `POST /api/repair-checklists/from-planner` takes `{ checklistDraftId }` and
-  nothing else. Task text, claims, warnings, and evidence in the body are
-  ignored.
+  nothing else. Task text, claims, warnings, evidence, and a `sources` array in
+  the body are ignored. Keeping that boundary was a design constraint of N3.2:
+  the browser must not become the authority for which document backed a repair.
 - **In the draft:** a `planned` checklist titled from the canonical tasks, one
   normal item per high-level task, and notes carrying the accepted claims with
   their document and page, the verified tool/part requirements, and the safety
   warnings for those tasks. A `not_found` run saves the tasks and warnings plus
   an explicit notice that nothing was verified — an honest empty result is still
   worth keeping.
+- **Also in the draft since N3.2:** `sources`, the *structured* twin of those
+  citations — `documentId` + `documentTitle` snapshot + `pageNumber`, deduplicated
+  first-seen. The prose citation stays; this is what a query can follow. It is
+  written to `repair_checklist_documents` in the same transaction as the
+  checklist and its items, and is later copied into a `repair_history` record by
+  `POST /api/repair-checklists/:id/complete`. See `docs/api.md`.
+- **Never durable provenance:** `sourceId` values (`S1`, `S2`, …), chunk ids,
+  embedding ids, and the plan run id. Source ids are run-scoped, chunk rows are
+  rebuilt on re-extraction, and the run expires in hours — none of the three can
+  be resolved by someone reading the repair history weeks later.
 - **Never in the draft:** model prose, the run's gaps, the placeholder
   owner-checklist steps, the handoff drafts, the readiness score or
   acknowledgment state, and every rejected claim. `plannerChecklistSave.test.js`

@@ -276,6 +276,40 @@ export function findMissingDocumentIds(vehicleId, documentIds) {
   return documentIds.filter((documentId) => !findDocumentForVehicle(vehicleId, documentId));
 }
 
+/**
+ * The id of the repair record already linked to this checklist, or `null`.
+ *
+ * ONE CHECKLIST IS ONE REPAIR (roadmap N3.2). The guarantee itself is the
+ * partial unique index `idx_repair_history_checklist_unique` added by migration
+ * 005; this lookup exists so both entry points -- the CRUD route here and
+ * checklist completion -- can refuse the second link with a sentence that names
+ * the existing record, instead of surfacing a raw constraint error.
+ *
+ * `excludeRepairHistoryId` is for the update path: a record re-saved with the
+ * checklist link it already had must not collide with itself.
+ *
+ * @param {*} vehicleId
+ * @param {number} checklistId
+ * @param {{ excludeRepairHistoryId?: number|null }} [options]
+ * @returns {number|null}
+ */
+export function findRepairHistoryIdForChecklist(
+  vehicleId,
+  checklistId,
+  { excludeRepairHistoryId = null } = {}
+) {
+  const row = db
+    .prepare(`
+      SELECT id
+      FROM repair_history
+      WHERE vehicle_id = ? AND checklist_id = ? AND id IS NOT ?
+      LIMIT 1
+    `)
+    .get(vehicleId, checklistId, excludeRepairHistoryId);
+
+  return row ? Number(row.id) : null;
+}
+
 // --- Row mapping -----------------------------------------------------------
 
 /**
@@ -435,8 +469,18 @@ export function getRepairHistoryRecord(vehicleId, repairHistoryId) {
 // frozen into the history row. They are called only from the create path and
 // from the update branches that were explicitly asked to change that
 // relationship -- never from a plain field edit.
+//
+// THEY MUST BE CALLED INSIDE THE TRANSACTION THAT WRITES THE ROW. A snapshot
+// read before the transaction opens is a snapshot of a moment that may already
+// be gone by the time it is frozen into history: the record could be renamed or
+// deleted in between, and the history row would then preserve a title that was
+// never true at the instant it was written. Reading here, under the same
+// IMMEDIATE lock as the INSERT, is what makes "the title as it was when the
+// repair was recorded" an accurate statement rather than an approximate one.
+// Checklist completion (roadmap N3.2) calls them for the same reason, which is
+// why they are exported rather than private to this module.
 
-function captureSymptomTitle(vehicleId, symptomId) {
+export function captureSymptomTitle(vehicleId, symptomId) {
   if (symptomId === null) {
     return "";
   }
@@ -450,7 +494,7 @@ function captureSymptomTitle(vehicleId, symptomId) {
   return symptom.title || "";
 }
 
-function captureChecklistTitle(vehicleId, checklistId) {
+export function captureChecklistTitle(vehicleId, checklistId) {
   if (checklistId === null) {
     return "";
   }
@@ -462,6 +506,100 @@ function captureChecklistTitle(vehicleId, checklistId) {
   }
 
   return checklist.title || "";
+}
+
+/**
+ * Write the `repair_history` header row and return its id. Callers must already
+ * be inside a transaction.
+ *
+ * Extracted from `createRepairHistory` so checklist completion (roadmap N3.2)
+ * writes history through this one statement rather than a second copy of it.
+ * Completion cannot call `createRepairHistory` itself, because it has more to do
+ * inside the same transaction than creating a record -- it also copies
+ * provenance and moves the checklist -- and SQLite has no nested transactions.
+ *
+ * The snapshot titles are parameters rather than being captured here because
+ * this function is the INSERT and nothing else; both entry points capture them
+ * the same way, through `captureSymptomTitle` / `captureChecklistTitle`, inside
+ * the transaction that then calls this.
+ */
+export function insertRepairHistoryRow(vehicleId, fields, symptomTitle, checklistTitle) {
+  const insertResult = db
+    .prepare(`
+      INSERT INTO repair_history (
+        vehicle_id,
+        performed_on,
+        odometer_miles,
+        title,
+        outcome,
+        summary,
+        follow_up,
+        symptom_id,
+        symptom_title,
+        checklist_id,
+        checklist_title
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      vehicleId,
+      fields.performedOn,
+      fields.odometerMiles,
+      fields.title,
+      fields.outcome,
+      fields.summary,
+      fields.followUp,
+      fields.symptomId,
+      symptomTitle,
+      fields.checklistId,
+      checklistTitle
+    );
+
+  return Number(insertResult.lastInsertRowid);
+}
+
+/**
+ * Copy already-snapshotted provenance rows onto a repair record VERBATIM.
+ * Callers must already be inside a transaction.
+ *
+ * The difference from `insertSources` below is the whole point, and it is why
+ * this is a separate function rather than an option on that one:
+ *
+ *   - `insertSources` takes caller INPUT (`{ documentId, pageNumber }`), so it
+ *     must resolve each id against the live library and TAKE a title snapshot.
+ *     An id naming no document is an error there -- the caller asked to cite
+ *     something that does not exist.
+ *   - This takes an existing SNAPSHOT (`{ documentId, documentTitle,
+ *     pageNumber }`) and writes it through unchanged. A `documentId` of `null`
+ *     is not an error here, it is the expected shape once the cited document has
+ *     been deleted, and the accompanying title and page are exactly the evidence
+ *     that must survive that deletion. Re-reading a live title here would also
+ *     let a rename rewrite history -- the drift both tables exist to prevent.
+ *
+ * @param {number} repairHistoryId
+ * @param {{ documentId: number|null, documentTitle: string, pageNumber: number|null }[]} snapshots
+ */
+export function insertRepairHistorySourceSnapshots(repairHistoryId, snapshots) {
+  if (!snapshots.length) {
+    return;
+  }
+
+  const insertSnapshot = db.prepare(`
+    INSERT INTO repair_history_documents (
+      repair_history_id,
+      document_id,
+      document_title,
+      page_number
+    ) VALUES (?, ?, ?, ?)
+  `);
+
+  for (const snapshot of snapshots) {
+    insertSnapshot.run(
+      repairHistoryId,
+      snapshot.documentId,
+      snapshot.documentTitle || "",
+      snapshot.pageNumber
+    );
+  }
 }
 
 /**
@@ -526,37 +664,12 @@ export function createRepairHistory(vehicleId, fields) {
     const symptomTitle = captureSymptomTitle(vehicleId, fields.symptomId);
     const checklistTitle = captureChecklistTitle(vehicleId, fields.checklistId);
 
-    const insertResult = db
-      .prepare(`
-        INSERT INTO repair_history (
-          vehicle_id,
-          performed_on,
-          odometer_miles,
-          title,
-          outcome,
-          summary,
-          follow_up,
-          symptom_id,
-          symptom_title,
-          checklist_id,
-          checklist_title
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        vehicleId,
-        fields.performedOn,
-        fields.odometerMiles,
-        fields.title,
-        fields.outcome,
-        fields.summary,
-        fields.followUp,
-        fields.symptomId,
-        symptomTitle,
-        fields.checklistId,
-        checklistTitle
-      );
-
-    const repairHistoryId = Number(insertResult.lastInsertRowid);
+    const repairHistoryId = insertRepairHistoryRow(
+      vehicleId,
+      fields,
+      symptomTitle,
+      checklistTitle
+    );
 
     insertSources(vehicleId, repairHistoryId, fields.sources || []);
 

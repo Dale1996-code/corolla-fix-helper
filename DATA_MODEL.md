@@ -260,7 +260,9 @@ Current use:
 - Change a checklist's status.
 - `updated_at` is bumped when the checklist's own fields change and when its items change (add, check off, edit, delete, reorder), so the list stays ordered by recent activity.
 
-Checklists are standalone in v1: there is no linking to symptoms, procedures, notes, or documents, and no image attachments.
+Checklists carry no links to symptoms, procedures, or notes, and no image attachments. The one structured relationship they do have is to **documents**, through `repair_checklist_documents` below — added by N3.2 so planner evidence survives the save.
+
+`status = 'done'` is an **organizational state only**. It files a checklist under "Done" on the Checklists page and does not record that a repair happened. Recording a repair is the separate, explicit `POST /api/repair-checklists/:id/complete` action, which needs facts a status dropdown cannot supply (the date the work happened, the odometer reading, the outcome). The implication runs one way: completing a checklist sets it to `done`; marking it `done` completes nothing.
 
 ### `repair_checklist_items`
 
@@ -277,6 +279,33 @@ Important fields:
 - `updated_at`
 
 New items are appended at `MAX(sort_order) + 1`. Reordering swaps a row's `sort_order` with its neighbor (the `Up`/`Down` buttons) inside a transaction. The `checklist_id` foreign key uses `ON DELETE CASCADE`, so deleting a checklist removes its items. Items are indexed by `idx_repair_checklist_items_checklist`.
+
+### `repair_checklist_documents`
+
+Stores which document page backed a checklist — the **durable, structured** form of a Repair Planner citation. Added by migration `005_repair_checklist_provenance` (roadmap **N3.2**).
+
+**The gap this closes.** A planner run produces citations that each already carry a `documentId` and a `pageNumber`. Before N3.2, `buildPlannerChecklistDraft` rendered those into prose (`Toyota Repair Manual, page 412`) and dropped the structure: the saved checklist held a sentence a human could read and nothing a query could follow. N3.1 built the destination (`repair_history_documents`); this table is the missing middle, so the chain runs end to end:
+
+`planner evidence` → `repair_checklist_documents` → checklist completion → `repair_history` → `repair_history_documents`
+
+Fields:
+
+- `id`
+- `repair_checklist_id` → `repair_checklists(id)`, `ON DELETE CASCADE`
+- `document_id` → `documents(id)`, nullable, `ON DELETE SET NULL`
+- `document_title` — snapshot taken at write time
+- `page_number` — nullable, `CHECK (page_number IS NULL OR page_number > 0)`
+- `created_at`
+
+Same **live foreign key + historical snapshot** strategy as `repair_history_documents`, column for column, because it is the same kind of fact at an earlier moment and completion copies one into the other verbatim. `document_id` follows the live document and goes `NULL` when it is deleted; `document_title` and `page_number` are frozen at write time and always survive. Renaming a document does not change an existing snapshot.
+
+The `CASCADE` on `repair_checklist_id` is the ordinary parent/child one — these rows mean nothing without their checklist. That is safe **because completion copies them** into `repair_history_documents` rather than pointing at them, so deleting a completed checklist later drops these rows and leaves the historical copy whole.
+
+Indexed by `idx_repair_checklist_documents_checklist` for the ordinary read, `idx_repair_checklist_documents_document` to cover the `ON DELETE SET NULL` sweep, and the partial `idx_repair_checklist_documents_unique` on `(repair_checklist_id, document_id, page_number) WHERE document_id IS NOT NULL` as a backstop. As with its `repair_history_documents` twin, that index is not the deduplication guarantee — SQLite treats `NULL`s as distinct — so duplicate planner citations are collapsed deterministically (first-seen order on `documentId:pageNumber`) in `plannerChecklistDraft.js` and `repairChecklistProvenanceService.js`.
+
+**Writes are server-derived only.** `POST /api/repair-checklists/from-planner` takes a `checklistDraftId` and nothing else; the provenance comes from the server-held, deep-frozen planner draft. A `sources` field in the request body is ignored. The browser is never the authority for which document backed a repair.
+
+**What is deliberately not stored here** (identical to `repair_history_documents`): planner `sourceId` values (`S1`, `S2`, …), chunk ids, embedding ids, and the plan run id. Source ids are scoped to the run that minted them — request-local for Ask, run-wide for the planner — `document_chunks` rows are rebuilt whenever a PDF is re-extracted, and a plan run is an in-memory record that expires in hours. None of the three can be resolved by a reader weeks later, which is exactly when a repair history is read. `document_id` + title snapshot + `page_number` is the only identity that outlives all of them.
 
 ### `repair_history`
 
@@ -301,9 +330,11 @@ Important fields:
 
 Listed by `performed_on DESC, id DESC` — by the day the work happened, unlike the other lists in this app, which order by recent activity. Correcting a typo in an old record must not move it to the top of the log. Indexed by `idx_repair_history_vehicle_performed` for that filter-then-sort, plus `idx_repair_history_symptom` and `idx_repair_history_checklist` to cover the `ON DELETE SET NULL` sweeps.
 
+**One checklist is one repair.** `idx_repair_history_checklist_unique`, a partial unique index on `(checklist_id) WHERE checklist_id IS NOT NULL` added by migration `005_repair_checklist_provenance`, is the guarantee that completing a checklist twice cannot record the same physical job twice. It binds **both** entry points — the CRUD route and `POST /api/repair-checklists/:id/complete` — because one repair recorded twice is the same mistake whichever door it came through. The services check first so a repeat gets an explanatory response rather than a constraint error, but the index is what makes the guarantee true rather than merely likely. The predicate is required because `checklist_id` is `ON DELETE SET NULL`: once a completed checklist is deleted its history row drops to `NULL`, and any number of such orphaned records may coexist.
+
 ### `repair_history_documents`
 
-Stores which document pages backed one repair — the structured provenance that a saved checklist does not keep.
+Stores which document pages backed one repair. Since N3.2 this is normally a **copy** of the completed checklist's `repair_checklist_documents` rows, taken verbatim at completion — including `document_id NULL` where the cited document had already been deleted. Copying rather than referencing is what lets the checklist be deleted afterwards without touching the history.
 
 Important fields:
 
@@ -412,6 +443,7 @@ Applied migrations:
 - `002_repair_checklists` — adds the `repair_checklists` and `repair_checklist_items` tables.
 - `003_link_and_sort_indexes` — adds `idx_documents_created_at` plus reverse-link indexes on `symptom_documents.document_id`, `procedure_documents.document_id`, and `symptom_procedures.procedure_id`, and adds `idx_repair_checklists_vehicle_updated` and `idx_repair_checklist_items_order` for checklist sorting. Index-only: no new tables or columns.
 - `004_repair_history` — adds the `repair_history` and `repair_history_documents` tables and their indexes. Purely additive: no existing table is altered, and in particular `vehicles` gains no odometer column.
+- `005_repair_checklist_provenance` — adds the `repair_checklist_documents` table and its indexes, plus the partial unique index `idx_repair_history_checklist_unique` on the existing `repair_history` table. Additive: no existing table is altered and no column is added or changed. The migration refuses to apply if a checklist is already linked to more than one `repair_history` row, so the "one checklist is one repair" rule fails with a sentence naming the offending checklist rather than a bare constraint error at startup.
 
 ## Not In The Current Schema
 
@@ -423,3 +455,4 @@ The current schema does not include:
 - separate vector database or vector-extension tables
 - a vehicle-level current odometer (`vehicles` has no mileage column — see `repair_history` above)
 - parts used and repair cost (a later N3 slice; when cost lands it will be integer `cost_cents`, never a float or text)
+- maintenance reminders and service intervals (not an N3 slice at all — the app records what was done, it does not schedule)
