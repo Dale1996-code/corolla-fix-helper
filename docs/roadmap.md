@@ -49,6 +49,14 @@ state a plan imagined.
 - **The corpus is no longer silently incomplete.** 128 documents held zero chunks and were
   invisible to Ask regardless of how good their PDFs were. That is now diagnosed, recovered,
   and embedded — see **N0**, which is complete.
+- **The repair record no longer stops at the plan.** It used to: a saved checklist kept no
+  stored link back to the plan, the symptom, or the documents that produced it, and there
+  was nowhere to record mileage or the result. Completing a checklist now writes a durable
+  repair carrying the date, odometer, outcome, symptom, checklist, and the exact document
+  pages that backed it, readable on the **Repair History** page after the symptom is
+  renamed, the checklist is edited, or the document is deleted — see **N3**, which is
+  complete. Recording a repair stays a deliberate act: `status = 'done'` on a checklist is
+  an organizational state and still records nothing.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
@@ -63,10 +71,6 @@ state a plan imagined.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
-- **The repair record stops at the plan.** A saved checklist has no link back to the plan,
-  the symptom, or the documents that produced it, and there is nowhere to record mileage,
-  parts, cost, or the result. The app answers "how do I fix this?" and then forgets that
-  you did.
 - **Electrical and rpm/temperature specifications have no subject guard.** Volts, ohms,
   rpm, and temperature keep the numeric check only, so a matching number can still attach
   to the wrong component for those families.
@@ -108,7 +112,7 @@ this alone.
 | N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 13 verified) | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | **Done** | Reduces |
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
-| N3 | Repair history and maintenance records | Critical — **in progress** (N3.1 and N3.2 done; no UI yet) | Increase (two migrations, one page) |
+| N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
 | N4 | Close the two named evidence gaps | High | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
@@ -232,7 +236,7 @@ needs a decision (see section 6) and a migration before any of this is buildable
 *Explicitly not in scope:* customers, invoicing, labor billing, technician scheduling,
 parts stock levels, suppliers, purchase orders.
 
-*Status: in progress, not complete.* Two slices have landed, both server-side only:
+*Status: done, August 2026.* Three slices landed — two server-side, then the UI that made them usable:
 
 - **N3.1 — Repair history foundation. Done, August 2026 (PR #133).** Migration
   `004_repair_history` adds `repair_history` and `repair_history_documents`, plus the CRUD
@@ -248,12 +252,27 @@ parts stock levels, suppliers, purchase orders.
   plan-run expiry, a server restart, a document rename, and a document deletion, which are
   the four things that used to break the trail. One checklist records one repair, enforced
   by a partial unique index rather than an application check.
+- **N3.3 — Repair history UI. Done, August 2026.** No migration: the schema N3.1 and N3.2
+  built was already the right shape, and this slice is the owner-facing end of it. A
+  **Repair History** navigation destination and page (`/repair-history`) reading
+  `GET /api/repair-history` through the shared list/detail layout, with the open record in
+  the query string (`?repairHistoryId=`); and a **Record completed repair** form on the
+  Repair Checklists page, which is the one place a repair gets created. The page is a read
+  surface on purpose: a hand-typed "create a repair" form would be a record with no
+  provenance, which is the one thing this chain exists to prevent. The only server change
+  was one additive field, `repairHistoryId`, on the checklist payload — completion state a
+  client genuinely cannot derive, since `status = 'done'` still records nothing, so a
+  reloaded page shows "Recorded in Repair History" instead of a blank form inviting a
+  second record of the same job.
 
-*What N3 still needs:* the repair-history UI — a page, a navigation destination, and a
-completion form — none of which exist. `status = 'done'` on a checklist remains an
+*What the whole initiative answers now:* what did I do, when, at what mileage, why, which
+checklist did I follow, how did it turn out, is there follow-up, and which manual pages
+backed it — with every one of those readable after the symptom is renamed, the checklist is
+edited, or the document is deleted. `status = 'done'` on a checklist remains an
 organizational state and deliberately does not record a repair.
-*Still out of scope for every N3 slice:* parts used, cost tracking, maintenance reminders,
-service intervals, dashboard history widgets, and a vehicle-level current odometer.
+*Still out of scope for every N3 slice, and not a condition of it being done:* parts used,
+cost tracking, maintenance reminders, service intervals, dashboard history widgets, and a
+vehicle-level current odometer.
 
 **N4 — Close the two named evidence gaps.**
 *Problem it solves:* electrical and rpm/temperature specifications (volts, ohms, rpm,
@@ -433,8 +452,11 @@ Not "later" — chosen against, because they would make this a different and wor
 
 These block or reshape items above and cannot be answered from the repository.
 
-1. **Where does mileage live?** An odometer reading on the vehicle record, a reading per
-   repair record, or both? This shapes N3's migration.
+1. ~~**Where does mileage live?**~~ **Answered by N3.1 and shipped:** one reading per
+   repair record, and **no** `vehicles.current_odometer`. A reading is a historical fact; a
+   "current" odometer is a derived maximum, and storing both would create two writable
+   sources of truth for one number. Left here as the record of the decision, not as an open
+   question.
 2. **Is a second vehicle ever likely?** If genuinely never, some single-vehicle shortcuts
    can be simplified rather than merely tolerated.
 3. **Do you want to plug in an OBD-II reader eventually,** or is typing a trouble code

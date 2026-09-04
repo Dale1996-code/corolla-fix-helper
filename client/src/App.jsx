@@ -8,6 +8,7 @@ import { SymptomsPage } from "./pages/SymptomsPage";
 import { ProceduresPage } from "./pages/ProceduresPage";
 import { NotesPage } from "./pages/NotesPage";
 import { RepairChecklistsPage } from "./pages/RepairChecklistsPage";
+import { RepairHistoryPage } from "./pages/RepairHistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { listDetailLayoutClasses } from "./components/ListDetailLayout";
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="/procedures" element={<ProceduresPage />} />
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/repair-checklists" element={<RepairChecklistsPage />} />
+            <Route path="/repair-history" element={<RepairHistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

@@ -46,6 +46,56 @@ export function formatDate(value) {
   }).format(date);
 }
 
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Format a bare `YYYY-MM-DD` calendar date, e.g. "Aug 20, 2026".
+ *
+ * Deliberately NOT `formatDate`, and the difference is not cosmetic. A repair's
+ * `performedOn` is a calendar fact the owner typed, not a moment in time: the
+ * server stores it as bare `YYYY-MM-DD` with no clock and no zone. Passing it to
+ * `new Date(...)` parses it as UTC midnight, which Intl then renders in the
+ * viewer's local zone -- so west of Greenwich a repair recorded on the 20th
+ * displays as the 19th. Reading the three fields and formatting in UTC keeps the
+ * day the owner entered the day the owner sees, at every offset.
+ *
+ * Returns "Not available" for empty or unparseable values, matching `formatDate`.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function formatCalendarDate(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  const match = CALENDAR_DATE.exec(text);
+
+  if (!match) {
+    return "Not available";
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  // The same round trip the server validates with, so a shape-valid but
+  // impossible date (2026-02-30, month 00) is refused here rather than shown
+  // silently rolled forward to a day nobody recorded.
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return "Not available";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
 /**
  * Numeric sort key (epoch ms) for an entity, preferring `updatedAt` and
  * falling back to `createdAt`. Returns 0 when neither is a valid date so

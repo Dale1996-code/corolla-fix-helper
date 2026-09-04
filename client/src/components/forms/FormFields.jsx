@@ -11,7 +11,24 @@ const FIELD_CLASS =
 // forwardRef so callers can focus the input programmatically (e.g. moving
 // focus into an edit form when it opens).
 export const TextField = forwardRef(function TextField(
-  { label, name, value, onChange, required = false, placeholder = "", listId = "" },
+  {
+    label,
+    name,
+    value,
+    onChange,
+    required = false,
+    placeholder = "",
+    listId = "",
+    // `type` exists for the input modes a browser renders natively and better
+    // than this app could: a date picker, a numeric keypad on a phone. It stays
+    // an opt-in with a text default so no existing field changes behaviour, and
+    // the value is still a string on the way out -- a `type="number"` box hands
+    // back "" for anything it cannot parse, so callers that need a real number
+    // parse and validate it themselves rather than trusting the widget.
+    type = "text",
+    inputMode = "",
+    helpText = "",
+  },
   ref
 ) {
   return (
@@ -23,13 +40,16 @@ export const TextField = forwardRef(function TextField(
       <input
         ref={ref}
         className={FIELD_CLASS}
+        type={type}
         name={name}
         value={value}
         onChange={onChange}
         required={required}
         placeholder={placeholder}
+        inputMode={inputMode || undefined}
         list={listId || undefined}
       />
+      {helpText ? <span className="text-xs text-slate-500">{helpText}</span> : null}
     </label>
   );
 });

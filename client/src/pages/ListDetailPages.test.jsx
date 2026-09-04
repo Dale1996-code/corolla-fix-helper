@@ -8,6 +8,7 @@ import { SymptomsPage } from "./SymptomsPage";
 import { ProceduresPage } from "./ProceduresPage";
 import { NotesPage } from "./NotesPage";
 import { RepairChecklistsPage } from "./RepairChecklistsPage";
+import { RepairHistoryPage } from "./RepairHistoryPage";
 import { listDetailLayoutClasses } from "../components/ListDetailLayout";
 
 // H6: five pages had five hand-copied split-pane wrappers that had already
@@ -88,8 +89,29 @@ const CHECKLIST = {
   items: [],
   itemCount: 0,
   doneItemCount: 0,
+  sources: [],
+  sourceCount: 0,
+  repairHistoryId: null,
   createdAt: "2026-05-01T08:00:00.000Z",
   updatedAt: "2026-05-01T09:00:00.000Z",
+};
+
+const REPAIR = {
+  id: 1,
+  performedOn: "2026-05-01",
+  odometerMiles: 183456,
+  title: "Front brake job",
+  outcome: "fixed",
+  summary: "New pads and rotors.",
+  followUp: "",
+  symptomId: null,
+  symptomTitle: "",
+  checklistId: null,
+  checklistTitle: "",
+  sources: [],
+  sourceCount: 0,
+  createdAt: "2026-05-02T08:00:00.000Z",
+  updatedAt: "2026-05-02T08:00:00.000Z",
 };
 
 // One permissive stub: these tests are about layout structure, so every page
@@ -106,6 +128,7 @@ function stubApi() {
         "/api/procedures": { procedures: [PROCEDURE], total: 1 },
         "/api/notes": { notes: [NOTE], total: 1 },
         "/api/repair-checklists": { checklists: [CHECKLIST], total: 1 },
+        "/api/repair-history": { repairHistory: [REPAIR], total: 1 },
         "/api/settings": {
           vehicle: { year: 2009, make: "Toyota", model: "Corolla", trim: "LE", engine: "1.8L" },
           documentDefaults: { commonSystems: [], documentTypes: [] },
@@ -131,6 +154,12 @@ const PAGES = [
     name: "RepairChecklists",
     Page: RepairChecklistsPage,
     route: "/repair-checklists",
+    row: /front brake job/i,
+  },
+  {
+    name: "RepairHistory",
+    Page: RepairHistoryPage,
+    route: "/repair-history",
     row: /front brake job/i,
   },
 ];

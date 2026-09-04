@@ -6,6 +6,7 @@ import { DocumentsPage } from "./DocumentsPage";
 import { SymptomsPage } from "./SymptomsPage";
 import { NotesPage } from "./NotesPage";
 import { RepairChecklistsPage } from "./RepairChecklistsPage";
+import { RepairHistoryPage } from "./RepairHistoryPage";
 
 // H7: filters, pagination, and the selected record are query-string state, so
 // the browser can restore them. These tests drive the same journey the audit
@@ -586,4 +587,116 @@ test("Repair Checklists clears a checklistId that names nothing", async () => {
   // otherwise.
   expect(screen.getByRole("heading", { level: 2, name: "Front brake job" })).toBeInTheDocument();
   await waitFor(() => expect(currentUrl()).toBe("/repair-checklists"));
+});
+
+
+// --- Repair History ----------------------------------------------------------
+
+const REPAIRS = [
+  {
+    id: 91,
+    performedOn: "2026-08-20",
+    odometerMiles: 183456,
+    title: "Front brake job",
+    outcome: "fixed",
+    summary: "New pads and rotors.",
+    followUp: "",
+    symptomId: null,
+    symptomTitle: "",
+    checklistId: null,
+    checklistTitle: "",
+    sources: [],
+    sourceCount: 0,
+    createdAt: "2026-08-21 09:00:00",
+    updatedAt: "2026-08-21 09:00:00",
+  },
+  {
+    id: 92,
+    performedOn: "2026-06-02",
+    odometerMiles: null,
+    title: "Oil change",
+    outcome: "unknown",
+    summary: "",
+    followUp: "",
+    symptomId: null,
+    symptomTitle: "",
+    checklistId: null,
+    checklistTitle: "",
+    sources: [],
+    sourceCount: 0,
+    createdAt: "2026-06-02 10:00:00",
+    updatedAt: "2026-06-02 10:00:00",
+  },
+];
+
+async function renderRepairHistory(entry = "/repair-history") {
+  const fetchMock = vi.fn((url) => {
+    if (url === "/api/repair-history") {
+      return jsonResponse({ repairHistory: REPAIRS, total: REPAIRS.length });
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(RepairHistoryPage, [entry]);
+  await screen.findByRole("heading", { level: 2, name: /Front brake job|Oil change/ });
+
+  return fetchMock;
+}
+
+test("Repair History puts the open repair in the URL and Back reopens the previous one", async () => {
+  await renderRepairHistory();
+
+  expect(currentUrl()).toBe("/repair-history");
+
+  fireEvent.click(screen.getByRole("button", { name: "Select repair: Oil change" }));
+  expect(currentUrl()).toBe("/repair-history?repairHistoryId=92");
+  expect(screen.getByRole("heading", { level: 2, name: "Oil change" })).toBeInTheDocument();
+
+  goBack();
+  await waitFor(() => expect(currentUrl()).toBe("/repair-history"));
+  expect(screen.getByRole("heading", { level: 2, name: "Front brake job" })).toBeInTheDocument();
+
+  goForward();
+  await waitFor(() => expect(currentUrl()).toBe("/repair-history?repairHistoryId=92"));
+  expect(screen.getByRole("heading", { level: 2, name: "Oil change" })).toBeInTheDocument();
+});
+
+test("Repair History rebuilds a selection from a deep link", async () => {
+  await renderRepairHistory("/repair-history?repairHistoryId=92");
+
+  expect(screen.getByRole("heading", { level: 2, name: "Oil change" })).toBeInTheDocument();
+  // A deep link is already the view it describes; nothing is rewritten.
+  expect(currentUrl()).toBe("/repair-history?repairHistoryId=92");
+});
+
+test("Repair History clears a repairHistoryId that names nothing", async () => {
+  await renderRepairHistory("/repair-history?repairHistoryId=404");
+
+  // The newest repair is shown in its place, and the URL stops claiming
+  // otherwise.
+  expect(screen.getByRole("heading", { level: 2, name: "Front brake job" })).toBeInTheDocument();
+  await waitFor(() => expect(currentUrl()).toBe("/repair-history"));
+});
+
+test("Repair History survives a hand-typed repairHistoryId that is not an id at all", async () => {
+  await renderRepairHistory("/repair-history?repairHistoryId=%2Fetc%2Fpasswd");
+
+  expect(screen.getByRole("heading", { level: 2, name: "Front brake job" })).toBeInTheDocument();
+  await waitFor(() => expect(currentUrl()).toBe("/repair-history"));
+});
+
+test("Repair History does not refetch when the selection changes", async () => {
+  const fetchMock = await renderRepairHistory();
+
+  const callsAfterLoad = fetchMock.mock.calls.length;
+
+  fireEvent.click(screen.getByRole("button", { name: "Select repair: Oil change" }));
+  goBack();
+  await waitFor(() => expect(currentUrl()).toBe("/repair-history"));
+
+  // Selection is derived from data already in hand -- a URL change here is a
+  // re-render, not a request.
+  expect(fetchMock.mock.calls.length).toBe(callsAfterLoad);
 });

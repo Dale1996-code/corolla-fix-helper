@@ -8,6 +8,7 @@ import { symptomsListTable } from "./symptoms/SymptomsList";
 import { proceduresListTable } from "./procedures/ProceduresList";
 import { notesListTable } from "../pages/NotesPage";
 import { checklistListTable } from "../pages/RepairChecklistsPage";
+import { repairHistoryListTable } from "../pages/RepairHistoryPage";
 
 // Two H6 invariants live here.
 //
@@ -51,6 +52,11 @@ const LISTS = [
     table: checklistListTable,
     file: "../pages/RepairChecklistsPage.jsx",
     symbol: "checklistListTable",
+  },
+  {
+    table: repairHistoryListTable,
+    file: "../pages/RepairHistoryPage.jsx",
+    symbol: "repairHistoryListTable",
   },
 ].map((entry) => ({ ...entry, name: entry.table.name }));
 

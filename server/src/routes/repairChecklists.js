@@ -11,7 +11,9 @@ import {
 } from "../services/repairChecklistProvenanceService.js";
 import {
   findChecklistForVehicle,
+  findRepairHistoryIdForChecklist,
   findSymptomForVehicle,
+  listRepairHistoryIdsByChecklist,
   normalizeOdometerMiles,
   normalizeOptionalEntityId,
   normalizeOutcome,
@@ -64,7 +66,7 @@ function mapItemRow(row) {
   };
 }
 
-function buildChecklist(row, items, sources = []) {
+function buildChecklist(row, items, sources = [], repairHistoryId = null) {
   const doneItemCount = items.filter((item) => item.isDone).length;
 
   return {
@@ -84,6 +86,23 @@ function buildChecklist(row, items, sources = []) {
     // is the queryable twin, not a replacement.
     sources,
     sourceCount: sources.length,
+    // Which repair this checklist was completed into, or null (roadmap N3.3).
+    //
+    // WHY THIS FIELD EXISTS AT ALL. Completion state is not derivable from
+    // anything else the client already has. `status === 'done'` deliberately
+    // does NOT imply a repair was recorded -- see the note on the completion
+    // route -- so a client that inferred it from the status would offer to
+    // record a repair that already exists, or claim one that never happened.
+    // The alternative was for the browser to fetch the whole repair-history
+    // list on every checklist screen and scan it for a back-link, which is a
+    // large unrelated read to answer a question the server can answer from the
+    // partial unique index it already maintains.
+    //
+    // It is a LINK, not a duplicate of the record: the id only, so nothing about
+    // a repair is snapshotted onto a checklist where it could drift. The
+    // relationship is one-to-one by `idx_repair_history_checklist_unique`, so
+    // one id is the complete answer.
+    repairHistoryId: Number.isInteger(repairHistoryId) && repairHistoryId > 0 ? repairHistoryId : null,
   };
 }
 
@@ -141,9 +160,16 @@ function listChecklistsForVehicle(vehicleId) {
   // Batched the same way the items are, so adding provenance to the list view
   // costs one more query rather than one per checklist.
   const sourcesByChecklist = listChecklistSourcesForVehicle(vehicleId);
+  // Likewise for completion state: one query for the vehicle, not one per row.
+  const repairHistoryIdsByChecklist = listRepairHistoryIdsByChecklist(vehicleId);
 
   return checklistRows.map((row) =>
-    buildChecklist(row, itemsByChecklist.get(row.id) || [], sourcesByChecklist.get(row.id) || [])
+    buildChecklist(
+      row,
+      itemsByChecklist.get(row.id) || [],
+      sourcesByChecklist.get(row.id) || [],
+      repairHistoryIdsByChecklist.get(row.id) ?? null
+    )
   );
 }
 
@@ -160,7 +186,14 @@ function getChecklistForVehicle(vehicleId, checklistId) {
     return null;
   }
 
-  return buildChecklist(row, listItemsForChecklist(row.id), listChecklistSources(row.id));
+  return buildChecklist(
+    row,
+    listItemsForChecklist(row.id),
+    listChecklistSources(row.id),
+    // Number() because SQLite hands the id back untyped, and this helper --
+    // unlike the batched one -- documents a numeric checklist id.
+    findRepairHistoryIdForChecklist(vehicleId, Number(row.id))
+  );
 }
 
 // Confirm a checklist exists for this vehicle before touching its items.

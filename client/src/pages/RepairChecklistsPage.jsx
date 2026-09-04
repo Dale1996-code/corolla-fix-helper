@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ListDetailLayout } from "../components/ListDetailLayout";
-import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
+import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { formatLibraryTotal } from "../lib/resultRange";
+import { buildEntityLink } from "../lib/navigation";
+import {
+  DEFAULT_REPAIR_OUTCOME,
+  parseOdometerInput,
+  REPAIR_OUTCOME_OPTIONS,
+} from "../lib/repairHistory";
 import { useScrollToHash } from "../lib/useScrollToHash";
 import { applyParamUpdates, readIdParam } from "../lib/urlState";
 
@@ -34,6 +40,27 @@ const emptyChecklistForm = {
   description: "",
   notes: "",
 };
+
+// The completion form's own fields, and ONLY the historical facts the API
+// accepts. There is no title here and no sources: the server takes the title
+// from the checklist and the provenance from the checklist's own saved rows,
+// inside the writing transaction. A title or a `sources` array sent from the
+// browser is ignored, and building either into this form would be a standing
+// invitation to make the browser the authority on what backed a repair.
+const emptyCompletionForm = {
+  performedOn: "",
+  odometerMiles: "",
+  outcome: DEFAULT_REPAIR_OUTCOME,
+  summary: "",
+  followUp: "",
+  symptomId: "",
+};
+
+// Tagged with the checklist it describes. A completion request can outlive the
+// screen that sent it -- the owner selects another checklist, opens its form --
+// and an untagged banner would then report one checklist's repair underneath a
+// different one.
+const emptyCompletionState = { checklistId: null, saving: false, message: "", error: "" };
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || "Planned";
@@ -426,6 +453,165 @@ function ChecklistEditForm({ form, saveState, onChange, onSubmit, onCancel }) {
   );
 }
 
+// Shown once a checklist has been recorded as a repair.
+//
+// This is the reload-safe half of the completion workflow, and the reason
+// `repairHistoryId` is on the checklist payload at all. Derived from the
+// server's own field rather than from anything this page remembers, so a
+// refresh, a Back, or a fresh browser lands on exactly this panel instead of a
+// blank completion form that invites the owner to record a repair that already
+// exists.
+//
+// Deliberately NOT derived from `status === "done"`: done is an organizational
+// state the owner can set from the dropdown, and it records nothing.
+function RecordedRepairPanel({ repairHistoryId, linkRef }) {
+  return (
+    <section className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+      <p className="font-semibold">Recorded in Repair History</p>
+      <p className="mt-2">
+        This checklist has already been recorded as a repair. One checklist records one repair, so
+        there is nothing more to enter here.
+      </p>
+      {/* Focus lands here the moment a repair is recorded: the form the keyboard
+          user was in has just been removed, and this link is what replaced it. */}
+      <Link
+        ref={linkRef}
+        to={buildEntityLink("repairHistory", repairHistoryId)}
+        className="mt-3 inline-flex font-medium text-emerald-900 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-950"
+      >
+        Open the repair record
+      </Link>
+    </section>
+  );
+}
+
+// The one place a repair gets written into permanent history.
+//
+// It asks for exactly the facts nothing on the server can derive -- the day the
+// work happened, the mileage, how it turned out, what was done, what is left --
+// and nothing else. The repair's title and its source documents are the
+// checklist's own and are read server-side; see the trust boundary on
+// `POST /api/repair-checklists/:id/complete`.
+function ChecklistCompletionForm({
+  form,
+  symptomOptions,
+  symptomsError,
+  completionState,
+  onChange,
+  onSubmit,
+  onCancel,
+}) {
+  const dateInputRef = useRef(null);
+
+  // The button only renders this form once pressed, so mounting is the "form
+  // opened" event -- move focus to the first field, which is also the only
+  // required one, so a keyboard user lands where the work starts.
+  useEffect(() => {
+    dateInputRef.current?.focus();
+  }, []);
+
+  return (
+    <form
+      className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4"
+      onSubmit={onSubmit}
+    >
+      <div>
+        <h3 className="text-base font-semibold text-slate-900">Record completed repair</h3>
+        <p className="mt-1 text-sm text-slate-600">
+          Save this checklist as a repair that actually happened. The repair keeps the checklist's
+          title and the document pages that backed it.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField
+          ref={dateInputRef}
+          label="Repair date"
+          name="performedOn"
+          type="date"
+          value={form.performedOn}
+          onChange={onChange}
+          required
+        />
+        {/* `inputMode="numeric"` rather than `type="number"`: a number input
+            silently DISCARDS anything it cannot parse, so an owner who types
+            "183,456" watches the box empty itself with no explanation and the
+            reading is quietly lost. Keeping it a text box means what was typed
+            stays on screen and `parseOdometerInput` can say what is wrong with
+            it, while a phone still gets the numeric keypad. */}
+        <TextField
+          label="Odometer (miles)"
+          name="odometerMiles"
+          inputMode="numeric"
+          value={form.odometerMiles}
+          onChange={onChange}
+          placeholder="183456"
+          helpText="Leave blank if you did not write it down."
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <SelectField
+          label="Outcome"
+          name="outcome"
+          value={form.outcome}
+          onChange={onChange}
+          options={REPAIR_OUTCOME_OPTIONS}
+        />
+        <SelectField
+          label="Symptom"
+          name="symptomId"
+          value={form.symptomId}
+          onChange={onChange}
+          options={symptomOptions}
+          emptyOption="No symptom linked"
+        />
+      </div>
+
+      {symptomsError ? (
+        <InfoBanner tone="amber">
+          {symptomsError} You can still record the repair without linking a symptom.
+        </InfoBanner>
+      ) : null}
+
+      <TextAreaField
+        label="What was done"
+        name="summary"
+        value={form.summary}
+        onChange={onChange}
+        placeholder="Replaced both front pads and rotors, bedded them in on the way home."
+      />
+
+      <TextAreaField
+        label="Follow-up"
+        name="followUp"
+        value={form.followUp}
+        onChange={onChange}
+        placeholder="Re-check the pad wear at the next oil change."
+      />
+
+      {completionState.error ? <ErrorBanner>{completionState.error}</ErrorBanner> : null}
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="submit"
+          disabled={completionState.saving}
+          className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-600"
+        >
+          {completionState.saving ? "Recording..." : "Record repair"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function ChecklistDetails({
   checklist,
   isEditing,
@@ -433,6 +619,7 @@ function ChecklistDetails({
   saveState,
   deleteState,
   itemsProps,
+  completionProps,
   onStartEdit,
   onCancelEdit,
   onEditChange,
@@ -462,6 +649,22 @@ function ChecklistDetails({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {/* "Record completed repair", never a bare "Complete": on a page full
+              of tick boxes, "Complete" would read as "tick every item". This
+              button writes a permanent repair record, and its label has to say
+              so. It disappears once the repair exists -- one checklist records
+              one repair -- so the form cannot invite a re-entry the server
+              would only answer with the record already there. */}
+          {!checklist.repairHistoryId && !completionProps.isOpen ? (
+            <button
+              type="button"
+              ref={completionProps.openButtonRef}
+              onClick={() => completionProps.onStart(checklist)}
+              className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+            >
+              Record completed repair
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onStartEdit(checklist)}
@@ -516,6 +719,36 @@ function ChecklistDetails({
           ) : null}
         </>
       )}
+
+      {checklist.repairHistoryId ? (
+        <RecordedRepairPanel
+          repairHistoryId={checklist.repairHistoryId}
+          linkRef={completionProps.recordedRepairLinkRef}
+        />
+      ) : null}
+
+      {completionProps.isOpen && !checklist.repairHistoryId ? (
+        <ChecklistCompletionForm
+          form={completionProps.form}
+          symptomOptions={completionProps.symptomOptions}
+          symptomsError={completionProps.symptomsError}
+          completionState={completionProps.state}
+          onChange={completionProps.onChange}
+          onSubmit={completionProps.onSubmit}
+          onCancel={completionProps.onCancel}
+        />
+      ) : null}
+
+      {completionProps.state.message ? (
+        <SuccessBanner className="mt-4">{completionProps.state.message}</SuccessBanner>
+      ) : null}
+
+      {/* The completion error also renders inside the form; this is the copy
+          that survives a successful-but-already-recorded response, where the
+          form has closed. */}
+      {completionProps.state.error && !completionProps.isOpen ? (
+        <ErrorBanner className="mt-4">{completionProps.state.error}</ErrorBanner>
+      ) : null}
 
       <ChecklistItems {...itemsProps} />
 
@@ -575,6 +808,33 @@ export function RepairChecklistsPage() {
   const itemActionInFlight = useRef(false);
   const [itemActionPending, setItemActionPending] = useState(false);
   const creatingInFlight = useRef(false);
+
+  // --- Completing a checklist into repair history (roadmap N3.3) ------------
+  const [completingChecklistId, setCompletingChecklistId] = useState(null);
+  const [completionForm, setCompletionForm] = useState(emptyCompletionForm);
+  const [completionState, setCompletionState] = useState(emptyCompletionState);
+  const [symptomOptions, setSymptomOptions] = useState([]);
+  const [symptomsError, setSymptomsError] = useState("");
+  // Symptoms are fetched once, and only when a completion form is first opened.
+  // The link is optional, so making every visit to this page pay for a second
+  // request would be a cost for a field most owners will leave blank.
+  const symptomsRequested = useRef(false);
+  // The checklist whose completion request is in flight, or null. It doubles as
+  // the re-entrancy guard -- one completion at a time -- but it is an id rather
+  // than a boolean because every answer this request gives has to be checked
+  // against WHOSE completion it was.
+  const completionRequestChecklistId = useRef(null);
+  // Mirrors `completingChecklistId` for those async checks. State read inside a
+  // resolved promise is the value captured when the request went out, which is
+  // precisely the wrong answer once the owner has opened another checklist's
+  // form in the meantime.
+  const openCompletionChecklistId = useRef(null);
+  // Focus goes back to the button that opened the form when it closes, so a
+  // keyboard user is not returned to the top of the document.
+  const recordButtonRef = useRef(null);
+  // ...and to the recorded-repair link when the form closes because the repair
+  // now exists, since that link is what replaced the form.
+  const recordedRepairLinkRef = useRef(null);
 
   // Derived from the URL and the loaded list: no `checklistId` means the newest
   // checklist, the fallback this page always had, now spelled as an absent
@@ -725,6 +985,10 @@ export function RepairChecklistsPage() {
     });
     setSaveState({ saving: false, message: "", error: "" });
     setDeleteState({ deletingId: null, error: "" });
+    // One form at a time: editing the checklist's own fields and recording the
+    // repair it became are different jobs, and two open forms in one panel is
+    // how a keyboard user loses track of which one Enter submits.
+    closeCompletionForm();
   }
 
   function cancelEditingChecklist() {
@@ -802,6 +1066,11 @@ export function RepairChecklistsPage() {
 
       if (editingChecklistId === checklist.id) {
         cancelEditingChecklist();
+      }
+
+      if (completingChecklistId === checklist.id) {
+        setCompletionState(emptyCompletionState);
+        closeCompletionForm();
       }
 
       setDeleteState({ deletingId: null, error: "" });
@@ -956,6 +1225,215 @@ export function RepairChecklistsPage() {
     }
   }
 
+  // --- Completion actions ---------------------------------------------------
+
+  async function loadSymptomOptions() {
+    if (symptomsRequested.current) {
+      return;
+    }
+
+    symptomsRequested.current = true;
+
+    try {
+      setSymptomsError("");
+
+      const response = await fetch("/api/symptoms");
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not load symptoms.");
+      }
+
+      const symptoms = Array.isArray(payload.symptoms) ? payload.symptoms : [];
+
+      setSymptomOptions(
+        symptoms.map((symptom) => ({ value: String(symptom.id), label: symptom.title }))
+      );
+    } catch (error) {
+      // A failed symptom list is not a failed completion: the link is optional,
+      // so the form stays usable and says so rather than blocking the record.
+      symptomsRequested.current = false;
+      setSymptomOptions([]);
+      setSymptomsError(error.message || "Could not load symptoms.");
+    }
+  }
+
+  function startCompletingChecklist(checklist) {
+    // Pin the checklist being completed into the URL, for the same reason
+    // editing does: a successful completion re-sorts the list by newest
+    // activity, and an unnamed "first row" selection could slide to a different
+    // checklist underneath the form. Replace, not push -- opening a form is not
+    // a navigation step of its own.
+    updateViewParams({ checklistId: checklist.id }, { replace: true });
+    openCompletionChecklistId.current = checklist.id;
+    setCompletingChecklistId(checklist.id);
+    setCompletionForm(emptyCompletionForm);
+    setCompletionState(emptyCompletionState);
+    loadSymptomOptions();
+  }
+
+  function closeCompletionForm({ returnFocus = false } = {}) {
+    openCompletionChecklistId.current = null;
+    setCompletingChecklistId(null);
+    setCompletionForm(emptyCompletionForm);
+
+    if (returnFocus) {
+      // After the state update has re-rendered the opening button.
+      window.requestAnimationFrame(() => recordButtonRef.current?.focus());
+    }
+  }
+
+  function cancelCompletingChecklist() {
+    setCompletionState(emptyCompletionState);
+    closeCompletionForm({ returnFocus: true });
+  }
+
+  function handleCompletionFormChange(event) {
+    const { name, value } = event.target;
+    setCompletionForm((currentForm) => ({ ...currentForm, [name]: value }));
+  }
+
+  async function handleCompleteChecklist(event) {
+    event.preventDefault();
+
+    if (!completingChecklistId) {
+      return;
+    }
+
+    // The checklist this submission belongs to, captured before anything can be
+    // awaited. Every answer below is tagged with it and checked against it.
+    const checklistId = completingChecklistId;
+    const pendingChecklistId = completionRequestChecklistId.current;
+
+    // One completion at a time, and never silently: a press that does nothing at
+    // all reads as a broken button, and the owner would try again.
+    if (pendingChecklistId !== null) {
+      setCompletionState({
+        checklistId,
+        // Keep the in-flight indicator honest: it belongs to the request that is
+        // really running, which is this form's only when the ids match.
+        saving: pendingChecklistId === checklistId,
+        message: "",
+        error:
+          pendingChecklistId === checklistId
+            ? "This repair is already being recorded. Wait for it to finish."
+            : "Another repair is still being recorded. Wait for it to finish, then record this one.",
+      });
+      return;
+    }
+
+    if (!completionForm.performedOn.trim()) {
+      setCompletionState({ checklistId, saving: false, message: "", error: "Repair date is required." });
+      return;
+    }
+
+    // A blank box means "I did not write it down" and must stay `null`; a real
+    // reading has to leave here as a JSON number, because the API rejects a
+    // numeric string outright rather than coercing it (a coerced "" would be a
+    // legitimate-looking reading of zero miles).
+    const odometer = parseOdometerInput(completionForm.odometerMiles);
+
+    if (!odometer.ok) {
+      setCompletionState({ checklistId, saving: false, message: "", error: odometer.error });
+      return;
+    }
+
+    const symptomId = completionForm.symptomId ? Number(completionForm.symptomId) : null;
+
+    try {
+      completionRequestChecklistId.current = checklistId;
+      setCompletionState({ checklistId, saving: true, message: "", error: "" });
+
+      const response = await fetch(`/api/repair-checklists/${checklistId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Historical facts ONLY. No title, no sources, no document ids: the
+        // server owns those and reads them from the checklist itself.
+        body: JSON.stringify({
+          performedOn: completionForm.performedOn,
+          odometerMiles: odometer.odometerMiles,
+          outcome: completionForm.outcome,
+          summary: completionForm.summary,
+          followUp: completionForm.followUp,
+          symptomId,
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not record the repair.");
+      }
+
+      // The server-returned checklist is applied wherever the owner happens to
+      // be looking. It is a fact about that checklist rather than a message
+      // about this screen, and a checklist that has been recorded has to stop
+      // offering to be recorded again in every list and panel that shows it.
+      //
+      // `created: false` is a 200 saying this checklist was already recorded.
+      // That is an answer, not an error -- one checklist records one repair, so
+      // the honest response to a retry is the record it already became.
+      if (payload.checklist) {
+        applyChecklistUpdate(payload.checklist);
+      }
+
+      setCompletionState({
+        checklistId,
+        saving: false,
+        message: payload.created
+          ? "Repair recorded. It is now in your Repair History."
+          : "This checklist was already recorded as a repair.",
+        error: "",
+      });
+
+      // Everything from here is about the form on screen, so it happens only
+      // while the form on screen is still this request's own. If the owner
+      // opened another checklist's completion form while this was in flight,
+      // closing it would throw away what they had typed into a repair this
+      // response knows nothing about.
+      if (openCompletionChecklistId.current === checklistId) {
+        closeCompletionForm();
+        // The form the keyboard user was in has just been removed; the recorded
+        // repair's link is what took its place, so focus follows it there
+        // instead of falling back to the top of the document. One frame, so the
+        // panel this focuses has actually rendered.
+        window.requestAnimationFrame(() => recordedRepairLinkRef.current?.focus());
+      }
+    } catch (error) {
+      setCompletionState({
+        checklistId,
+        saving: false,
+        message: "",
+        error: error.message || "Could not record the repair.",
+      });
+    } finally {
+      completionRequestChecklistId.current = null;
+    }
+  }
+
+  // A completion banner is about one checklist, so it is only ever shown under
+  // that checklist. Scoping it here rather than trusting the request handler
+  // means even a response that lands long after the owner has moved on cannot
+  // announce itself under whatever is open now.
+  const completionStateForSelection =
+    completionState.checklistId !== null && completionState.checklistId === selectedChecklistId
+      ? completionState
+      : emptyCompletionState;
+
+  const completionProps = {
+    isOpen: completingChecklistId !== null && completingChecklistId === selectedChecklistId,
+    form: completionForm,
+    state: completionStateForSelection,
+    symptomOptions,
+    symptomsError,
+    openButtonRef: recordButtonRef,
+    recordedRepairLinkRef,
+    onStart: startCompletingChecklist,
+    onChange: handleCompletionFormChange,
+    onSubmit: handleCompleteChecklist,
+    onCancel: cancelCompletingChecklist,
+  };
+
   const itemsProps = {
     items: selectedChecklist?.items || [],
     itemError,
@@ -988,6 +1466,11 @@ export function RepairChecklistsPage() {
     // Clear the delete error too, so a status banner from the previously selected
     // checklist is not shown under this one.
     setDeleteState({ deletingId: null, error: "" });
+    // Same for the completion form and its banner: a "Repair recorded" message
+    // belongs to the checklist it was recorded for, not to whichever one is
+    // opened next.
+    setCompletionState(emptyCompletionState);
+    closeCompletionForm();
   }
 
   return (
@@ -1050,6 +1533,7 @@ export function RepairChecklistsPage() {
                     saveState={saveState}
                     deleteState={deleteState}
                     itemsProps={itemsProps}
+                    completionProps={completionProps}
                     onStartEdit={startEditingChecklist}
                     onCancelEdit={cancelEditingChecklist}
                     onEditChange={handleEditFormChange}

@@ -599,9 +599,11 @@ Plan a repair as a list of steps you can check off. Each checklist belongs to th
 
 Allowed values — `status`: `planned` (default) | `in_progress` | `blocked` | `done`. A move takes `direction`: `up` | `down`.
 
-Every write returns the **whole** checklist — its own fields plus `items`, `itemCount`, `doneItemCount`, `sources`, and `sourceCount` — so the UI can re-render after any change without a second fetch. Editing, adding, deleting, or moving an item also bumps the parent checklist's `updatedAt`, which is why the list is ordered newest-activity-first.
+Every write returns the **whole** checklist — its own fields plus `items`, `itemCount`, `doneItemCount`, `sources`, `sourceCount`, and `repairHistoryId` — so the UI can re-render after any change without a second fetch. Editing, adding, deleting, or moving an item also bumps the parent checklist's `updatedAt`, which is why the list is ordered newest-activity-first.
 
 `sources` is the checklist's **durable planner provenance**: `[{ id, documentId, documentTitle, pageNumber }]`, empty for a checklist created by hand. `documentId` is the live link and becomes `null` once that document is deleted; `documentTitle` and `pageNumber` are snapshots taken when the checklist was saved and always survive. It is written only by `POST /api/repair-checklists/from-planner`, from server-derived planner output — never from a request body.
+
+`repairHistoryId` (**N3.3**) is the id of the repair this checklist was completed into, or `null`. It is the completion state a client cannot derive for itself: **`status: "done"` does not imply it**, because `done` is an organizational state that records nothing, so a client that inferred completion from the status would offer to record a repair that already exists. It is a link and not a copy — the id only — and the relationship is one-to-one, enforced by the partial unique index on `repair_history(checklist_id)`. The list view answers it from one batched query for the vehicle rather than a lookup per checklist.
 
 | Endpoint | Notes |
 | --- | --- |
@@ -654,7 +656,7 @@ The result is an **ordinary** checklist: `planned`, fully editable, with no stor
 
 ### `POST /api/repair-checklists/:id/complete`
 
-Records that the checklist's repair was actually carried out, creating one `repair_history` record from it. Server-side only in this slice — there is no completion UI yet.
+Records that the checklist's repair was actually carried out, creating one `repair_history` record from it. The **Record completed repair** form on the Repair Checklists page is what calls it (N3.3).
 
 | Body field | Required | Notes |
 | --- | --- | --- |
@@ -688,7 +690,9 @@ Records that the checklist's repair was actually carried out, creating one `repa
 
 ## Repair History
 
-The durable record that a repair was actually carried out — the roadmap's **N3** foundation. Persistence only: there is **no UI for this yet**. Since **N3.2** one other thing writes here: [`POST /api/repair-checklists/:id/complete`](#post-apirepair-checklistsidcomplete), which creates a record from a completed checklist and copies that checklist's provenance into it. Both entry points share one set of validators, so a date, odometer reading, or outcome that is valid at one is valid at the other.
+The durable record that a repair was actually carried out — the roadmap's **N3** foundation. Since **N3.2** one other thing writes here: [`POST /api/repair-checklists/:id/complete`](#post-apirepair-checklistsidcomplete), which creates a record from a completed checklist and copies that checklist's provenance into it. Both entry points share one set of validators, so a date, odometer reading, or outcome that is valid at one is valid at the other.
+
+Since **N3.3** the app reads this at `/repair-history`. That page is a read surface: it lists and opens records, and the way one gets CREATED is by completing a checklist, which is what carries the evidence. The `POST`, `PUT`, and `DELETE` routes below are still supported and still have no UI.
 
 It answers "what did I do, when, at what mileage, why, and which manual pages backed it?" — and keeps answering after the symptom is renamed, the checklist is edited, or the document is deleted.
 
