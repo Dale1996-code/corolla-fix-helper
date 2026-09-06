@@ -14,6 +14,7 @@ export const navigationItems = [
   { label: "Procedures", to: "/procedures" },
   { label: "Notes", to: "/notes" },
   { label: "Repair Checklists", to: "/repair-checklists" },
+  { label: "Repair History", to: "/repair-history" },
   { label: "Settings", to: "/settings" },
 ];
 
@@ -40,6 +41,10 @@ export function buildEntityLink(entityType, entityId) {
 
   if (entityType === "checklist") {
     return `/repair-checklists?checklistId=${entityId}#checklist-library`;
+  }
+
+  if (entityType === "repairHistory") {
+    return `/repair-history?repairHistoryId=${entityId}#repair-history-library`;
   }
 
   return "/dashboard";

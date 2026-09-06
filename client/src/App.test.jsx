@@ -26,6 +26,7 @@ beforeEach(() => {
           recentActivity: [],
           tags: [],
           checklists: [],
+          repairHistory: [],
           attachments: [],
           results: [],
           filters: {},

@@ -310,6 +310,39 @@ export function findRepairHistoryIdForChecklist(
   return row ? Number(row.id) : null;
 }
 
+/**
+ * The repair each checklist was completed into, keyed by checklist id.
+ *
+ * The batched twin of `findRepairHistoryIdForChecklist`, for the checklists list
+ * view: one query for the whole vehicle rather than a lookup per checklist, the
+ * same way that route already batches its items and its provenance.
+ *
+ * Only completed checklists appear. A checklist merely moved to `status = 'done'`
+ * is absent, which is the whole point -- done is an organizational state and
+ * records no repair, so it must not be readable as one.
+ *
+ * @param {*} vehicleId
+ * @returns {Map<*, number>} keyed by checklist id, left untyped because SQLite
+ *   hands back untyped row values
+ */
+export function listRepairHistoryIdsByChecklist(vehicleId) {
+  const rows = db
+    .prepare(`
+      SELECT checklist_id, id
+      FROM repair_history
+      WHERE vehicle_id = ? AND checklist_id IS NOT NULL
+    `)
+    .all(vehicleId);
+
+  const byChecklist = new Map();
+
+  for (const row of rows) {
+    byChecklist.set(row.checklist_id, Number(row.id));
+  }
+
+  return byChecklist;
+}
+
 // --- Row mapping -----------------------------------------------------------
 
 /**

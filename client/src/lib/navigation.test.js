@@ -20,6 +20,7 @@ describe("navigationItems", () => {
       { label: "Procedures", to: "/procedures" },
       { label: "Notes", to: "/notes" },
       { label: "Repair Checklists", to: "/repair-checklists" },
+      { label: "Repair History", to: "/repair-history" },
       { label: "Settings", to: "/settings" },
     ]);
   });
@@ -27,11 +28,12 @@ describe("navigationItems", () => {
   // Retired names. "Search" and "Ask" both once labelled the /search
   // destination that is now called "Ask AI"; "Checklists" once labelled the
   // page headed "Repair Checklists"; "Planner" is never an acceptable
-  // abbreviation of "Repair Planner".
+  // abbreviation of "Repair Planner", and neither is "History" of
+  // "Repair History".
   test("does not reuse a retired feature name", () => {
     const labels = navigationItems.map((item) => item.label);
 
-    for (const retired of ["Search", "Ask", "Checklists", "Planner"]) {
+    for (const retired of ["Search", "Ask", "Checklists", "Planner", "History"]) {
       expect(labels).not.toContain(retired);
     }
   });
@@ -45,6 +47,9 @@ describe("buildEntityLink", () => {
     expect(buildEntityLink("note", 7)).toBe("/notes?noteId=7#note-library");
     expect(buildEntityLink("checklist", 7)).toBe(
       "/repair-checklists?checklistId=7#checklist-library"
+    );
+    expect(buildEntityLink("repairHistory", 7)).toBe(
+      "/repair-history?repairHistoryId=7#repair-history-library"
     );
   });
 
