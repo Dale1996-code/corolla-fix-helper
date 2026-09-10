@@ -379,16 +379,214 @@ test("the widened subject guard still accepts a matching non-torque subject", ()
   }
 });
 
-test("units outside the convertible families keep the numeric check only", () => {
-  // Volts, ohms, rpm, and temperature are not converted, so the subject guard
-  // does not gate them -- widening it that far would reject ordinary readings
-  // whose surrounding wording the parser was never built to understand.
+test("a voltage claim citing a different circuit with the same reading is rejected", () => {
+  // 13.5 V at the charging system and 13.5 V at the battery are not the same
+  // measurement, and the numeric check alone cannot tell them apart.
   const quote = "Charging system output: 13.5 volts at idle";
   const result = verifyEvidence(
     payload({
       documentSupported: [
         {
           claim: "The battery voltage should read 13.5 volts.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.doesNotMatch(result.gaps.join(" "), /13\.5 volts/);
+});
+
+test("a resistance claim citing a different sensor with the same figure is rejected", () => {
+  const quote = "Intake air temperature sensor resistance: 2.4 kilohms";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The engine coolant temperature sensor resistance is 2.4 kilohms.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+});
+
+test("an rpm claim citing a different system with the same figure is rejected", () => {
+  const quote = "Maximum cooling fan speed: 700 rpm";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The idle speed is 700 rpm.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+});
+
+test("a temperature claim citing a different component with the same figure is rejected", () => {
+  const quote = "Engine oil temperature warning threshold: 82°C";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The thermostat opening temperature is 82°C.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+});
+
+test("the guard covers the spaced unit spellings these manuals print too", () => {
+  // "20 deg C", "180 degrees F", and "5 k ohms" are the same specifications as
+  // "20°C" and "5 kilohms". A guard that silently covered only the unspaced
+  // form would look complete while leaving the printed form ungated.
+  const cases = [
+    [
+      "The thermostat opening temperature is 180 degrees F.",
+      "Engine oil temperature warning threshold: 180 degrees F",
+    ],
+    [
+      "The thermostat opening temperature is 82 deg C.",
+      "Engine oil temperature warning threshold: 82 deg C",
+    ],
+    [
+      "The engine coolant temperature sensor resistance is 5 k ohms.",
+      "Intake air temperature sensor resistance: 5 k ohms",
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
+  }
+});
+
+test("the electrical, speed, and temperature guards still accept a matching subject", () => {
+  // Fail-closed must not mean fail-always: the same component in claim and quote
+  // passes, exactly as it does for the four convertible families.
+  const cases = [
+    ["The battery voltage should read 12.6 volts.", "Battery voltage (engine off): 12.6 volts"],
+    [
+      "The engine coolant temperature sensor resistance is 2.4 kilohms.",
+      "Engine coolant temperature sensor resistance: 2.4 kilohms",
+    ],
+    ["The idle speed is 700 rpm.", "Idle speed: 700 rpm"],
+    ["The thermostat opening temperature is 82°C.", "Thermostat opening temperature: 82°C"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("a claim shape with no parsable subject keeps the numeric check only", () => {
+  // The guard reads a named part out of a small set of sentence shapes. When it
+  // cannot, it does not guess: the quote and numeric checks still stand alone.
+  // Volts are guarded, but "produces ... volts" names no head noun, so this
+  // passes even though the claim says alternator and the quote says charging
+  // system -- a documented limit, not an endorsement.
+  const quote = "Charging system output: 14.5 volts at idle";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The alternator produces 14.5 volts at idle.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("current in amps keeps only the numeric check, not the subject guard", () => {
+  // Ordinary current wording ("draws 150 amps", "current draw") gives the
+  // head-noun parser nothing to read, so amps were never meaningfully subject
+  // guarded. The only way one got a subject was by borrowing an unrelated noun:
+  // here "speed" would yield the subject "cooling fan current at high", which is
+  // not a part name. Claiming that as coverage would overstate the guard.
+  const quote = "Radiator fan motor draw: 15 amps";
+  const wrongPart = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The cooling fan current at high speed is 15 amps.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(wrongPart.rejected.length, 0);
+  assert.equal(wrongPart.documentSupported.length, 1);
+
+  // The pre-existing numeric detector still recognizes amps: an invented value
+  // is rejected exactly as before.
+  const inventedValue = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The radiator fan motor draw is 25 amps.",
+          sourceId: "S1",
+          evidenceQuote: quote,
+        },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(inventedValue.documentSupported.length, 0);
+  assert.equal(inventedValue.rejected[0].reason, "numeric_anomaly");
+});
+
+test("a convertible-family claim keeps its own subject when it also names a temperature", () => {
+  // The new head nouns must not steal the subject from the families that
+  // already had one: "capacity" still decides this claim, not "temperature".
+  const quote = "Engine oil capacity (with filter): 4.2 liters";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The engine oil capacity is 4.2 liters at operating temperature.",
           sourceId: "S1",
           evidenceQuote: quote,
         },

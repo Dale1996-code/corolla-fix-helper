@@ -545,6 +545,101 @@ test("SearchPage renders evidence-contract channels as distinct blocks", async (
   expect(within(askSection).queryByText("UNUSED PASSAGE")).not.toBeInTheDocument();
 });
 
+test("SearchPage states the limits of verification beside the verified claims", async () => {
+  // The verification boundary — quote presence and lexical subject agreement, not
+  // that the claim follows from its quote — was documented for developers only.
+  // The person acting on the answer is the one who needs it.
+  const baseSearchFetchMock = createEmptySearchFetchMock();
+  const fetchMock = vi.fn((url, options) => {
+    if (url === "/api/ask") {
+      return jsonResponse({
+        question: "What is the oil drain plug torque?",
+        status: "answered",
+        answer: "",
+        citations: [
+          {
+            documentId: 7,
+            documentTitle: "Oil Manual",
+            originalFilename: "oil.pdf",
+            pageNumber: 1,
+            chunkIndex: 0,
+            snippet: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+          },
+        ],
+        evidence: {
+          documentSupported: [
+            {
+              claim: "The oil drain plug torque is 37 Nm.",
+              evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+              documentId: 7,
+              documentTitle: "Oil Manual",
+              pageNumber: 1,
+              chunkIndex: 0,
+            },
+          ],
+          generalGuidance: [],
+          gaps: [],
+        },
+        retrievedContext: [],
+      });
+    }
+
+    return baseSearchFetchMock(url, options);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/search"]}>
+      <SearchPage />
+    </MemoryRouter>
+  );
+
+  const askSection = (
+    await screen.findByRole("heading", { name: "Ask a question" })
+  ).closest("section");
+
+  fireEvent.change(within(askSection).getByRole("textbox", { name: "Question" }), {
+    target: { value: "What is the oil drain plug torque?" },
+  });
+  fireEvent.click(within(askSection).getByRole("button", { name: "Ask question" }));
+
+  const supportedBlock = (
+    await within(askSection).findByRole("heading", { name: "From your documents" })
+  ).closest("section");
+
+  // What the check proves for every claim: the quote is really in the document.
+  expect(
+    within(supportedBlock).getByText(
+      /Checked automatically: the quote appears in the named document/
+    )
+  ).toBeInTheDocument();
+
+  // What it proves only sometimes. The number and part-name comparison runs on
+  // the specification shapes the parser recognizes, not on every claim, so the
+  // notice must say so rather than promise it for all of them.
+  expect(
+    within(supportedBlock).getByText(/For supported specification formats/)
+  ).toBeInTheDocument();
+  expect(
+    within(supportedBlock).getByText(/common part wording are also compared with that quote/)
+  ).toBeInTheDocument();
+  expect(
+    within(supportedBlock).queryByText(/each quote really appears/)
+  ).not.toBeInTheDocument();
+
+  // What it does not prove — the part a confident-looking answer hides.
+  expect(within(supportedBlock).getByText(/Not checked/)).toBeInTheDocument();
+  expect(
+    within(supportedBlock).getByText(
+      /whether the claim as a whole follows from its quote or whether the page applies to this car/
+    )
+  ).toBeInTheDocument();
+  expect(
+    within(supportedBlock).getByText(/Read the quote before relying on it/)
+  ).toBeInTheDocument();
+});
+
 test("SearchPage keeps distinct evidence quotes from the same source chunk", async () => {
   const baseSearchFetchMock = createEmptySearchFetchMock();
   const fetchMock = vi.fn((url, options) => {
