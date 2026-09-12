@@ -738,7 +738,25 @@ function AskEvidence({ evidence }) {
       {supported.length ? (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-slate-800">
           <h3 className="font-semibold text-emerald-900">From your documents</h3>
-          <ul className="mt-2 space-y-3">
+          {/* The verification boundary, in the one place it matters: next to a
+              claim the owner is about to act on. Deliberately says what the
+              check does NOT establish -- a green block that only advertised its
+              guarantees would read as "confirmed correct", which it is not.
+              The number and part-wording comparison is qualified on purpose: it
+              runs only on the specification shapes the parser recognizes, so
+              promising it for every claim would overstate it.
+              Kept as two flat paragraphs so neither phrase is split across
+              nested elements. */}
+          <p className="mt-2 text-xs leading-5 text-emerald-900">
+            Checked automatically: the quote appears in the named document. For supported
+            specification formats, the claim's numbers and common part wording are also
+            compared with that quote.
+          </p>
+          <p className="mt-1 text-xs leading-5 text-emerald-900">
+            Not checked: whether the claim as a whole follows from its quote or whether the page
+            applies to this car. Read the quote before relying on it.
+          </p>
+          <ul className="mt-3 space-y-3">
             {supported.map((item, index) => (
               <li key={`claim-${index}`}>
                 <p className="leading-6">{item.claim}</p>

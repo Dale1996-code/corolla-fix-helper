@@ -518,6 +518,44 @@ const SPEC_SUBJECT_NOUNS = [
   "depth",
 ];
 
+// Units that are NOT converted but are still component-scoped, added in N4.
+// Voltage, resistance, engine-speed, and temperature values were passing on a
+// numeric match alone: 13.5 V at the charging system is not 13.5 V at the
+// battery, and 700 rpm of cooling fan is not 700 rpm of idle. Conversion stays
+// out of it -- temperature has an offset, and volts and ohms have no sibling
+// unit in these manuals worth converting -- so these gate the SUBJECT only.
+//
+// Each family carries its OWN head noun rather than sharing one pooled list.
+// extractSpecSubject takes the last matching noun in the clause, so a pooled
+// list let an unrelated qualifier steal the subject: "the battery voltage at
+// operating temperature is 12.6 volts" parsed off "temperature" and produced
+// the subject "battery voltage at operating", which its own quote could not
+// match. Pairing each unit with its noun keeps the parse anchored on the
+// specification actually being checked.
+//
+// Current (amps) is absent on purpose. The numeric detector still checks it,
+// but ordinary current wording ("draws 150 amps", "current draw") gives the
+// head-noun parser no subject to read, so listing it here would claim a guard
+// that almost never runs.
+//
+// Resistance written as the bare ohm symbol is absent on purpose too:
+// extractSpecNumbers does not detect it today (the unit pattern requires a
+// trailing word boundary the symbol cannot provide), so listing it here would be
+// dead code that overstates what is covered.
+const NON_CONVERTIBLE_GUARDED_FAMILIES = [
+  { pattern: /^(volts?|millivolts?)$/i, noun: "voltage" },
+  { pattern: /^(ohms?|kilohms?|k\s*ohms?)$/i, noun: "resistance" },
+  { pattern: /^rpm$/i, noun: "speed" },
+  { pattern: /^(°\s*[cf]|deg(?:rees)?\s*[cf])$/i, noun: "temperature" },
+];
+
+function nonConvertibleSubjectNoun(unit) {
+  const cleaned = String(unit || "").trim();
+  const family = NON_CONVERTIBLE_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
+
+  return family ? family.noun : "";
+}
+
 /**
  * Extract the named part from common specification-claim shapes.
  *
@@ -526,7 +564,7 @@ const SPEC_SUBJECT_NOUNS = [
  * numeric checks still run. When a subject is parsed, however, its complete
  * normalized token sequence must occur in the evidence quote.
  */
-function extractSpecSubject(text) {
+function extractSpecSubject(text, nouns) {
   const normalized = normalizeForMatch(text);
   const imperative = normalized.match(
     /\b(?:torque|tighten|inflate|fill)\s+(?:the\s+)?([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
@@ -539,7 +577,7 @@ function extractSpecSubject(text) {
   for (const clause of normalized.split(/[.!?;,:]/)) {
     // The LAST head noun in the clause wins, matching the torque-only behavior
     // this generalizes: the nearest noun is the one the part name qualifies.
-    const nounIndex = SPEC_SUBJECT_NOUNS.reduce(
+    const nounIndex = nouns.reduce(
       (found, noun) => Math.max(found, clause.lastIndexOf(` ${noun}`)),
       -1
     );
@@ -577,27 +615,44 @@ function containsTokenSequence(haystack, needle) {
 }
 
 /**
- * Deterministic subject guard for convertible specifications.
+ * Deterministic subject guard for component-scoped specifications.
  *
  * A matching number is not enough: "oil filter cap, 37 Nm" must not be
  * certified by a quote about an "oil drain plug, 37 Nm", and "engine oil
  * capacity, 4.2 liters" must not be certified by a coolant capacity that
- * happens to print the same figure. Every unit family we convert is gated, not
- * torque alone; units outside those families (volts, ohms, rpm, temperature)
- * keep the numeric check only. This lexical check is deliberately fail-closed
- * for recognized claim shapes. It is not a general semantic-entailment engine,
- * which is documented as a remaining limit.
+ * happens to print the same figure. Two sets of units are gated: the four
+ * families we convert, and the non-convertible families added in N4 (volts,
+ * ohms, rpm, temperature), which were reaching the owner on a numeric match
+ * alone. The convertible set keeps its own pooled nouns; each non-convertible
+ * family contributes only its own noun, so a qualifier naming another family
+ * cannot steal the subject from the specification being checked.
+ *
+ * This lexical check is deliberately fail-closed for recognized claim shapes.
+ * It is not a general semantic-entailment engine, which is documented as a
+ * remaining limit.
  */
 export function checkClaimSubject(claimText, evidenceText) {
-  const hasConvertibleSpec = extractSpecNumbers(claimText).some(
+  const specs = extractSpecNumbers(claimText);
+  const hasConvertibleSpec = specs.some(
     (spec) => spec.unit !== "viscosity" && Boolean(canonicalize(spec.value, spec.unit))
   );
+  // Only the nouns of the families actually detected are offered to the parser.
+  // Passing all four would let "at operating temperature" outrank the voltage
+  // this claim is really about, because the last noun in the clause wins.
+  const nonConvertibleNouns = [
+    ...new Set(specs.map((spec) => nonConvertibleSubjectNoun(spec.unit)).filter(Boolean)),
+  ];
 
-  if (!hasConvertibleSpec) {
+  if (!hasConvertibleSpec && !nonConvertibleNouns.length) {
     return { grounded: true, checked: false, subject: "" };
   }
 
-  const subject = extractSpecSubject(claimText);
+  // A claim carrying a convertible spec keeps the original noun list, so its
+  // parse is byte-identical to the behavior shipped in PR #122.
+  const subject = extractSpecSubject(
+    claimText,
+    hasConvertibleSpec ? SPEC_SUBJECT_NOUNS : nonConvertibleNouns
+  );
 
   if (!subject.length) {
     return { grounded: true, checked: false, subject: "" };

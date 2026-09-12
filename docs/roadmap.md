@@ -41,7 +41,12 @@ state a plan imagined.
 - Ask AI's rejection paths are now observable (`ASK_DEBUG_METRICS`), have deterministic eval
   probes, and share a machine-readable response schema (`askResponseContract.js`).
 - The subject guard is no longer torque-only: torque, capacity, pressure, clearance, and
-  thickness are all checked so a matching number cannot certify the wrong component.
+  thickness are checked (PR #122), and the first N4 expansion adds voltage, resistance,
+  engine speed, and temperature. For the claim shapes the parser recognizes, a matching
+  number cannot certify a component the quote does not name — which is narrower than
+  proving the number belongs to that component when one quote names several parts.
+  Unparsed claim shapes, compound claims, and the Repair Planner are outside even that
+  (see below).
 - Backups snapshot a live database correctly, restore validates and rolls back, and a drill
   proves the round trip.
 - CI runs lint, typecheck, both test suites, the production build, and a smoke test.
@@ -71,9 +76,21 @@ state a plan imagined.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
-- **Electrical and rpm/temperature specifications have no subject guard.** Volts, ohms,
-  rpm, and temperature keep the numeric check only, so a matching number can still attach
-  to the wrong component for those families.
+- **Unit symbols are invisible to the specification detector.** A voltage written as a
+  bare `V` or `mV`, and a resistance written as `Ω` or `kΩ`, are not matched by the unit
+  pattern at all, so neither the numeric check nor the subject guard sees them. Spelled-out
+  volts, millivolts, ohms, kilohms, rpm, and degrees are covered. Deciding this is one of
+  the two things left in N4.
+- **Compound claims get one subject.** The subject guard derives a single part name per
+  claim, so a claim stating two specifications — "the drain plug torque is 37 Nm and the
+  battery voltage is 12.6 volts" — has only one component compared with its quote; the
+  other rides through on the numeric check alone. This predates N4 (PR #122's guard behaves
+  identically) and was surfaced by the N4 review. The evidence contract asks the model for
+  atomic claims, but nothing enforces it. Deciding this is the other thing left in N4.
+- **The Repair Planner has no subject guard.** Its evidence contract shares only the quote
+  check, the numeric check, and gap redaction with Ask, so a planner task can cite a real
+  number that belongs to a different component. This is a separate limitation; no roadmap
+  item currently covers it.
 - **Two dormant feature flags are carrying maintenance cost.** The reranker
   (`RERANK_ENABLED`) has never been measured on the real manuals with a key. The legacy
   non-evidence Ask path (`ASK_EVIDENCE_CONTRACT=false`) is the only route by which model
@@ -113,7 +130,7 @@ this alone.
 | N2 | Repair the eval suite's own defects | **Done** | Reduces |
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
-| N4 | Close the two named evidence gaps | High | Slight increase |
+| N4 | Close the two named evidence gaps | High — in progress | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | High | Slight increase |
@@ -274,7 +291,7 @@ organizational state and deliberately does not record a repair.
 cost tracking, maintenance reminders, service intervals, dashboard history widgets, and a
 vehicle-level current odometer.
 
-**N4 — Close the two named evidence gaps.**
+**N4 — Close the two named evidence gaps. In progress.**
 *Problem it solves:* electrical and rpm/temperature specifications (volts, ohms, rpm,
 degrees) still pass on a numeric match alone, with no check that the number belongs to the
 component being asked about. Extend the existing subject machinery to those families the
@@ -285,6 +302,26 @@ reading an answer. Make that boundary legible in the UI rather than only in the 
 *What this is not:* an attempt to make verification into semantic entailment. Adding a
 model to judge whether a claim follows from its quote would replace a deterministic
 guarantee with a probabilistic one. Do not.
+*First subject-guard expansion (this slice):* volts and millivolts, ohms, kilohms and the
+spaced `k ohms`, rpm, and degrees C/F now gate the subject as well as the number, using
+their own head nouns. Each family carries only its OWN noun — volts and millivolts take
+“voltage”, ohms take “resistance”, rpm takes “speed”, degrees take “temperature” — instead
+of sharing one pooled list. The subject parser takes the last matching noun in a clause, so
+a pooled list made “the battery voltage at operating temperature is 12.6 volts” parse off
+“temperature” and rejected it against its own quote; the PR #136 review caught that and it
+is fixed here. The convertible families keep their existing pooled nouns untouched, so “the
+engine oil capacity is 4.2 liters at operating temperature” still parses off “capacity”.
+Current in amps is deliberately
+left out: the numeric detector still checks it, but ordinary current wording (“draws 150
+amps”) gives the parser no subject, so listing it would claim a guard that almost never
+runs. The Ask answer now states, beside the verified claims themselves, what is checked
+for every claim, what is compared only for supported specification formats, and what is
+not checked. No migration, no model, prompt, retrieval, or embedding change.
+*Remaining before N4 is done:* two decisions, each needing its own reviewed change — the
+unit symbols the detector does not see (bare `V`, `mV`, `Ω`, `kΩ`), and compound claims,
+where one subject is derived per claim. Both are described in the known limitations above.
+*What it still does not cover:* claim shapes with no parsable head noun keep the numeric
+check alone, as before.
 
 **N5 — Applicability: say which variant a specification belongs to.**
 *Problem it solves:* a measured, real defect on this exact corpus. One uploaded factory
