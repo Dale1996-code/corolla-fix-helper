@@ -599,6 +599,52 @@ test("a convertible-family claim keeps its own subject when it also names a temp
   assert.equal(result.documentSupported.length, 1);
 });
 
+test("a qualifier naming another guarded family no longer steals the subject", () => {
+  // Regression: the four non-convertible head nouns were passed as one list, and
+  // extractSpecSubject takes the LAST noun in the clause. So "at operating
+  // temperature" hijacked a voltage claim, which then failed to match its own
+  // quote and was rejected as subject_mismatch. Each detected unit family must
+  // contribute only its own noun.
+  const cases = [
+    ["The battery voltage at operating temperature is 12.6 volts.", "Battery voltage: 12.6 volts"],
+    ["The circuit resistance at operating temperature is 5 ohms.", "Circuit resistance: 5 ohms"],
+    ["The idle speed at operating temperature is 700 rpm.", "Idle speed: 700 rpm"],
+    ["The coolant temperature at idle speed is 82 degrees C.", "Coolant temperature: 82 degrees C"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the qualifier shape still rejects a genuinely wrong component", () => {
+  // Narrowing the noun list must not turn the guard fail-open: the same sentence
+  // shape still has to catch a claim naming a part its quote does not name.
+  const cases = [
+    [
+      "The battery voltage at operating temperature is 13.5 volts.",
+      "Charging system output: 13.5 volts at idle",
+    ],
+    ["The idle speed at operating temperature is 700 rpm.", "Maximum cooling fan speed: 700 rpm"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
+  }
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.

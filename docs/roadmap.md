@@ -304,10 +304,14 @@ model to judge whether a claim follows from its quote would replace a determinis
 guarantee with a probabilistic one. Do not.
 *First subject-guard expansion (this slice):* volts and millivolts, ohms, kilohms and the
 spaced `k ohms`, rpm, and degrees C/F now gate the subject as well as the number, using
-their own head nouns (voltage, resistance, speed, temperature) held in a list SEPARATE from
-the convertible families’. Sharing one list would have let a new noun steal the subject
-from a family that already had one, so a claim like “the engine oil capacity is 4.2 liters
-at operating temperature” keeps parsing off “capacity”. Current in amps is deliberately
+their own head nouns. Each family carries only its OWN noun — volts and millivolts take
+“voltage”, ohms take “resistance”, rpm takes “speed”, degrees take “temperature” — instead
+of sharing one pooled list. The subject parser takes the last matching noun in a clause, so
+a pooled list made “the battery voltage at operating temperature is 12.6 volts” parse off
+“temperature” and rejected it against its own quote; the PR #136 review caught that and it
+is fixed here. The convertible families keep their existing pooled nouns untouched, so “the
+engine oil capacity is 4.2 liters at operating temperature” still parses off “capacity”.
+Current in amps is deliberately
 left out: the numeric detector still checks it, but ordinary current wording (“draws 150
 amps”) gives the parser no subject, so listing it would claim a guard that almost never
 runs. The Ask answer now states, beside the verified claims themselves, what is checked
