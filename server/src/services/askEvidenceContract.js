@@ -290,6 +290,54 @@ const SPEC_NUMBER_REGEX = new RegExp(
   "gi"
 );
 
+// Electrical symbols, matched CASE-SENSITIVELY and apart from UNIT_PATTERN. That
+// pattern's "i" flag suits spelled-out units, but it would read every lowercase
+// "v" after a number as volts and make "MV" (megavolts) look like "mV"
+// (millivolts). The trailing lookahead stands in for a word boundary, which can
+// never follow "Ω" because Ω is not a word character -- the reason UNIT_PATTERN's
+// own "Ω" alternative only ever matches when a letter, digit, or underscore
+// follows -- exactly what this lookahead refuses -- so the two patterns never
+// claim the same text. The lookahead also keeps "2 V-belts" and
+// "2 VVT sensors" from reading as voltages. The optional whitespace covers a
+// normal space, a nonbreaking space, or none, and the ohm symbol arrives as
+// either U+03A9 (Greek capital omega) or U+2126 (the ohm sign), which look
+// identical on the page.
+const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
+const ELECTRICAL_SYMBOL_REGEX = new RegExp(
+  String.raw`(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+  "g"
+);
+
+// The electrical units known in both printed forms. `symbol` is compared
+// case-sensitively for the reason above; `spelled` keeps exactly the
+// case-insensitive spellings the subject guard already recognized.
+const ELECTRICAL_UNITS = [
+  { name: "millivolt", noun: "voltage", symbol: /^mV$/, spelled: /^millivolts?$/i },
+  { name: "volt", noun: "voltage", symbol: /^V$/, spelled: /^volts?$/i },
+  {
+    name: "kilohm",
+    noun: "resistance",
+    symbol: new RegExp(String.raw`^k\s*[${OHM_SYMBOLS}]$`),
+    spelled: /^(kilohms?|k\s*ohms?)$/i,
+  },
+  {
+    name: "ohm",
+    noun: "resistance",
+    symbol: new RegExp(`^[${OHM_SYMBOLS}]$`),
+    spelled: /^ohms?$/i,
+  },
+];
+
+/** The electrical unit a detected unit string names, spelled out or as a symbol. */
+function findElectricalUnit(unit) {
+  const cleaned = String(unit || "").trim();
+  const found = ELECTRICAL_UNITS.find(
+    ({ symbol, spelled }) => symbol.test(cleaned) || spelled.test(cleaned)
+  );
+
+  return found || null;
+}
+
 /** Viscosity grades: 5W-30, 0W20. A grade is a spec even without a unit. */
 const VISCOSITY_REGEX = /\b\d+\s*w\s*[-–]?\s*\d+\b/gi;
 
@@ -308,6 +356,14 @@ export function extractSpecNumbers(text) {
 
     if (Number.isFinite(value)) {
       found.push({ value, raw: match[0].trim(), unit: match[0].replace(match[1], "").trim() });
+    }
+  }
+
+  for (const match of source.matchAll(ELECTRICAL_SYMBOL_REGEX)) {
+    const value = Number(String(match[1]).replace(",", "."));
+
+    if (Number.isFinite(value)) {
+      found.push({ value, raw: match[0].trim(), unit: match[2] });
     }
   }
 
@@ -392,6 +448,33 @@ function withinTolerance(left, right) {
   return Math.abs(left - right) <= Math.max(0.51, Math.abs(right) * 0.02);
 }
 
+/** Is this detected unit string one of the case-sensitive electrical symbols? */
+function isElectricalSymbol(unit) {
+  const cleaned = String(unit || "").trim();
+
+  return ELECTRICAL_UNITS.some(({ symbol }) => symbol.test(cleaned));
+}
+
+/**
+ * Do two units that are never converted name the same unit?
+ *
+ * Spelled-out units compare exactly as they always have. A symbol is compared by
+ * the unit it stands for, so a quote printing "12.6 V" still supports a claim
+ * saying "12.6 volts", and the reverse -- without this, detecting symbols would
+ * have started rejecting claims that were passing. Nothing here converts: mV and
+ * V stay different units, as do kΩ and Ω.
+ */
+function sameLiteralUnit(left, right) {
+  if (isElectricalSymbol(left) || isElectricalSymbol(right)) {
+    const leftUnit = findElectricalUnit(left);
+    const rightUnit = findElectricalUnit(right);
+
+    return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
+  }
+
+  return normalizeForMatch(left) === normalizeForMatch(right);
+}
+
 /**
  * Is the claimed spec present in the evidence -- literally, or as a conversion
  * within the same unit family?
@@ -421,7 +504,7 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
     if (
       !claimCanonical &&
       !evidenceCanonical &&
-      normalizeForMatch(evidenceSpec.unit) === normalizeForMatch(spec.unit) &&
+      sameLiteralUnit(evidenceSpec.unit, spec.unit) &&
       withinTolerance(evidenceSpec.value, spec.value)
     ) {
       return true;
@@ -538,18 +621,21 @@ const SPEC_SUBJECT_NOUNS = [
 // head-noun parser no subject to read, so listing it here would claim a guard
 // that almost never runs.
 //
-// Resistance written as the bare ohm symbol is absent on purpose too:
-// extractSpecNumbers does not detect it today (the unit pattern requires a
-// trailing word boundary the symbol cannot provide), so listing it here would be
-// dead code that overstates what is covered.
+// Voltage and resistance take their noun from ELECTRICAL_UNITS, which knows each
+// unit both spelled out and as a symbol, so "12.6 V" gates the subject exactly
+// as "12.6 volts" does, and "2.4 kΩ" exactly as "2.4 kilohms".
 const NON_CONVERTIBLE_GUARDED_FAMILIES = [
-  { pattern: /^(volts?|millivolts?)$/i, noun: "voltage" },
-  { pattern: /^(ohms?|kilohms?|k\s*ohms?)$/i, noun: "resistance" },
   { pattern: /^rpm$/i, noun: "speed" },
   { pattern: /^(°\s*[cf]|deg(?:rees)?\s*[cf])$/i, noun: "temperature" },
 ];
 
 function nonConvertibleSubjectNoun(unit) {
+  const electrical = findElectricalUnit(unit);
+
+  if (electrical) {
+    return electrical.noun;
+  }
+
   const cleaned = String(unit || "").trim();
   const family = NON_CONVERTIBLE_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
 
@@ -693,6 +779,7 @@ function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote })
 export function redactSpecNumbers(text) {
   return String(text || "")
     .replace(SPEC_NUMBER_REGEX, "[unverified value]")
+    .replace(ELECTRICAL_SYMBOL_REGEX, "[unverified value]")
     .replace(VISCOSITY_REGEX, "[unverified value]");
 }
 

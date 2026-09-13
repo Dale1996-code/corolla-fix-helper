@@ -76,17 +76,27 @@ state a plan imagined.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
-- **Unit symbols are invisible to the specification detector.** A voltage written as a
-  bare `V` or `mV`, and a resistance written as `Ω` or `kΩ`, are not matched by the unit
-  pattern at all, so neither the numeric check nor the subject guard sees them. Spelled-out
-  volts, millivolts, ohms, kilohms, rpm, and degrees are covered. Deciding this is one of
-  the two things left in N4.
+- **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
+  `Ω`, and `kΩ` are detected (N4's second slice), but case-sensitively: a lowercase `v` is
+  not read as volts, and other symbols such as `kV` or `mΩ` are not detected at all, so a
+  value written that way still gets neither the numeric check nor the subject guard. In the
+  other direction, `mV` and `V`, and `kΩ` and `Ω`, are never converted into each other, so
+  a claim restating its quote in the other unit is rejected rather than accepted.
 - **Compound claims get one subject.** The subject guard derives a single part name per
   claim, so a claim stating two specifications — "the drain plug torque is 37 Nm and the
   battery voltage is 12.6 volts" — has only one component compared with its quote; the
   other rides through on the numeric check alone. This predates N4 (PR #122's guard behaves
   identically) and was surfaced by the N4 review. The evidence contract asks the model for
-  atomic claims, but nothing enforces it. Deciding this is the other thing left in N4.
+  atomic claims, but nothing enforces it. Deciding this is one of the two things left in N4.
+- **The numeric comparison is too permissive for some small electrical values.** A claimed
+  value matches a quoted one within `max(0.51 absolute, 2% relative)`. That suits torque
+  and capacity figures, but not small electrical ones: `0.9 V` can match `0.5 V`, and `12 Ω`
+  can match `12.5 Ω`. This predates the symbol slice and affects spelled-out volts and ohms
+  as well; it was surfaced by that slice's review. Deciding this is the other thing left in
+  N4.
+- **Two numeric-parser limits are known and unchanged.** A leading sign is not part of the
+  extracted number, so `-5 V` is compared as `5 V`. In a range such as `5 to 14 V`, only the
+  number directly carrying the unit (`14`) is checked; the other end is not.
 - **The Repair Planner has no subject guard.** Its evidence contract shares only the quote
   check, the numeric check, and gap redaction with Ask, so a planner task can cite a real
   number that belongs to a different component. This is a separate limitation; no roadmap
@@ -302,7 +312,7 @@ reading an answer. Make that boundary legible in the UI rather than only in the 
 *What this is not:* an attempt to make verification into semantic entailment. Adding a
 model to judge whether a claim follows from its quote would replace a deterministic
 guarantee with a probabilistic one. Do not.
-*First subject-guard expansion (this slice):* volts and millivolts, ohms, kilohms and the
+*First subject-guard expansion (PR #136):* volts and millivolts, ohms, kilohms and the
 spaced `k ohms`, rpm, and degrees C/F now gate the subject as well as the number, using
 their own head nouns. Each family carries only its OWN noun — volts and millivolts take
 “voltage”, ohms take “resistance”, rpm takes “speed”, degrees take “temperature” — instead
@@ -317,9 +327,25 @@ amps”) gives the parser no subject, so listing it would claim a guard that alm
 runs. The Ask answer now states, beside the verified claims themselves, what is checked
 for every claim, what is compared only for supported specification formats, and what is
 not checked. No migration, no model, prompt, retrieval, or embedding change.
-*Remaining before N4 is done:* two decisions, each needing its own reviewed change — the
-unit symbols the detector does not see (bare `V`, `mV`, `Ω`, `kΩ`), and compound claims,
-where one subject is derived per claim. Both are described in the known limitations above.
+*Second slice — electrical symbols:* `V`, `mV`, `Ω`, and `kΩ` are now detected, so a value
+written as a symbol gets the numeric check and the subject guard exactly as its spelled-out
+form does: `V` and `mV` take “voltage”, `Ω` and `kΩ` take “resistance”. Symbols are matched
+case-sensitively — `V` is volts and `mV` millivolts, while a lowercase `v` is ordinary text
+and `MV` is not millivolts — and a trailing guard keeps “2 V-belts” from reading as a
+voltage. A normal space, a nonbreaking space, or no space may separate a value from its
+symbol, `k Ω` may be spaced, and the ohm symbol is accepted as either code point it can be
+encoded as (U+03A9 and U+2126). A symbol and its spelled-out unit support each other, so a
+quote printing “12.6 V” still backs a claim saying “12.6 volts”; spelled-out units still
+compare with one another exactly as before. Nothing converts between `mV` and `V` or
+between `kΩ` and `Ω`. The ASCII spellings `ohm`, `kohm`, and `kOhm` were already detected
+and are unchanged. Because the detector is shared, the Repair Planner's numeric check and
+gap redaction see these symbols too; planner subject guarding is still not covered.
+*Remaining before N4 is done:* two decisions, each needing its own reviewed change —
+(1) unit-sensitive numeric tolerance: the shared `max(0.51 absolute, 2% relative)`
+comparison lets `0.9 V` match `0.5 V` and `12 Ω` match `12.5 Ω`, which predates the symbol
+slice and affects spelled-out electrical units too; and (2) compound, multi-specification
+claims, where one subject is derived per claim. Both are described in the known
+limitations above.
 *What it still does not cover:* claim shapes with no parsable head noun keep the numeric
 check alone, as before.
 
