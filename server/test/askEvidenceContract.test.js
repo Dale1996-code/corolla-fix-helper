@@ -708,6 +708,70 @@ test("lowercase v, megavolts, and words starting with V are not read as a voltag
   }
 });
 
+test("a symbol value inside an identifier is not read as a specification", () => {
+  // A connector or code name ending in digits and "V" is not a voltage, and a
+  // decimal inside one must not restart as a partial value ("M1.5V" -> "5V"). A
+  // value standing on its own, or wrapped in punctuation, still is.
+  for (const [text, value, unit] of [
+    ["Battery reads 12V.", 12, "V"],
+    [`Resistance is 2${OMEGA}.`, 2, OMEGA],
+    ["Battery reads (12V) at rest.", 12, "V"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  for (const text of [
+    "Connector M12V is behind the dash.",
+    "Code P012V is stored.",
+    "Model M1.5V label.",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+
+  const result = verifySingleClaim(
+    "Unplug connector M12V before testing.",
+    "Unplug the connector before testing."
+  );
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("a hyphen before a symbol value keeps ranges and signed values checked", () => {
+  // The identifier boundary deliberately does not refuse a preceding hyphen.
+  // Hiding "16V" in "9-16V" or "9 V" in "-9 V" would leave nothing to check and
+  // let a fabricated value pass. Only the unit-bearing endpoint is read, and the
+  // sign is not kept -- both documented limits. "B-12V" still reads as "12 V"
+  // for the same reason: an extra rejection, never a false verification.
+  for (const [text, raw] of [
+    ["Charging voltage: 9-16V.", "16V"],
+    ["Charging voltage: 13.2-16.8V.", "16.8V"],
+    ["Reference is -9 V.", "9 V"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.raw),
+      [raw],
+      text
+    );
+  }
+
+  for (const [claim, quote, unsupported] of [
+    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", "16V"],
+    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", "16.8V"],
+    ["Reference should be -9 V.", "Reference: -5 V", "9 V"],
+  ]) {
+    assert.deepEqual(
+      checkClaimNumbers(claim, quote),
+      { grounded: false, unsupported: [unsupported] },
+      claim
+    );
+  }
+});
+
 test("a matching electrical-symbol claim is verified, not merely invisible", () => {
   // These claims were also accepted before symbols were detected -- but only
   // because the verifier saw no specification to check. `checked` proves the

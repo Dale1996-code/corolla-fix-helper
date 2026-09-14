@@ -298,13 +298,20 @@ const SPEC_NUMBER_REGEX = new RegExp(
 // own "Ω" alternative only ever matches when a letter, digit, or underscore
 // follows -- exactly what this lookahead refuses -- so the two patterns never
 // claim the same text. The lookahead also keeps "2 V-belts" and
-// "2 VVT sensors" from reading as voltages. The optional whitespace covers a
+// "2 VVT sensors" from reading as voltages. The leading lookbehind refuses a
+// value preceded by a letter, digit, or underscore, so an identifier such as
+// "M12V" or "P012V" is not read as "12 V"; it also refuses to restart just after
+// a decimal separator, so "M1.5V" does not yield a partial "5V". A preceding
+// hyphen is deliberately NOT refused: in "9-16V" or "-9 V" it separates a range
+// or signs a value, and hiding that value would let a wrong claim pass with
+// nothing to check. The cost is that "B-12V" still reads as "12 V" -- an extra
+// rejection, never a false verification. The optional whitespace covers a
 // normal space, a nonbreaking space, or none, and the ohm symbol arrives as
 // either U+03A9 (Greek capital omega) or U+2126 (the ohm sign), which look
 // identical on the page.
 const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
 const ELECTRICAL_SYMBOL_REGEX = new RegExp(
-  String.raw`(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
   "g"
 );
 
