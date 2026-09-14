@@ -6,6 +6,7 @@ import {
   ASK_REJECTION_CHANNELS,
   ASK_REJECTION_REASONS,
   checkClaimNumbers,
+  checkClaimSubject,
   deriveEvidenceStatus,
   extractSpecNumbers,
   quoteAppearsInChunk,
@@ -643,6 +644,272 @@ test("the qualifier shape still rejects a genuinely wrong component", () => {
     assert.equal(result.documentSupported.length, 0, claim);
     assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
   }
+});
+
+// ---- N4: electrical unit symbols ----
+//
+// Manuals print electrical specifications as symbols more often than as words:
+// "11 to 14 V", "500 mV", "12 Ω", "2.4 kΩ". Until symbols were detected, an
+// invented value or a wrong component written that way passed as if the claim
+// held no specification at all.
+
+// Built from code points: the two ohm characters are indistinguishable on screen.
+const OMEGA = String.fromCharCode(0x03a9); // Greek capital omega, the usual ohm symbol
+const OHM_SIGN = String.fromCharCode(0x2126); // the dedicated ohm sign, a different code point
+const NBSP = String.fromCharCode(0x00a0); // nonbreaking space
+
+const verifySingleClaim = (claim, quote) =>
+  verifyEvidence(payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }), [
+    chunk({ chunkText: quote }),
+  ]);
+
+test("V, mV, Ω, and kΩ are detected in the spacing forms extracted PDF text uses", () => {
+  // A normal space, a nonbreaking space, or no space at all can sit between a
+  // value and its symbol, and the ohm symbol arrives as either code point.
+  const cases = [
+    ["12.6 V", 12.6, "V"],
+    ["12.6V", 12.6, "V"],
+    [`12.6${NBSP}V`, 12.6, "V"],
+    ["500 mV", 500, "mV"],
+    ["500mV", 500, "mV"],
+    [`12 ${OMEGA}`, 12, OMEGA],
+    [`12${OMEGA}`, 12, OMEGA],
+    [`12 ${OHM_SIGN}`, 12, OHM_SIGN],
+    [`2.4 k${OMEGA}`, 2.4, `k${OMEGA}`],
+    [`2.4k${OMEGA}`, 2.4, `k${OMEGA}`],
+    [`2.4 k ${OMEGA}`, 2.4, `k ${OMEGA}`],
+  ];
+
+  for (const [text, value, unit] of cases) {
+    const specs = extractSpecNumbers(`Standard: ${text}.`);
+
+    assert.deepEqual(
+      specs.map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+});
+
+test("lowercase v, megavolts, and words starting with V are not read as a voltage", () => {
+  // Symbols are matched case-sensitively on purpose. Reading every lowercase "v"
+  // after a number as volts would gate ordinary prose, and "MV" is megavolts,
+  // not millivolts. A bare lowercase "12 v" is deliberately not read as volts
+  // either: that is a documented limit, not an oversight.
+  for (const text of [
+    "Connect the 2 vacuum hoses.",
+    "Compare 2 vs 3 bolts.",
+    "Check for 12 v at the fuse.",
+    "The meter showed 500 MV.",
+    "Replace the 2 V-belts.",
+    "Inspect the 2 VVT sensors.",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+});
+
+test("a symbol value inside an identifier is not read as a specification", () => {
+  // A connector or code name ending in digits and "V" is not a voltage, and a
+  // decimal inside one must not restart as a partial value ("M1.5V" -> "5V"). A
+  // value standing on its own, or wrapped in punctuation, still is.
+  for (const [text, value, unit] of [
+    ["Battery reads 12V.", 12, "V"],
+    [`Resistance is 2${OMEGA}.`, 2, OMEGA],
+    ["Battery reads (12V) at rest.", 12, "V"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  for (const text of [
+    "Connector M12V is behind the dash.",
+    "Code P012V is stored.",
+    "Model M1.5V label.",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+
+  const result = verifySingleClaim(
+    "Unplug connector M12V before testing.",
+    "Unplug the connector before testing."
+  );
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("a hyphen before a symbol value keeps ranges and signed values checked", () => {
+  // The identifier boundary deliberately does not refuse a preceding hyphen.
+  // Hiding "16V" in "9-16V" or "9 V" in "-9 V" would leave nothing to check and
+  // let a fabricated value pass. Only the unit-bearing endpoint is read, and the
+  // sign is not kept -- both documented limits. "B-12V" still reads as "12 V"
+  // for the same reason: an extra rejection, never a false verification.
+  for (const [text, raw] of [
+    ["Charging voltage: 9-16V.", "16V"],
+    ["Charging voltage: 13.2-16.8V.", "16.8V"],
+    ["Reference is -9 V.", "9 V"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.raw),
+      [raw],
+      text
+    );
+  }
+
+  for (const [claim, quote, unsupported] of [
+    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", "16V"],
+    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", "16.8V"],
+    ["Reference should be -9 V.", "Reference: -5 V", "9 V"],
+  ]) {
+    assert.deepEqual(
+      checkClaimNumbers(claim, quote),
+      { grounded: false, unsupported: [unsupported] },
+      claim
+    );
+  }
+});
+
+test("a matching electrical-symbol claim is verified, not merely invisible", () => {
+  // These claims were also accepted before symbols were detected -- but only
+  // because the verifier saw no specification to check. `checked` proves the
+  // subject guard actually ran and passed.
+  const cases = [
+    ["The battery voltage is 12.6 V.", "Battery voltage (engine off): 12.6 V"],
+    ["The battery voltage is 12.6V.", `Battery voltage (engine off): 12.6${NBSP}V`],
+    ["The heated oxygen sensor voltage is 500 mV.", "Heated oxygen sensor voltage: 500 mV"],
+    [`The fuel injector resistance is 12 ${OMEGA}.`, `Fuel injector resistance: 12 ${OMEGA}`],
+    [`The fuel injector resistance is 12 ${OMEGA}.`, `Fuel injector resistance: 12 ${OHM_SIGN}`],
+    [
+      `The engine coolant temperature sensor resistance is 2 k${OMEGA}.`,
+      `Engine coolant temperature sensor resistance: 2 k${OMEGA}`,
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+    assert.equal(checkClaimSubject(claim, quote).checked, true, claim);
+  }
+});
+
+test("a qualifier naming another guarded family does not steal a symbol claim's subject", () => {
+  // PR #136's regression, re-proven through the symbol path: "V" contributes only
+  // "voltage", so "at operating temperature" cannot hijack the parse and reject
+  // the claim against its own quote.
+  const claim = "The battery voltage at operating temperature is 12.6 V.";
+  const quote = "Battery voltage: 12.6 V";
+  const result = verifySingleClaim(claim, quote);
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+  assert.deepEqual(checkClaimSubject(claim, quote), {
+    grounded: true,
+    checked: true,
+    subject: "battery",
+  });
+});
+
+test("an invented electrical-symbol value is rejected and not reprinted", () => {
+  const cases = [
+    ["The battery voltage is 14.2 V.", "Battery voltage (engine off): 12.6 V", /14\.2/],
+    [`The fuel injector resistance is 16 ${OMEGA}.`, `Fuel injector resistance: 12 ${OMEGA}`, /16/],
+  ];
+
+  for (const [claim, quote, invented] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "numeric_anomaly", claim);
+    assert.doesNotMatch(result.gaps.join(" "), invented, claim);
+  }
+});
+
+test("an electrical-symbol claim citing a different component is rejected", () => {
+  const cases = [
+    ["The battery voltage is 13.5 V.", "Charging system output: 13.5 V at idle"],
+    [`The fuel injector resistance is 12 ${OMEGA}.`, `Ignition coil primary resistance: 12 ${OMEGA}`],
+    [
+      `The engine coolant temperature sensor resistance is 2.4 k${OMEGA}.`,
+      `Intake air temperature sensor resistance: 2.4 k${OMEGA}`,
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
+  }
+});
+
+test("mV is not V, and kΩ is not Ω", () => {
+  // Each pair differs by a factor of a thousand and neither is converted into
+  // the other, so a claim naming the wrong symbol cannot borrow the figure.
+  const cases = [
+    ["The heated oxygen sensor voltage is 500 V.", "Heated oxygen sensor voltage: 500 mV"],
+    [
+      `The engine coolant temperature sensor resistance is 2 ${OMEGA}.`,
+      `Engine coolant temperature sensor resistance: 2 k${OMEGA}`,
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "numeric_anomaly", claim);
+  }
+});
+
+test("a spelled-out unit and its symbol still verify against each other", () => {
+  // Detecting a symbol in the QUOTE must not break claims that were passing: a
+  // quote printing "12.6 V" still supports "12.6 volts", and the reverse.
+  const cases = [
+    ["The battery voltage is 12.6 volts.", "Battery voltage (engine off): 12.6 V"],
+    ["The battery voltage is 12.6 V.", "Battery voltage (engine off): 12.6 volts"],
+    ["The heated oxygen sensor voltage is 500 millivolts.", "Heated oxygen sensor voltage: 500 mV"],
+    ["The fuel injector resistance is 12 ohms.", `Fuel injector resistance: 12 ${OMEGA}`],
+    [
+      "The engine coolant temperature sensor resistance is 2.4 kilohms.",
+      `Engine coolant temperature sensor resistance: 2.4 k${OMEGA}`,
+    ],
+    [
+      `The engine coolant temperature sensor resistance is 2.4 k${OMEGA}.`,
+      "Engine coolant temperature sensor resistance: 2.4 kOhm",
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the ASCII ohm spellings were already covered and still are", () => {
+  // "ohm", "kohm", and "kOhm" already matched the case-insensitive unit pattern
+  // before symbols were added. This pins that; it does not extend it.
+  for (const [text, value] of [
+    ["5 ohm", 5],
+    ["2.4 kohm", 2.4],
+    ["2.4 kOhm", 2.4],
+  ]) {
+    assert.equal(extractSpecNumbers(text)[0]?.value, value, text);
+  }
+
+  const result = verifySingleClaim(
+    "The engine coolant temperature sensor resistance is 2.4 kOhm.",
+    "Intake air temperature sensor resistance: 2.4 kOhm"
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {

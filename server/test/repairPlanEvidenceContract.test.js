@@ -370,3 +370,27 @@ test("verifyClaims reports why each rejection happened", () => {
   assert.equal(rejected.length, 1);
   assert.equal(rejected[0].reason, "quote_not_in_source");
 });
+
+test("a rejected statement's electrical-symbol value is redacted, not reprinted", () => {
+  // The planner shares Ask's redaction, so a value written as a symbol ("14.2 V")
+  // is hidden from the owner exactly as "54 Nm" is above. This pins that shared
+  // redaction only: the planner still has no subject guard.
+  const batteryText = "Charging check: the battery should read 12.6 V with the engine off.";
+  const result = build(
+    [
+      claim({
+        claim: "the battery should read 14.2 V",
+        sourceId: "S1",
+        evidenceQuote: "the battery should read 12.6 V",
+      }),
+    ],
+    { sources: [makeSource("S1", batteryText)] }
+  );
+
+  assert.equal(result.verifiedClaims.length, 0);
+
+  const gapText = result.gaps.join(" ");
+  assert.match(gapText, /\[unverified value\]/);
+  assert.doesNotMatch(gapText, /14\.2/, "the rejected value must not be reprinted in the gaps");
+  assert.doesNotMatch(result.text, /14\.2/, "the rejected value must not reach the plan");
+});
