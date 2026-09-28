@@ -355,6 +355,10 @@ They are not a general semantic-entailment engine: unrecognized sentence shapes,
 non-numeric claims, pronouns, synonyms, and a long quote that mentions several
 parts can still require human judgment. The subject rule intentionally favors a
 safe rejection over guessing that two differently worded part names are equal.
+Word order is relaxed in exactly three ways, and only within one phrase of the
+quote: "X of the Y" also reads as "Y X", the table label "standard" may sit
+anywhere, and the words "system" and "installation" may be left out. Every other
+word of the part name must still be present, unbroken and in order.
 
 Setting `ASK_EVIDENCE_CONTRACT=false` is an explicit compatibility escape hatch.
 It changes a legacy successful reply to `status: "unverified"`, keeps the prose,

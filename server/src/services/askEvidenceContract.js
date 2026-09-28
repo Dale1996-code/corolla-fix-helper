@@ -615,34 +615,44 @@ const SUBJECT_IGNORED_WORDS = new Set(
  * words.
  */
 function subjectTokens(text) {
-  const tokens = [];
+  return subjectPieces(text)
+    .filter((piece) => piece.kept)
+    .map((piece) => piece.token);
+}
+
+/**
+ * Every normalized piece of the text, whether the subject keeps it, and the
+ * index of the whitespace-separated word it came from -- so the phrase readings
+ * can ask which "a" is the letter using the same decision subjectTokens makes.
+ */
+function subjectPieces(text) {
+  const pieces = [];
   // The piece before this one, if the subject kept it. A letter needs a kept
   // word in front of it: after "the", an A is read as the article, as it is at
   // the start of the text.
   let previousKept = "";
 
-  for (const word of String(text || "").split(/\s+/)) {
-    const pieces = word.split(/[-_/]+/).filter((piece) => normalizeSubjectToken(piece));
+  String(text || "")
+    .split(/\s+/)
+    .forEach((word, wordIndex) => {
+      const parts = word.split(/[-_/]+/).filter((part) => normalizeSubjectToken(part));
 
-    for (const piece of pieces) {
-      const token = normalizeSubjectToken(piece);
-      const isLetterA =
-        token === "a" &&
-        piece.includes("A") &&
-        pieces.length === 1 &&
-        previousKept !== "" &&
-        !/[.!?;:,]["')\]]*$/.test(previousKept);
-      const kept = isLetterA || !SUBJECT_IGNORED_WORDS.has(token);
+      for (const part of parts) {
+        const token = normalizeSubjectToken(part);
+        const isLetterA =
+          token === "a" &&
+          part.includes("A") &&
+          parts.length === 1 &&
+          previousKept !== "" &&
+          !/[.!?;:,]["')\]]*$/.test(previousKept);
+        const kept = isLetterA || !SUBJECT_IGNORED_WORDS.has(token);
 
-      if (kept) {
-        tokens.push(token);
+        pieces.push({ token, kept, word: wordIndex });
+        previousKept = kept ? part : "";
       }
+    });
 
-      previousKept = kept ? piece : "";
-    }
-  }
-
-  return tokens;
+  return pieces;
 }
 
 // Head nouns that make a specification component-scoped: in "<part> <noun> is
@@ -706,8 +716,8 @@ function nonConvertibleSubjectNoun(unit) {
  *
  * This is intentionally conservative. If the claim uses a shape the server
  * cannot parse, this check does not pretend to understand it; the quote and
- * numeric checks still run. When a subject is parsed, however, its complete
- * normalized token sequence must occur in the evidence quote.
+ * numeric checks still run. When a subject is parsed, however, every word of it
+ * must be found in the evidence quote -- see checkClaimSubject for exactly how.
  */
 function extractSpecSubject(text, nouns) {
   const normalized = normalizeForMatch(text);
@@ -771,6 +781,145 @@ function containsTokenSequence(haystack, needle) {
   return false;
 }
 
+// "standard" is these manuals' own table label ("Fuel injector assembly Standard
+// resistance"): it sits between the part and the specification noun in 285
+// chunks, while a claim naturally leads with it ("the standard fuel injector
+// resistance"). WHERE it sits says nothing about which part; WHETHER it is there
+// still says which specification, so it may move within the quote's phrase but
+// may never be missing -- a "standard" claim still fails against a "minimum".
+const FLOATING_SUBJECT_WORDS = new Set(["standard"]);
+
+// Words naming the enclosing system or the procedure step, never a part: the
+// "fuel system pressure" is the fuel pressure, and the "water drain cock
+// installation torque" is the water drain cock's torque. Both were rejected
+// live (Experiment D, 2026-09-27), and either side may omit them. A subject made
+// of nothing else is still compared in full by the contiguous check.
+const TRANSPARENT_SUBJECT_WORDS = new Set(["system", "installation"]);
+
+const PHRASE_DETERMINERS = new Set(["the", "a", "an"]);
+
+/**
+ * Split a quote into the phrases one part name can come from: its clauses, and
+ * within a clause the runs of words between bare numbers. Flattened spec tables
+ * carry no punctuation between rows -- the values are the only thing separating
+ * one row's label from the next -- so without the number boundaries "Front brake
+ * disc thickness 25.0 mm Rear brake pad thickness 1.0 mm" would yield a "front
+ * brake pad". A number right after "No." is a part designation, not a value.
+ */
+function quotePhrases(text) {
+  const phrases = [];
+
+  // Words keep their case (see subjectTokens: a capital A may be a letter), so
+  // every comparison against a word here is case-insensitive.
+  for (const clause of collapseForMatch(text).split(/(?<!\bno)[.!?;,:](?=\s|$)/i)) {
+    const words = clause.split(" ").filter(Boolean);
+    let phrase = [];
+
+    words.forEach((word, index) => {
+      const isValue =
+        /^[([]*\d+(?:[.,]\d+)*[)\],]*$/.test(word) && !/^no\.?$/i.test(words[index - 1] || "");
+
+      if (!isValue) {
+        phrase.push(word);
+        return;
+      }
+
+      if (phrase.length) {
+        phrases.push(phrase);
+      }
+
+      phrase = [];
+    });
+
+    if (phrase.length) {
+      phrases.push(phrase);
+    }
+  }
+
+  return phrases;
+}
+
+/**
+ * One phrase as written, plus each "A of the B" read as "B A": "the valve opening
+ * temperature of the thermostat" also reads "the thermostat valve opening
+ * temperature". B is EVERYTHING after "of" to the end of the phrase, never a
+ * prefix of it, so "of the EGR cooler bypass" cannot be cut down to "EGR" and
+ * certify an "EGR valve".
+ */
+function phraseReadings(words) {
+  const readings = [words];
+  // "the bolt A of the water pump": that A is the bolt's letter, not a
+  // determiner starting a new phrase. The same decision subjectTokens makes.
+  const letters = new Set(
+    subjectPieces(words.join(" "))
+      .filter((piece) => piece.kept && piece.token === "a")
+      .map((piece) => piece.word)
+  );
+  const isDeterminer = (index) =>
+    PHRASE_DETERMINERS.has(String(words[index]).toLowerCase()) && !letters.has(index);
+
+  words.forEach((word, ofIndex) => {
+    if (word.toLowerCase() !== "of") {
+      return;
+    }
+
+    let determiner = ofIndex - 1;
+
+    while (determiner >= 0 && !isDeterminer(determiner)) {
+      determiner -= 1;
+    }
+
+    const owned = words.slice(determiner + 1, ofIndex);
+    const owner = words.slice(ofIndex + 1);
+
+    if (isDeterminer(ofIndex + 1)) {
+      owner.shift();
+    }
+
+    if (owned.length && owner.length) {
+      readings.push([...words.slice(0, determiner + 1), ...owner, ...owned]);
+    }
+  });
+
+  return readings;
+}
+
+/**
+ * Does ONE phrase of the quote name the claim's part, once word order is
+ * allowed the three variations real manuals and claims actually differ by?
+ *
+ * The part words keep their order and must stay unbroken -- that is what
+ * rejects a "drive shaft nut" against "drive shaft bearing lock nut", or a
+ * "front brake pad" against "rear brake pad and front disc". Only three things
+ * are relaxed: "standard" may sit anywhere in the phrase (but must be there),
+ * "system" and "installation" may be absent on either side, and "A of the B"
+ * may be read as "B A". Measured before it was chosen (2026-09-27): set
+ * membership over the quote or a clause, and an ordered subsequence, each
+ * accepted wrong parts that this rejects.
+ */
+function phraseNamesSubject(subject, evidenceText) {
+  const isPartWord = (token) =>
+    !FLOATING_SUBJECT_WORDS.has(token) && !TRANSPARENT_SUBJECT_WORDS.has(token);
+  const partWords = subject.filter(isPartWord);
+  const floatingWords = subject.filter((token) => FLOATING_SUBJECT_WORDS.has(token));
+
+  if (!partWords.length) {
+    return false;
+  }
+
+  return quotePhrases(evidenceText).some((words) => {
+    const phraseTokens = subjectTokens(words.join(" "));
+
+    if (!floatingWords.every((token) => phraseTokens.includes(token))) {
+      return false;
+    }
+
+    return phraseReadings(words).some((reading) =>
+      containsTokenSequence(subjectTokens(reading.join(" ")).filter(isPartWord), partWords)
+    );
+  });
+}
+
 /**
  * Deterministic subject guard for component-scoped specifications.
  *
@@ -783,6 +932,15 @@ function containsTokenSequence(haystack, needle) {
  * alone. The convertible set keeps its own pooled nouns; each non-convertible
  * family contributes only its own noun, so a qualifier naming another family
  * cannot steal the subject from the specification being checked.
+ *
+ * The parsed subject passes when its words occur in the quote as one unbroken,
+ * in-order run -- or, failing that, when ONE phrase of the quote names the same
+ * part allowing only the variations real claims and manuals differ by (word
+ * order around "of", the table label "standard", the words "system" and
+ * "installation"; see phraseNamesSubject). Before the second test existed, the
+ * first live answer eval after N4 found correct claims rejected purely on word
+ * order: "the thermostat valve opening temperature" against "the valve opening
+ * temperature of the thermostat".
  *
  * This lexical check is deliberately fail-closed for recognized claim shapes.
  * It is not a general semantic-entailment engine, which is documented as a
@@ -816,7 +974,11 @@ export function checkClaimSubject(claimText, evidenceText) {
   }
 
   return {
-    grounded: containsTokenSequence(subjectTokens(evidenceText), subject),
+    // The unbroken run is still the first test, unchanged. The phrase test only
+    // ever ADDS acceptances, so no claim verified before this can be rejected now.
+    grounded:
+      containsTokenSequence(subjectTokens(evidenceText), subject) ||
+      phraseNamesSubject(subject, evidenceText),
     checked: true,
     subject: subject.join(" "),
   };
