@@ -1076,3 +1076,130 @@ test("the detailed rejection fields stay available for server-side diagnosis", (
   assert.ok(byReason.get("numeric_anomaly").unsupported.some((raw) => raw.includes("54")));
   assert.equal(byReason.get("subject_mismatch").subject, "oil filter cap");
 });
+
+// ---- Letter designators ----
+//
+// Manuals name parts by letter: "Bolt A", "Connector C", Speed Sensor "A". The
+// subject parser ignores the article "a", and it used to drop the letter A along
+// with it, so a claim about Bolt A was checked as a claim about "bolt" and a
+// quote about Bolt B certified it. B through H were never dropped: only A was.
+
+test("a claim about Bolt A is not certified by the quote for Bolt B", () => {
+  // From a real V-ribbed belt page, where Bolt A is 19 N*m and Bolt B is 43 N*m.
+  // Stating Bolt B's value for Bolt A passed as "bolt".
+  const quote = "Torque: Bolt B: 43 N*m (438 kgf*cm, 32 ft*lbf)";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        { claim: "The Bolt A torque is 43 N·m.", sourceId: "S1", evidenceQuote: quote },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.equal(result.rejected[0].subject, "bolt a");
+});
+
+test("a lettered part is not certified by a quote naming another letter", () => {
+  const cases = [
+    // The cooling specifications table: water pump Bolt A is 26 N*m, Bolt B 24.
+    [
+      "The water pump Bolt A torque is 24 N·m (245 kgf·cm, 18 ft·lbf).",
+      "Water pump Bolt B torque 24 N·m (245 kgf·cm, 18 ft·lbf)",
+    ],
+    // The letter has to END the parsed subject to have been lost: "Connector A
+    // terminal 1" against "Connector C terminal 1" was already rejected, because
+    // the quote's "c" breaks the run.
+    [
+      `The Connector A resistance is 10 k${OMEGA} or higher.`,
+      `Connector C resistance 10 k${OMEGA} or higher`,
+    ],
+    // Diagnostic trouble code names print the letter in quotation marks.
+    [
+      'The Vehicle Speed Sensor "A" voltage is 4.5 V.',
+      'Vehicle Speed Sensor "B" voltage 4.5 V',
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
+  }
+});
+
+test("a lettered part is still certified by a quote naming the same letter", () => {
+  const cases = [
+    ["The Bolt A torque is 19 N·m.", "Torque: Bolt A: 19 N*m (190 kgf*cm, 14 ft*lbf)"],
+    ["The Bolt B torque is 43 N·m.", "Torque: Bolt B: 43 N*m (438 kgf*cm, 32 ft*lbf)"],
+    [
+      "The water pump Bolt A torque is 26 N·m (260 kgf·cm, 18 ft·lbf).",
+      "Water pump Bolt A torque 26 N·m (260 kgf·cm, 18 ft·lbf)",
+    ],
+    [
+      `The Connector A resistance is 10 k${OMEGA} or higher.`,
+      `Connector A resistance 10 k${OMEGA} or higher`,
+    ],
+    // Quotation marks or brackets around the letter do not change which part it is.
+    ['The Vehicle Speed Sensor "A" voltage is 4.5 V.', "Vehicle Speed Sensor (A) voltage 4.5 V"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the article a is still never part of the subject", () => {
+  // Only a capital A standing alone right after another word is read as a
+  // letter. The article -- lowercase mid-sentence, capitalized at the start --
+  // is ignored exactly as before, on both the claim and the quote side, so a
+  // paraphrase that adds or drops it is not rejected over it.
+  const cases = [
+    ["Tighten a bolt to 24 N·m.", "Tighten the bolt. Torque : 24 N·m", "bolt"],
+    ["A new drain plug torque is 37 Nm.", "Install a new drain plug. Torque : 37 Nm", "new drain plug"],
+    [
+      "Torque the oil drain plug using a new gasket to 37 Nm.",
+      "Install the oil drain plug using new gasket. Torque : 37 Nm",
+      "oil drain plug using new gasket",
+    ],
+    [
+      "Torque the oil drain plug using new gasket to 37 Nm.",
+      "Install the oil drain plug using a new gasket. Torque : 37 Nm",
+      "oil drain plug using new gasket",
+    ],
+  ];
+
+  for (const [claim, quote, subject] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(checkClaimSubject(claim, quote).subject, subject, claim);
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the A of an acronym such as A/F is not read as a letter", () => {
+  // "A/F" (air-fuel) and "A/C" split into pieces, and their A was dropped as the
+  // article. It still is: only an A standing alone as a word is a letter, so
+  // these subjects are unchanged.
+  const quote = `A/F sensor heater resistance 1.8 ${OMEGA}`;
+  const claim = `The A/F sensor heater resistance is 1.8 ${OMEGA}.`;
+
+  assert.equal(checkClaimSubject(claim, quote).subject, "f sensor heater");
+  assert.equal(checkClaimSubject(claim, quote).grounded, true);
+});

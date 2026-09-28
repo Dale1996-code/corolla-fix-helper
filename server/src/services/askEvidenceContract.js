@@ -231,12 +231,18 @@ export function validateEvidencePayload(payload) {
 
 /** Normalize for substring comparison: whitespace, quotes, and case only. */
 function normalizeForMatch(text) {
+  return collapseForMatch(text).toLowerCase();
+}
+
+// normalizeForMatch without the lowercasing, for the one reader that needs the
+// text as written: the subject parser tells a letter designator ("Bolt A") from
+// the article "a" by its capital.
+function collapseForMatch(text) {
   return String(text || "")
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+    .trim();
 }
 
 /**
@@ -583,14 +589,56 @@ function normalizeSubjectToken(token) {
   return normalized;
 }
 
-function subjectTokens(text) {
-  const ignored = new Set(["a", "an", "the", "this", "that"]);
+const SUBJECT_IGNORED_WORDS = new Set(["a", "an", "the", "this", "that"]);
 
-  return String(text || "")
-    .replace(/[-_/]+/g, " ")
-    .split(/\s+/)
-    .map(normalizeSubjectToken)
-    .filter((token) => token && !ignored.has(token));
+/**
+ * Normalized subject words, with the determiners dropped -- but not the letter A.
+ *
+ * Manuals name parts by letter ("Bolt A", Speed Sensor "A", "(A)"). B through H
+ * always survived as tokens, while A was dropped as the article, so a claim
+ * about Bolt A was checked as a claim about "bolt" and the quote for Bolt B
+ * certified it. The two are told apart by how the corpus writes them (measured
+ * 2026-09-28): a capital A standing alone as a word right after another word
+ * is a designator or a flowchart branch label almost every time, while the
+ * article is lowercase unless it starts a sentence. So a piece is kept as the
+ * letter only when it is a capital A, is a word of its own (the A of "A/F" and
+ * "A/C" is not a letter), and directly follows a word the subject keeps, with
+ * no clause punctuation between them. "The" does not count: the parser cuts a
+ * claim's subject right after "the", so counting it would read the same "the A"
+ * differently depending on where the cut fell. A designator written in
+ * lowercase is still read as the article -- a deliberate limit: reading every
+ * "a" after a word as a letter would make ordinary articles required subject
+ * words.
+ */
+function subjectTokens(text) {
+  const tokens = [];
+  // The piece before this one, if the subject kept it. A letter needs a kept
+  // word in front of it: after "the", an A is read as the article, as it is at
+  // the start of the text.
+  let previousKept = "";
+
+  for (const word of String(text || "").split(/\s+/)) {
+    const pieces = word.split(/[-_/]+/).filter((piece) => normalizeSubjectToken(piece));
+
+    for (const piece of pieces) {
+      const token = normalizeSubjectToken(piece);
+      const isLetterA =
+        token === "a" &&
+        piece.includes("A") &&
+        pieces.length === 1 &&
+        previousKept !== "" &&
+        !/[.!?;:,]["')\]]*$/.test(previousKept);
+      const kept = isLetterA || !SUBJECT_IGNORED_WORDS.has(token);
+
+      if (kept) {
+        tokens.push(token);
+      }
+
+      previousKept = kept ? piece : "";
+    }
+  }
+
+  return tokens;
 }
 
 // Head nouns that make a specification component-scoped: in "<part> <noun> is
@@ -659,15 +707,26 @@ function nonConvertibleSubjectNoun(unit) {
  */
 function extractSpecSubject(text, nouns) {
   const normalized = normalizeForMatch(text);
+  // The shapes are matched on the lowercased text, but the subject is cut from
+  // the text as written, at the same offsets, so subjectTokens can see whether
+  // an A is capitalized. Lowercasing a character can lengthen it (a dotted
+  // capital I becomes two), and then the offsets would not line up, so such a
+  // claim is read lowercased -- the article-only reading used before letters
+  // were recognized.
+  const collapsed = collapseForMatch(text);
+  const written = collapsed.length === normalized.length ? collapsed : normalized;
   const imperative = normalized.match(
-    /\b(?:torque|tighten|inflate|fill)\s+(?:the\s+)?([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
+    /\b((?:torque|tighten|inflate|fill)\s+(?:the\s+)?)([^.!?;,:]{1,100}?)\s+(?:to|at)\s+\d/
   );
 
   if (imperative) {
-    return subjectTokens(imperative[1]);
+    const start = imperative.index + imperative[1].length;
+    return subjectTokens(written.slice(start, start + imperative[2].length));
   }
 
-  for (const clause of normalized.split(/[.!?;,:]/)) {
+  const writtenClauses = written.split(/[.!?;,:]/);
+
+  for (const [clauseIndex, clause] of normalized.split(/[.!?;,:]/).entries()) {
     // The LAST head noun in the clause wins, matching the torque-only behavior
     // this generalizes: the nearest noun is the one the part name qualifies.
     const nounIndex = nouns.reduce(
@@ -679,14 +738,15 @@ function extractSpecSubject(text, nouns) {
       continue;
     }
 
-    let prefix = clause.slice(0, nounIndex).trim();
+    const prefix = clause.slice(0, nounIndex).trim();
+    let writtenPrefix = writtenClauses[clauseIndex].slice(0, nounIndex).trim();
     const lastDeterminer = prefix.lastIndexOf(" the ");
 
     if (lastDeterminer >= 0) {
-      prefix = prefix.slice(lastDeterminer + 5);
+      writtenPrefix = writtenPrefix.slice(lastDeterminer + 5);
     }
 
-    const tokens = subjectTokens(prefix);
+    const tokens = subjectTokens(writtenPrefix);
     return tokens.slice(-6);
   }
 
