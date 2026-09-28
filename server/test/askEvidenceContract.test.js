@@ -1203,3 +1203,18 @@ test("the A of an acronym such as A/F is not read as a letter", () => {
   assert.equal(checkClaimSubject(claim, quote).subject, "f sensor heater");
   assert.equal(checkClaimSubject(claim, quote).grounded, true);
 });
+
+test('"this" is ignored like the other determiners', () => {
+  // "this" was on the ignore list but never matched it: the plural rule had
+  // already shortened it to "thi", so "this bolt" demanded a word "thi".
+  const claim = "Tighten this bolt to 24 N·m.";
+  const quote = "Tighten the bolt. Torque : 24 N·m";
+  const result = verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(checkClaimSubject(claim, quote).subject, "bolt");
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});

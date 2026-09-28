@@ -589,7 +589,11 @@ function normalizeSubjectToken(token) {
   return normalized;
 }
 
-const SUBJECT_IGNORED_WORDS = new Set(["a", "an", "the", "this", "that"]);
+// Normalized like the tokens they are compared with: "this" is "thi" by then,
+// which is how it used to slip past a list written as plain words.
+const SUBJECT_IGNORED_WORDS = new Set(
+  ["a", "an", "the", "this", "that"].map((word) => normalizeSubjectToken(word))
+);
 
 /**
  * Normalized subject words, with the determiners dropped -- but not the letter A.
