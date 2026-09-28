@@ -912,6 +912,115 @@ test("the ASCII ohm spellings were already covered and still are", () => {
   assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
+// ---- Subject guard: word order and generic words (Experiment D, 2026-09-27) ----
+//
+// The first live answer eval after N4 found the subject guard rejecting CORRECT
+// claims against their own verbatim quotes. Every part word was in the quote --
+// just not as one unbroken run in the claim's order. The first and last pairs
+// are real claim and quote text from that run, byte for byte; the two injector
+// wordings were reproduced offline against the real table row.
+
+test("a correct claim naming the part in a different word order is verified", () => {
+  const cases = [
+    // Live, 4 of 4 observations: the quote names the part after "of the".
+    [
+      "The thermostat valve opening temperature standard value is 80 to 84°C (176 to 183°F).",
+      "Measure the valve opening temperature of the thermostat. Standard value: 80 to 84°C (176 to 183°F)",
+    ],
+    // The quote has "assembly" between the part and the qualifier.
+    [
+      `The fuel injector standard resistance is 11.6 to 12.4 ${OMEGA} at 20°C (68°F).`,
+      `Fuel injector assembly Standard resistance 11.6 to 12.4 ${OMEGA} at 20°C (68°F)`,
+    ],
+    // The qualifier leads the part in the claim and trails it in the quote.
+    [
+      `The standard fuel injector resistance is 11.6 to 12.4 ${OMEGA} at 20°C (68°F).`,
+      `Fuel injector assembly Standard resistance 11.6 to 12.4 ${OMEGA} at 20°C (68°F)`,
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.deepEqual(result.rejected, [], claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("a correct claim adding the generic word 'system' is verified", () => {
+  // Live, 3 of 11 fuel-pressure observations: the model echoed the question's
+  // "fuel system pressure", and the quote says "fuel pressure". "System" names
+  // no component, so its absence from the quote is not a different part.
+  const result = verifySingleClaim(
+    "The standard fuel system pressure is 304 to 343 kPa (3.1 to 3.5 kgf/cm2, 44.1 to 49.7 psi).",
+    "Fuel pressure Standard fuel pressure 304 to 343 kPa (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi)"
+  );
+
+  assert.deepEqual(result.rejected, []);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("a correct claim adding the procedure word 'installation' is verified", () => {
+  // Live, 2 claims in the same run: the quote says "Install the water drain
+  // cock", the claim says "water drain cock installation torque". The word
+  // names the step, not the part.
+  const result = verifySingleClaim(
+    "The water drain cock installation torque is 20 Nm (204 kgf-cm, 15 ft-lbf).",
+    "Install the water drain cock as shown in the illustration. Torque : 20 Nm (204 kgf-cm, 15 ft-lbf)"
+  );
+
+  assert.deepEqual(result.rejected, []);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+// The relaxations above must not become a general "all the words are in there
+// somewhere" rule. Each case below is a WRONG part whose words all occur in the
+// quote. Measured on 2026-09-27: set membership over the quote or a clause, and
+// an ordered subsequence, each accept several of these; the current contiguous
+// rule rejects every one, and must keep doing so.
+test("the word-order relaxation still rejects a different part built from the quote's words", () => {
+  const cases = [
+    // Flattened table rows: the values are the only thing between two labels.
+    ["The front brake pad thickness is 1.0 mm.", "Front brake disc thickness 25.0 mm Rear brake pad thickness 1.0 mm"],
+    [
+      "The rear engine mounting insulator bolt torque is 52 Nm.",
+      "Front engine mounting insulator bolt 52 530 38 Rear engine mounting bracket bolt 87 887 64",
+    ],
+    [
+      `The left front wheel speed sensor resistance is 1.2 k${OMEGA}.`,
+      `Right front wheel speed sensor 1.2 k${OMEGA} Left rear wheel speed sensor 1.4 k${OMEGA}`,
+    ],
+    // One label naming two sides.
+    ["The front brake pad thickness is 1.0 mm.", "Rear brake pad and front disc minimum thickness: 1.0 mm"],
+    // The claim names a shorter part than the quote: "EGR valve" is not the
+    // valve of the EGR cooler bypass, and "drive shaft nut" is not the drive
+    // shaft bearing lock nut.
+    [
+      "The EGR valve opening temperature is 95°C.",
+      "Measure the valve opening temperature of the EGR cooler bypass. Standard value: 95°C",
+    ],
+    ["The drive shaft nut torque is 216 Nm.", "Drive shaft bearing lock nut 216 N*m"],
+    // "standard" may move, but it must still be there: a minimum is not a standard.
+    ["The standard brake disc thickness is 10.0 mm.", "Brake disc minimum thickness: 10.0 mm"],
+    // ...and it must be there in the SAME row. In a flattened table the brake
+    // pad's "standard" is not the brake disc's; 10.0 mm is the disc minimum.
+    [
+      "The standard brake disc thickness is 10.0 mm.",
+      "Brake pad standard thickness 12.0 mm Brake disc minimum thickness 10.0 mm",
+    ],
+    // "system" is optional, but the system it names is not.
+    ["The cooling system pressure is 304 kPa.", "Fuel pressure: 304 kPa"],
+    ["The system pressure is 304 kPa.", "Fuel pressure: 304 kPa"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const subject = checkClaimSubject(claim, quote);
+
+    assert.equal(subject.checked, true, `no subject was parsed: ${claim}`);
+    assert.equal(subject.grounded, false, `${claim} was accepted against: ${quote}`);
+  }
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
