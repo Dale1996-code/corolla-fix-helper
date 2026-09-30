@@ -1142,3 +1142,428 @@ test("segmentation: a sentence starting LOWERCASE still ends the previous one", 
   assert.equal(scored.pass, false);
   assert.ok(failedChecks(scored).some((name) => /never states .*96/.test(name)));
 });
+
+// ---- N1 (2026-09-27): table-derived specifications with a same-table trap ----
+//
+// Each case asks for a value printed in a service-data table whose neighbouring
+// row holds a different, genuinely printed value that is WRONG for the question:
+// the used-plug maximum gap, the pressure that must remain five minutes after the
+// engine stops, and the fuel pump's resistance printed under the same "Standard
+// resistance" label as the injector's. The verifier cannot catch any of them --
+// the wrong value really is in the quote, and so is the part name -- so the answer
+// eval is the only place they can fail.
+//
+// The rules are read from the real case definitions, never from a copy. Every
+// wrong answer below is a shape the table itself invites, and every answer is
+// written the way the evidence contract renders claims: "claim [title, page N]".
+
+const sparkPlugGapCase = () => answerQualityCases.find((entry) => entry.id === "spark-plug-gap");
+const fuelPressureCase = () =>
+  answerQualityCases.find((entry) => entry.id === "fuel-pressure-spec");
+const fuelInjectorCase = () =>
+  answerQualityCases.find((entry) => entry.id === "fuel-injector-resistance");
+
+/** The name of the check a qualifiedValues rule fails when its value appears unqualified. */
+function unqualifiedCheck(testCase, label) {
+  const rule = testCase.qualifiedValues.find((entry) => entry.label === label);
+  assert.ok(rule, `${testCase.id} has no qualifiedValues rule labelled "${label}"`);
+  return `never states ${String(rule.value)} without`;
+}
+
+const failedWith = (scored, fragment) =>
+  failedChecks(scored).some((name) => name.includes(fragment));
+const cite = (documentTitle, pageNumber) => [{ documentTitle, pageNumber }];
+
+// The titles of every document holding the trap row, as of 2026-09-27. A claim
+// with no closing punctuation shares its segment with the "[title, page N]" the
+// renderer appends, so no qualifier word may occur in any of them.
+const USED_PLUG_ROW_TITLES = [
+  "Computers and Control Systems Specifications Electrical Engine Control Service Data [12 2007 ]",
+  "Computers and Control Systems Specifications Pressure, Vacuum and Temperature Engine Control Service Data [12 2007 ]",
+  "Fuel Delivery and Air Induction Specifications Electrical Engine Control Service Data [12 2007 ]",
+  "Fuel Delivery and Air Induction Specifications Pressure, Vacuum and Temperature Engine Control Service Data [12 2007 ]",
+  "IGNITION SYSTEM ON VEHICLE INSPECTION",
+  "chunk 001",
+  "chunk 002",
+  "merged final",
+];
+const HOLD_PRESSURE_ROW_TITLES = [
+  "Fuel Delivery and Air Induction Specifications Electrical Fuel Service Data [12 2007 ]",
+  "Fuel Delivery and Air Induction Specifications Pressure, Vacuum and Temperature Fuel Service Data [12 2007 ]",
+  "Fuel Delivery and Air Induction Testing and Inspection Component Tests and General Diagnostics Fuel System On Vehicle Inspection [12 2007 ]",
+  "chunk 002",
+  "merged final",
+];
+const [ENGINE_SERVICE_DATA] = USED_PLUG_ROW_TITLES;
+const IGNITION_INSPECTION = "IGNITION SYSTEM ON VEHICLE INSPECTION";
+const [FUEL_SERVICE_DATA, , FUEL_ON_VEHICLE_INSPECTION] = HOLD_PRESSURE_ROW_TITLES;
+
+test("spark plug gap: the new-plug range alone PASSES", () => {
+  const scored = evaluateAnswerCase(
+    sparkPlugGapCase(),
+    answered(
+      `The spark plug electrode gap is 1.0 to 1.1 mm (0.0394 to 0.0433 in.). [${ENGINE_SERVICE_DATA}, page 1]`,
+      cite(ENGINE_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("spark plug gap: the used-plug maximum stated as a maximum PASSES", () => {
+  // The used-plug figure is permitted, not banned: an answer that reports both
+  // table rows correctly is a better answer, not a failing one.
+  const scored = evaluateAnswerCase(
+    sparkPlugGapCase(),
+    answered(
+      [
+        `The electrode gap for a new spark plug is 1.0 to 1.1 mm (0.0394 to 0.0433 in.). [${IGNITION_INSPECTION}, page 6]`,
+        `The maximum electrode gap for a used spark plug is 1.3 mm (0.0512 in.). [${IGNITION_INSPECTION}, page 6]`,
+      ].join("\n"),
+      cite(IGNITION_INSPECTION, 6)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("spark plug gap: the used-plug maximum presented as THE gap fails", () => {
+  // The page-boundary trap in doc 724: page 6 opens with "Electrode Gap 1.3 mm
+  // (0.0512 in.)" because its "for Used Spark Plug" label ended page 5.
+  const testCase = sparkPlugGapCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      `The spark plug electrode gap is 1.3 mm (0.0512 in.). [${IGNITION_INSPECTION}, page 6]`,
+      cite(IGNITION_INSPECTION, 6)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  const failed = failedChecks(scored).join("; ");
+  assert.ok(failedWith(scored, unqualifiedCheck(testCase, "1.3 mm as the used-plug maximum")), failed);
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "0.0512 in. as the used-plug maximum")),
+    failed
+  );
+});
+
+test("spark plug gap: a bare 1.3 mm beside the correct range still fails", () => {
+  // Giving the right range does not license an unconditioned wrong figure elsewhere.
+  const testCase = sparkPlugGapCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      [
+        `The spark plug electrode gap is 1.0 to 1.1 mm (0.0394 to 0.0433 in.). [${ENGINE_SERVICE_DATA}, page 1]`,
+        `The spark plug gap can also be 1.3 mm. [${ENGINE_SERVICE_DATA}, page 1]`,
+      ].join("\n"),
+      cite(ENGINE_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "1.3 mm as the used-plug maximum")),
+    failedChecks(scored).join("; ")
+  );
+});
+
+test("spark plug gap: one end of the range is not the specification", () => {
+  // The old template's /1\.[01]\s*mm/ accepted this.
+  const scored = evaluateAnswerCase(
+    sparkPlugGapCase(),
+    answered(`The spark plug gap is 1.0 mm. [${ENGINE_SERVICE_DATA}, page 1]`, cite(ENGINE_SERVICE_DATA, 1))
+  );
+
+  assert.equal(scored.pass, false);
+  assert.ok(failedChecks(scored).some((name) => /contains the expected value/.test(name)));
+});
+
+test("spark plug gap: no rendered title can qualify a bare 1.3 mm", () => {
+  for (const title of USED_PLUG_ROW_TITLES) {
+    const scored = evaluateAnswerCase(
+      sparkPlugGapCase(),
+      answered(
+        `Electrode gap 1.0 to 1.1 mm (0.0394 to 0.0433 in.) [${title}, page 1]\n` +
+          `Electrode Gap 1.3 mm (0.0512 in.) [${title}, page 1]`,
+        cite(title, 1)
+      )
+    );
+
+    assert.equal(scored.pass, false, `a bare 1.3 mm was qualified by the title "${title}"`);
+  }
+});
+
+test("fuel pressure: the operating range alone PASSES", () => {
+  const scored = evaluateAnswerCase(
+    fuelPressureCase(),
+    answered(
+      `The standard fuel pressure is 304 to 343 kPa (3.1 to 3.5 kgf/cm2, 44.1 to 49.7 psi). [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel pressure: the hold pressure stated with its condition PASSES", () => {
+  const scored = evaluateAnswerCase(
+    fuelPressureCase(),
+    answered(
+      [
+        `Measure the fuel pressure at idle; it should be 304 to 343 kPa (3.1 to 3.5 kgf/cm2, 44.1 to 49.7 psi). [${FUEL_ON_VEHICLE_INSPECTION}, page 3]`,
+        `The fuel pressure should remain at 147 kPa (1.5 kgf/cm2, 21 psi) or more for 5 minutes after the engine stops. [${FUEL_ON_VEHICLE_INSPECTION}, page 3]`,
+      ].join("\n"),
+      cite(FUEL_ON_VEHICLE_INSPECTION, 3)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel pressure: an answer in psi alone PASSES", () => {
+  const scored = evaluateAnswerCase(
+    fuelPressureCase(),
+    answered(`The fuel pressure should be 44.1 to 49.7 psi. [${FUEL_SERVICE_DATA}, page 1]`, cite(FUEL_SERVICE_DATA, 1))
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel pressure: the hold pressure presented as THE specification fails", () => {
+  // The table's second row with its left-hand condition column dropped: it
+  // really does read "Standard fuel pressure 147 kPa (1.5 kgf*cm2, 21 psi) or more".
+  const testCase = fuelPressureCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      `The standard fuel pressure is 147 kPa (1.5 kgf/cm2, 21 psi) or more. [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  const failed = failedChecks(scored).join("; ");
+  for (const label of [
+    "147 kPa as the pressure held after the engine stops",
+    "21 psi as the pressure held after the engine stops",
+    "1.5 kgf/cm2 as the pressure held after the engine stops",
+  ]) {
+    assert.ok(failedWith(scored, unqualifiedCheck(testCase, label)), `${label}: ${failed}`);
+  }
+  assert.ok(failedChecks(scored).some((name) => /contains the expected value/.test(name)), failed);
+});
+
+test("fuel pressure: a bare hold figure beside the correct range still fails", () => {
+  const testCase = fuelPressureCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      [
+        `The standard fuel pressure is 304 to 343 kPa (44.1 to 49.7 psi). [${FUEL_SERVICE_DATA}, page 1]`,
+        `The minimum fuel pressure is 147 kPa (21 psi). [${FUEL_SERVICE_DATA}, page 1]`,
+      ].join("\n"),
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  const failed = failedChecks(scored).join("; ");
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "147 kPa as the pressure held after the engine stops")),
+    failed
+  );
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "21 psi as the pressure held after the engine stops")),
+    failed
+  );
+});
+
+test("fuel pressure: no rendered title can qualify a bare 147 kPa", () => {
+  for (const title of HOLD_PRESSURE_ROW_TITLES) {
+    const scored = evaluateAnswerCase(
+      fuelPressureCase(),
+      answered(
+        `Standard fuel pressure 304 to 343 kPa (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi) [${title}, page 1]\n` +
+          `Standard fuel pressure 147 kPa (1.5 kgf*cm2, 21 psi) or more [${title}, page 1]`,
+        cite(title, 1)
+      )
+    );
+
+    assert.equal(scored.pass, false, `a bare 147 kPa was qualified by the title "${title}"`);
+  }
+});
+
+test("fuel injector: the injector's own row PASSES", () => {
+  const scored = evaluateAnswerCase(
+    fuelInjectorCase(),
+    answered(
+      `The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel injector: the other rows quoted with their own components PASS", () => {
+  const scored = evaluateAnswerCase(
+    fuelInjectorCase(),
+    answered(
+      [
+        `The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+        `The fuel pump standard resistance is 0.2 to 3.0 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+        `The fuel sender gauge assembly standard resistance is 13.5 to 16.5 Ω at float level F. [${FUEL_SERVICE_DATA}, page 1]`,
+      ].join("\n"),
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel injector: the pump's row given as the injector's fails", () => {
+  // The wrong-component answer the table invites. This exact wording passes both
+  // the numeric check and the subject guard against the real table quote,
+  // because that quote names the injector too (checked 2026-09-27). So do "the
+  // fuel injector resistance is..." and "the resistance of the fuel injector
+  // is..."; only "the fuel injector STANDARD resistance is..." happens to be
+  // rejected, because those words are not adjacent in the quote. The eval must
+  // not depend on that accident of wording.
+  const testCase = fuelInjectorCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      `The fuel injector assembly resistance is 0.2 to 3.0 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+  const failed = failedChecks(scored).join("; ");
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "0.2 to 3.0 ohms as the fuel pump's resistance")),
+    failed
+  );
+  assert.ok(
+    failedChecks(scored).some((name) =>
+      name.includes("states 11.6 to 12.4 ohms as the fuel injector's resistance")
+    ),
+    failed
+  );
+});
+
+test("fuel injector: a swap between two components fails inside one sentence", () => {
+  // Same-segment membership alone would accept this: both values, both part
+  // names. The competing qualifier sitting nearer each value is what rejects it.
+  const testCase = fuelInjectorCase();
+  const scored = evaluateAnswerCase(
+    testCase,
+    answered(
+      `The fuel pump resistance is 11.6 to 12.4 Ω and the fuel injector resistance is 0.2 to 3.0 Ω. [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false, "a one-sentence swap must not pass");
+  const failed = failedChecks(scored).join("; ");
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "11.6 to 12.4 ohms as the fuel injector's resistance")),
+    failed
+  );
+  assert.ok(
+    failedWith(scored, unqualifiedCheck(testCase, "0.2 to 3.0 ohms as the fuel pump's resistance")),
+    failed
+  );
+});
+
+test("fuel injector: a value with no component named fails", () => {
+  // Three rows of this table share the label "Standard resistance". An answer
+  // that never says which part its number belongs to has not answered the
+  // question, even when the number happens to be the right one.
+  const scored = evaluateAnswerCase(
+    fuelInjectorCase(),
+    answered(
+      `Standard resistance: 11.6 to 12.4 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+      cite(FUEL_SERVICE_DATA, 1)
+    )
+  );
+
+  assert.equal(scored.pass, false);
+});
+
+// Verbatim from the 2026-09-27 live repeats (rendered answer text, unedited), so
+// these rules are pinned against observed behaviour as well as against the
+// synthetic shapes above.
+const LIVE_SPARK_PLUG_GAP_ANSWER = [
+  "The standard spark plug electrode gap is 1.0 to 1.1 mm (0.0394 to 0.0433 in.). [P0300 P0304 [12 2007 ] (ALL Diagnostic Trouble Codes ( DTC )) ALLDATA diy, page 11]",
+  "The electrode gap for a new spark plug is 1.0 to 1.1 mm (0.0394 to 0.0433 in.). [IGNITION SYSTEM ON VEHICLE INSPECTION, page 6]",
+  "The maximum electrode gap for a used spark plug is 1.3 mm (0.0512 in.). [IGNITION SYSTEM ON VEHICLE INSPECTION, page 6]",
+  "If the electrode gap is larger than standard, replace the spark plug. [P0300 P0304 [12 2007 ] (ALL Diagnostic Trouble Codes ( DTC )) ALLDATA diy, page 11]",
+  "Do not adjust the spark plug electrode gap. [P0300 P0304 [12 2007 ] (ALL Diagnostic Trouble Codes ( DTC )) ALLDATA diy, page 11]",
+].join("\n");
+const LIVE_FUEL_PRESSURE_RANGE_WITHHELD_ANSWER = [
+  "Fuel pressure should remain 147 kPa (1.5 kgf/cm2, 21 psi) or more for 5 minutes after the engine has stopped. [Fuel Delivery and Air Induction Specifications Pressure, Vacuum and Temperature Fuel Service Data [12 2007 ], page 1]",
+  "",
+  "Not covered by your documents:",
+  "- Unverified (the cited text does not name the same part): The standard fuel system pressure is 304 to [unverified value] (3.1 to 3.5 kgf/cm2, 44.1 to [unverified value]).",
+].join("\n");
+const LIVE_FUEL_INJECTOR_ANSWER =
+  "The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F). [Fuel Delivery and Air Induction Specifications Electrical Fuel Service Data [12 2007 ], page 1]";
+
+test("spark plug gap: the real live answer PASSES, trap row and all", () => {
+  // Every captured answer also stated the 1.3 mm row, cited to the
+  // page-boundary page, and always as the used-plug maximum.
+  const scored = evaluateAnswerCase(
+    sparkPlugGapCase(),
+    { status: "answered", answer: LIVE_SPARK_PLUG_GAP_ANSWER, citations: cite(IGNITION_INSPECTION, 6) }
+  );
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel pressure: the real live answer that withheld the operating range FAILS", () => {
+  // The product failure this case exists to see: the subject guard rejected the
+  // correct "standard fuel system pressure" claim, so the owner got only the
+  // hold pressure. The hold figure itself is correctly qualified, so the ONLY
+  // failing check must be the missing operating range -- the old rule, which
+  // accepted any kPa figure, passed this answer.
+  const scored = evaluateAnswerCase(fuelPressureCase(), {
+    status: "partial",
+    answer: LIVE_FUEL_PRESSURE_RANGE_WITHHELD_ANSWER,
+    citations: cite(HOLD_PRESSURE_ROW_TITLES[1], 1),
+  });
+
+  assert.equal(scored.pass, false);
+  assert.deepEqual(failedChecks(scored), ["answer: contains the expected value"]);
+});
+
+test("fuel injector: the real live answer PASSES", () => {
+  const scored = evaluateAnswerCase(fuelInjectorCase(), {
+    status: "answered",
+    answer: LIVE_FUEL_INJECTOR_ANSWER,
+    citations: cite(FUEL_SERVICE_DATA, 1),
+  });
+
+  assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
+});
+
+test("fuel injector: both ohm code points and spelled-out ohms are read", () => {
+  // N4 accepts both code points an ohm can be encoded as, so the case must too.
+  // Built from code points because the two glyphs are indistinguishable in source.
+  const GREEK_CAPITAL_OMEGA = String.fromCharCode(0x03a9);
+  const OHM_SIGN = String.fromCharCode(0x2126);
+
+  for (const unit of [GREEK_CAPITAL_OMEGA, OHM_SIGN, "ohms"]) {
+    const scored = evaluateAnswerCase(
+      fuelInjectorCase(),
+      answered(
+        `The fuel injector assembly standard resistance is 11.6 to 12.4 ${unit} at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
+        cite(FUEL_SERVICE_DATA, 1)
+      )
+    );
+
+    assert.equal(scored.pass, true, `${unit}: ${failedChecks(scored).join("; ")}`);
+  }
+});

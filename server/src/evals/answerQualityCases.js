@@ -104,6 +104,8 @@ export const answerQualityCases = [
   // ---- TEMPLATES: confirm the expected value against YOUR manual, then set verified: true ----
   // The values below are common published 2009 Corolla 1.8L (2ZR-FE) figures used only as a
   // starting point. Do NOT trust them until you confirm them against your own documents.
+  // Exception: spark-plug-gap has since been confirmed against the PDF pages and is verified
+  // (see its note).
   {
     id: "wheel-lug-nut-torque",
     question: "What is the wheel lug nut torque spec?",
@@ -124,9 +126,66 @@ export const answerQualityCases = [
     id: "spark-plug-gap",
     question: "What is the spark plug gap?",
     category: "capacity",
+    system: "Engine",
     expect: "answered",
-    mustIncludeAny: [/1\.[01]\s*mm/i, /0\.04[0-9]?\s*in/i], // CONFIRM against your manual
-    verified: false,
+    // N1, 2026-09-27: expectation CONFIRMED against the rendered PDF pages, not
+    // just the extracted text (source files MD5-matched to documents.file_md5):
+    //   doc 226 p1, "SPECIFICATIONS: 2ZR-FE ENGINE CONTROL: SERVICE DATA",
+    //   Spark plug table:
+    //     Electrode gap            1.0 to 1.1 mm (0.0394 to 0.0433 in.)
+    //     Maximum electrode gap    1.3 mm (0.0512 in.) for used plug
+    //   doc 724 p5-6, "IGNITION SYSTEM ON VEHICLE INSPECTION": same two values,
+    //     "Electrode Gap for New Spark Plug" and "Maximum Electrode Gap for Used
+    //     Spark Plug".
+    // Only these two gap figures exist anywhere in the corpus (45 chunks carry
+    // the 1.0-1.1 mm range), and no 2AZ-FE figure competes with them.
+    //
+    // The old template accepted /1\.[01]\s*mm/, so "1.0 mm" alone passed, and it
+    // said nothing about the trap sitting one table row below the answer. That
+    // trap is sharper than it looks: in doc 724 the label "Maximum Electrode
+    // Gap for Used Spark Plug:" ends page 5 while its value opens page 6 as a
+    // bare "Electrode Gap 1.3 mm (0.0512 in.)", directly above the new-plug
+    // range. The chunk for page 6 therefore prints 1.3 mm under the heading
+    // "Electrode Gap" with its condition on another page. The verifier cannot
+    // catch that mistake: 1.3 mm really is in the quote and so is "gap".
+    //
+    // So the used-plug maximum may be stated, but only in a statement that says
+    // it is a maximum or for a used plug. The qualifier words are chosen to be
+    // absent from the titles of all 8 documents holding the 1.3 mm row: a claim
+    // line renders as "claim [title, page N]", and a title word must not be able
+    // to qualify a bare value.
+    //
+    // No citationSupportsAny: the scorer reads the 217-character citation
+    // preview, and the gap row lies beyond it in 43 of the 45 chunks, behind the
+    // breadcrumb header, so the check would fail correct answers.
+    mustIncludeAny: [
+      /\b1\.0\s*(?:mm\s*)?(?:to|-|–|—|and)\s*1\.1\s*(?:mm|millimet)/i,
+      /\b0\.0394\s*(?:in\.?\s*)?(?:to|-|–|—|and)\s*0\.0433\s*in/i,
+    ],
+    qualifiedValues: [
+      {
+        value: /\b1\.3\s*(?:mm|millimet)/i,
+        qualifier: /\bused\b|\bmax(?:imum)?\b|exceed|greater than|\blimit|\bworn\b/i,
+        label: "1.3 mm as the used-plug maximum",
+      },
+      {
+        value: /\b0\.0512\s*in/i,
+        qualifier: /\bused\b|\bmax(?:imum)?\b|exceed|greater than|\blimit|\bworn\b/i,
+        label: "0.0512 in. as the used-plug maximum",
+      },
+    ],
+    // PROMOTED 2026-09-27, 13 -> 14, on both conditions:
+    //   Expectation: confirmed on the rendered pages above, not only in extracted text.
+    //   Behavior: 11 of 11 passes under this exact rule -- the full eval:answers
+    //   run plus 10 repeats of the same code path -- after 4 of 4 passes in the
+    //   four earlier runs under the old, looser rule. The trap was exercised
+    //   live, not vacuously: every one of the 10 captured answers also stated
+    //   the 1.3 mm row, always cited to doc 724 page 6 (the page-boundary page)
+    //   and always as "the maximum electrode gap for a used spark plug".
+    // Nothing in the answer depends on N4's new code: millimetres have no
+    // subject family, and all 48 captured claims get the same verdict from the
+    // pre-N4 verifier. See docs/evals/ask-rag-iteration-log.md, 2026-09-27.
+    verified: true,
   },
   {
     id: "front-brake-pad-procedure",
@@ -159,6 +218,8 @@ export const answerQualityCases = [
   // change that helps one system but hurts another is visible. Every value is a
   // common published 2009 Corolla 1.8L (2ZR-FE) figure used ONLY as a starting
   // point — confirm each against YOUR manual before flipping verified: true.
+  // Exceptions: fuel-pressure-spec and fuel-injector-resistance have since been
+  // confirmed against the PDF pages (see their notes).
   {
     id: "rear-brake-caliper-torque",
     question: "What is the rear brake caliper mounting bolt torque?",
@@ -232,7 +293,146 @@ export const answerQualityCases = [
     category: "capacity",
     system: "Fuel",
     expect: "answered",
-    mustIncludeAny: [/\b\d{2,3}\s*(kpa|psi)/i], // CONFIRM against your manual
+    // N1, 2026-09-27: expectation CONFIRMED against the rendered PDF pages
+    // (source files MD5-matched to documents.file_md5):
+    //   doc 573 p1, "SPECIFICATIONS: 2ZR-FE FUEL: SERVICE DATA", two rows that
+    //   both read "Standard fuel pressure":
+    //     Fuel pressure                        304 to 343 kPa
+    //                                          (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi)
+    //     Fuel pressure : at fuel pressure     147 kPa (1.5 kgf*cm2, 21 psi) or more
+    //       remains for 5 minutes after
+    //       engine has stopped
+    //   doc 578 p2-3, "Fuel System On Vehicle Inspection": steps j and m measure
+    //     304 to 343 kPa (with the pump forced on, then at idle); step o checks
+    //     that 147 kPa or more remains for 5 minutes after the engine stops.
+    // 304 to 343 kPa is the only operating range anywhere in the corpus.
+    //
+    // The old template accepted ANY two- or three-digit kPa or psi figure, so
+    // "the fuel pressure is 147 kPa" passed. That is the dangerous answer here,
+    // and the table invites it: the second row carries the same "Standard fuel
+    // pressure" label, and its condition lives only in the left-hand column,
+    // which extraction flattens into a run-on phrase. The verifier cannot catch
+    // it either -- 147 kPa and "fuel pressure" both really are in the quote.
+    //
+    // So the hold pressure may be stated, but only in a statement that carries
+    // its condition. The qualifier words are absent from the titles of all 5
+    // documents holding the 147 kPa row, so a rendered "[title, page N]" suffix
+    // cannot qualify a bare value.
+    //
+    // No citationSupportsAny: the scorer reads the 217-character citation
+    // preview, and 304 to 343 kPa lies beyond it in all 12 chunks that state it.
+    mustIncludeAny: [
+      /\b304\s*(?:kPa\s*)?(?:to|-|–|—|and)\s*343\s*kPa/i,
+      /\b44\.1\s*(?:psi\s*)?(?:to|-|–|—|and)\s*49\.7\s*psi/i,
+    ],
+    qualifiedValues: [
+      {
+        value: /\b147\s*kPa/i,
+        qualifier:
+          /\b(?:5|five)[\s-]*min|\bstop|\bshut|\bremains?\b|\bhold|\bheld\b|residual|retain|retention/i,
+        label: "147 kPa as the pressure held after the engine stops",
+      },
+      {
+        value: /\b21\s*psi/i,
+        qualifier:
+          /\b(?:5|five)[\s-]*min|\bstop|\bshut|\bremains?\b|\bhold|\bheld\b|residual|retain|retention/i,
+        label: "21 psi as the pressure held after the engine stops",
+      },
+      {
+        value: /\b1\.5\s*kgf/i,
+        qualifier:
+          /\b(?:5|five)[\s-]*min|\bstop|\bshut|\bremains?\b|\bhold|\bheld\b|residual|retain|retention/i,
+        label: "1.5 kgf/cm2 as the pressure held after the engine stops",
+      },
+    ],
+    // NOT promoted, 2026-09-27: the expectation is confirmed, the behavior is
+    // not stable. 8 of 11 passes under this rule (the full run plus 10 repeats).
+    // All three failures are one mechanism, and it is the product's, not the
+    // case's: the model wrote "The standard fuel SYSTEM pressure is 304 to 343
+    // kPa ...", echoing the question, and the subject guard rejected that
+    // correct claim because the quote says "Standard fuel pressure". The owner
+    // then saw only the 147 kPa hold pressure, with the operating range
+    // withheld as "[unverified value]". The guard's pressure family predates
+    // N4, and the pre-N4 verifier rejects the same claims.
+    //
+    // The old rule could not see any of this: "147 kPa" matched it, so the
+    // withheld-range answer would have PASSED. Its 4 of 4 earlier passes
+    // therefore never showed that the operating range reached the owner.
+    // It can gate once that false rejection is fixed and a fresh run is stable.
+    verified: false,
+  },
+  {
+    id: "fuel-injector-resistance",
+    question: "What is the standard resistance of the fuel injector?",
+    category: "capacity",
+    system: "Fuel",
+    expect: "answered",
+    // N1, 2026-09-27: expectation CONFIRMED against the rendered PDF page doc
+    // 573 p1 (MD5-matched), the same service-data table as fuel-pressure-spec:
+    //   Fuel injector assembly     Standard resistance  11.6 to 12.4 Ω at 20°C (68°F)
+    //   Fuel pump                  Standard resistance  0.2 to 3.0 Ω at 20°C (68°F)
+    //   Fuel Sender gauge assembly Standard resistance  13.5 to 16.5 Ω (Float level F)
+    //                                                   13.5 to 414.5 Ω (Float level E to F)
+    //                                                   405.5 to 414.5 Ω (Float level E)
+    // 11.6 to 12.4 Ω is stated in 6 chunks across 4 documents, always in this
+    // table and always with the same value. The whole table is ONE 919-character
+    // chunk, so the model always sees all three rows together.
+    //
+    // THE failure class the roadmap names first, "the correct number attached
+    // to the wrong component", observed in real generation rather than through
+    // a probe. reject-wrong-component-torque proves the subject guard rejects an
+    // impossible part name; it cannot prove anything about this table, because
+    // every row shares the label "Standard resistance" and one quote of the
+    // table names all three parts. A claim giving the injector the pump's
+    // 0.2 to 3.0 Ω passes the numeric check and the subject check alike: checked
+    // against the real quote on 2026-09-27, three of four natural wordings get
+    // through ("the fuel injector resistance is...", "the fuel injector
+    // assembly resistance is...", "the resistance of the fuel injector is...").
+    // The fourth is rejected only because its words are not adjacent in the
+    // quote. Only an eval of the rendered answer catches this reliably.
+    //
+    // The injector's own value must be stated as the injector's; the other rows
+    // may be quoted, but only attached to their own component. Rules with
+    // different qualifiers compete (nearest wins), so a swap between two
+    // components fails even inside one sentence. None of the qualifier words
+    // appears in the titles of the 4 documents holding this table.
+    //
+    // Also the first live exercise of the N4 electrical-symbol slice (PR #137)
+    // on real evidence: this table prints Ω, which the numeric detector did not
+    // read before that change.
+    //
+    // NOT promoted, 2026-09-27, although it passed 11 of 11 (the full run plus
+    // 10 repeats, all ten captured answers word for word "The fuel injector
+    // assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F)."). Two
+    // reasons. It is new, so all 11 observations come from one session, and
+    // the engine-mount demotion is the record of what a case can do between
+    // sessions. And its pass depends on the model copying the quote's word
+    // order: "The fuel injector standard resistance is ..." and "The standard
+    // fuel injector resistance is ..." are correct but are REJECTED by the
+    // resistance subject guard N4 added (PR #136), while the pre-N4 verifier
+    // accepts both. Promote after an independent later run passes with the rule
+    // unchanged -- sooner if that false rejection is fixed first. The pump trap
+    // never appeared live, so its rule is proven only by the negative controls
+    // in answerQualityScoring.test.js.
+    mustIncludeAny: [/\b11\.6\s*(?:Ω|Ω|ohms?)?\s*(?:to|-|–|—|and)\s*12\.4/i],
+    qualifiedValues: [
+      {
+        value: /\b11\.6\s*(?:Ω|Ω|ohms?)?\s*(?:to|-|–|—|and)\s*12\.4/i,
+        qualifier: /injector/i,
+        required: true,
+        label: "11.6 to 12.4 ohms as the fuel injector's resistance",
+      },
+      {
+        value: /\b0\.2\s*(?:Ω|Ω|ohms?)?\s*(?:to|-|–|—|and)\s*3\.0\b/i,
+        qualifier: /\bpump/i,
+        label: "0.2 to 3.0 ohms as the fuel pump's resistance",
+      },
+      {
+        value: /\b(?:13\.5|405\.5)\s*(?:Ω|Ω|ohms?)?\s*(?:to|-|–|—|and)\s*(?:16\.5|414\.5)/i,
+        qualifier: /sender|gauge|float/i,
+        label: "the fuel sender gauge's resistance",
+      },
+    ],
     verified: false,
   },
   {
