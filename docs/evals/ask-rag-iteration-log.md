@@ -1769,3 +1769,290 @@ unchanged retrieval path, not a product signal, and no conclusion is drawn from 
   decision and is deliberately not bundled here.
 
 Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+---
+
+## N1 — table-derived specifications with a same-table trap (2026-09-27)
+
+Roadmap item N1, one slice. Work on the measuring instrument only: no production Ask,
+retrieval, prompt, model, or verifier code was changed. The live measurements behind the
+decisions are recorded in **Experiment D** below.
+
+### Which failure classes lacked reliable coverage
+
+The roadmap names six failure classes for N1. Before this slice the verified gate (13 of 43)
+covered them like this:
+
+| Failure class | Verified coverage before | After this slice |
+| --- | --- | --- |
+| Correct number, wrong component | `reject-wrong-component-torque` only — a probe with an impossible part name; it tests the verifier, never real generation | `spark-plug-gap` gates a wrong-**row** value in real generation; `fuel-injector-resistance` (wrong **component**) reports as a template |
+| Two manual sections that disagree | none (the applicability cases are templates) | unchanged |
+| Table-derived values | none — `oil-drain-plug-torque` is answered from procedure text, not the torque table | **`spark-plug-gap`** |
+| OCR-noisy pages | none (`applicability-abs-wiring-variant`, a template failing on retrieval) | unchanged |
+| Follow-up questions | none (`water-pump-then-torque`, a template failing on the follow-up) | unchanged |
+| Questions the manuals do not answer | `refuse-turbo-boost-pressure`, `refuse-timing-belt-interval`, three fictional refusals | unchanged |
+
+### Why these three cases
+
+A service-data table is where the two uncovered classes meet: the value is table-derived, and
+the row next to it holds a different, genuinely printed value that is wrong for the question.
+The verifier cannot catch that mistake — the wrong value really is in the quote, and so is the
+part name — so the answer eval is the only place it can fail. Two of the three cases were
+already templates that had passed all four earlier live runs, which made them the cheapest
+route to cases whose behaviour could be judged in one session.
+
+- **`spark-plug-gap`** (improved). The trap is the used-plug maximum one row below the answer.
+- **`fuel-pressure-spec`** (improved). The trap is the pressure held five minutes after the
+  engine stops, in a second row that carries the same "Standard fuel pressure" label.
+- **`fuel-injector-resistance`** (new). The trap is the fuel pump's and the fuel sender's
+  resistance, printed in the same table under the same "Standard resistance" label.
+
+### The evidence, checked on the PDF pages
+
+The pages were rendered to images with `pdftoppm` and read visually, so the check does not
+rely on the app's own text extraction. Each source file's MD5 matched `documents.file_md5`.
+
+| Case | Page | What it prints |
+| --- | --- | --- |
+| `spark-plug-gap` | doc 226 p1 (2ZR-FE engine control service data) | Electrode gap **1.0 to 1.1 mm (0.0394 to 0.0433 in.)**; maximum electrode gap **1.3 mm (0.0512 in.) for used plug** |
+| `spark-plug-gap` | doc 724 p5–6 (ignition on-vehicle inspection) | the same two values. The label "Maximum Electrode Gap for Used Spark Plug:" **ends page 5** while its value opens page 6 as a bare "Electrode Gap 1.3 mm", directly above the new-plug range |
+| `fuel-pressure-spec` | doc 573 p1 (2ZR-FE fuel service data) | Standard fuel pressure **304 to 343 kPa (3.1 to 3.5 kgf/cm², 44.1 to 49.7 psi)**; standard fuel pressure "at fuel pressure remains for 5 minutes after engine has stopped" **147 kPa (1.5 kgf/cm², 21 psi) or more** |
+| `fuel-pressure-spec` | doc 578 p2–3 (fuel system on-vehicle inspection) | steps j and m measure 304 to 343 kPa (pump forced on, then at idle); step o checks that 147 kPa or more remains for 5 minutes after the engine stops |
+| `fuel-injector-resistance` | doc 573 p1 | fuel injector assembly **11.6 to 12.4 Ω at 20°C (68°F)**; fuel pump 0.2 to 3.0 Ω at 20°C; fuel sender gauge 13.5 to 16.5 Ω (float level F) and two other float ranges |
+
+Corpus-wide, only these values exist: the 1.0–1.1 mm range (45 chunks) and the 1.3 mm row
+(13 chunks in 8 documents); one operating fuel-pressure range (12 chunks); one injector value
+(6 chunks in 4 documents). No 2AZ-FE figure competes with any of them.
+
+### What changed in the eval files
+
+- `spark-plug-gap`: the old rule `/1\.[01]\s*mm/` accepted "1.0 mm" alone and said nothing about
+  the trap. It now requires the whole range, and its `qualifiedValues` rule allows 1.3 mm or
+  0.0512 in. only in a statement that calls it a maximum or a used-plug figure.
+- `fuel-pressure-spec`: the old rule accepted **any** two- or three-digit kPa or psi figure,
+  so "the fuel pressure is 147 kPa" passed. It now requires 304 to 343 kPa or 44.1 to 49.7 psi,
+  and allows 147 kPa, 21 psi, or 1.5 kgf/cm² only alongside their condition.
+- `fuel-injector-resistance`: requires 11.6 to 12.4 Ω stated as the injector's. The other rows
+  may be quoted, but only attached to their own component; qualifiers compete, so a swap fails
+  even inside one sentence.
+- **21 deterministic controls** in `answerQualityScoring.test.js`, reading the real case
+  definitions. They include every trap shape, and a check that no document title can qualify a
+  bare value — a claim line renders as `claim [title, page N]`, so a title word such as
+  "Replacement" could otherwise launder one. Three of them are verbatim live answers from this
+  run, byte-checked against the captures.
+- Replaying the old rules on four trap answers ("gap is 1.3 mm", "gap is 1.0 mm", "standard
+  fuel pressure is 147 kPa", "minimum 147 kPa"): **the old rules passed all four.**
+
+**An instrument limit these cases exposed.** `citationSupportsAny` reads the citation's
+220-character preview — the start of the chunk — not the verified passage. The fuel-pressure
+range lies beyond that window in **12 of 12** chunks that state it, the spark-plug range in **43
+of 45**, because table rows sit behind the page's breadcrumb header. The check would fail
+correct answers there, so none of these cases uses it. `docs/quality-testing.md` now says so.
+The scorer was not changed.
+
+### How promotion was decided
+
+The bar was set **before any live call**: an expectation confirmed on the PDF page, plus at
+least 10 of 10 fresh live observations under the final rule. Meeting the number is necessary,
+not sufficient. Result: **one promotion, 13 → 14** — `spark-plug-gap`. The other two stay
+templates, and the reasons are in Experiment D.
+
+## EXPERIMENT D — live answer eval, 2026-09-27
+
+**The fifth `eval:answers` run, and the first since N3 and N4 merged.** The scoring instrument
+is unchanged, and three case definitions changed as described above. It also measured two
+product changes, and this log records no live run for either before it merged:
+
+- **N4**'s evidence-contract changes (PRs #136, #137);
+- a T4 classifier fix, `d35499c`.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `npm run eval:answers`, 2026-09-27 02:17–02:22 (UTC−5) |
+| Revision | `796a84be26e9de8ae74b99523a16e1ca363b4f16` (`origin/main`, merge of PR #137) plus uncommitted eval-only changes |
+| Case definitions at run time | `answerQualityCases.js` blob `54c8bb6`. The file was later edited in comments only, and all rules are identical — the run-time blob was reconstructed and re-hashed to prove it |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693` — **byte-identical to experiments A, B, and C** |
+| Product changes since experiment C | `askEvidenceContract.js` `99d1007` → `6c8e25c` (N4: subject guards for volts, ohms, rpm, and degrees; electrical symbols). `defeatRequestClassifier.js` `6978381` → `d8a7826` (clause-scoped T4 exemption). Nothing in retrieval, prompts, model, or embeddings |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded at `text-embedding-3-small@512` — unchanged |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default; `.env` sets no override) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the **default 500 per process** applies, and no run came near it. Roadmap section 6 says the owner runs with 0; this machine's `.env` does not |
+| Cases | 44 (13 verified, 31 templates) — the 43 of experiment C plus `fuel-injector-resistance` |
+| Provider requests | **~81** for the run (43 embeddings, 37 answer/vision, 1 follow-up rewrite), derived from harness metrics as in B and C. Plus **78** for the follow-ups below (39 embeddings, 39 answers), so **~159** in total |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases — in the run and in all 39 follow-up observations |
+
+### Result
+
+**13/13 verified PASS. Exit code 0.** Templates 17/31. Overall **30/44**. On the 43 cases it
+shares with experiment C: **29/43**, against C's 33/43.
+
+| Category | D passed | C passed |
+| --- | --- | --- |
+| torque | 2/7 | 2/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 7/11 | 8/10 |
+| procedure | 6/9 | 8/9 |
+| behavior | 1/3 | 1/3 |
+| verifier | 6/6 | 6/6 |
+
+### Follow-up observations, same code path
+
+`npm run eval:answers` keeps no answer text, so two small follow-ups were made with a scratch
+harness (not committed). It calls `askQuestionUsingDocuments` with the runner's options and
+scores with `evaluateAnswerCase`. Its one addition is a pass-through wrapper around the real
+answer generator: it records the model's claims, so the verifier can be re-run locally for the
+full rejection records that the metrics sanitizer strips. The requests are the same as the
+runner's.
+
+- **Stability:** the three slice cases, 10 repeats each, interleaved, 02:23–02:26.
+- **Diagnosis:** the three previously stable templates that failed in the run, 3 repeats each,
+  02:26–02:27.
+
+| Case | Run | Repeats | Total |
+| --- | --- | --- | --- |
+| `spark-plug-gap` | PASS | 10/10 | **11/11** |
+| `fuel-injector-resistance` | PASS | 10/10 | **11/11** |
+| `fuel-pressure-spec` | PASS | 7/10 | **8/11** |
+| `thermostat-opening-temperature` | FAIL | 0/3 | 0/4 |
+| `charging-system-voltage` | FAIL | 0/3 | 0/4 |
+| `coolant-drain-and-refill` | FAIL | 3/3 | 3/4 |
+
+**Attribution without guessing.** Every captured claim was replayed, offline and with no
+provider call, through two versions of the verifier's number and subject checks. One was
+`askEvidenceContract.js` at `e44019e`, which is byte-identical to experiment C's. The other
+was today's. Of **102 captured claims**, the verdict changed on **exactly 3**, all of them for
+the thermostat.
+
+### Every case movement against experiment C
+
+| Case | C | D | Cause |
+| --- | --- | --- | --- |
+| `thermostat-opening-temperature` | PASS | **FAIL** | **N4 regression, proven** — see below |
+| `charging-system-voltage` | PASS | **FAIL** | not N4 — see below |
+| `coolant-drain-and-refill` | PASS | **FAIL** | intermittent: passed 3 of 3 afterwards; its captured rejections get the same verdict pre- and post-N4 |
+| `hazard-t3-airbag-module-shop-referral` | PASS | **FAIL** | documented instability: the expectation is not document-grounded (experiment B) |
+| `spark-plug-gap` | PASS | PASS | rule tightened — the two verdicts measure different things |
+| `fuel-pressure-spec` | PASS | PASS | rule tightened; 8/11 over the whole session |
+| `fuel-injector-resistance` | — | PASS | new |
+
+### N4 regression: the thermostat question now answers "not in documents"
+
+The model wrote the same claim every time:
+"The thermostat valve opening temperature standard value is 80 to 84°C (176 to 183°F)". It
+quoted doc 738's "Measure the valve opening temperature of the thermostat. Standard value: 80
+to 84°C (176 to 183°F)". The claim is correct, and its quote really is on the page.
+
+The **pre-N4** verifier accepts it. The **current** verifier rejects it as `subject_mismatch`:
+its parsed subject, "thermostat valve opening", does not occur as one run of words in a quote
+that says "valve opening temperature of the thermostat". With its only claim gone, the answer
+becomes `not_found`. This happened on 4 of 4 observations today, against 4 of 4 passes before N4.
+
+The same mechanism, word adjacency in the new families' subject check, was measured offline
+on correct injector wordings. "The fuel injector standard resistance is 11.6 to 12.4 Ω…" and
+"The standard fuel injector resistance is…" are both accepted by the pre-N4 verifier and
+rejected by today's.
+
+**Not fixed here.** Changing the verifier is N4 work, and this slice changes no production
+behaviour. `thermostat-opening-temperature` was left exactly as it was. Its expectation is not
+confirmed, and it is still a template, so the regression was visible only because the suite
+reports templates.
+
+### `charging-system-voltage` is not an N4 effect
+
+The verdicts are identical pre- and post-N4 on all 6 captured claims. The model now:
+
+- states that the manual's test is at 2000 rpm, not at idle — which is right: doc 717 p4
+  measures 13.2 to 14.8 V "while keeping the engine speed at 2000 rpm";
+- then claims "At 2000 rpm, the standard charging voltage is 13.2 to 14.8 V", while quoting
+  only "Standard voltage: 13.2 to 14.8 V".
+
+The number check rejects a claim whose own quote lacks "2000 rpm", and it does so in both
+versions. So the owner sees the condition, but the voltage itself is withheld.
+
+Why the earlier four runs passed is **unknown**, because no earlier answer text was kept. What
+is known: the template's regex passes any 13.x or 14.x V figure, including one stated bare
+under the question's false "at idle" premise — a wrong-condition answer the case cannot
+currently fail. The case is unchanged; fixing its expectation is follow-up work.
+
+### Why the other two slice cases were not promoted
+
+- **`fuel-pressure-spec` (8/11): the expectation is confirmed, the behavior is not stable.** All
+  three failures are one mechanism. The model wrote "The standard fuel **system** pressure is
+  304 to 343 kPa…", echoing the question. The subject guard rejected that correct claim,
+  because the quote says "Standard fuel pressure". The owner then saw only the 147 kPa hold
+  pressure, with the operating range redacted to "[unverified value]". The pressure family
+  predates N4, and the pre-N4 verifier rejects the same claims. The old rule would have
+  **passed** those answers, because "147 kPa" matched it. So the four earlier passes never
+  showed that the operating range reached the owner.
+- **`fuel-injector-resistance` (11/11): not promoted either.** All ten captured answers read,
+  word for word, "The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C
+  (68°F)." Two reasons hold it back:
+  - The evidence comes from one session. The engine-mount demotion is the record of what a
+    case can do between sessions.
+  - The pass depends on the model copying the quote's word order. The two correct rewordings
+    above are rejected by the N4 guard.
+
+  Promote it after an independent later run passes with the rule unchanged — sooner if that
+  false rejection is fixed first. The pump trap never appeared live, so its rule is proven only
+  by the deterministic controls.
+
+**Why `spark-plug-gap` was promoted:**
+
+- 11 of 11 under the final rule, after 4 of 4 under the old rule in four separate earlier runs.
+- The trap was exercised live, not vacuously. Each of the 10 captured answers also stated the
+  1.3 mm row, cited to **doc 724 page 6** — the page-boundary page — and always as "the maximum
+  electrode gap for a used spark plug".
+- Millimetres carry no subject check, and all 48 captured claims get the same verdict from the
+  pre-N4 verifier. A later change to the new N4 families cannot move it.
+
+### Two smaller verifier observations (not acted on)
+
+- `kgf/cm2` and `kgf*cm2` — the forms these manuals and the model actually write — are **not
+  recognised as units**. Values written that way are neither checked against their quote nor
+  redacted from gap text. `kgf/cm²` is half-recognised: it redacts to `[unverified value]²`.
+- In the redacted gap above, "304 to [unverified value]" and "44.1 to [unverified value]" leave
+  the lower bound of each range readable. That is the range limit roadmap section 2 already
+  documents, seen on a real answer. Here the rejected claim was correct, so nothing wrong
+  reached the owner.
+
+### Failure classification — 14 failures
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Verifier false rejection, **new in N4** | `thermostat-opening-temperature` |
+| Verifier rejection of a claim carrying a condition its quote omits (not N4) | `charging-system-voltage` |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant`, `water-pump-then-torque` (follow-up only) |
+| Answer generation / intermittent | `wheel-lug-nut-torque`, `front-lower-ball-joint-procedure`, `applicability-engine-mount-build-variant`, `coolant-drain-and-refill`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, refusal correct, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 42 metered cases (the two T4 cases meter zero by
+design). Retrieval 774ms mean / 623ms median (min 539, max 2,682). Answer 3,824ms mean /
+2,824ms median (max 11,145) over the 36 cases that call the answer model. Context 1,803
+tokens mean (min 1,189, max 2,382) — in line with B and C.
+
+### Limits, stated plainly
+
+- **Same-session evidence.** The 10-repeat stability check samples generation variance within
+  one session. It cannot show behaviour across sessions or days. For `spark-plug-gap`, the four
+  earlier runs supply that at the outcome level (answered, with a figure), but not under the
+  tightened rule.
+- **10 of 10 is a filter, not a proof.** It would reject a case that fails half the time (as the
+  engine-mount case did) with 99.9% probability. It would pass a 95%-reliable case about 60%
+  of the time.
+- **The N4 attribution covers the verifier only.** The prompt text and retrieval did not change
+  (checked). Model sampling is not replayable, so what the replay establishes is that the same
+  claim is accepted by one verifier version and rejected by the other.
+- The pump and sender trap rules of `fuel-injector-resistance` were never exercised live.
+- No production code, prompt, retrieval setting, verifier rule, or scoring rule was changed.
+  The only gating change is `spark-plug-gap` joining the verified set. Beyond this slice's three
+  cases, no case changed — including the four that regressed.
+
+Counts after this run: **44 cases, 14 verified, 30 templates.**
