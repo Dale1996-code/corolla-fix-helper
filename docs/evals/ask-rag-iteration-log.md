@@ -2059,3 +2059,113 @@ unchanged code, not a product signal.
   water-pump value check and the "Bolt A" defect above.
 
 Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+## EXPERIMENT F — live answer eval of the letter-designator fix, 2026-09-29
+
+**The seventh `eval:answers` run — and not a valid gate reading.** 11 of the 43 cases never got
+an answer from the provider. The connection dropped, and each of them failed as `fetch failed`,
+with no HTTP status. Six of the 11 are verified, so the gate reads 7/13 and the run exits 1.
+That is infrastructure, not the product:
+
+- every verified case that completed passed, 7 of 7;
+- no verified case failed on its own checks.
+
+A complete re-run at the same revision is still needed before this revision has a gate reading.
+
+### What is under test
+
+Against E, one product change: the verifier, merged at `296f165`.
+
+- `d0a39fb` keeps the letter A of a lettered part in the subject guard. The guard used to drop
+  it as the article "a", so "Bolt A" read as "bolt" and the quote for Bolt B certified it.
+- `87616bd` ignores "this" as intended. The plural rule had shortened it to "thi".
+- The merge joins them with E's word-order fix (`28ffc21`). It reconciles the two, so the
+  phrase readings tell the letter A from the article the same way the guard does.
+
+There is no retrieval, prompt, model, embedding, quote-check, or number-check change.
+
+Offline before this run, the 174 claims captured in C–E replayed through E's verifier and this
+one with no verdict change. The letter rule was chosen on a copy of the corpus; the method and
+figures are in `d0a39fb`'s message.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env src/scripts/evalAnswers.js`, run from the worktree's `server/`, the entry point `npm run eval:answers` uses. 2026-09-29 21:35:12–21:39:53 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `296f165c1a5651f47c7905d096fa2e8a05e70eb6`. The worktree was checked clean immediately before the run, and product and eval code are the same revision |
+| Data | `DATABASE_FILE` was a byte-for-byte copy of the real database. It matches the live file's MD5, `c1c5f794a261757569d846ca270ebcfd`; the live WAL was empty and the live main file has been unchanged since 2026-08-17, so this is the corpus E read. `UPLOADS_DIR` was an empty scratch folder. E pointed at the live files; the copy keeps the eval's read-write open (it sets WAL mode and would run any pending migration) away from real data. No case reads uploads: the vision case uses a committed fixture |
+| Case definitions | `answerQualityCases.js` blob `81de6c0`, identical to E |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693`, identical to A–E |
+| Verifier | `askEvidenceContract.js` blob `6000033`; E ran `2d9dd4f` |
+| Corpus | 1,443 documents / 20,447 chunks at `text-embedding-3-small@512`: the same bytes as E |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 43 (13 verified, 30 templates) |
+| Provider requests | **~61 completed**: 31 embeddings, 29 answer/vision, and 1 follow-up rewrite, derived from the per-case timing lines. Up to 11 more attempts failed at the network layer with no response |
+| Infrastructure noise | **11 network failures (`fetch failed`)**: the first case, and the last ten in a row. 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings. The API host answered normally when checked right after the run |
+
+The 11 cases that never ran, verified ones marked *: `oil-drain-plug-torque`*,
+`reject-wrong-component-torque`*, `reject-fabricated-quote`*, `reject-unsourced-guidance-spec`*,
+`reject-unsourced-gap-spec`*, `refuse-timing-belt-interval`*, `applicability-engine-variant-qualified`,
+`applicability-abs-variant-qualified`, `applicability-vehicle-height-wrong-engine`,
+`applicability-engine-mount-build-variant`, `applicability-abs-wiring-variant`.
+
+### Result
+
+**Exit code 1, from the network failures only.**
+
+| | Result |
+| --- | --- |
+| Verified | 7/13 — the 7 that completed all passed |
+| Templates | 15/30 — 15 of the 25 that completed |
+| Overall | 22/43 |
+| The 32 cases that completed | 22/32, against E's 25/32 on the same cases |
+
+### Every case movement against experiment E (the 32 cases that completed)
+
+| Case | E | F | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | PASS | FAIL | **Not shown.** It failed all five runs before E, and in E's capture it passed only when the model wrote "installation" (1 of 3) |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | **Not shown.** In E's capture it passed 2 of 3, once on a vacuous value check and once on an unparsed sentence shape |
+| `coolant-drain-and-refill` | PASS | FAIL | **Not shown.** It is on the documented unstable list |
+
+No case moved from FAIL to PASS. `thermostat-opening-temperature`, the case E fixed, still
+passes. The seven E failures that ran fail again, for their recorded reasons.
+
+**Offline replay, no provider calls:**
+
+- E captured 9 generations for the first two cases. Replayed through E's verifier and this one,
+  every generation gets the same status and the same accepted claims.
+- The only difference is the subject reported for two already-rejected "Bolt A" claims. Doc
+  730's run-together table text rejects them either way.
+- This run kept no answer text, so a wording the capture never saw is not ruled out.
+
+**`reject-wrong-component-torque`**, the verified probe aimed at the subject guard, was one of
+the cases the network failure lost. It was rebuilt offline with the runner's own probe builder
+on the three real chunks E used (#240, #14359, #14369) and run through this revision's verifier.
+Each claim cleared the number check and was rejected as `subject_mismatch`, with status
+`not_found`: the probe still bites.
+
+### Retrieval and latency shape
+
+These cover the cases that completed:
+
+- retrieval 1,288ms mean / 1,117ms median (min 609, max 3,154), over 30 cases;
+- answer 5,101ms mean / 3,292ms median (max 21,351), over 28 cases.
+
+This is same-machine timing on a network that failed mid-run, not a product signal.
+
+### Limits, stated plainly
+
+- **No gate reading for `296f165` yet.** Four of the six verifier probes and two further
+  verified cases did not run. The probe most relevant to this change was checked offline only.
+- **n = 1, with no answer text kept.** The three template movements are unattributed. Two of them
+  have a measured history of passing only on particular wordings.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
