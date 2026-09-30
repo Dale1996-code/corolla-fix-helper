@@ -69,6 +69,14 @@ const VERIFIED_IDS = [
   // and DEMOTED on 2026-08-22, taking the gate 13 -> 14 -> 13. It is still a
   // case, and its rules are unchanged; it is only no longer allowed to gate the
   // build. See the note on the case itself for why.
+  //
+  // N1, 2026-09-27, 13 -> 14. The first verified TABLE-DERIVED value, and the
+  // first verified case whose table holds a wrong value one row away (the 1.3 mm
+  // used-plug maximum). Its expectation was confirmed on the rendered PDF pages,
+  // and it passed 11 of 11 live observations under its current rule. Its two
+  // siblings from the same slice stay templates: fuel-pressure-spec passed only
+  // 8 of 11, and fuel-injector-resistance has single-session evidence only.
+  "spark-plug-gap",
 ];
 
 const VALID_CATEGORIES = new Set([
