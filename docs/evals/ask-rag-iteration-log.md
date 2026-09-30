@@ -2456,3 +2456,171 @@ This is same-machine timing on a network that failed mid-run, not a product sign
   setting, or verifier rule, and no case was promoted.
 
 Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+## EXPERIMENT G — live answer eval of the combined verifier and N1 slice, 2026-09-30
+
+**The eighth `eval:answers` run, and the first gate reading for the letter-designator fix.
+14/14 verified PASS. Exit code 0.** Every case got a provider answer and there were 0 network
+failures, so F's inconclusive reading is superseded, not repeated.
+
+- It is also the first run that gates on the N1 slice. `spark-plug-gap` passes its first gating
+  run, and both slice templates pass.
+- Against D, whose case rules it shares, the only movement in 44 cases is the one E fixed:
+  `thermostat-opening-temperature` now passes.
+- Against E, four templates went from PASS back to FAIL, three of them the same three F lost.
+  None is a verified case. None is shown to be this change, but one has a possible mechanism,
+  found offline and described below.
+
+### What is under test
+
+Against E, two changes, both on this branch:
+
+- **Product:** the verifier merged at `296f165`, the same code F ran. `d0a39fb` keeps the letter
+  A of a lettered part in the subject guard, and `87616bd` ignores "this" as intended. The merge
+  reconciles both with E's word-order fix (`28ffc21`).
+- **Instrument:** the N1 table-trap slice (`c3e413f`, merged at `367c6a0`).
+  - `spark-plug-gap` now gates under its tightened rule (13 → 14 verified).
+  - `fuel-pressure-spec` carries its tightened rule.
+  - `fuel-injector-resistance` is new.
+
+  These are the rules D ran; E and F ran `origin/main`'s.
+
+There is no retrieval, prompt, model, embedding, quote-check, number-check, or scoring change.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env src/scripts/evalAnswers.js`, as in F, run from the worktree's `server/`: the entry point `npm run eval:answers` uses. 2026-09-30 14:29:17–14:34:05 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `a7fc0b2acf926ac20dacd1e41965b05b64b3938f`. The run command itself checked the revision and a clean worktree, and would not have started otherwise |
+| Data | `DATABASE_FILE` was a fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` before and after the run: the corpus E and F read. The live WAL was empty, and the live file's MD5 and timestamp (2026-08-17) were unchanged afterwards. `UPLOADS_DIR` was an empty scratch folder |
+| Network | Before the run, three unauthenticated requests to the API host returned HTTP 401 in under 0.3s. No key was sent |
+| Case definitions | `answerQualityCases.js` blob `01dc9ed`: the N1 slice |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693`, identical to A–F |
+| Verifier | `askEvidenceContract.js` blob `6000033`, identical to F; E ran `2d9dd4f` |
+| Corpus | 1,443 documents / 20,447 chunks, all at `text-embedding-3-small@512`, re-counted read-only on the copy |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 44 (14 verified, 30 templates) |
+| Provider requests | **~81**: 43 embeddings, 37 answer/vision, and 1 follow-up rewrite, derived from the per-case timing lines as in F. The same count as D |
+| Infrastructure noise | **None.** 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 17/30. Overall **31/44**.
+
+| Category | G | E | D |
+| --- | --- | --- | --- |
+| torque | 2/7 | 3/7 | 2/7 |
+| refusal | 8/8 | 8/8 | 8/8 |
+| capacity | 8/11 | 7/10 | 7/11 |
+| procedure | 6/9 | 8/9 | 6/9 |
+| behavior | 1/3 | 2/3 | 1/3 |
+| verifier | 6/6 | 6/6 | 6/6 |
+
+- **Against D, on all 44 cases: 31 against 30.** The one movement is
+  `thermostat-opening-temperature`, FAIL → PASS: the regression E fixed.
+- **Against E, on the 43 cases they share: 30 against 34.** Four movements, all templates, all
+  PASS → FAIL. E ran looser rules for `spark-plug-gap` and `fuel-pressure-spec`; both pass in
+  both runs.
+- **All six verifier probes ran and passed.** That includes `reject-wrong-component-torque`, the
+  probe aimed at the subject guard, which F could check only offline.
+
+### The N1 slice's three cases
+
+| Case | G | Record under the same rule |
+| --- | --- | --- |
+| `spark-plug-gap` (verified) | PASS | 12 of 12: D's run, its 10 repeats, and this first gating run |
+| `fuel-pressure-spec` | PASS | 9 of 12. All three earlier failures were one mechanism: the "standard fuel **system** pressure" false rejection, which E's word-order fix removes offline. This is the first live observation since that fix |
+| `fuel-injector-resistance` | PASS | 12 of 12, and the first observation from a second session |
+
+Nothing was promoted.
+
+- `fuel-injector-resistance`'s note sets its bar as an independent later run that passes with the
+  rule unchanged. This run is one, with the rule unchanged (`01dc9ed`), so the case is now a
+  candidate for the owner's decision. Its pump trap has still never appeared live.
+- `fuel-pressure-spec` needs more than one observation after its fix before it can be called
+  stable.
+
+### Every case movement against experiment E
+
+| Case | E | G | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | PASS | FAIL (`not_found`) | **No, as far as can be checked.** It failed all five runs before E, D included, and F. Offline, all five wordings tried (two from E's capture, three constructed) get the same verdict from E's verifier and this one |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | **Possible, not shown.** A mechanism exists; see below. Also failed in D and F |
+| `coolant-drain-and-refill` | PASS | FAIL (`not_found`) | **Not shown.** It is on the documented unstable list, and also failed in D and F |
+| `front-lower-ball-joint-procedure` | PASS | FAIL (missing "control arm"/"knuckle") | **No.** The answer was given but lacked the expected term, exactly D's failure; nothing was rejected. It is on the documented unstable list |
+
+No case moved from FAIL to PASS against E. On all four, G matches D, which ran before both E's
+fix and this one.
+
+**`water-pump-then-torque`: a mechanism, checked offline, no provider calls.** The follow-up's
+evidence is chunk #2075, doc 730 p1. Its table was extracted as "…sub-assembly BoltA 26 260 18
+Bolt B 24 245 18": the A is run into "Bolt", while the B stands apart.
+
+- **The flip.** E's verifier treated the A of a short, correct claim such as "The Bolt A torque
+  is 26 N·m" as the article and dropped it. It then matched the remaining "bolt" to the Bolt B
+  row and accepted the claim. This verifier keeps the A, finds no "bolt a" in the quote, and
+  rejects the claim.
+- **The count.** 9 wordings were checked against that quote: 3 from E's capture and 6
+  constructed.
+  - 2 flip from accepted to rejected, both constructed short "Bolt A" wordings.
+  - 2 more differ only in the subject reported for a claim both versions reject.
+  - Every "Bolt B" wording is unchanged.
+- **What it means.** E could certify a Bolt A value only through Bolt B's word, which is the
+  grounding `d0a39fb` exists to refuse. The rejection is the safe one CLAUDE.md describes. The
+  root cause is doc 730's extraction, already recorded above.
+- **What it does not show.** The run kept no answer text, so whether G's model wrote such a
+  wording is unknown. F's replay of all 9 generations in E's capture found no status or
+  accepted-claim change. The case's value check is vacuous (`N\b`), so a PASS here never showed
+  that a torque reached the owner.
+
+### Failure classification — 13 failures
+
+Assigned from the failure signatures, since no answer text was kept.
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Verifier false rejection, new in N4 | **none** |
+| Number check: the claim carries a condition its quote omits (not N4) | `charging-system-voltage`, failing its value check as in F; D established the cause |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant` |
+| Answer generation / intermittent | `applicability-engine-mount-build-variant`, `front-lower-ball-joint-procedure`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+| Server-derived `not_found`; the cause cannot be separated without the claims | `wheel-lug-nut-torque` (every verifier version rejects its usual "lug nut" wording), `water-pump-then-torque` (above), `coolant-drain-and-refill` |
+
+**One observation, not acted on: `engine-oil-capacity` did not refuse this time.**
+
+- It failed only its value check. The server derived `answered` or `partial` with at least one
+  citation, and no stated value matched the template's 4.4 qt / 4.2 L. In F it returned
+  `not_found`.
+- The corpus's only "oil capacity" is the A/C compressor's (see the N1 baseline's
+  classification), so whatever was accepted is likely not the engine's.
+- It cannot be checked without the answer text, and the case is a template, so it gates nothing.
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 42 metered cases; the two T4 cases meter zero by
+design. Context averaged 1,803 tokens (min 1,189, max 2,382), against E's 1,802 and D's 1,803.
+
+- retrieval 907ms mean / 702ms median (min 585, max 4,674);
+- answer 4,327ms mean / 3,340ms median (max 11,803), over the 36 cases that call the answer
+  model.
+
+This is same-machine timing on unchanged retrieval, not a product signal.
+
+### Limits, stated plainly
+
+- **n = 1, with no answer text kept.** The four template movements are classified from failure
+  signatures, and two of them from offline checks on constructed wordings, not from this run's
+  own claims.
+- **A capture would settle the water pump and the lug nut.** The D/E capture method records the
+  raw claims. It costs extra provider requests and was not run.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
