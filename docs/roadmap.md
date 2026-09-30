@@ -356,7 +356,8 @@ the quote. "The thermostat valve opening temperature … is 80 to 84°C" is reje
 now answers "not in documents" (0 of 4 today, 4 of 4 before N4). Of 102 claims captured that
 day and replayed through the pre-N4 verifier, those thermostat claims were the only verdicts
 that changed. The same effect was reproduced offline on correct fuel-injector resistance
-wordings. Not fixed; see the
+wordings. Fixed by the N4 word-order follow-up (`28ffc21`): the thermostat question passes
+again in Experiment E, and both injector wordings are accepted offline. See the
 [iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* two decisions, each needing its own reviewed change —
 (1) unit-sensitive numeric tolerance: the shared `max(0.51 absolute, 2% relative)`
