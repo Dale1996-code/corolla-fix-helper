@@ -912,6 +912,149 @@ test("the ASCII ohm spellings were already covered and still are", () => {
   assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
+// ---- Subject guard: word order and generic words (Experiment D, 2026-09-27) ----
+//
+// The first live answer eval after N4 found the subject guard rejecting CORRECT
+// claims against their own verbatim quotes. Every part word was in the quote --
+// just not as one unbroken run in the claim's order. The first and last pairs
+// are real claim and quote text from that run, byte for byte; the two injector
+// wordings were reproduced offline against the real table row.
+
+test("a correct claim naming the part in a different word order is verified", () => {
+  const cases = [
+    // Live, 4 of 4 observations: the quote names the part after "of the".
+    [
+      "The thermostat valve opening temperature standard value is 80 to 84°C (176 to 183°F).",
+      "Measure the valve opening temperature of the thermostat. Standard value: 80 to 84°C (176 to 183°F)",
+    ],
+    // The quote has "assembly" between the part and the qualifier.
+    [
+      `The fuel injector standard resistance is 11.6 to 12.4 ${OMEGA} at 20°C (68°F).`,
+      `Fuel injector assembly Standard resistance 11.6 to 12.4 ${OMEGA} at 20°C (68°F)`,
+    ],
+    // The qualifier leads the part in the claim and trails it in the quote.
+    [
+      `The standard fuel injector resistance is 11.6 to 12.4 ${OMEGA} at 20°C (68°F).`,
+      `Fuel injector assembly Standard resistance 11.6 to 12.4 ${OMEGA} at 20°C (68°F)`,
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.deepEqual(result.rejected, [], claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("a correct claim adding the generic word 'system' is verified", () => {
+  // Live, 3 of 11 fuel-pressure observations: the model echoed the question's
+  // "fuel system pressure", and the quote says "fuel pressure". "System" names
+  // no component, so its absence from the quote is not a different part.
+  const result = verifySingleClaim(
+    "The standard fuel system pressure is 304 to 343 kPa (3.1 to 3.5 kgf/cm2, 44.1 to 49.7 psi).",
+    "Fuel pressure Standard fuel pressure 304 to 343 kPa (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi)"
+  );
+
+  assert.deepEqual(result.rejected, []);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("a correct claim adding the procedure word 'installation' is verified", () => {
+  // Live, 2 claims in the same run: the quote says "Install the water drain
+  // cock", the claim says "water drain cock installation torque". The word
+  // names the step, not the part.
+  const result = verifySingleClaim(
+    "The water drain cock installation torque is 20 Nm (204 kgf-cm, 15 ft-lbf).",
+    "Install the water drain cock as shown in the illustration. Torque : 20 Nm (204 kgf-cm, 15 ft-lbf)"
+  );
+
+  assert.deepEqual(result.rejected, []);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+// The relaxations above must not become a general "all the words are in there
+// somewhere" rule. Each case below is a WRONG part whose words all occur in the
+// quote. Measured on 2026-09-27: set membership over the quote or a clause, and
+// an ordered subsequence, each accept several of these; the current contiguous
+// rule rejects every one, and must keep doing so.
+test("the word-order relaxation still rejects a different part built from the quote's words", () => {
+  const cases = [
+    // Flattened table rows: the values are the only thing between two labels.
+    ["The front brake pad thickness is 1.0 mm.", "Front brake disc thickness 25.0 mm Rear brake pad thickness 1.0 mm"],
+    [
+      "The rear engine mounting insulator bolt torque is 52 Nm.",
+      "Front engine mounting insulator bolt 52 530 38 Rear engine mounting bracket bolt 87 887 64",
+    ],
+    [
+      `The left front wheel speed sensor resistance is 1.2 k${OMEGA}.`,
+      `Right front wheel speed sensor 1.2 k${OMEGA} Left rear wheel speed sensor 1.4 k${OMEGA}`,
+    ],
+    // One label naming two sides.
+    ["The front brake pad thickness is 1.0 mm.", "Rear brake pad and front disc minimum thickness: 1.0 mm"],
+    // The claim names a shorter part than the quote: "EGR valve" is not the
+    // valve of the EGR cooler bypass, and "drive shaft nut" is not the drive
+    // shaft bearing lock nut.
+    [
+      "The EGR valve opening temperature is 95°C.",
+      "Measure the valve opening temperature of the EGR cooler bypass. Standard value: 95°C",
+    ],
+    ["The drive shaft nut torque is 216 Nm.", "Drive shaft bearing lock nut 216 N*m"],
+    // "standard" may move, but it must still be there: a minimum is not a standard.
+    ["The standard brake disc thickness is 10.0 mm.", "Brake disc minimum thickness: 10.0 mm"],
+    // ...and it must be there in the SAME row. In a flattened table the brake
+    // pad's "standard" is not the brake disc's; 10.0 mm is the disc minimum.
+    [
+      "The standard brake disc thickness is 10.0 mm.",
+      "Brake pad standard thickness 12.0 mm Brake disc minimum thickness 10.0 mm",
+    ],
+    // "system" is optional, but the system it names is not.
+    ["The cooling system pressure is 304 kPa.", "Fuel pressure: 304 kPa"],
+    ["The system pressure is 304 kPa.", "Fuel pressure: 304 kPa"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const subject = checkClaimSubject(claim, quote);
+
+    assert.equal(subject.checked, true, `no subject was parsed: ${claim}`);
+    assert.equal(subject.grounded, false, `${claim} was accepted against: ${quote}`);
+  }
+});
+
+test("the letter A gets the same word-order reading as any other letter", () => {
+  // The phrase readings were built from lowercased words, where a letter A is
+  // indistinguishable from the article: it was dropped from every reading, and
+  // "the bolt A of" stopped the search for the owned phrase as if it were "a".
+  // So "Bolt B" could be read across "of" and "Bolt A" never could.
+  const shapes = [
+    [
+      (letter) => `The water pump Bolt ${letter} torque is 26 N·m.`,
+      (letter) => `Tighten the bolt ${letter} of the water pump. Torque: 26 N·m`,
+    ],
+    [
+      (letter) => `The sensor ${letter} resistance is 2.4 k${OMEGA}.`,
+      (letter) => `Resistance of sensor ${letter}: 2.4 k${OMEGA}`,
+    ],
+  ];
+
+  for (const [claim, quote] of shapes) {
+    for (const letter of ["A", "B"]) {
+      const result = verifySingleClaim(claim(letter), quote(letter));
+
+      assert.deepEqual(result.rejected, [], `${claim(letter)} <= ${quote(letter)}`);
+      assert.equal(result.documentSupported.length, 1, claim(letter));
+    }
+
+    // Still the letter that was quoted, in either direction.
+    for (const [claimed, quoted] of [["A", "B"], ["B", "A"]]) {
+      const result = verifySingleClaim(claim(claimed), quote(quoted));
+
+      assert.equal(result.documentSupported.length, 0, `${claim(claimed)} <= ${quote(quoted)}`);
+      assert.equal(result.rejected[0].reason, "subject_mismatch");
+    }
+  }
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
@@ -1075,4 +1218,146 @@ test("the detailed rejection fields stay available for server-side diagnosis", (
   assert.match(byReason.get("numeric_anomaly").claim, /54 Nm/);
   assert.ok(byReason.get("numeric_anomaly").unsupported.some((raw) => raw.includes("54")));
   assert.equal(byReason.get("subject_mismatch").subject, "oil filter cap");
+});
+
+// ---- Letter designators ----
+//
+// Manuals name parts by letter: "Bolt A", "Connector C", Speed Sensor "A". The
+// subject parser ignores the article "a", and it used to drop the letter A along
+// with it, so a claim about Bolt A was checked as a claim about "bolt" and a
+// quote about Bolt B certified it. B through H were never dropped: only A was.
+
+test("a claim about Bolt A is not certified by the quote for Bolt B", () => {
+  // From a real V-ribbed belt page, where Bolt A is 19 N*m and Bolt B is 43 N*m.
+  // Stating Bolt B's value for Bolt A passed as "bolt".
+  const quote = "Torque: Bolt B: 43 N*m (438 kgf*cm, 32 ft*lbf)";
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        { claim: "The Bolt A torque is 43 N·m.", sourceId: "S1", evidenceQuote: quote },
+      ],
+    }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "subject_mismatch");
+  assert.equal(result.rejected[0].subject, "bolt a");
+});
+
+test("a lettered part is not certified by a quote naming another letter", () => {
+  const cases = [
+    // The cooling specifications table: water pump Bolt A is 26 N*m, Bolt B 24.
+    [
+      "The water pump Bolt A torque is 24 N·m (245 kgf·cm, 18 ft·lbf).",
+      "Water pump Bolt B torque 24 N·m (245 kgf·cm, 18 ft·lbf)",
+    ],
+    // The letter has to END the parsed subject to have been lost: "Connector A
+    // terminal 1" against "Connector C terminal 1" was already rejected, because
+    // the quote's "c" breaks the run.
+    [
+      `The Connector A resistance is 10 k${OMEGA} or higher.`,
+      `Connector C resistance 10 k${OMEGA} or higher`,
+    ],
+    // Diagnostic trouble code names print the letter in quotation marks.
+    [
+      'The Vehicle Speed Sensor "A" voltage is 4.5 V.',
+      'Vehicle Speed Sensor "B" voltage 4.5 V',
+    ],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "subject_mismatch", claim);
+  }
+});
+
+test("a lettered part is still certified by a quote naming the same letter", () => {
+  const cases = [
+    ["The Bolt A torque is 19 N·m.", "Torque: Bolt A: 19 N*m (190 kgf*cm, 14 ft*lbf)"],
+    ["The Bolt B torque is 43 N·m.", "Torque: Bolt B: 43 N*m (438 kgf*cm, 32 ft*lbf)"],
+    [
+      "The water pump Bolt A torque is 26 N·m (260 kgf·cm, 18 ft·lbf).",
+      "Water pump Bolt A torque 26 N·m (260 kgf·cm, 18 ft·lbf)",
+    ],
+    [
+      `The Connector A resistance is 10 k${OMEGA} or higher.`,
+      `Connector A resistance 10 k${OMEGA} or higher`,
+    ],
+    // Quotation marks or brackets around the letter do not change which part it is.
+    ['The Vehicle Speed Sensor "A" voltage is 4.5 V.', "Vehicle Speed Sensor (A) voltage 4.5 V"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the article a is still never part of the subject", () => {
+  // Only a capital A standing alone right after another word is read as a
+  // letter. The article -- lowercase mid-sentence, capitalized at the start --
+  // is ignored exactly as before, on both the claim and the quote side, so a
+  // paraphrase that adds or drops it is not rejected over it.
+  const cases = [
+    ["Tighten a bolt to 24 N·m.", "Tighten the bolt. Torque : 24 N·m", "bolt"],
+    ["A new drain plug torque is 37 Nm.", "Install a new drain plug. Torque : 37 Nm", "new drain plug"],
+    [
+      "Torque the oil drain plug using a new gasket to 37 Nm.",
+      "Install the oil drain plug using new gasket. Torque : 37 Nm",
+      "oil drain plug using new gasket",
+    ],
+    [
+      "Torque the oil drain plug using new gasket to 37 Nm.",
+      "Install the oil drain plug using a new gasket. Torque : 37 Nm",
+      "oil drain plug using new gasket",
+    ],
+  ];
+
+  for (const [claim, quote, subject] of cases) {
+    const result = verifyEvidence(
+      payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+      [chunk({ chunkText: quote })]
+    );
+
+    assert.equal(checkClaimSubject(claim, quote).subject, subject, claim);
+    assert.equal(result.rejected.length, 0, claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+test("the A of an acronym such as A/F is not read as a letter", () => {
+  // "A/F" (air-fuel) and "A/C" split into pieces, and their A was dropped as the
+  // article. It still is: only an A standing alone as a word is a letter, so
+  // these subjects are unchanged.
+  const quote = `A/F sensor heater resistance 1.8 ${OMEGA}`;
+  const claim = `The A/F sensor heater resistance is 1.8 ${OMEGA}.`;
+
+  assert.equal(checkClaimSubject(claim, quote).subject, "f sensor heater");
+  assert.equal(checkClaimSubject(claim, quote).grounded, true);
+});
+
+test('"this" is ignored like the other determiners', () => {
+  // "this" was on the ignore list but never matched it: the plural rule had
+  // already shortened it to "thi", so "this bolt" demanded a word "thi".
+  const claim = "Tighten this bolt to 24 N·m.";
+  const quote = "Tighten the bolt. Torque : 24 N·m";
+  const result = verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText: quote })]
+  );
+
+  assert.equal(checkClaimSubject(claim, quote).subject, "bolt");
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
 });

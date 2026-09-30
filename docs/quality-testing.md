@@ -45,7 +45,11 @@ your `OPENAI_API_KEY` set (it costs a few cents per full run). For each question
   include what it refers to before searching?
 - **Citation grounding** (optional, `citationSupportsAny`): does at least one cited snippet
   actually contain the asserted value, so a confidently-worded answer cannot pass on a
-  citation that does not back it up?
+  citation that does not back it up? The snippet it reads is the citation's 220-character
+  *preview* — the start of the chunk — not the whole verified passage. A value further into
+  its chunk is invisible to it, and that is where almost every row of a specification table
+  sits, behind the page's breadcrumb header. Leave the check off such a case rather than let
+  it fail correct answers; `spark-plug-gap` and `fuel-pressure-spec` explain the measurement.
 
 It prints a scorecard and **fails if any verified case fails.** New template cases (including
 the broader engine/brakes/cooling/electrical/suspension/transmission/fuel/HVAC coverage and a

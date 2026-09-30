@@ -71,8 +71,9 @@ state a plan imagined.
   occurred inside instructional comments; the runtime `VERIFIED_IDS` set is the gating
   authority. N1 raised the suite to 14 verified of 43, then back to 13 when
   `applicability-engine-mount-build-variant` was demoted for varying at the product level.
-  Almost every remaining idea in this roadmap is a change whose value can only be judged by
-  that suite.
+  A September slice took it to 14 of 44 with the first verified table-derived value
+  (`spark-plug-gap`). Almost every remaining idea in this roadmap is a change whose value can
+  only be judged by that suite.
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
@@ -136,7 +137,7 @@ this alone.
 | # | Item | Priority | Maintenance |
 | --- | --- | --- | --- |
 | N0 | Recover the zero-chunk corpus | **Done** | Neutral (on-demand batch tooling) |
-| N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 13 verified) | Slight increase (test data only) |
+| N1 | Grow the verified answer-eval set | Critical — **in progress** (8 → 14 verified) | Slight increase (test data only) |
 | N2 | Repair the eval suite's own defects | **Done** | Reduces |
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
@@ -199,6 +200,14 @@ the finish line: this item ends when the failure classes above are covered, not 
 count, and several are still represented only by unverified templates. Experiment B's own
 conclusion — that the suite is now the limiting instrument — is the argument for continuing
 N1, not for declaring it done.
+*September 2026 slice — table-derived values with a same-table trap:* three cases whose
+expected values were confirmed on the rendered PDF pages, each asking for a table value that
+has a different, genuinely printed value one row away. `spark-plug-gap` is verified (14 of
+44), the first gate on a table-derived value and on a wrong-row value in real generation.
+`fuel-pressure-spec` and `fuel-injector-resistance` report as templates for now. Still
+covered only by templates: two sections that disagree, OCR-noisy pages, and follow-up
+questions. See Experiment D in the
+[iteration log](evals/ask-rag-iteration-log.md).
 
 **N2 — Repair the eval suite's own defects. Done, August 2026.**
 *Problem it solves:* the vision case `vision-refuses-unsupported-spec` fails every run
@@ -340,6 +349,16 @@ compare with one another exactly as before. Nothing converts between `mV` and `V
 between `kΩ` and `Ω`. The ASCII spellings `ohm`, `kohm`, and `kOhm` were already detected
 and are unchanged. Because the detector is shared, the Repair Planner's numeric check and
 gap redaction see these symbols too; planner subject guarding is still not covered.
+*Measured after merge (Experiment D, 2026-09-27, the first live answer eval since N4):* the
+new families' subject check rejects correct claims whose words are ordered differently from
+the quote. "The thermostat valve opening temperature … is 80 to 84°C" is rejected against
+"valve opening temperature of the thermostat … 80 to 84°C", so `thermostat-opening-temperature`
+now answers "not in documents" (0 of 4 today, 4 of 4 before N4). Of 102 claims captured that
+day and replayed through the pre-N4 verifier, those thermostat claims were the only verdicts
+that changed. The same effect was reproduced offline on correct fuel-injector resistance
+wordings. Fixed by the N4 word-order follow-up (`28ffc21`): the thermostat question passes
+again in Experiment E, and both injector wordings are accepted offline. See the
+[iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* two decisions, each needing its own reviewed change —
 (1) unit-sensitive numeric tolerance: the shared `max(0.51 absolute, 2% relative)`
 comparison lets `0.9 V` match `0.5 V` and `12 Ω` match `12.5 Ω`, which predates the symbol

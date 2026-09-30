@@ -1769,3 +1769,858 @@ unchanged retrieval path, not a product signal, and no conclusion is drawn from 
   decision and is deliberately not bundled here.
 
 Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+---
+
+## N1 — table-derived specifications with a same-table trap (2026-09-27)
+
+Roadmap item N1, one slice. Work on the measuring instrument only: no production Ask,
+retrieval, prompt, model, or verifier code was changed. The live measurements behind the
+decisions are recorded in **Experiment D** below.
+
+### Which failure classes lacked reliable coverage
+
+The roadmap names six failure classes for N1. Before this slice the verified gate (13 of 43)
+covered them like this:
+
+| Failure class | Verified coverage before | After this slice |
+| --- | --- | --- |
+| Correct number, wrong component | `reject-wrong-component-torque` only — a probe with an impossible part name; it tests the verifier, never real generation | `spark-plug-gap` gates a wrong-**row** value in real generation; `fuel-injector-resistance` (wrong **component**) reports as a template |
+| Two manual sections that disagree | none (the applicability cases are templates) | unchanged |
+| Table-derived values | none — `oil-drain-plug-torque` is answered from procedure text, not the torque table | **`spark-plug-gap`** |
+| OCR-noisy pages | none (`applicability-abs-wiring-variant`, a template failing on retrieval) | unchanged |
+| Follow-up questions | none (`water-pump-then-torque`, a template failing on the follow-up) | unchanged |
+| Questions the manuals do not answer | `refuse-turbo-boost-pressure`, `refuse-timing-belt-interval`, three fictional refusals | unchanged |
+
+### Why these three cases
+
+A service-data table is where the two uncovered classes meet: the value is table-derived, and
+the row next to it holds a different, genuinely printed value that is wrong for the question.
+The verifier cannot catch that mistake — the wrong value really is in the quote, and so is the
+part name — so the answer eval is the only place it can fail. Two of the three cases were
+already templates that had passed all four earlier live runs, which made them the cheapest
+route to cases whose behaviour could be judged in one session.
+
+- **`spark-plug-gap`** (improved). The trap is the used-plug maximum one row below the answer.
+- **`fuel-pressure-spec`** (improved). The trap is the pressure held five minutes after the
+  engine stops, in a second row that carries the same "Standard fuel pressure" label.
+- **`fuel-injector-resistance`** (new). The trap is the fuel pump's and the fuel sender's
+  resistance, printed in the same table under the same "Standard resistance" label.
+
+### The evidence, checked on the PDF pages
+
+The pages were rendered to images with `pdftoppm` and read visually, so the check does not
+rely on the app's own text extraction. Each source file's MD5 matched `documents.file_md5`.
+
+| Case | Page | What it prints |
+| --- | --- | --- |
+| `spark-plug-gap` | doc 226 p1 (2ZR-FE engine control service data) | Electrode gap **1.0 to 1.1 mm (0.0394 to 0.0433 in.)**; maximum electrode gap **1.3 mm (0.0512 in.) for used plug** |
+| `spark-plug-gap` | doc 724 p5–6 (ignition on-vehicle inspection) | the same two values. The label "Maximum Electrode Gap for Used Spark Plug:" **ends page 5** while its value opens page 6 as a bare "Electrode Gap 1.3 mm", directly above the new-plug range |
+| `fuel-pressure-spec` | doc 573 p1 (2ZR-FE fuel service data) | Standard fuel pressure **304 to 343 kPa (3.1 to 3.5 kgf/cm², 44.1 to 49.7 psi)**; standard fuel pressure "at fuel pressure remains for 5 minutes after engine has stopped" **147 kPa (1.5 kgf/cm², 21 psi) or more** |
+| `fuel-pressure-spec` | doc 578 p2–3 (fuel system on-vehicle inspection) | steps j and m measure 304 to 343 kPa (pump forced on, then at idle); step o checks that 147 kPa or more remains for 5 minutes after the engine stops |
+| `fuel-injector-resistance` | doc 573 p1 | fuel injector assembly **11.6 to 12.4 Ω at 20°C (68°F)**; fuel pump 0.2 to 3.0 Ω at 20°C; fuel sender gauge 13.5 to 16.5 Ω (float level F) and two other float ranges |
+
+Corpus-wide, only these values exist: the 1.0–1.1 mm range (45 chunks) and the 1.3 mm row
+(13 chunks in 8 documents); one operating fuel-pressure range (12 chunks); one injector value
+(6 chunks in 4 documents). No 2AZ-FE figure competes with any of them.
+
+### What changed in the eval files
+
+- `spark-plug-gap`: the old rule `/1\.[01]\s*mm/` accepted "1.0 mm" alone and said nothing about
+  the trap. It now requires the whole range, and its `qualifiedValues` rule allows 1.3 mm or
+  0.0512 in. only in a statement that calls it a maximum or a used-plug figure.
+- `fuel-pressure-spec`: the old rule accepted **any** two- or three-digit kPa or psi figure,
+  so "the fuel pressure is 147 kPa" passed. It now requires 304 to 343 kPa or 44.1 to 49.7 psi,
+  and allows 147 kPa, 21 psi, or 1.5 kgf/cm² only alongside their condition.
+- `fuel-injector-resistance`: requires 11.6 to 12.4 Ω stated as the injector's. The other rows
+  may be quoted, but only attached to their own component; qualifiers compete, so a swap fails
+  even inside one sentence.
+- **21 deterministic controls** in `answerQualityScoring.test.js`, reading the real case
+  definitions. They include every trap shape, and a check that no document title can qualify a
+  bare value — a claim line renders as `claim [title, page N]`, so a title word such as
+  "Replacement" could otherwise launder one. Three of them are verbatim live answers from this
+  run, byte-checked against the captures.
+- Replaying the old rules on four trap answers ("gap is 1.3 mm", "gap is 1.0 mm", "standard
+  fuel pressure is 147 kPa", "minimum 147 kPa"): **the old rules passed all four.**
+
+**An instrument limit these cases exposed.** `citationSupportsAny` reads the citation's
+220-character preview — the start of the chunk — not the verified passage. The fuel-pressure
+range lies beyond that window in **12 of 12** chunks that state it, the spark-plug range in **43
+of 45**, because table rows sit behind the page's breadcrumb header. The check would fail
+correct answers there, so none of these cases uses it. `docs/quality-testing.md` now says so.
+The scorer was not changed.
+
+### How promotion was decided
+
+The bar was set **before any live call**: an expectation confirmed on the PDF page, plus at
+least 10 of 10 fresh live observations under the final rule. Meeting the number is necessary,
+not sufficient. Result: **one promotion, 13 → 14** — `spark-plug-gap`. The other two stay
+templates, and the reasons are in Experiment D.
+
+## EXPERIMENT D — live answer eval, 2026-09-27
+
+**The fifth `eval:answers` run, and the first since N3 and N4 merged.** The scoring instrument
+is unchanged, and three case definitions changed as described above. It also measured two
+product changes, and this log records no live run for either before it merged:
+
+- **N4**'s evidence-contract changes (PRs #136, #137);
+- a T4 classifier fix, `d35499c`.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `npm run eval:answers`, 2026-09-27 02:17–02:22 (UTC−5) |
+| Revision | `796a84be26e9de8ae74b99523a16e1ca363b4f16` (`origin/main`, merge of PR #137) plus uncommitted eval-only changes |
+| Case definitions at run time | `answerQualityCases.js` blob `54c8bb6`. The file was later edited in comments only, and all rules are identical — the run-time blob was reconstructed and re-hashed to prove it |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693` — **byte-identical to experiments A, B, and C** |
+| Product changes since experiment C | `askEvidenceContract.js` `99d1007` → `6c8e25c` (N4: subject guards for volts, ohms, rpm, and degrees; electrical symbols). `defeatRequestClassifier.js` `6978381` → `d8a7826` (clause-scoped T4 exemption). Nothing in retrieval, prompts, model, or embeddings |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded at `text-embedding-3-small@512` — unchanged |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default; `.env` sets no override) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the **default 500 per process** applies, and no run came near it. Roadmap section 6 says the owner runs with 0; this machine's `.env` does not |
+| Cases | 44 (13 verified, 31 templates) — the 43 of experiment C plus `fuel-injector-resistance` |
+| Provider requests | **~81** for the run (43 embeddings, 37 answer/vision, 1 follow-up rewrite), derived from harness metrics as in B and C. Plus **78** for the follow-ups below (39 embeddings, 39 answers), so **~159** in total |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases — in the run and in all 39 follow-up observations |
+
+### Result
+
+**13/13 verified PASS. Exit code 0.** Templates 17/31. Overall **30/44**. On the 43 cases it
+shares with experiment C: **29/43**, against C's 33/43.
+
+| Category | D passed | C passed |
+| --- | --- | --- |
+| torque | 2/7 | 2/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 7/11 | 8/10 |
+| procedure | 6/9 | 8/9 |
+| behavior | 1/3 | 1/3 |
+| verifier | 6/6 | 6/6 |
+
+### Follow-up observations, same code path
+
+`npm run eval:answers` keeps no answer text, so two small follow-ups were made with a scratch
+harness (not committed). It calls `askQuestionUsingDocuments` with the runner's options and
+scores with `evaluateAnswerCase`. Its one addition is a pass-through wrapper around the real
+answer generator: it records the model's claims, so the verifier can be re-run locally for the
+full rejection records that the metrics sanitizer strips. The requests are the same as the
+runner's.
+
+- **Stability:** the three slice cases, 10 repeats each, interleaved, 02:23–02:26.
+- **Diagnosis:** the three previously stable templates that failed in the run, 3 repeats each,
+  02:26–02:27.
+
+| Case | Run | Repeats | Total |
+| --- | --- | --- | --- |
+| `spark-plug-gap` | PASS | 10/10 | **11/11** |
+| `fuel-injector-resistance` | PASS | 10/10 | **11/11** |
+| `fuel-pressure-spec` | PASS | 7/10 | **8/11** |
+| `thermostat-opening-temperature` | FAIL | 0/3 | 0/4 |
+| `charging-system-voltage` | FAIL | 0/3 | 0/4 |
+| `coolant-drain-and-refill` | FAIL | 3/3 | 3/4 |
+
+**Attribution without guessing.** Every captured claim was replayed, offline and with no
+provider call, through two versions of the verifier's number and subject checks. One was
+`askEvidenceContract.js` at `e44019e`, which is byte-identical to experiment C's. The other
+was today's. Of **102 captured claims**, the verdict changed on **exactly 3**, all of them for
+the thermostat.
+
+### Every case movement against experiment C
+
+| Case | C | D | Cause |
+| --- | --- | --- | --- |
+| `thermostat-opening-temperature` | PASS | **FAIL** | **N4 regression, proven** — see below |
+| `charging-system-voltage` | PASS | **FAIL** | not N4 — see below |
+| `coolant-drain-and-refill` | PASS | **FAIL** | intermittent: passed 3 of 3 afterwards; its captured rejections get the same verdict pre- and post-N4 |
+| `hazard-t3-airbag-module-shop-referral` | PASS | **FAIL** | documented instability: the expectation is not document-grounded (experiment B) |
+| `spark-plug-gap` | PASS | PASS | rule tightened — the two verdicts measure different things |
+| `fuel-pressure-spec` | PASS | PASS | rule tightened; 8/11 over the whole session |
+| `fuel-injector-resistance` | — | PASS | new |
+
+### N4 regression: the thermostat question now answers "not in documents"
+
+The model wrote the same claim every time:
+"The thermostat valve opening temperature standard value is 80 to 84°C (176 to 183°F)". It
+quoted doc 738's "Measure the valve opening temperature of the thermostat. Standard value: 80
+to 84°C (176 to 183°F)". The claim is correct, and its quote really is on the page.
+
+The **pre-N4** verifier accepts it. The **current** verifier rejects it as `subject_mismatch`:
+its parsed subject, "thermostat valve opening", does not occur as one run of words in a quote
+that says "valve opening temperature of the thermostat". With its only claim gone, the answer
+becomes `not_found`. This happened on 4 of 4 observations today, against 4 of 4 passes before N4.
+
+The same mechanism, word adjacency in the new families' subject check, was measured offline
+on correct injector wordings. "The fuel injector standard resistance is 11.6 to 12.4 Ω…" and
+"The standard fuel injector resistance is…" are both accepted by the pre-N4 verifier and
+rejected by today's.
+
+**Not fixed here.** Changing the verifier is N4 work, and this slice changes no production
+behaviour. `thermostat-opening-temperature` was left exactly as it was. Its expectation is not
+confirmed, and it is still a template, so the regression was visible only because the suite
+reports templates.
+
+### `charging-system-voltage` is not an N4 effect
+
+The verdicts are identical pre- and post-N4 on all 6 captured claims. The model now:
+
+- states that the manual's test is at 2000 rpm, not at idle — which is right: doc 717 p4
+  measures 13.2 to 14.8 V "while keeping the engine speed at 2000 rpm";
+- then claims "At 2000 rpm, the standard charging voltage is 13.2 to 14.8 V", while quoting
+  only "Standard voltage: 13.2 to 14.8 V".
+
+The number check rejects a claim whose own quote lacks "2000 rpm", and it does so in both
+versions. So the owner sees the condition, but the voltage itself is withheld.
+
+Why the earlier four runs passed is **unknown**, because no earlier answer text was kept. What
+is known: the template's regex passes any 13.x or 14.x V figure, including one stated bare
+under the question's false "at idle" premise — a wrong-condition answer the case cannot
+currently fail. The case is unchanged; fixing its expectation is follow-up work.
+
+### Why the other two slice cases were not promoted
+
+- **`fuel-pressure-spec` (8/11): the expectation is confirmed, the behavior is not stable.** All
+  three failures are one mechanism. The model wrote "The standard fuel **system** pressure is
+  304 to 343 kPa…", echoing the question. The subject guard rejected that correct claim,
+  because the quote says "Standard fuel pressure". The owner then saw only the 147 kPa hold
+  pressure, with the operating range redacted to "[unverified value]". The pressure family
+  predates N4, and the pre-N4 verifier rejects the same claims. The old rule would have
+  **passed** those answers, because "147 kPa" matched it. So the four earlier passes never
+  showed that the operating range reached the owner.
+- **`fuel-injector-resistance` (11/11): not promoted either.** All ten captured answers read,
+  word for word, "The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C
+  (68°F)." Two reasons hold it back:
+  - The evidence comes from one session. The engine-mount demotion is the record of what a
+    case can do between sessions.
+  - The pass depends on the model copying the quote's word order. The two correct rewordings
+    above are rejected by the N4 guard.
+
+  Promote it after an independent later run passes with the rule unchanged — sooner if that
+  false rejection is fixed first. The pump trap never appeared live, so its rule is proven only
+  by the deterministic controls.
+
+**Why `spark-plug-gap` was promoted:**
+
+- 11 of 11 under the final rule, after 4 of 4 under the old rule in four separate earlier runs.
+- The trap was exercised live, not vacuously. Each of the 10 captured answers also stated the
+  1.3 mm row, cited to **doc 724 page 6** — the page-boundary page — and always as "the maximum
+  electrode gap for a used spark plug".
+- Millimetres carry no subject check, and all 48 captured claims get the same verdict from the
+  pre-N4 verifier. A later change to the new N4 families cannot move it.
+
+### Two smaller verifier observations (not acted on)
+
+- `kgf/cm2` and `kgf*cm2` — the forms these manuals and the model actually write — are **not
+  recognised as units**. Values written that way are neither checked against their quote nor
+  redacted from gap text. `kgf/cm²` is half-recognised: it redacts to `[unverified value]²`.
+- In the redacted gap above, "304 to [unverified value]" and "44.1 to [unverified value]" leave
+  the lower bound of each range readable. That is the range limit roadmap section 2 already
+  documents, seen on a real answer. Here the rejected claim was correct, so nothing wrong
+  reached the owner.
+
+### Failure classification — 14 failures
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Verifier false rejection, **new in N4** | `thermostat-opening-temperature` |
+| Verifier rejection of a claim carrying a condition its quote omits (not N4) | `charging-system-voltage` |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant`, `water-pump-then-torque` (follow-up only) |
+| Answer generation / intermittent | `wheel-lug-nut-torque`, `front-lower-ball-joint-procedure`, `applicability-engine-mount-build-variant`, `coolant-drain-and-refill`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, refusal correct, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 42 metered cases (the two T4 cases meter zero by
+design). Retrieval 774ms mean / 623ms median (min 539, max 2,682). Answer 3,824ms mean /
+2,824ms median (max 11,145) over the 36 cases that call the answer model. Context 1,803
+tokens mean (min 1,189, max 2,382) — in line with B and C.
+
+### Limits, stated plainly
+
+- **Same-session evidence.** The 10-repeat stability check samples generation variance within
+  one session. It cannot show behaviour across sessions or days. For `spark-plug-gap`, the four
+  earlier runs supply that at the outcome level (answered, with a figure), but not under the
+  tightened rule.
+- **10 of 10 is a filter, not a proof.** It would reject a case that fails half the time (as the
+  engine-mount case did) with 99.9% probability. It would pass a 95%-reliable case about 60%
+  of the time.
+- **The N4 attribution covers the verifier only.** The prompt text and retrieval did not change
+  (checked). Model sampling is not replayable, so what the replay establishes is that the same
+  claim is accepted by one verifier version and rejected by the other.
+- The pump and sender trap rules of `fuel-injector-resistance` were never exercised live.
+- No production code, prompt, retrieval setting, verifier rule, or scoring rule was changed.
+  The only gating change is `spark-plug-gap` joining the verified set. Beyond this slice's three
+  cases, no case changed — including the four that regressed.
+
+Counts after this run: **44 cases, 14 verified, 30 templates.**
+
+## N4 follow-up — subject guard word order (2026-09-27)
+
+Experiment D found N4's subject guard rejecting **correct** claims whose words came in a
+different order from their quote. D is recorded with the N1 table-trap slice, which had not
+merged when this entry was written. This entry is the fix; experiment E below is its live run.
+
+### What changed
+
+`checkClaimSubject` in `askEvidenceContract.js` keeps its old test unchanged and still runs it
+first: the claim's subject words must occur in the quote as one unbroken run. When that fails,
+a second test can still accept the claim. It never rejects anything the old test accepted.
+
+The new test works within one **phrase** of the quote. A phrase is a clause, cut again at bare
+numbers so that flattened table rows stay apart. Inside a phrase, word order is relaxed in
+exactly three ways:
+
+- "X of the Y" also reads as "Y X", so "valve opening temperature of the thermostat" supports
+  "thermostat valve opening temperature";
+- the table label "standard" may sit anywhere in the phrase, but it must be in the phrase;
+- "system" and "installation" may be missing on either side. They name no component.
+
+Every other word of the part name must still be present, unbroken and in order. The test is
+deterministic word matching: no model, no embeddings, no similarity score.
+
+### Choosing the rule: measured, not assumed
+
+Candidate rules were scored offline against 49 labelled claim–quote pairs: 18 correct claims,
+and 31 wrong-part claims built only from words in their own quote. They were then scored
+against the 102 live claims captured in experiment D. No provider calls.
+
+| Candidate rule | False rejects (of 18) | False accepts (of 31) | Live claims rejected on subject (of 102) |
+| --- | --- | --- | --- |
+| One unbroken run (released) | 8 | 1 | 10 |
+| Ordered subsequence, whole quote | 7 | 5 | 10 |
+| Word set, whole quote | 4 | 11 | 7 |
+| Word set, within one clause | 4 | 9 | 7 |
+| Word set, within one number-free segment | 4 | 5 | 7 |
+| Ordered, within one segment | 7 | 3 | 10 |
+| Phrase readings, longer word lists | 1 | 1 | 2 |
+| **Phrase readings, minimal word lists (chosen)** | **3** | **1** | **2** |
+
+- **Both obvious relaxations fail the "still reject a different part" rule.**
+  - An ordered subsequence fixes one false reject and adds four false accepts: it joins
+    words across sentences ("Front brake caliper … Rear brake pad").
+  - A word set within a clause adds eight. Flattened table text puts several rows in one
+    clause, so "front brake pad" can be assembled from "Front brake disc…" and "…Rear brake
+    pad" in the next row.
+  - The real corpus gives both rules plenty of room: 516 clauses contain both "front" and
+    "rear", 675 both "left" and "right", 278 both "intake" and "exhaust", 140 both "upper"
+    and "lower".
+  - Making "system" and "installation" optional under the segment-set rule fixed its live
+    rejections but kept all 5 of its false accepts.
+- **The chosen rule keeps the part's words together and relaxes only what real claims needed.**
+  - In the corpus, "standard" comes right after a word and right before a specification noun
+    ("Fuel injector assembly Standard resistance") in 285 chunks. "Minimum" does so in 1,
+    "maximum" in none.
+  - "System" and "installation" come from live claims.
+  - The longer-list variant also let "minimum" and "maximum" float, and made "assembly" and
+    "sub" optional. That fixed two synthetic probes with no live claim behind them, so it was
+    not taken.
+- **Its one false accept is the released rule's too:** a claim can borrow a part named in
+  another row of the same long quote. That boundary is unchanged, and the new tests do not claim
+  to close it.
+- **Remaining false rejects:** "fuel pressure specification for…", where the claim parser picks
+  the wrong subject and a parser change is needed, plus the two synthetic probes above. Of the
+  two live claims still rejected, the second is correct to reject: its quote, "Torque : 20 Nm",
+  never names the part.
+
+### Verified offline
+
+- **Replay:** all 102 captured claims went through the full verifier, every check, released
+  against candidate. Exactly **8** verdicts change, all from rejected to accepted: "standard
+  fuel system pressure" ×3, the thermostat ×3, "water drain cock (plug) installation torque"
+  ×2. **None** changes from accepted to rejected.
+- **Tests:** `server/test/askEvidenceContract.test.js` gains four tests.
+  - Three cover five correct claims: the thermostat, two injector wordings, fuel "system"
+    pressure, and drain-cock "installation" torque. The released verifier rejects all five as
+    `subject_mismatch`.
+  - One pins ten wrong-part claims that every relaxation must still reject. Among them are
+    flattened rows, "EGR valve" against "the EGR cooler bypass", and a brake pad's "standard"
+    borrowed by the brake disc in the next row.
+- **Mutation check:** each part of the rule was loosened or removed in turn, 9 mutations in
+  all. Every one fails at least one test.
+- **Verifier probe:** `reject-wrong-component-torque` still bites. On the three real chunks where
+  it can be built (#240, #14359, #14369), its numbers pass and its verdict is
+  `subject_mismatch`.
+- The rule is documented in `docs/api.md`, `AGENTS.md`, and `CLAUDE.md`.
+
+## EXPERIMENT E — live answer eval of the word-order fix, 2026-09-27
+
+**The sixth `eval:answers` run.** Against experiment D, exactly one production change is under
+test: the subject-check fix above, uncommitted. The case definitions are `origin/main`'s, not
+the N1 slice's. So this run compares with **C on all 43 cases**, and with **D on the 41 cases
+whose rules match**.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env src/scripts/evalAnswers.js`, run from the worktree's `server/` — the entry point `npm run eval:answers` uses — with `DATABASE_FILE` and `UPLOADS_DIR` pointed at the main checkout's real data. 2026-09-27 18:24–18:29 (UTC−5). The API key was read from that file and never copied or printed |
+| Base revision | `796a84be26e9de8ae74b99523a16e1ca363b4f16` (`origin/main`, merge of PR #137) — the same base as D |
+| Candidate state | **uncommitted worktree** on that base: `askEvidenceContract.js` `6c8e25c` → `2d9dd4f`, `askEvidenceContract.test.js` → `33b04ba`, and a one-sentence statement of the rule in each of `docs/api.md`, `AGENTS.md`, `CLAUDE.md`. All were last written before the run started |
+| Product change since D | `checkClaimSubject`'s added phrase test. **Nothing else** — no retrieval, prompt, model, embedding, quote-check, or number-check change |
+| Case definitions | `answerQualityCases.js` blob `81de6c0` (`origin/main`); no commit has touched it since C, so the rules are C's. Compared case by case with D's run-time file, comments ignored: only `spark-plug-gap` and `fuel-pressure-spec` differ, and `fuel-injector-resistance` is absent |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693` — **byte-identical to experiments A–D** |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded at `text-embedding-3-small@512` — re-counted read-only after the run |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default; `.env` sets no override) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 43 (13 verified, 30 templates) |
+| Provider requests | **~79** (42 embeddings, 36 answer/vision, 1 follow-up rewrite), derived from harness metrics. The same derivation reproduces D's recorded ~81 exactly. Plus **21** for the owner-approved capture below (9 embeddings, 3 rewrites, 9 answers), so **~100** in total |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases — in the run and in all 6 capture observations |
+
+### Result
+
+**13/13 verified PASS. Exit code 0.** Templates 21/30. Overall **34/43**, against C's 33/43 on
+the same cases. On the 41 cases shared with D: **32/41**, against D's 27/41 — five
+improvements, no regressions.
+
+| Category | E passed | C passed |
+| --- | --- | --- |
+| torque | 3/7 | 2/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 7/10 | 8/10 |
+| procedure | 8/9 | 8/9 |
+| behavior | 2/3 | 1/3 |
+| verifier | 6/6 | 6/6 |
+
+### Every case movement against experiment D
+
+| Case | D | E | Attributable to the fix? |
+| --- | --- | --- | --- |
+| `thermostat-opening-temperature` | FAIL | **PASS** | **Yes — the mechanism is proven offline** |
+| `wheel-lug-nut-torque` | FAIL | **PASS** | **Very likely** — in the capture below, the only wording that passed is one the released verifier rejects |
+| `water-pump-then-torque` | FAIL | **PASS** | **No** — in the capture below, the fix changed no verdict for this case |
+| `coolant-drain-and-refill` | FAIL | **PASS** | **Not shown** — documented as unstable; it passed 3 of 3 right after D's run, without the fix |
+| `front-lower-ball-joint-procedure` | FAIL | **PASS** | **No** — documented as unstable (FAIL, PASS, FAIL, FAIL, FAIL, PASS over six runs); D's failure was a missing "control arm"/"knuckle" term, not a `not_found` |
+
+No shared case went from PASS to FAIL. The change only ever turns a rejected claim into an
+accepted one; the replay found 0 of 102 moving the other way. So a regression would have needed
+a newly accepted claim to break a case, such as a refusal that now answers. All 8 refusal cases
+and all 6 verifier cases pass.
+
+**The thermostat regression D found is fixed.** In D the model wrote the same claim on every
+captured observation, and the case failed on all 4. The released verifier rejects that claim
+against its quote. The candidate accepts it, and the exact pair is now a unit test. The case
+rule is the same in both runs, and nothing else in the product changed. This run kept no answer
+text, so what is proven is the mechanism, not that E's model wrote the identical sentence. The
+case passed on all four runs before N4, and passes again here.
+
+Compared with C, which ran before N4, three cases improved: `wheel-lug-nut-torque`,
+`water-pump-then-torque`, and `front-lower-ball-joint-procedure`. Two regressed:
+
+- **`charging-system-voltage`** fails for the reason D established. Its claim carries "2000 rpm"
+  and its quote omits it, so the number check rejects it. This change does not touch that
+  check.
+- **`hazard-t3-airbag-module-shop-referral`** has an expectation that no retrieved chunk
+  supports (experiment B).
+
+### Two cases that had never passed
+
+`wheel-lug-nut-torque`, and the follow-up of `water-pump-then-torque`, failed on **all five**
+earlier runs. Both pass here, in the same run. The run kept no answer text, so the owner then
+approved one targeted capture to find out why.
+
+**The capture.** Three rounds alternating the two cases, 2026-09-27 19:07–19:09 (UTC−5): 21
+provider requests (9 embeddings, 3 rewrites, 9 answers). It used the same code, settings, and data
+as the run above.
+
+- A scratch script (not committed) calls `askQuestionUsingDocuments` exactly as the runner
+  does, including the follow-up history, built the same way.
+- Its one addition is a pass-through recorder around the real answer generator. The recorder
+  keeps the model's raw claims and the exact chunks the model was shown.
+- Each observation was then replayed offline through both the released and the candidate
+  verifier, and scored with the eval's own scorer.
+
+In all 9 generations, the candidate replay reproduced the live status and rendered answer
+exactly. That is what makes "what would the released verifier have done?" answerable.
+
+| Round | Case | What the model claimed | Released | Candidate | Result |
+| --- | --- | --- | --- | --- | --- |
+| 1, 2 | lug nut | "The front wheel **lug nut** torque is 103 Nm (1050 kgf-cm, 76 ft-lbf)." | rejected | rejected | FAIL |
+| 3 | lug nut | "The front wheel **installation** torque is 103 Nm (1050 kgf-cm, 76 ft-lbf)." | rejected | **accepted** | **PASS, only with the fix** |
+| 1, 2 | water pump follow-up | "The water pump assembly to timing chain or belt cover sub-assembly Bolt A torque is 26 N·m…", and the same for Bolt B, 24 N·m (round 2's words; round 1 added a vehicle prefix and "specification") | rejected | rejected | round 1 a false PASS (below), round 2 FAIL |
+| 3 | water pump follow-up | "The torque specification for water pump assembly to timing chain or belt cover sub-assembly Bolt A is 26 N·m…", and the same for Bolt B | accepted, no subject parsed | accepted, no subject parsed | PASS |
+
+**`wheel-lug-nut-torque`: the fix is what makes it passable.**
+
+- All three answers quote the same chunk, #240, doc 109 p6: "k. Install the front wheel.
+  Torque : 103 Nm (1050 kgf-cm, 76 ft-lbf)".
+- When the model says "installation", only the candidate accepts it.
+- When the model echoes the question's "lug nut", both verifiers reject it, because the quote
+  never names a nut. That is the deliberate safe rejection CLAUDE.md describes, and nothing
+  here changes it.
+- Under the released verifier, all three observations would fail, matching the 0-for-5 history.
+- E's own wording was not kept. But the only passing wording seen here needs the fix, so E's pass
+  is very likely the fix.
+
+**`water-pump-then-torque`: the fix is not the explanation.** Every claim in all three
+observations got the same verdict from both verifiers, and the case scores 2 of 3 either way.
+
+- **The evidence text is run together.** The torque evidence is chunk #2075, doc 730 p1,
+  "Mechanical Specifications — 2009 Toyota Corolla L4 1.8L (2ZR FE) Service Manual", extracted as
+  "WaterpumpassemblyxTimingchainorbeltcoversub-assembly BoltA 26 260 18 Bolt B 24 245 18". The
+  values are right, but no part name in a claim can match that text, so the ordinary wording in
+  rounds 1 and 2 is rejected by any version of the subject check.
+- **Round 3 passed unchecked.** Its sentence shape, "The torque specification for X is …",
+  leaves the subject parser nothing to check. This is the unusual-sentence-shape boundary
+  CLAUDE.md documents, observed live.
+- **Round 1 passed without showing the owner a torque.** Both torque claims were rejected and
+  shown only as "[unverified value]" gaps. The follow-up still passed for two reasons: one
+  non-numeric claim was accepted ("fastened … with 5 bolts"), and the value check is vacuous. The
+  case's `/N\b|N·m|Nm|ft/i` is case-insensitive, so `N\b` matches any word ending in "n", such as
+  "chain" or "specification".
+
+**Two earlier classifications were wrong.** In both cases the server had derived `not_found`
+itself, which is why the claims were needed to tell the causes apart.
+
+- Experiment B called the lug-nut failure answer generation. It is a verifier rejection of a
+  claim naming a part the quote does not.
+- Earlier runs called the water-pump follow-up a retrieval miss. The evidence was retrieved every
+  time; its claims are rejected because of how the text was extracted.
+
+### Verifier observations from the capture (not acted on)
+
+- **`water-pump-then-torque`'s follow-up value check is vacuous.** The case-insensitive `N\b`
+  matches ordinary words. Tightening it is eval work for a later slice. Until then, a PASS on that
+  case does not show that a torque reached the owner.
+- **Doc 730's specification table was extracted without spaces between words.** Correct claims
+  about it can pass the subject check only when no subject is parsed. That is a source-quality
+  limit, like the overprinted-text entry above, not a verifier rule to relax.
+- **A single-letter designator is dropped as if it were the article "a", so "Bolt A" matches
+  "Bolt B".** Both verifier versions accept the wrong claim "The water pump Bolt A torque is 24
+  N·m" against a quote for Bolt B, and correctly reject "Bolt C".
+  - This false accept predates this change, and this change does not touch it.
+  - 30 chunks in 6 documents pair lettered siblings, e.g. "Connector A terminal 1 – Connector C
+    terminal 1 … 10 kΩ or higher".
+  - It was split off as its own task rather than bundled into this fix.
+
+### Failure classification — 9 failures
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Verifier false rejection, new in N4 | **none — `thermostat-opening-temperature` left this row** |
+| Verifier rejection of a claim carrying a condition its quote omits (number check, not N4) | `charging-system-voltage` |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant` |
+| Answer generation / intermittent | `applicability-engine-mount-build-variant`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, refusal correct, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 41 metered cases; the two T4 cases meter zero by
+design. Context averaged 1,802 tokens (min 1,189, max 2,382), against D's 1,803. That is
+expected: nothing before the answer model changed.
+
+Timing was slower than D:
+
+- retrieval 1,338ms mean / 830ms median (min 639, max 6,471);
+- answer 4,413ms mean / 3,756ms median (max 13,144), over the 35 cases that call the answer
+  model.
+
+The verifier runs after the model returns and adds no request. This is same-machine timing on
+unchanged code, not a product signal.
+
+### Limits, stated plainly
+
+- **The run itself is n = 1, and it kept no answer text.** The capture settled two movements with
+  three observations each: the lug nut (very likely the fix) and the water pump (not the fix).
+  Three observations show a mechanism, not a pass rate. `coolant-drain-and-refill` and
+  `front-lower-ball-joint-procedure` remain unattributed, and both are on the documented
+  unstable list.
+- **This run used `origin/main`'s cases**, so it re-measures neither the N1 slice's tightened
+  `spark-plug-gap` and `fuel-pressure-spec` rules nor `fuel-injector-resistance`.
+  - Offline, the fix accepts all three captured "standard fuel system pressure" claims. That
+    was `fuel-pressure-spec`'s only failure mechanism in D.
+  - It also accepts both injector rewordings D cited against promotion.
+  - Whether either case is now stable enough to promote needs a fresh measurement after both
+    changes land. It is not decided here.
+- **The relaxation is lexical.** It shows the part's words are in one phrase of the quote, not
+  that the claim follows from it. The CLAUDE.md boundary is unchanged.
+- **Nothing was changed in response to this run or the capture:** no eval case, scoring rule,
+  retrieval setting, or verifier rule, and no case was promoted. That includes the vacuous
+  water-pump value check and the "Bolt A" defect above.
+
+Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+## EXPERIMENT F — live answer eval of the letter-designator fix, 2026-09-29
+
+**The seventh `eval:answers` run — and not a valid gate reading.** 11 of the 43 cases never got
+an answer from the provider. The connection dropped, and each of them failed as `fetch failed`,
+with no HTTP status. Six of the 11 are verified, so the gate reads 7/13 and the run exits 1.
+That is infrastructure, not the product:
+
+- every verified case that completed passed, 7 of 7;
+- no verified case failed on its own checks.
+
+A complete re-run at the same revision is still needed before this revision has a gate reading.
+
+### What is under test
+
+Against E, one product change: the verifier, merged at `296f165`.
+
+- `d0a39fb` keeps the letter A of a lettered part in the subject guard. The guard used to drop
+  it as the article "a", so "Bolt A" read as "bolt" and the quote for Bolt B certified it.
+- `87616bd` ignores "this" as intended. The plural rule had shortened it to "thi".
+- The merge joins them with E's word-order fix (`28ffc21`). It reconciles the two, so the
+  phrase readings tell the letter A from the article the same way the guard does.
+
+There is no retrieval, prompt, model, embedding, quote-check, or number-check change.
+
+Offline before this run, the 174 claims captured in C–E replayed through E's verifier and this
+one with no verdict change. The letter rule was chosen on a copy of the corpus; the method and
+figures are in `d0a39fb`'s message.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env src/scripts/evalAnswers.js`, run from the worktree's `server/`, the entry point `npm run eval:answers` uses. 2026-09-29 21:35:12–21:39:53 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `296f165c1a5651f47c7905d096fa2e8a05e70eb6`. The worktree was checked clean immediately before the run, and product and eval code are the same revision |
+| Data | `DATABASE_FILE` was a byte-for-byte copy of the real database. It matches the live file's MD5, `c1c5f794a261757569d846ca270ebcfd`; the live WAL was empty and the live main file has been unchanged since 2026-08-17, so this is the corpus E read. `UPLOADS_DIR` was an empty scratch folder. E pointed at the live files; the copy keeps the eval's read-write open (it sets WAL mode and would run any pending migration) away from real data. No case reads uploads: the vision case uses a committed fixture |
+| Case definitions | `answerQualityCases.js` blob `81de6c0`, identical to E |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693`, identical to A–E |
+| Verifier | `askEvidenceContract.js` blob `6000033`; E ran `2d9dd4f` |
+| Corpus | 1,443 documents / 20,447 chunks at `text-embedding-3-small@512`: the same bytes as E |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 43 (13 verified, 30 templates) |
+| Provider requests | **~61 completed**: 31 embeddings, 29 answer/vision, and 1 follow-up rewrite, derived from the per-case timing lines. Up to 11 more attempts failed at the network layer with no response |
+| Infrastructure noise | **11 network failures (`fetch failed`)**: the first case, and the last ten in a row. 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings. The API host answered normally when checked right after the run |
+
+The 11 cases that never ran, verified ones marked *: `oil-drain-plug-torque`*,
+`reject-wrong-component-torque`*, `reject-fabricated-quote`*, `reject-unsourced-guidance-spec`*,
+`reject-unsourced-gap-spec`*, `refuse-timing-belt-interval`*, `applicability-engine-variant-qualified`,
+`applicability-abs-variant-qualified`, `applicability-vehicle-height-wrong-engine`,
+`applicability-engine-mount-build-variant`, `applicability-abs-wiring-variant`.
+
+### Result
+
+**Exit code 1, from the network failures only.**
+
+| | Result |
+| --- | --- |
+| Verified | 7/13 — the 7 that completed all passed |
+| Templates | 15/30 — 15 of the 25 that completed |
+| Overall | 22/43 |
+| The 32 cases that completed | 22/32, against E's 25/32 on the same cases |
+
+### Every case movement against experiment E (the 32 cases that completed)
+
+| Case | E | F | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | PASS | FAIL | **Not shown.** It failed all five runs before E, and in E's capture it passed only when the model wrote "installation" (1 of 3) |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | **Not shown.** In E's capture it passed 2 of 3, once on a vacuous value check and once on an unparsed sentence shape |
+| `coolant-drain-and-refill` | PASS | FAIL | **Not shown.** It is on the documented unstable list |
+
+No case moved from FAIL to PASS. `thermostat-opening-temperature`, the case E fixed, still
+passes. The seven E failures that ran fail again, for their recorded reasons.
+
+**Offline replay, no provider calls:**
+
+- E captured 9 generations for the first two cases. Replayed through E's verifier and this one,
+  every generation gets the same status and the same accepted claims.
+- The only difference is the subject reported for two already-rejected "Bolt A" claims. Doc
+  730's run-together table text rejects them either way.
+- This run kept no answer text, so a wording the capture never saw is not ruled out.
+
+**`reject-wrong-component-torque`**, the verified probe aimed at the subject guard, was one of
+the cases the network failure lost. It was rebuilt offline with the runner's own probe builder
+on the three real chunks E used (#240, #14359, #14369) and run through this revision's verifier.
+Each claim cleared the number check and was rejected as `subject_mismatch`, with status
+`not_found`: the probe still bites.
+
+### Retrieval and latency shape
+
+These cover the cases that completed:
+
+- retrieval 1,288ms mean / 1,117ms median (min 609, max 3,154), over 30 cases;
+- answer 5,101ms mean / 3,292ms median (max 21,351), over 28 cases.
+
+This is same-machine timing on a network that failed mid-run, not a product signal.
+
+### Limits, stated plainly
+
+- **No gate reading for `296f165` yet.** Four of the six verifier probes and two further
+  verified cases did not run. The probe most relevant to this change was checked offline only.
+- **n = 1, with no answer text kept.** The three template movements are unattributed. Two of them
+  have a measured history of passing only on particular wordings.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **43 cases, 13 verified, 30 templates** — unchanged.
+
+## EXPERIMENT G — live answer eval of the combined verifier and N1 slice, 2026-09-30
+
+**The eighth `eval:answers` run, and the first gate reading for the letter-designator fix.
+14/14 verified PASS. Exit code 0.** Every case got a provider answer and there were 0 network
+failures, so F's inconclusive reading is superseded, not repeated.
+
+- It is also the first run that gates on the N1 slice. `spark-plug-gap` passes its first gating
+  run, and both slice templates pass.
+- Against D, whose case rules it shares, the only movement in 44 cases is the one E fixed:
+  `thermostat-opening-temperature` now passes.
+- Against E, four templates went from PASS back to FAIL, three of them the same three F lost.
+  None is a verified case. None is shown to be this change, but one has a possible mechanism,
+  found offline and described below.
+
+### What is under test
+
+Against E, two changes, both on this branch:
+
+- **Product:** the verifier merged at `296f165`, the same code F ran. `d0a39fb` keeps the letter
+  A of a lettered part in the subject guard, and `87616bd` ignores "this" as intended. The merge
+  reconciles both with E's word-order fix (`28ffc21`).
+- **Instrument:** the N1 table-trap slice (`c3e413f`, merged at `367c6a0`).
+  - `spark-plug-gap` now gates under its tightened rule (13 → 14 verified).
+  - `fuel-pressure-spec` carries its tightened rule.
+  - `fuel-injector-resistance` is new.
+
+  These are the rules D ran; E and F ran `origin/main`'s.
+
+There is no retrieval, prompt, model, embedding, quote-check, number-check, or scoring change.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env src/scripts/evalAnswers.js`, as in F, run from the worktree's `server/`: the entry point `npm run eval:answers` uses. 2026-09-30 14:29:17–14:34:05 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `a7fc0b2acf926ac20dacd1e41965b05b64b3938f`. The run command itself checked the revision and a clean worktree, and would not have started otherwise |
+| Data | `DATABASE_FILE` was a fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` before and after the run: the corpus E and F read. The live WAL was empty, and the live file's MD5 and timestamp (2026-08-17) were unchanged afterwards. `UPLOADS_DIR` was an empty scratch folder |
+| Network | Before the run, three unauthenticated requests to the API host returned HTTP 401 in under 0.3s. No key was sent |
+| Case definitions | `answerQualityCases.js` blob `01dc9ed`: the N1 slice |
+| Scoring instrument | `answerQualityScoring.js` blob `e2c9693`, identical to A–F |
+| Verifier | `askEvidenceContract.js` blob `6000033`, identical to F; E ran `2d9dd4f` |
+| Corpus | 1,443 documents / 20,447 chunks, all at `text-embedding-3-small@512`, re-counted read-only on the copy |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); `OPENAI_REASONING_EFFORT` unset, so `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048 |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 44 (14 verified, 30 templates) |
+| Provider requests | **~81**: 43 embeddings, 37 answer/vision, and 1 follow-up rewrite, derived from the per-case timing lines as in F. The same count as D |
+| Infrastructure noise | **None.** 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 17/30. Overall **31/44**.
+
+| Category | G | E | D |
+| --- | --- | --- | --- |
+| torque | 2/7 | 3/7 | 2/7 |
+| refusal | 8/8 | 8/8 | 8/8 |
+| capacity | 8/11 | 7/10 | 7/11 |
+| procedure | 6/9 | 8/9 | 6/9 |
+| behavior | 1/3 | 2/3 | 1/3 |
+| verifier | 6/6 | 6/6 | 6/6 |
+
+- **Against D, on all 44 cases: 31 against 30.** The one movement is
+  `thermostat-opening-temperature`, FAIL → PASS: the regression E fixed.
+- **Against E, on the 43 cases they share: 30 against 34.** Four movements, all templates, all
+  PASS → FAIL. E ran looser rules for `spark-plug-gap` and `fuel-pressure-spec`; both pass in
+  both runs.
+- **All six verifier probes ran and passed.** That includes `reject-wrong-component-torque`, the
+  probe aimed at the subject guard, which F could check only offline.
+
+### The N1 slice's three cases
+
+| Case | G | Record under the same rule |
+| --- | --- | --- |
+| `spark-plug-gap` (verified) | PASS | 12 of 12: D's run, its 10 repeats, and this first gating run |
+| `fuel-pressure-spec` | PASS | 9 of 12. All three earlier failures were one mechanism: the "standard fuel **system** pressure" false rejection, which E's word-order fix removes offline. This is the first live observation since that fix |
+| `fuel-injector-resistance` | PASS | 12 of 12, and the first observation from a second session |
+
+Nothing was promoted.
+
+- `fuel-injector-resistance`'s note sets its bar as an independent later run that passes with the
+  rule unchanged. This run is one, with the rule unchanged (`01dc9ed`), so the case is now a
+  candidate for the owner's decision. Its pump trap has still never appeared live.
+- `fuel-pressure-spec` needs more than one observation after its fix before it can be called
+  stable.
+
+### Every case movement against experiment E
+
+| Case | E | G | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | PASS | FAIL (`not_found`) | **No, as far as can be checked.** It failed all five runs before E, D included, and F. Offline, all five wordings tried (two from E's capture, three constructed) get the same verdict from E's verifier and this one |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | **Possible, not shown.** A mechanism exists; see below. Also failed in D and F |
+| `coolant-drain-and-refill` | PASS | FAIL (`not_found`) | **Not shown.** It is on the documented unstable list, and also failed in D and F |
+| `front-lower-ball-joint-procedure` | PASS | FAIL (missing "control arm"/"knuckle") | **No.** The answer was given but lacked the expected term, exactly D's failure; nothing was rejected. It is on the documented unstable list |
+
+No case moved from FAIL to PASS against E. On all four, G matches D, which ran before both E's
+fix and this one.
+
+**`water-pump-then-torque`: a mechanism, checked offline, no provider calls.** The follow-up's
+evidence is chunk #2075, doc 730 p1. Its table was extracted as "…sub-assembly BoltA 26 260 18
+Bolt B 24 245 18": the A is run into "Bolt", while the B stands apart.
+
+- **The flip.** E's verifier treated the A of a short, correct claim such as "The Bolt A torque
+  is 26 N·m" as the article and dropped it. It then matched the remaining "bolt" to the Bolt B
+  row and accepted the claim. This verifier keeps the A, finds no "bolt a" in the quote, and
+  rejects the claim.
+- **The count.** 9 wordings were checked against that quote: 3 from E's capture and 6
+  constructed.
+  - 2 flip from accepted to rejected, both constructed short "Bolt A" wordings.
+  - 2 more differ only in the subject reported for a claim both versions reject.
+  - Every "Bolt B" wording is unchanged.
+- **What it means.** E could certify a Bolt A value only through Bolt B's word, which is the
+  grounding `d0a39fb` exists to refuse. The rejection is the safe one CLAUDE.md describes. The
+  root cause is doc 730's extraction, already recorded above.
+- **What it does not show.** The run kept no answer text, so whether G's model wrote such a
+  wording is unknown. F's replay of all 9 generations in E's capture found no status or
+  accepted-claim change. The case's value check is vacuous (`N\b`), so a PASS here never showed
+  that a torque reached the owner.
+
+### Failure classification — 13 failures
+
+Assigned from the failure signatures, since no answer text was kept.
+
+| Cause | Cases |
+| --- | --- |
+| Scoring / eval instrumentation | **0** |
+| Verifier false rejection, new in N4 | **none** |
+| Number check: the claim carries a condition its quote omits (not N4) | `charging-system-voltage`, failing its value check as in F; D established the cause |
+| Retrieval (recall miss persists) | `applicability-abs-wiring-variant` |
+| Answer generation / intermittent | `applicability-engine-mount-build-variant`, `front-lower-ball-joint-procedure`, `hazard-t3-airbag-module-shop-referral` (expectation not document-grounded) |
+| Corpus limitation, expectation stale | `engine-oil-capacity`, `rear-brake-caliper-torque`, `front-strut-mount-torque`, `valve-cover-bolt-torque` |
+| Grounding boundary, known noise | `auto-transaxle-fluid-type` |
+| Server-derived `not_found`; the cause cannot be separated without the claims | `wheel-lug-nut-torque` (every verifier version rejects its usual "lug nut" wording), `water-pump-then-torque` (above), `coolant-drain-and-refill` |
+
+**One observation, not acted on: `engine-oil-capacity` did not refuse this time.**
+
+- It failed only its value check. The server derived `answered` or `partial` with at least one
+  citation, and no stated value matched the template's 4.4 qt / 4.2 L. In F it returned
+  `not_found`.
+- The corpus's only "oil capacity" is the A/C compressor's (see the N1 baseline's
+  classification), so whatever was accepted is likely not the engine's.
+- It cannot be checked without the answer text, and the case is a template, so it gates nothing.
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 42 metered cases; the two T4 cases meter zero by
+design. Context averaged 1,803 tokens (min 1,189, max 2,382), against E's 1,802 and D's 1,803.
+
+- retrieval 907ms mean / 702ms median (min 585, max 4,674);
+- answer 4,327ms mean / 3,340ms median (max 11,803), over the 36 cases that call the answer
+  model.
+
+This is same-machine timing on unchanged retrieval, not a product signal.
+
+### Limits, stated plainly
+
+- **n = 1, with no answer text kept.** The four template movements are classified from failure
+  signatures, and two of them from offline checks on constructed wordings, not from this run's
+  own claims.
+- **A capture would settle the water pump and the lug nut.** The D/E capture method records the
+  raw claims. It costs extra provider requests and was not run.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
