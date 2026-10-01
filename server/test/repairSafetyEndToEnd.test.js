@@ -1,5 +1,30 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
+
+// repairTools.js imports chunkRetrievalService.js, which imports
+// src/database.js and opens the database at import time. Point it at a scratch
+// dir first (and load the planner with import() so this runs before it), so
+// this suite never opens -- or locks -- the real database.
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-repair-safety-"));
+
+process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
+process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
+
+const { db } = await import("../src/database.js");
+const { buildOwnerChecklist, checkRepairReadiness, extractRepairTasks } = await import(
+  "../src/services/agent/repairTools.js"
+);
+
+after(() => {
+  if (typeof db.close === "function") {
+    db.close();
+  }
+
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
 
 // End-to-end safety consistency through the ACTUAL planner flow:
 //   extractRepairTasks -> checkRepairReadiness -> buildOwnerChecklist
@@ -8,11 +33,6 @@ import test from "node:test";
 // prove the three planner stages all read that same decision -- the failure this
 // suite exists for is a task being blocked ("Shop Recommended", not Ready) while
 // the owner is shown no warning, or shown a warning for the wrong hazard.
-import {
-  buildOwnerChecklist,
-  checkRepairReadiness,
-  extractRepairTasks,
-} from "../src/services/agent/repairTools.js";
 
 /** Run one phrase through the whole planner path. */
 function runFlow(phrase) {

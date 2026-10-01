@@ -1,16 +1,35 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
 
-// The reranker is a pure-logic + raw-fetch service. It imports only config (no
-// database), so no scratch DB isolation is needed. A blank key keeps the
-// no-key branch honest; every test that needs a "configured" path injects it.
+// The reranker is pure logic + raw fetch, but its module graph reaches
+// src/database.js (chunkRerankService -> aiAnswerService ->
+// chunkRetrievalService -> database), which opens the database the moment it
+// is imported. Point that at a scratch dir so this suite never opens -- or
+// locks -- the real one. A blank key keeps the no-key branch honest; every
+// test that needs a "configured" path injects it.
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-chunk-rerank-"));
+
+process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
+process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
 process.env.OPENAI_API_KEY = "";
 
+const { db } = await import("../src/database.js");
 const {
   applyRanking,
   parseRerankedOrder,
   rerankChunks,
 } = await import("../src/services/chunkRerankService.js");
+
+after(() => {
+  if (typeof db.close === "function") {
+    db.close();
+  }
+
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
 
 function candidate(id) {
   return {
