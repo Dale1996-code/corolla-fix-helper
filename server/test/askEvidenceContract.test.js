@@ -912,6 +912,131 @@ test("the ASCII ohm spellings were already covered and still are", () => {
   assert.equal(result.rejected[0].reason, "subject_mismatch");
 });
 
+// ---- N4: electrical values must equal the printed value ----
+//
+// Every other unit is compared within max(0.51 absolute, 2% relative). That
+// slack exists for torque tables that print one figure in three units, and it
+// is far too wide for electrical readings: it let 0.9 V pass against a printed
+// 0.5 V, 12.4 V against a printed 12.6 V (a battery at 75% charge, not 100%),
+// and 12 Ω against a printed 12.4 Ω. Volts, millivolts, ohms, kilohms, amps,
+// and milliamps -- spelled out or as a symbol -- now need the printed number
+// itself. "Exact" is NUMERIC equality: 12.40 and 12.4 are the same number.
+
+test("an electrical value near, but not equal to, the printed value is not grounded", () => {
+  const cases = [
+    ["The sensor output is 0.9 V.", "Sensor output: 0.5 V"],
+    ["The battery voltage is 12.4 V.", "Battery voltage (engine off): 12.6 V"],
+    ["The battery voltage is 12.4 volts.", "Battery voltage (engine off): 12.6 volts"],
+    ["The heated oxygen sensor voltage is 450 mV.", "Heated oxygen sensor voltage: 455 mV"],
+    ["The heated oxygen sensor voltage is 450 millivolts.", "Heated oxygen sensor voltage: 455 millivolts"],
+    [`The resistance is 12 ${OMEGA}.`, `Standard resistance: 12.5 ${OMEGA}`],
+    ["The resistance is 12 ohms.", "Standard resistance: 12.5 ohms"],
+    [`The sensor resistance is 2.3 k${OMEGA}.`, `Sensor resistance: 2.4 k${OMEGA}`],
+    ["The sensor resistance is 2.3 kilohms.", "Sensor resistance: 2.4 kilohms"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = checkClaimNumbers(claim, quote);
+
+    assert.equal(result.grounded, false, `${claim} | ${quote}`);
+    assert.equal(result.unsupported.length, 1, claim);
+  }
+});
+
+test("a value inside a printed range is not grounded unless it is printed", () => {
+  // The fuel injector table prints "11.6 to 12.4 Ω". A claim of 12 Ω is a
+  // number the page never states, even though it falls inside the range.
+  const quote = `Fuel injector resistance: 11.6 to 12.4 ${OMEGA} at 20°C (68°F)`;
+  const rounded = verifySingleClaim(`The fuel injector resistance is 12 ${OMEGA}.`, quote);
+
+  assert.equal(rounded.documentSupported.length, 0);
+  assert.equal(rounded.rejected[0].reason, "numeric_anomaly");
+
+  const printed = verifySingleClaim(`The fuel injector resistance is 12.4 ${OMEGA}.`, quote);
+
+  assert.equal(printed.rejected.length, 0);
+  assert.equal(printed.documentSupported.length, 1);
+});
+
+test("current in amps and milliamps must equal the printed value too", () => {
+  const cases = [
+    ["The radiator fan motor draw is 15.4 amps.", "Radiator fan motor draw: 15 amps"],
+    ["The radiator fan motor draw is 15.4 amperes.", "Radiator fan motor draw: 15 amperes"],
+    ["The parasitic draw limit is 49.5 milliamps.", "Parasitic draw limit: 50 milliamps"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  assert.equal(
+    checkClaimNumbers("The radiator fan motor draw is 15 amps.", "Radiator fan motor draw: 15 amps").grounded,
+    true
+  );
+});
+
+test("exact means numeric equality, so formatting differences still match", () => {
+  // A text comparison would reject every one of these.
+  const cases = [
+    [`The resistance is 12.40 ${OMEGA}.`, `Standard resistance: 12.4 ${OMEGA}`],
+    [`The resistance is 12.400 ${OMEGA}.`, `Standard resistance: 12.4 ${OMEGA}`],
+    [`The resistance is 12.4 ${OMEGA}.`, `Standard resistance: 12.40 ${OMEGA}`],
+    [`The resistance is 12.4 ${OHM_SIGN}.`, `Standard resistance: 12.40 ${OMEGA}`],
+    ["The resistance is 12.40 ohms.", `Standard resistance: 12.4 ${OMEGA}`],
+    ["The battery voltage is 12 V.", "Battery voltage: 12.0 V"],
+    ["The battery voltage is 12.60 volts.", "Battery voltage: 12.6 V"],
+    ["The battery voltage is 12,6 V.", "Battery voltage: 12.6 V"],
+    ["The heated oxygen sensor voltage is 500.0 mV.", "Heated oxygen sensor voltage: 500 mV"],
+    [`The sensor resistance is 2.40 k${OMEGA}.`, "Sensor resistance: 2.4 kilohms"],
+    ["The radiator fan motor draw is 15.0 amps.", "Radiator fan motor draw: 15 amps"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = checkClaimNumbers(claim, quote);
+
+    assert.equal(result.grounded, true, `${claim} | ${quote} | ${JSON.stringify(result)}`);
+  }
+});
+
+test("a bare table number needs the exact value for an electrical claim", () => {
+  // Some tables print the unit only in a column header, so the row holds a bare
+  // number and the quote carries no unit-bearing specification at all. The
+  // fallback that compares against those bare numbers is exact for electrical
+  // claims as well.
+  const resistanceRow = `Standard resistance (${OMEGA}): injector 12.5`;
+
+  assert.equal(checkClaimNumbers(`The injector resistance is 12 ${OMEGA}.`, resistanceRow).grounded, false);
+  assert.equal(checkClaimNumbers(`The injector resistance is 12.5 ${OMEGA}.`, resistanceRow).grounded, true);
+  assert.equal(checkClaimNumbers(`The injector resistance is 12.50 ${OMEGA}.`, resistanceRow).grounded, true);
+
+  const voltageRow = "Terminal voltage (V): 11 to 14";
+
+  assert.equal(checkClaimNumbers("The terminal voltage is 13.6 V.", voltageRow).grounded, false);
+  assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
+});
+
+test("every other unit keeps the existing tolerance", () => {
+  // Pinned so the electrical rule cannot leak into the families it does not
+  // cover. Each claim differs from its quote by an amount the shared
+  // max(0.51, 2%) tolerance has always accepted.
+  const cases = [
+    ["Torque the drain plug to 37.5 Nm.", "Torque : 37 N·m"],
+    ["The fuel pressure is 304 kPa.", "Fuel pressure: 300 kPa"],
+    ["The engine oil capacity is 4.4 liters.", "Engine oil capacity: 4.2 liters"],
+    ["The brake pad lining thickness is 1.2 mm.", "Brake pad lining thickness: 1.1 mm"],
+    ["The thermostat opens at 83°C.", "Thermostat valve opening temperature: 84°C"],
+    ["The idle speed is 710 rpm.", "Idle speed: 700 rpm"],
+    ["The signal frequency is 50.5 Hz.", "Signal frequency: 50 Hz"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
+  }
+
+  // The bare-number fallback keeps its tolerance for these units as well.
+  assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, true);
+});
+
 // ---- Subject guard: word order and generic words (Experiment D, 2026-09-27) ----
 //
 // The first live answer eval after N4 found the subject guard rejecting CORRECT

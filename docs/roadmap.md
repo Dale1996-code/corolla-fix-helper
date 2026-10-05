@@ -79,22 +79,25 @@ state a plan imagined.
   fixed; these were not.
 - **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
   `Ω`, and `kΩ` are detected (N4's second slice), but case-sensitively: a lowercase `v` is
-  not read as volts, and other symbols such as `kV` or `mΩ` are not detected at all, so a
-  value written that way still gets neither the numeric check nor the subject guard. In the
-  other direction, `mV` and `V`, and `kΩ` and `Ω`, are never converted into each other, so
-  a claim restating its quote in the other unit is rejected rather than accepted.
+  not read as volts, and other symbols such as `kV`, `mΩ`, `A`, or `mA` are not detected at
+  all, so a value written that way still gets neither the numeric check nor the subject guard.
+  (Amps and milliamps are detected only spelled out; the corpus prints `A` mostly as fuse
+  ratings on wiring diagrams, and detecting it would change behaviour for other units — see
+  the iteration log's N4 decision 1 entry.) In the other direction, `mV` and `V`, and `kΩ`
+  and `Ω`, are never converted into each other, so a claim restating its quote in the other
+  unit is rejected rather than accepted.
 - **Compound claims get one subject.** The subject guard derives a single part name per
   claim, so a claim stating two specifications — "the drain plug torque is 37 Nm and the
   battery voltage is 12.6 volts" — has only one component compared with its quote; the
   other rides through on the numeric check alone. This predates N4 (PR #122's guard behaves
   identically) and was surfaced by the N4 review. The evidence contract asks the model for
-  atomic claims, but nothing enforces it. Deciding this is one of the two things left in N4.
-- **The numeric comparison is too permissive for some small electrical values.** A claimed
-  value matches a quoted one within `max(0.51 absolute, 2% relative)`. That suits torque
-  and capacity figures, but not small electrical ones: `0.9 V` can match `0.5 V`, and `12 Ω`
-  can match `12.5 Ω`. This predates the symbol slice and affects spelled-out volts and ohms
-  as well; it was surfaced by that slice's review. Deciding this is the other thing left in
-  N4.
+  atomic claims, but nothing enforces it. Deciding this is the one thing left in N4.
+- **Temperature and engine speed still match within a tolerance.** Electrical values no
+  longer do (N4's first decision, below): volts, millivolts, ohms, kilohms, amps, and
+  milliamps must equal a printed value. Every other unit still matches within
+  `max(0.51 absolute, 2% relative)`. That suits torque and capacity conversions, but it
+  also lets a claimed `83 °C` pass against a printed `84 °C` and `710 rpm` against
+  `700 rpm`. Whether those need the same treatment has not been measured.
 - **Two numeric-parser limits are known and unchanged.** A leading sign is not part of the
   extracted number, so `-5 V` is compared as `5 V`. In a range such as `5 to 14 V`, only the
   number directly carrying the unit (`14`) is checked; the other end is not.
@@ -359,12 +362,25 @@ that changed. The same effect was reproduced offline on correct fuel-injector re
 wordings. Fixed by the N4 word-order follow-up (`28ffc21`): the thermostat question passes
 again in Experiment E, and both injector wordings are accepted offline. See the
 [iteration log](evals/ask-rag-iteration-log.md).
-*Remaining before N4 is done:* two decisions, each needing its own reviewed change —
-(1) unit-sensitive numeric tolerance: the shared `max(0.51 absolute, 2% relative)`
-comparison lets `0.9 V` match `0.5 V` and `12 Ω` match `12.5 Ω`, which predates the symbol
-slice and affects spelled-out electrical units too; and (2) compound, multi-specification
-claims, where one subject is derived per claim. Both are described in the known
-limitations above.
+*First remaining decision — electrical values must equal the printed value (October 2026):*
+the shared `max(0.51 absolute, 2% relative)` comparison let `0.9 V` match a printed `0.5 V`,
+`12.4 V` a printed `12.6 V`, and `12 Ω` a printed `12.4 Ω`. Volts, millivolts, ohms,
+kilohms, amps, and milliamps now need a printed value of the same unit — compared as
+parsed numbers, so `12.40 Ω` and `12.4 Ω` are equal — on both the unit-bearing comparison
+and the bare-number table fallback. Nothing is converted between `mV` and `V`, `kΩ` and
+`Ω`, or milliamps and amps; every other unit, the detector, the subject guard, and the two
+parser limits are unchanged. Measured offline on the real corpus with no provider calls:
+all 14,661 printed electrical values still verify when restated, with or without a trailing
+zero, and no verdict changes for any of the 18,725 non-electrical values. A real figure
+printed elsewhere in the manuals, cited against a chunk that does not print it, was accepted
+44,369 times before and 0 after. The cost is that 1,392 printed values carry two or more
+significant decimals, and an answer that rounds one is now rejected. One production file, no
+migration, no model, prompt, retrieval, embedding, or UI change. The live answer eval
+required before merging is a separate decision. See the
+[iteration log](evals/ask-rag-iteration-log.md).
+*Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
+multi-specification claims, where one subject is derived per claim (described in the known
+limitations above).
 *What it still does not cover:* claim shapes with no parsable head noun keep the numeric
 check alone, as before.
 

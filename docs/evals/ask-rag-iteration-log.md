@@ -2624,3 +2624,206 @@ This is same-machine timing on unchanged retrieval, not a product signal.
   setting, or verifier rule, and no case was promoted.
 
 Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
+
+## N4 decision 1 — electrical values must equal the printed value (2026-10-04, offline)
+
+N4 had two decisions left. This entry is the first one: unit-sensitive numeric tolerance. **No
+`eval:answers` run and no provider calls.** `docs/quality-testing.md` requires an answer eval
+before this merges, because it changes the evidence contract. The owner is deciding on that run
+separately, so this entry records only the free, local evidence.
+
+### What changed
+
+The number check compared every claimed value with its quote within `max(0.51 absolute, 2%
+relative)`. That slack exists for torque tables that print one figure in three units. On
+electrical readings it is wide enough to change the meaning: 0.9 V passed against a printed
+0.5 V, 12.4 V against a printed 12.6 V, and 12 Ω against a printed 12.4 Ω.
+
+`askEvidenceContract.js` now gives **volts, millivolts, ohms, kilohms, amps, and milliamps** no
+tolerance, whether spelled out or written as `V`, `mV`, `Ω`, or `kΩ`. The claimed value must
+equal a printed value of the same unit.
+
+- **"Equal" is numeric, never textual.** Both sides are parsed first, so `12.40 Ω`, `12.400 Ω`,
+  `12.4 Ω`, and `12,4 Ω` are one value. Only a different number fails.
+- **It applies to both comparisons:** against a printed value carrying its unit, and against the
+  bare numbers of a quote with no unit-bearing figure at all (a table whose unit sits in a
+  column header).
+- **Nothing is converted.** `mV` and `V`, `kΩ` and `Ω`, and milliamps and amps stay separate
+  units, as before.
+- **Current is listed apart from `ELECTRICAL_UNITS`.** That table also hands the subject guard its
+  head nouns, and current deliberately has none, so listing amps there would have quietly added
+  a subject guard.
+
+**Unchanged:** torque, pressure, volume, length, temperature, rpm, and Hz keep the old
+tolerance. Unit detection, the subject guard, and both known parser limits (a leading sign is
+dropped; only the unit-carrying end of a range is checked) are unchanged.
+
+**The Repair Planner is effectively unaffected.** It shares the number check, but it first
+requires a claim's text to appear inside its own quote. A claim cannot carry a number that
+differs from its quote's, so a near-miss is rejected there as a paraphrase under either rule.
+The planner test added here pins that, and pins that an exact restatement still verifies. It
+replaces the "planner rejects 0.9 V against 0.5 V" test in the original plan, which would have
+passed for the paraphrase reason without exercising the tolerance at all.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Code | Branch `fix/n4-electrical-exact-values`, based on `74fd71f`, **uncommitted**. Verifier `askEvidenceContract.js` blob `c81f1f5`, against `6000033` before |
+| Data | A fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` (the copy experiments E–G read), opened **read-only**. The live WAL was empty and the app was not running, so the live file was copied, never opened |
+| Method | A scratch script, not committed, loading both verifier versions side by side. The "before" version was extracted with `git show 74fd71f:…` and its blob hash checked. 18 seconds. No network calls |
+| Corpus | 1,443 documents, 1,430 with chunks, 20,447 chunks |
+
+**Two self-checks before reading any result:**
+
+- **Detection is unchanged.** `extractSpecNumbers` returns identical output from both versions on
+  all 20,447 chunks.
+- **The script's unit classification matches the code's.** The corpus prints 30 distinct unit
+  strings. For each one, "exact or not" as the script classifies it agrees with how the two
+  verifiers actually behave: 30 of 30.
+
+### What the corpus prints
+
+| Unit | Occurrences | Chunks | Documents | Distinct values |
+| --- | --- | --- | --- | --- |
+| volts | 7,736 | 2,805 | 414 | 86 |
+| ohms | 3,545 | 1,946 | 299 | 37 |
+| kilohms | 3,380 | 1,193 | 208 | 34 |
+| **all electrical** | **14,661** | **4,442** | **467** | |
+
+The detector finds **no** millivolt, amp, or milliamp value anywhere in the corpus. The current
+part of the rule therefore changes nothing that is printed today; see the `A`/`mA` note below.
+
+### Measured
+
+**1. False-rejection direction: a correct restatement still verifies.** Every printed value was
+restated as a claim and checked against its own chunk.
+
+- Electrical, restated as printed: **14,661 of 14,661** accepted by both versions.
+- Electrical, reformatted with an added trailing zero (`12.4` → `12.40`, `5` → `5.0`):
+  **14,661 of 14,661** accepted by both versions.
+- Every other unit: 18,725 values × 6 variants = **112,350** verdict pairs, with **0** different.
+  The variants are as printed, reformatted, +0.1, +0.3, +0.5, and +1.5%.
+
+**2. A near miss against its own chunk.** The same electrical values, nudged by +0.1, +0.3, +0.5,
+or +1.5%:
+
+| Variant | Old accepted | New accepted |
+| --- | --- | --- |
+| +0.1 | 14,661 (100%) | 126 |
+| +0.3 | 14,661 (100%) | 99 |
+| +0.5 | 14,661 (100%) | 255 |
+| +1.5% | 14,661 (100%) | 103 |
+
+The old rule accepted **every** nudged value. Each one the new rule still accepts is a value the
+same chunk also prints, such as a table stepping in tenths.
+
+**3. A real figure from elsewhere in the manuals, cited against a chunk that does not print
+it.** For each chunk that prints electrical values, every distinct value of the same unit
+printed anywhere else in the corpus was tried as a claim. This is the shape of a model taking a
+number from source S2 and attaching S1's quote.
+
+- 345,055 such claims.
+- Old: **44,369 accepted (12.9%)**, in 3,907 of the 4,442 electrical chunks (88%), across 448
+  documents.
+- New: **0**.
+- Examples:
+  - "5.2 V" against a chunk printing only 5 V (doc 100 p2);
+  - "12.9 V" against one printing 1 V and 13 V (doc 229 p13);
+  - "0.6 Ω" against one printing only 1 Ω (doc 230 p5);
+  - "2.58 kΩ" against a table printing 0.67, 2.69, and 18.4 kΩ (doc 226 p1).
+- The script prefiltered these candidates by the old formula. A 6,559-candidate sample of the
+  excluded ones was rechecked against the real old verifier: 0 accepted.
+
+**4. The bare-number fallback.** 12,697 chunks carry numbers but no unit-bearing figure, so a
+claim citing them is checked against bare numbers. Here is the share of the corpus's distinct
+electrical values each version accepted, averaged over those chunks:
+
+| Unit | Old | New |
+| --- | --- | --- |
+| volts | 28.8% | 4.5% |
+| ohms | 16.8% | 5.4% |
+| kilohms | 36.8% | 4.1% |
+
+On a number-dense page the old rule accepted almost any small figure, because some bare number
+was within 0.51 of it. A deterministic sample of 8,378 pairs was rechecked against the real
+verifiers: 0 disagreements for either version.
+
+**5. Rounding exposure: what the new rule will now reject.** 1,392 of the 14,661 printed
+electrical values (9.5%; 51 distinct values) carry 2+ significant decimals: volts 1,080,
+kilohms 297, ohms 15. Trailing zeros such as `1.00 kΩ` are not counted, since they match
+numerically.
+
+- The most common are 0.02 V, 1.75 V, 0.59 V, 4.535 V, 0.04 V, 4.91 V, 0.21 V, 0.55 V, 3.35 V,
+  3.45 V, 2.02 V, and 0.45 V. Among the resistances: 3.73, 2.88, 1.47, 1.22, and 0.85 kΩ.
+- An answer that rounds one of these ("about 0.5 V" for 0.45 V) is now rejected, where the old
+  rule accepted it.
+- At these magnitudes a rounded figure is a different reading. The rejection is the intended
+  direction, and it is the cost to watch in a live run.
+
+### The `A` and `mA` symbols are not detected, and were deliberately left that way
+
+The approved scope named `A` and `mA`, but only the spelled forms (amps, amperes, milliamps) are
+detected, so only those are covered. No rule, old or new, checks a value written `15 A` or
+`1.0 mA`. Adding that detection is a separate change, for two measured reasons:
+
+- **What the corpus means by it.** There are 2,576 occurrences in 965 chunks across 251
+  documents, mostly fuse ratings on wiring diagrams ("10A", "7.5A", "30A HOT AT ALL TIMES").
+  There are a few real specifications ("Max.: 0.997 A", "less than 1.0 mA") and OCR noise
+  ("A+]").
+- **Its effect on other units.** 671 of those chunks have no detected specification today. A
+  newly detected `A` would turn off the bare-number fallback for every claim citing them,
+  torque claims included. That would break the "every other unit is unchanged" property this
+  change keeps.
+
+### Tests and checks
+
+- **`askEvidenceContract.test.js`: six new tests.**
+  - near misses for every covered unit;
+  - a value inside a printed range ("12 Ω" against 11.6 to 12.4 Ω, rejected as
+    `numeric_anomaly`; "12.4 Ω" verified);
+  - amps and milliamps;
+  - numeric-not-textual equality;
+  - the bare-number fallback;
+  - a pin that torque, pressure, volume, length, temperature, rpm, and Hz keep their
+    tolerance.
+- **`repairPlanEvidenceContract.test.js`: one new test**, as described above.
+- **Red first.** Before the change, the four behaviour tests failed by accepting the non-printed
+  value. The two guard tests passed, as guards should.
+- **Mutation checks.**
+  - Swapping the comparison for a text comparison of the claim's printed digits fails two
+    tests, the formatting test among them.
+  - Applying the exact rule to every unit fails the tolerance pin.
+- **Full local checks in the worktree:**
+  - `lint` clean;
+  - `typecheck` clean;
+  - server **1017/1017** (`NETWORK_MODE=0`);
+  - client **410/410** in 31 files;
+  - `build` green;
+  - `smoke` 13/13.
+
+### Which answer-eval cases can see this
+
+None of the 14 verified cases has an electrical value, so the gate cannot move because of this
+change. Two templates can:
+
+- **`fuel-injector-resistance`.** In D, all ten captured answers stated "11.6 to 12.4 Ω" word for
+  word. The new rule accepts that, because only 12.4 Ω carries the unit and it is printed. A
+  rounded or mid-range figure would now be rejected.
+- **`charging-system-voltage`.** Its quote prints "13.2 to 14.8 V". Its recorded failure is the
+  2000 rpm condition (D), which this change does not touch.
+
+### Limits, stated plainly
+
+- **The claims are constructed, not generated.** Every number above is what the rule does to
+  figures the corpus really prints. None of it is a measurement of how often the model rounds or
+  borrows a figure. Only a live run, and a capture of its raw claims, can show that.
+- **The number check only.** These figures exclude the subject guard, which also rejects some
+  cross-chunk borrowing for voltage and resistance (not current). A near miss the old number check
+  accepted could still have been stopped there.
+- **Temperature and rpm keep the slack.** 83 °C still passes against a printed 84 °C, and 710 rpm
+  against 700 rpm. Whether they need the same treatment was not measured.
+- **N4 is not done.** The second decision, compound multi-specification claims, is untouched.
+
+Counts: **44 cases, 14 verified, 30 templates** — unchanged; no eval case or scoring rule was
+touched.

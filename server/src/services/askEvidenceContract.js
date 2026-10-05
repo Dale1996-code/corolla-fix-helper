@@ -461,6 +461,34 @@ function withinTolerance(left, right) {
   return Math.abs(left - right) <= Math.max(0.51, Math.abs(right) * 0.02);
 }
 
+// Electrical readings get no tolerance at all. The max(0.51, 2%) slack above was
+// sized for torque tables that print one figure in three units; on an
+// electrical reading it let 0.9 V pass against a printed 0.5 V, 12.4 V against a
+// printed 12.6 V, and 12 Ω against a printed 12.4 Ω. The comparison is between
+// PARSED numbers, never strings, so 12.40, 12.400, and 12.4 are the same value
+// -- only a different number fails. Nothing is converted: mV and V, kΩ and Ω,
+// and milliamps and amps stay separate units, exactly as sameLiteralUnit keeps
+// them.
+//
+// Current lives here rather than in ELECTRICAL_UNITS because that table also
+// gives the subject guard its head nouns, and current deliberately has none.
+// Only the spelled forms appear because only they are detected: UNIT_PATTERN
+// has no "A" or "mA" symbol, so a value written that way is not checked at all.
+const CURRENT_UNIT_REGEX = /^(amps?|amperes?|milliamps?)$/i;
+
+function requiresExactValue(unit) {
+  return Boolean(findElectricalUnit(unit)) || CURRENT_UNIT_REGEX.test(String(unit || "").trim());
+}
+
+/** Does this printed number support the claimed spec? Exact for electrical units. */
+function printedValueSupports(evidenceValue, spec) {
+  if (requiresExactValue(spec.unit)) {
+    return evidenceValue === spec.value;
+  }
+
+  return withinTolerance(evidenceValue, spec.value);
+}
+
 /** Is this detected unit string one of the case-sensitive electrical symbols? */
 function isElectricalSymbol(unit) {
   const cleaned = String(unit || "").trim();
@@ -518,7 +546,7 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
       !claimCanonical &&
       !evidenceCanonical &&
       sameLiteralUnit(evidenceSpec.unit, spec.unit) &&
-      withinTolerance(evidenceSpec.value, spec.value)
+      printedValueSupports(evidenceSpec.value, spec)
     ) {
       return true;
     }
@@ -531,7 +559,7 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   // Some extracted manual tables put units in a header and only numbers in the
   // row. Preserve that fallback only when the quote contains no other explicit
   // unit-bearing specification to contradict the claim's unit family.
-  return evidenceNumbers.some((candidate) => withinTolerance(candidate, spec.value));
+  return evidenceNumbers.some((candidate) => printedValueSupports(candidate, spec));
 }
 
 /** All numbers appearing anywhere in the evidence text, unit or not. */

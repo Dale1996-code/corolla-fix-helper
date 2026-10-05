@@ -330,7 +330,7 @@ Server-side verification, in order:
 1. The reply must match the JSON schema (hand-written validator).
 2. Each `sourceId` (`S1`..`Sn`, prompt-local; never a database row id) must map to a retrieved chunk.
 3. The `evidenceQuote` must be a genuine substring of that chunk (whitespace- and case-insensitive).
-4. Every unit-bearing number in the claim must be present in the quote, allowing conversions within a unit family (37 N·m grounds a 27 ft-lbf claim).
+4. Every unit-bearing number in the claim must be present in the quote, allowing conversions within a unit family (37 N·m grounds a 27 ft-lbf claim). Torque, pressure, volume, length, temperature, engine-speed, and frequency figures match within `max(0.51, 2%)`. Electrical values — volts, millivolts, ohms, kilohms, amps, and milliamps, spelled out or as `V`, `mV`, `Ω`, `kΩ` — must equal a printed value of the same unit: compared as numbers, so `12.40 Ω` matches `12.4 Ω`, but `12 Ω` does not match `12.4 Ω`, and `mV`/`V`, `kΩ`/`Ω`, and milliamps/amps are never converted into each other. A quote with no unit-bearing figure at all is compared by its bare numbers under the same rules. The symbols `A` and `mA` are not detected, so a value written that way is not checked.
 5. For recognized torque-claim wording, the complete normalized part name from the claim must also occur in the quote. This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
 6. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
 7. `status` is derived by the server from what actually verified — never taken from the model.
