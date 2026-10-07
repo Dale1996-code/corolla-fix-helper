@@ -2624,3 +2624,346 @@ This is same-machine timing on unchanged retrieval, not a product signal.
   setting, or verifier rule, and no case was promoted.
 
 Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
+
+## N4 decision 1 — electrical values must equal the printed value (2026-10-04, offline)
+
+N4 had two decisions left. This entry is the first one: unit-sensitive numeric tolerance. **No
+`eval:answers` run and no provider calls.** `docs/quality-testing.md` requires an answer eval
+before this merges, because it changes the evidence contract. The owner is deciding on that run
+separately, so this entry records only the free, local evidence. **Committed as `b733bd0`;
+experiment H below is the answer eval of that commit.**
+
+### What changed
+
+The number check compared every claimed value with its quote within `max(0.51 absolute, 2%
+relative)`. That slack exists for torque tables that print one figure in three units. On
+electrical readings it is wide enough to change the meaning: 0.9 V passed against a printed
+0.5 V, 12.4 V against a printed 12.6 V, and 12 Ω against a printed 12.4 Ω.
+
+`askEvidenceContract.js` now gives **volts, millivolts, ohms, kilohms, amps, and milliamps** no
+tolerance, whether spelled out or written as `V`, `mV`, `Ω`, or `kΩ`. The claimed value must
+equal a printed value of the same unit.
+
+- **"Equal" is numeric, never textual.** Both sides are parsed first, so `12.40 Ω`, `12.400 Ω`,
+  `12.4 Ω`, and `12,4 Ω` are one value. Only a different number fails.
+- **It applies to both comparisons:** against a printed value carrying its unit, and against the
+  bare numbers of a quote with no unit-bearing figure at all (a table whose unit sits in a
+  column header).
+- **Nothing is converted.** `mV` and `V`, `kΩ` and `Ω`, and milliamps and amps stay separate
+  units, as before.
+- **Current is listed apart from `ELECTRICAL_UNITS`.** That table also hands the subject guard its
+  head nouns, and current deliberately has none, so listing amps there would have quietly added
+  a subject guard.
+
+**Unchanged:** torque, pressure, volume, length, temperature, rpm, and Hz keep the old
+tolerance. Unit detection, the subject guard, and both known parser limits (a leading sign is
+dropped; only the unit-carrying end of a range is checked) are unchanged.
+
+**The Repair Planner is effectively unaffected.** It shares the number check, but it first
+requires a claim's text to appear inside its own quote. A claim cannot carry a number that
+differs from its quote's, so a near-miss is rejected there as a paraphrase under either rule.
+The planner test added here pins that, and pins that an exact restatement still verifies. It
+replaces the "planner rejects 0.9 V against 0.5 V" test in the original plan, which would have
+passed for the paraphrase reason without exercising the tolerance at all.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Code | Measured on the working tree of branch `fix/n4-electrical-exact-values` (based on `74fd71f`) before it was committed, unchanged, as `b733bd0`. Verifier `askEvidenceContract.js` blob `c81f1f5` in both, against `6000033` before |
+| Data | A fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` (the copy experiments E–G read), opened **read-only**. The live WAL was empty and the app was not running, so the live file was copied, never opened |
+| Method | A scratch script, not committed, loading both verifier versions side by side. The "before" version was extracted with `git show 74fd71f:…` and its blob hash checked. 18 seconds. No network calls |
+| Corpus | 1,443 documents, 1,430 with chunks, 20,447 chunks |
+
+**Two self-checks before reading any result:**
+
+- **Detection is unchanged.** `extractSpecNumbers` returns identical output from both versions on
+  all 20,447 chunks.
+- **The script's unit classification matches the code's.** The corpus prints 30 distinct unit
+  strings. For each one, "exact or not" as the script classifies it agrees with how the two
+  verifiers actually behave: 30 of 30.
+
+### What the corpus prints
+
+| Unit | Occurrences | Chunks | Documents | Distinct values |
+| --- | --- | --- | --- | --- |
+| volts | 7,736 | 2,805 | 414 | 86 |
+| ohms | 3,545 | 1,946 | 299 | 37 |
+| kilohms | 3,380 | 1,193 | 208 | 34 |
+| **all electrical** | **14,661** | **4,442** | **467** | |
+
+The detector finds **no** millivolt, amp, or milliamp value anywhere in the corpus. The current
+part of the rule therefore changes nothing that is printed today; see the `A`/`mA` note below.
+
+### Measured
+
+**1. False-rejection direction: a correct restatement still verifies.** Every printed value was
+restated as a claim and checked against its own chunk.
+
+- Electrical, restated as printed: **14,661 of 14,661** accepted by both versions.
+- Electrical, reformatted with an added trailing zero (`12.4` → `12.40`, `5` → `5.0`):
+  **14,661 of 14,661** accepted by both versions.
+- Every other unit: 18,725 values × 6 variants = **112,350** verdict pairs, with **0** different.
+  The variants are as printed, reformatted, +0.1, +0.3, +0.5, and +1.5%.
+
+**2. A near miss against its own chunk.** The same electrical values, nudged by +0.1, +0.3, +0.5,
+or +1.5%:
+
+| Variant | Old accepted | New accepted |
+| --- | --- | --- |
+| +0.1 | 14,661 (100%) | 126 |
+| +0.3 | 14,661 (100%) | 99 |
+| +0.5 | 14,661 (100%) | 255 |
+| +1.5% | 14,661 (100%) | 103 |
+
+The old rule accepted **every** nudged value. Each one the new rule still accepts is a value the
+same chunk also prints, such as a table stepping in tenths.
+
+**3. A real figure from elsewhere in the manuals, cited against a chunk that does not print
+it.** For each chunk that prints electrical values, every distinct value of the same unit
+printed anywhere else in the corpus was tried as a claim. This is the shape of a model taking a
+number from source S2 and attaching S1's quote.
+
+- 345,055 such claims.
+- Old: **44,369 accepted (12.9%)**, in 3,907 of the 4,442 electrical chunks (88%), across 448
+  documents.
+- New: **0**.
+- Examples:
+  - "5.2 V" against a chunk printing only 5 V (doc 100 p2);
+  - "12.9 V" against one printing 1 V and 13 V (doc 229 p13);
+  - "0.6 Ω" against one printing only 1 Ω (doc 230 p5);
+  - "2.58 kΩ" against a table printing 0.67, 2.69, and 18.4 kΩ (doc 226 p1).
+- The script prefiltered these candidates by the old formula. A 6,559-candidate sample of the
+  excluded ones was rechecked against the real old verifier: 0 accepted.
+
+**4. The bare-number fallback.** 12,697 chunks carry numbers but no unit-bearing figure, so a
+claim citing them is checked against bare numbers. Here is the share of the corpus's distinct
+electrical values each version accepted, averaged over those chunks:
+
+| Unit | Old | New |
+| --- | --- | --- |
+| volts | 28.8% | 4.5% |
+| ohms | 16.8% | 5.4% |
+| kilohms | 36.8% | 4.1% |
+
+On a number-dense page the old rule accepted almost any small figure, because some bare number
+was within 0.51 of it. A deterministic sample of 8,378 pairs was rechecked against the real
+verifiers: 0 disagreements for either version.
+
+**5. Rounding exposure: what the new rule will now reject.** 1,392 of the 14,661 printed
+electrical values (9.5%; 51 distinct values) carry 2+ significant decimals: volts 1,080,
+kilohms 297, ohms 15. Trailing zeros such as `1.00 kΩ` are not counted, since they match
+numerically.
+
+- The most common are 0.02 V, 1.75 V, 0.59 V, 4.535 V, 0.04 V, 4.91 V, 0.21 V, 0.55 V, 3.35 V,
+  3.45 V, 2.02 V, and 0.45 V. Among the resistances: 3.73, 2.88, 1.47, 1.22, and 0.85 kΩ.
+- An answer that rounds one of these ("about 0.5 V" for 0.45 V) is now rejected, where the old
+  rule accepted it.
+- At these magnitudes a rounded figure is a different reading. The rejection is the intended
+  direction, and it is the cost to watch in a live run.
+
+### The `A` and `mA` symbols are not detected, and were deliberately left that way
+
+The approved scope named `A` and `mA`, but only the spelled forms (amps, amperes, milliamps) are
+detected, so only those are covered. No rule, old or new, checks a value written `15 A` or
+`1.0 mA`. Adding that detection is a separate change, for two measured reasons:
+
+- **What the corpus means by it.** There are 2,576 occurrences in 965 chunks across 251
+  documents, mostly fuse ratings on wiring diagrams ("10A", "7.5A", "30A HOT AT ALL TIMES").
+  There are a few real specifications ("Max.: 0.997 A", "less than 1.0 mA") and OCR noise
+  ("A+]").
+- **Its effect on other units.** 671 of those chunks have no detected specification today. A
+  newly detected `A` would turn off the bare-number fallback for every claim citing them,
+  torque claims included. That would break the "every other unit is unchanged" property this
+  change keeps.
+
+### Tests and checks
+
+- **`askEvidenceContract.test.js`: six new tests.**
+  - near misses for every covered unit;
+  - a value inside a printed range ("12 Ω" against 11.6 to 12.4 Ω, rejected as
+    `numeric_anomaly`; "12.4 Ω" verified);
+  - amps and milliamps;
+  - numeric-not-textual equality;
+  - the bare-number fallback;
+  - a pin that torque, pressure, volume, length, temperature, rpm, and Hz keep their
+    tolerance.
+- **`repairPlanEvidenceContract.test.js`: one new test**, as described above.
+- **Red first.** Before the change, the four behaviour tests failed by accepting the non-printed
+  value. The two guard tests passed, as guards should.
+- **Mutation checks.**
+  - Swapping the comparison for a text comparison of the claim's printed digits fails two
+    tests, the formatting test among them.
+  - Applying the exact rule to every unit fails the tolerance pin.
+- **Full local checks in the worktree:**
+  - `lint` clean;
+  - `typecheck` clean;
+  - server **1017/1017** (`NETWORK_MODE=0`);
+  - client **410/410** in 31 files;
+  - `build` green;
+  - `smoke` 13/13.
+
+### Which answer-eval cases can see this
+
+None of the 14 verified cases has an electrical value, so the gate cannot move because of this
+change. Two templates can:
+
+- **`fuel-injector-resistance`.** In D, all ten captured answers stated "11.6 to 12.4 Ω" word for
+  word. The new rule accepts that, because only 12.4 Ω carries the unit and it is printed. A
+  rounded or mid-range figure would now be rejected.
+- **`charging-system-voltage`.** Its quote prints "13.2 to 14.8 V". Its recorded failure is the
+  2000 rpm condition (D), which this change does not touch.
+
+### Limits, stated plainly
+
+- **The claims are constructed, not generated.** Every number above is what the rule does to
+  figures the corpus really prints. None of it is a measurement of how often the model rounds or
+  borrows a figure. Only a live run, and a capture of its raw claims, can show that.
+- **The number check only.** These figures exclude the subject guard, which also rejects some
+  cross-chunk borrowing for voltage and resistance (not current). A near miss the old number check
+  accepted could still have been stopped there.
+- **Temperature and rpm keep the slack.** 83 °C still passes against a printed 84 °C, and 710 rpm
+  against 700 rpm. Whether they need the same treatment was not measured.
+- **N4 is not done.** The second decision, compound multi-specification claims, is untouched.
+
+Counts: **44 cases, 14 verified, 30 templates** — unchanged; no eval case or scoring rule was
+touched.
+
+## EXPERIMENT H — live answer eval of exact electrical values, 2026-10-04
+
+**The ninth `eval:answers` run, and the gate reading for N4 decision 1 at `b733bd0`. 14/14
+verified PASS. Exit code 0. Overall 31/44, the same as G.**
+
+- For the first time, every model reply was captured. Each was replayed through the verifier
+  before and after this change: **0 of 36 replies get a different verdict.** Nothing in this
+  run's outcome was caused by the change.
+- Two templates moved against G, in opposite directions, and neither is attributable to it.
+  `wheel-lug-nut-torque` went FAIL → PASS on a different wording.
+  `applicability-abs-variant-qualified` went PASS → FAIL because the provider cut its reply off
+  at the output cap before verification ran.
+
+### What is under test
+
+Against G, one change: the verifier, `askEvidenceContract.js` blob `6000033` → `c81f1f5`
+(commit `b733bd0`, the N4 decision 1 entry above).
+
+- The case definitions (`01dc9ed`) and the scoring instrument (`e2c9693`) are byte-identical to
+  G's.
+- There is no retrieval, prompt, model, embedding, quote-check, subject-check, or scoring
+  change.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env --import <capture preload> src/scripts/evalAnswers.js`, run from the worktree's `server/`. This is G's command plus an observation-only preload, described below. 2026-10-04 23:47:32–23:52:15 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `b733bd02399e7028ab311d16e2a260176d876d7b` on `fix/n4-electrical-exact-values`, not pushed. The run command checked the revision and a clean worktree, and would not have started otherwise. Both were rechecked after the run |
+| Data | `DATABASE_FILE` was a fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` before and after the run, byte-identical to the copies E–G read. The live WAL was empty, and the live file's MD5 was unchanged afterwards. `UPLOADS_DIR` was an empty scratch folder |
+| Network | Before the run, one unauthenticated request to the API host returned HTTP 401 in 434 ms. No key was sent |
+| Case definitions / scoring | `01dc9ed` / `e2c9693`, both identical to G |
+| Verifier | `c81f1f5`; G ran `6000033` |
+| Corpus | 1,443 documents / 20,447 chunks (the same byte-identical database as G) |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned). `OPENAI_REASONING_EFFORT` was unset, and the captured requests confirm effort `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048, confirmed in the captured requests |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 44 (14 verified, 30 templates) |
+| Provider requests | **~81**: 38 Responses requests captured (37 answer/vision, one of them truncated, plus 1 follow-up rewrite), and 43 embedding requests, not captured, derived as in G |
+| Infrastructure noise | 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings. **1 errored case**, the reply cut off at the output cap (below) |
+
+### The answer capture, new in this run
+
+G's limits section names the gap: no answer text was kept, so its template movements could be
+classified only from failure signatures. This run closes it with an observation-only preload
+(`node --import`). It wrapped the global `fetch` and appended each Responses API reply, with its
+request body, to a JSONL file in scratch.
+
+- **No effect on the run:** it made no request and read a clone of each reply, so the app
+  received the original untouched. It recorded no headers, so the key could not reach the file.
+  Embedding calls were not recorded.
+- **All 38 of 38** Responses calls were captured.
+- **The replay:** for each of the 37 evidence answers, the eight `S1`..`S8` sources were rebuilt
+  from the prompt the model saw. The model's own reply then went through the full verifier
+  twice: at `74fd71f` (blob `6000033`) and at `b733bd0` (blob `c81f1f5`).
+  - 36 replies parsed. The 37th is the truncated one.
+  - **Verdict differences: 0 of 36.** No `documentSupported` claim gets a different
+    number-check result either.
+  - The replayed statuses match the live run's wherever its output shows them (every
+    `not_found`).
+- The capture and the replay script are in session scratch, not the repository.
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 17/30. Overall **31/44**.
+
+| Category | H | G | E |
+| --- | --- | --- | --- |
+| torque | 3/7 | 2/7 | 3/7 |
+| refusal | 8/8 | 8/8 | 8/8 |
+| capacity | 8/11 | 8/11 | 7/10 |
+| procedure | 5/9 | 6/9 | 8/9 |
+| behavior | 1/3 | 1/3 | 2/3 |
+| verifier | 6/6 | 6/6 | 6/6 |
+
+### The two electrical cases
+
+| Case | H | What the model said |
+| --- | --- | --- |
+| `fuel-injector-resistance` | PASS (`answered`) | One claim, quoting the table row verbatim: "The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F)." 12.4 Ω is printed, so the exact rule accepts it, as the old rule did. Its record under the unchanged rule (`01dc9ed`) is now **13 of 13**: G's 12 plus this run |
+| `charging-system-voltage` | FAIL, the value check, as in D, F, and G | Status `partial`. The model correctly says the test is at 2000 rpm, not idle, and that claim is accepted. Its voltage claim, "At 2000 rpm without load, the standard charging voltage is 13.2 to 14.8 V", quotes only "Standard voltage: 13.2 to 14.8 V" and is rejected as `numeric_anomaly`. **The unsupported figure is `2000 rpm`, not the voltage:** 14.8 V is printed and passes the exact rule. Both verifier versions reject it identically. This is D's mechanism, unchanged |
+
+Nothing was promoted.
+
+### Every case movement against experiment G
+
+| Case | G | H | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | FAIL (`not_found`) | PASS | **No.** Its one claim is "The front wheel installation torque is 103 Nm (1050 kgf-cm, 76 ft-lbf)", quoting "Install the front wheel. Torque : 103 Nm (1050 kgf-cm, 76 ft-lbf)". Both verifier versions accept it. It is a torque claim with no electrical unit, and it passes through E's "installation" relaxation. E's capture recorded that every verifier version rejects the "lug nut" wording, which fits G's failure. Generation variance, on a case that has failed in most runs |
+| `applicability-abs-variant-qualified` | PASS | FAIL (errored: "reply was cut off") | **No.** The provider returned `status: incomplete`, reason `max_output_tokens`, at exactly the 2,048-token cap with 0 reasoning tokens. The longest completed reply in this run used 1,365. The fail-closed response parser refused it before verification, so neither verifier version saw it. This is an output-length event, not a grounding result |
+
+**Intended stricter grounding rejections in this run: none.** No captured claim's verdict
+depends on the change. **Unexpected regressions: none.**
+
+**One observation, not acted on: `engine-oil-capacity` refused again, and its figure is in the
+corpus.**
+
+- It failed in G too, but as `answered` with no matching value. Here it is `not_found`.
+- Its one claim, "The engine oil capacity for drain and refill with an oil filter change is
+  4.2 liters (4.4 US qts, 3.7 Imp. qts)", quotes "Drain and refill with oil filter change 4.2
+  liters (4.4 US qts, 3.7 lmp. qts)". The source is the Oil and Oil Filter Replacement
+  document, page 4.
+- Both verifier versions reject it as `subject_mismatch`, because the table row never says
+  "engine oil capacity".
+- The case's classification in G and earlier ("corpus limitation, expectation stale") therefore
+  needs revisiting under N1. The template's 4.2 L figure is printed. What fails is the subject
+  guard on a table row that names no part.
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 41 metered cases. The two T4 cases meter zero by
+design, and the truncated case reported no metrics. Context averaged 1,799 tokens (min 1,189,
+max 2,382), against G's 1,803.
+
+- retrieval 933ms mean / 768ms median (min 651, max 2,583);
+- answer 3,903ms mean / 2,644ms median (max 11,296), over the 35 cases that report an answer
+  time.
+
+This is same-machine timing on unchanged retrieval, not a product signal.
+
+### Limits, stated plainly
+
+- **n = 1.** For the first time, though, the movements are classified from the model's own
+  captured claims rather than from failure signatures.
+- **The exact rule was not exercised live.** No claim in this run carried an electrical value
+  that differs from its quote's. The run shows the change cost nothing on these 44 questions.
+  It does not show the change catching anything. The offline measurement in the N4 decision 1
+  entry is the evidence for what it catches.
+- **The replay rebuilds sources from the prompt text.** The prompt carries no document ids, so
+  replayed evidence ids differ from the live run's. Ids do not affect verdicts.
+- **The truncation was seen once.** Whether 2,048 output tokens is now tight for this question
+  is not known from one run.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.

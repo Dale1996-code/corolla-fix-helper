@@ -394,3 +394,27 @@ test("a rejected statement's electrical-symbol value is redacted, not reprinted"
   assert.doesNotMatch(gapText, /14\.2/, "the rejected value must not be reprinted in the gaps");
   assert.doesNotMatch(result.text, /14\.2/, "the rejected value must not reach the plan");
 });
+
+test("the planner rejects a near-miss electrical value before any tolerance applies", () => {
+  // The planner shares Ask's number check, which no longer gives electrical
+  // values any tolerance. But the planner first requires a claim's text to sit
+  // inside its own quote, so a claim cannot carry a number that differs from the
+  // quote's into that check: 12.4 V against a printed 12.6 V is a paraphrase
+  // here, under either rule. What the planner needs from the change is the other
+  // direction -- that an exact restatement, as printed, still verifies.
+  const batteryText = "Charging check: the battery should read 12.6 V with the engine off.";
+  const sourcesById = new Map([["S1", makeSource("S1", batteryText)]]);
+  const { accepted, rejected } = verifyClaims(
+    [
+      claim({ claim: "the battery should read 12.4 V", evidenceQuote: "the battery should read 12.6 V" }),
+      claim({ claim: "the battery should read 12.6 V", evidenceQuote: "the battery should read 12.6 V" }),
+    ],
+    { sourcesById }
+  );
+
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].claim.claim, "the battery should read 12.4 V");
+  assert.equal(rejected[0].reason, "claim_not_in_quote");
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0].claim, "the battery should read 12.6 V");
+});
