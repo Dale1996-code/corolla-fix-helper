@@ -375,9 +375,12 @@ zero, and no verdict changes for any of the 18,725 non-electrical values. A real
 printed elsewhere in the manuals, cited against a chunk that does not print it, was accepted
 44,369 times before and 0 after. The cost is that 1,392 printed values carry two or more
 significant decimals, and an answer that rounds one is now rejected. One production file, no
-migration, no model, prompt, retrieval, embedding, or UI change. The live answer eval
-required before merging is a separate decision. See the
-[iteration log](evals/ask-rag-iteration-log.md).
+migration, no model, prompt, retrieval, embedding, or UI change. Its live answer eval
+(Experiment H, on `b733bd0`) passed 14/14 verified and 31/44 overall, the same as G. Every
+model reply in that run was captured and replayed through both verifier versions, and none
+got a different verdict. So the run shows the change costs nothing on the current questions,
+but not that it catches anything: no answer stated an electrical value that differed from its
+quote. See the [iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
 multi-specification claims, where one subject is derived per claim (described in the known
 limitations above).

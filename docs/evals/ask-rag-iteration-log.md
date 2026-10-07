@@ -2630,7 +2630,8 @@ Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
 N4 had two decisions left. This entry is the first one: unit-sensitive numeric tolerance. **No
 `eval:answers` run and no provider calls.** `docs/quality-testing.md` requires an answer eval
 before this merges, because it changes the evidence contract. The owner is deciding on that run
-separately, so this entry records only the free, local evidence.
+separately, so this entry records only the free, local evidence. **Committed as `b733bd0`;
+experiment H below is the answer eval of that commit.**
 
 ### What changed
 
@@ -2669,7 +2670,7 @@ passed for the paraphrase reason without exercising the tolerance at all.
 
 | | |
 | --- | --- |
-| Code | Branch `fix/n4-electrical-exact-values`, based on `74fd71f`, **uncommitted**. Verifier `askEvidenceContract.js` blob `c81f1f5`, against `6000033` before |
+| Code | Measured on the working tree of branch `fix/n4-electrical-exact-values` (based on `74fd71f`) before it was committed, unchanged, as `b733bd0`. Verifier `askEvidenceContract.js` blob `c81f1f5` in both, against `6000033` before |
 | Data | A fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` (the copy experiments E–G read), opened **read-only**. The live WAL was empty and the app was not running, so the live file was copied, never opened |
 | Method | A scratch script, not committed, loading both verifier versions side by side. The "before" version was extracted with `git show 74fd71f:…` and its blob hash checked. 18 seconds. No network calls |
 | Corpus | 1,443 documents, 1,430 with chunks, 20,447 chunks |
@@ -2827,3 +2828,142 @@ change. Two templates can:
 
 Counts: **44 cases, 14 verified, 30 templates** — unchanged; no eval case or scoring rule was
 touched.
+
+## EXPERIMENT H — live answer eval of exact electrical values, 2026-10-04
+
+**The ninth `eval:answers` run, and the gate reading for N4 decision 1 at `b733bd0`. 14/14
+verified PASS. Exit code 0. Overall 31/44, the same as G.**
+
+- For the first time, every model reply was captured. Each was replayed through the verifier
+  before and after this change: **0 of 36 replies get a different verdict.** Nothing in this
+  run's outcome was caused by the change.
+- Two templates moved against G, in opposite directions, and neither is attributable to it.
+  `wheel-lug-nut-torque` went FAIL → PASS on a different wording.
+  `applicability-abs-variant-qualified` went PASS → FAIL because the provider cut its reply off
+  at the output cap before verification ran.
+
+### What is under test
+
+Against G, one change: the verifier, `askEvidenceContract.js` blob `6000033` → `c81f1f5`
+(commit `b733bd0`, the N4 decision 1 entry above).
+
+- The case definitions (`01dc9ed`) and the scoring instrument (`e2c9693`) are byte-identical to
+  G's.
+- There is no retrieval, prompt, model, embedding, quote-check, subject-check, or scoring
+  change.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env --import <capture preload> src/scripts/evalAnswers.js`, run from the worktree's `server/`. This is G's command plus an observation-only preload, described below. 2026-10-04 23:47:32–23:52:15 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | `b733bd02399e7028ab311d16e2a260176d876d7b` on `fix/n4-electrical-exact-values`, not pushed. The run command checked the revision and a clean worktree, and would not have started otherwise. Both were rechecked after the run |
+| Data | `DATABASE_FILE` was a fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd` before and after the run, byte-identical to the copies E–G read. The live WAL was empty, and the live file's MD5 was unchanged afterwards. `UPLOADS_DIR` was an empty scratch folder |
+| Network | Before the run, one unauthenticated request to the API host returned HTTP 401 in 434 ms. No key was sent |
+| Case definitions / scoring | `01dc9ed` / `e2c9693`, both identical to G |
+| Verifier | `c81f1f5`; G ran `6000033` |
+| Corpus | 1,443 documents / 20,447 chunks (the same byte-identical database as G) |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned). `OPENAI_REASONING_EFFORT` was unset, and the captured requests confirm effort `low` |
+| M2 retrieval diversity | applied, `RETRIEVAL_MAX_CHUNKS_PER_SOURCE=3` (default) |
+| Reranker / evidence contract / relevance floor | off / on / off (shadow) |
+| `OPENAI_MAX_OUTPUT_TOKENS` | 2048, confirmed in the captured requests |
+| `AI_DAILY_CALL_LIMIT` | unset, so the default 500 per process |
+| Cases | 44 (14 verified, 30 templates) |
+| Provider requests | **~81**: 38 Responses requests captured (37 answer/vision, one of them truncated, plus 1 follow-up rewrite), and 43 embedding requests, not captured, derived as in G |
+| Infrastructure noise | 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings. **1 errored case**, the reply cut off at the output cap (below) |
+
+### The answer capture, new in this run
+
+G's limits section names the gap: no answer text was kept, so its template movements could be
+classified only from failure signatures. This run closes it with an observation-only preload
+(`node --import`). It wrapped the global `fetch` and appended each Responses API reply, with its
+request body, to a JSONL file in scratch.
+
+- **No effect on the run:** it made no request and read a clone of each reply, so the app
+  received the original untouched. It recorded no headers, so the key could not reach the file.
+  Embedding calls were not recorded.
+- **All 38 of 38** Responses calls were captured.
+- **The replay:** for each of the 37 evidence answers, the eight `S1`..`S8` sources were rebuilt
+  from the prompt the model saw. The model's own reply then went through the full verifier
+  twice: at `74fd71f` (blob `6000033`) and at `b733bd0` (blob `c81f1f5`).
+  - 36 replies parsed. The 37th is the truncated one.
+  - **Verdict differences: 0 of 36.** No `documentSupported` claim gets a different
+    number-check result either.
+  - The replayed statuses match the live run's wherever its output shows them (every
+    `not_found`).
+- The capture and the replay script are in session scratch, not the repository.
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 17/30. Overall **31/44**.
+
+| Category | H | G | E |
+| --- | --- | --- | --- |
+| torque | 3/7 | 2/7 | 3/7 |
+| refusal | 8/8 | 8/8 | 8/8 |
+| capacity | 8/11 | 8/11 | 7/10 |
+| procedure | 5/9 | 6/9 | 8/9 |
+| behavior | 1/3 | 1/3 | 2/3 |
+| verifier | 6/6 | 6/6 | 6/6 |
+
+### The two electrical cases
+
+| Case | H | What the model said |
+| --- | --- | --- |
+| `fuel-injector-resistance` | PASS (`answered`) | One claim, quoting the table row verbatim: "The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F)." 12.4 Ω is printed, so the exact rule accepts it, as the old rule did. Its record under the unchanged rule (`01dc9ed`) is now **13 of 13**: G's 12 plus this run |
+| `charging-system-voltage` | FAIL, the value check, as in D, F, and G | Status `partial`. The model correctly says the test is at 2000 rpm, not idle, and that claim is accepted. Its voltage claim, "At 2000 rpm without load, the standard charging voltage is 13.2 to 14.8 V", quotes only "Standard voltage: 13.2 to 14.8 V" and is rejected as `numeric_anomaly`. **The unsupported figure is `2000 rpm`, not the voltage:** 14.8 V is printed and passes the exact rule. Both verifier versions reject it identically. This is D's mechanism, unchanged |
+
+Nothing was promoted.
+
+### Every case movement against experiment G
+
+| Case | G | H | Attributable to this change? |
+| --- | --- | --- | --- |
+| `wheel-lug-nut-torque` | FAIL (`not_found`) | PASS | **No.** Its one claim is "The front wheel installation torque is 103 Nm (1050 kgf-cm, 76 ft-lbf)", quoting "Install the front wheel. Torque : 103 Nm (1050 kgf-cm, 76 ft-lbf)". Both verifier versions accept it. It is a torque claim with no electrical unit, and it passes through E's "installation" relaxation. E's capture recorded that every verifier version rejects the "lug nut" wording, which fits G's failure. Generation variance, on a case that has failed in most runs |
+| `applicability-abs-variant-qualified` | PASS | FAIL (errored: "reply was cut off") | **No.** The provider returned `status: incomplete`, reason `max_output_tokens`, at exactly the 2,048-token cap with 0 reasoning tokens. The longest completed reply in this run used 1,365. The fail-closed response parser refused it before verification, so neither verifier version saw it. This is an output-length event, not a grounding result |
+
+**Intended stricter grounding rejections in this run: none.** No captured claim's verdict
+depends on the change. **Unexpected regressions: none.**
+
+**One observation, not acted on: `engine-oil-capacity` refused again, and its figure is in the
+corpus.**
+
+- It failed in G too, but as `answered` with no matching value. Here it is `not_found`.
+- Its one claim, "The engine oil capacity for drain and refill with an oil filter change is
+  4.2 liters (4.4 US qts, 3.7 Imp. qts)", quotes "Drain and refill with oil filter change 4.2
+  liters (4.4 US qts, 3.7 lmp. qts)". The source is the Oil and Oil Filter Replacement
+  document, page 4.
+- Both verifier versions reject it as `subject_mismatch`, because the table row never says
+  "engine oil capacity".
+- The case's classification in G and earlier ("corpus limitation, expectation stale") therefore
+  needs revisiting under N1. The template's 4.2 L figure is printed. What fails is the subject
+  guard on a table row that names no part.
+
+### Retrieval and latency shape
+
+Retrieval returned exactly 8 chunks on all 41 metered cases. The two T4 cases meter zero by
+design, and the truncated case reported no metrics. Context averaged 1,799 tokens (min 1,189,
+max 2,382), against G's 1,803.
+
+- retrieval 933ms mean / 768ms median (min 651, max 2,583);
+- answer 3,903ms mean / 2,644ms median (max 11,296), over the 35 cases that report an answer
+  time.
+
+This is same-machine timing on unchanged retrieval, not a product signal.
+
+### Limits, stated plainly
+
+- **n = 1.** For the first time, though, the movements are classified from the model's own
+  captured claims rather than from failure signatures.
+- **The exact rule was not exercised live.** No claim in this run carried an electrical value
+  that differs from its quote's. The run shows the change cost nothing on these 44 questions.
+  It does not show the change catching anything. The offline measurement in the N4 decision 1
+  entry is the evidence for what it catches.
+- **The replay rebuilds sources from the prompt text.** The prompt carries no document ids, so
+  replayed evidence ids differ from the live run's. Ids do not affect verdicts.
+- **The truncation was seen once.** Whether 2,048 output tokens is now tight for this question
+  is not known from one run.
+- **Nothing was changed in response to this run:** no eval case, scoring rule, retrieval
+  setting, or verifier rule, and no case was promoted.
+
+Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
