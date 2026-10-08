@@ -124,33 +124,18 @@ npm run test
 
 ### Known dependency advisories
 
-`npm run install:all` may print `3 vulnerabilities (1 moderate, 2 critical)`
-for the frontend. As of this writing they all come from one source: the test
-runner, `vitest` 3. Two are in its worker pool, `tinypool` (GHSA-5gmw-xhrv-c9v3,
-GHSA-85c8-ppgw-ccpr), and one is in `@vitest/mocker` (GHSA-82fw-gwwq-j7x9).
-
-What this means in practice:
-
-- These are **development-only** tools. They are **not** part of the production
-  app that gets built into `client/dist` and served to users, and
-  `npm --prefix client audit --omit=dev` reports 0.
-- Neither is reachable as this project uses them. The `tinypool` advisories need
-  something else in the test process to have already polluted
-  `Object.prototype`; the `@vitest/mocker` one needs a third-party dev server or
-  Vitest browser mode. The client tests run in jsdom against the repo's own code.
-- No Vitest 3 release fixes them: Vitest 3 requires `tinypool` 1.x, and every
-  1.x release is affected. The fix is Vitest 4.1.11 or newer, which removes
-  `tinypool` entirely.
-
-Do **not** run `npm audit fix --force`. It jumps straight to Vitest 5, two major
-versions at once. The Vitest upgrade should be done deliberately and
-re-verified, not as an automatic fix.
-
-You can review the current details any time with:
+The frontend audit is clean, development tools included: `npm run install:all`
+should report 0 vulnerabilities for the frontend. Its last findings came from
+the test runner, Vitest 3, whose worker pool `tinypool` has no fixed 1.x
+release; Vitest 4.1.11 removes `tinypool` entirely. Check any time with:
 
 ```powershell
 npm --prefix client audit
 ```
+
+If a finding does appear, do **not** run `npm audit fix --force`. It jumps
+straight to the newest major version (for Vitest it proposed 5 when 4.1.11 was
+enough); upgrade deliberately and re-verify instead.
 
 The root `package.json` carries one `overrides` entry, `"shell-quote": "1.11.0"`.
 `concurrently` pins `shell-quote` to an exact version, and every release up to
