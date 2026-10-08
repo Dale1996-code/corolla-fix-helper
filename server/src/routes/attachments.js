@@ -29,6 +29,9 @@ const upload = multer({
     files: 1,
     fields: 20,
     parts: 25,
+    // No field here is array-indexed, and multer leaves this guard off by
+    // default: an index near 2^32 pins the CPU (GHSA-535w-7cp7-47q4).
+    fieldArrayIndexLimit: 0,
   },
   fileFilter: (_request, file, callback) => {
     const extension = path.extname(file.originalname || "").toLowerCase();

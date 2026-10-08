@@ -503,6 +503,25 @@ test("POST /api/documents/upload defaults to not bookmarked when the flag is omi
   assert.deepEqual(response.body.document.tags, []);
 });
 
+// multer GHSA-535w-7cp7-47q4: a field name with a huge array index (near 2^32)
+// pins the CPU, and multer only guards it when `fieldArrayIndexLimit` is set.
+// A small index proves the limit is configured without hanging the suite if
+// that guard is ever removed.
+test("POST /api/documents/upload rejects array-indexed field names", async () => {
+  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Indexed field name")
+    .field("system", "Engine")
+    .field("documentType", "Reference")
+    .field("items[5]", "x")
+    .attach("pdfFile", sourcePdf);
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /array index/i);
+});
+
 test("POST /api/documents/:id/extract re-runs extraction, updates status fields, and rebuilds chunks", async () => {
   const vehicle = db.prepare("SELECT id FROM vehicles ORDER BY id ASC LIMIT 1").get();
   assert.ok(vehicle);
