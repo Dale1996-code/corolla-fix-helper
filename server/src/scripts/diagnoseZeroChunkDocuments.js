@@ -162,7 +162,6 @@ async function inspectStoredPdf(storedFilename) {
     pdfDocument = await pdfjs.getDocument({
       data: new Uint8Array(fileBuffer),
       useSystemFonts: true,
-      isEvalSupported: false,
     }).promise;
     inspection.inspectedPageCount = pdfDocument.numPages;
   } catch (error) {
