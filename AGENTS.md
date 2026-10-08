@@ -142,7 +142,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - `/api/ask` and `/api/repair-plan` share **one** in-memory 20-requests-per-minute limiter window (their combined AI request rate is bounded, not one window each); it evicts expired windows so the map cannot grow unbounded. A limiter can be injected in tests via `createApp({ aiRateLimiter })`. It reduces accidental OpenAI spend but is not a substitute for authentication on any public deployment.
 - Every response carries baseline security headers set in `src/app.js` (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, and a self-only `Content-Security-Policy`). The CSP assumes same-origin assets and PDFs opened in new tabs — if you add a CDN, external font host, or an embedded (`<iframe>`/`<object>`) viewer, widen the matching directive.
 - `src/database.js` sets `PRAGMA busy_timeout = 5000` so a concurrent writer (import/backfill alongside the server) waits briefly instead of failing with `SQLITE_BUSY`.
-- Both upload routes cap `files`/`fields`/`parts` (not just `fileSize`); multer is pinned `>= 2.2.0`. Keep the server audit clean (`npm --prefix server audit`).
+- Both upload routes cap `files`/`fields`/`parts` (not just `fileSize`) and set `fieldArrayIndexLimit: 0`. That last limit is opt-in in multer, and `npm audit` reports multer clean without it, so don't drop it. Keep multer `>= 2.4.0` and pdfjs-dist `>= 6.2.108`, and keep the server audit clean (`npm --prefix server audit`).
 - Bulk import (`importFolder.js`) dedups strictly on MD5. Two distinct files that share a basename both import (the on-disk stored name is disambiguated); only byte-for-byte duplicates are skipped.
 
 ## Deployment And CI Notes
