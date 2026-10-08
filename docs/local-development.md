@@ -147,6 +147,15 @@ You can review the current details any time with:
 npm --prefix client audit
 ```
 
+The root `package.json` carries one `overrides` entry, `"shell-quote": "1.11.0"`.
+`concurrently` pins `shell-quote` to an exact version, and every release up to
+10.0.5 pins one affected by GHSA-pqg4-j6r4-53mv (fixed in 1.11.0), so
+`npm audit fix` cannot resolve it. `npm audit fix --force` instead downgrades
+`concurrently` to 9.2.1, whose `shell-quote` 1.8.3 has a different critical
+advisory (GHSA-w7jw-789q-3m8p) and a high one (GHSA-395f-4hp3-45gv).
+Remove the override once a `concurrently` release pins `shell-quote` 1.11.0 or
+newer — left in place, it would force 1.11.0 over that newer pin.
+
 ## 8. Bulk Import PDFs
 
 Run this from the repo root:
