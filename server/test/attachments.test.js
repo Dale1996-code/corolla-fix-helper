@@ -149,6 +149,25 @@ test("POST /api/attachments rejects an unknown entity type", async () => {
   assert.match(response.body.error, /entity type/i);
 });
 
+// multer GHSA-535w-7cp7-47q4: see the matching document-upload test in
+// app.test.js for why a small index stands in for the real attack.
+test("POST /api/attachments rejects array-indexed field names", async () => {
+  const symptomId = await createSymptom("Indexed field name");
+
+  const response = await request(app)
+    .post("/api/attachments")
+    .field("entityType", "symptom")
+    .field("entityId", String(symptomId))
+    .field("items[5]", "x")
+    .attach("image", PNG_BYTES, {
+      filename: "evidence.png",
+      contentType: "image/png",
+    });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /array index/i);
+});
+
 test("deleting a symptom removes its attachments and files", async () => {
   const symptomId = await createSymptom("Vibration");
   const createResponse = await attachImageToSymptom(symptomId);
