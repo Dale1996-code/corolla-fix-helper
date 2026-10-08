@@ -269,7 +269,7 @@ Documented honestly so they don't surprise anyone:
 - **`file_md5` is a duplicate-detection key, not a security control.** MD5 collisions are not a realistic concern for personal PDFs, but don't reuse it as an integrity guarantee.
 - **Server runtime dependencies audit clean** (`npm --prefix server audit` → 0 vulnerabilities). Keep multer ≥ 2.4.0, the first release clear of its field-name and aborted-upload DoS advisories (the lockfile resolves 2.4.0 within the `^2.2.0` range), and pdfjs-dist ≥ 6.2.108. pdfjs-dist 6.x has no `isEvalSupported` option because it no longer evaluates code from PDFs.
 - **The audit can't see one multer limit.** Both upload routes cap `files`/`fields`/`parts` in addition to `fileSize`, and also set `fieldArrayIndexLimit: 0`. multer leaves that limit off by default. Without it, a field name like `items[4294967294]` still pins the CPU (GHSA-535w-7cp7-47q4) even though `npm audit` reports multer clean. Keep all of these when bumping deps.
-- **Known dev-dependency advisories** (esbuild via Vite/Vitest) affect the local dev server only, not the built app. Do not run `npm audit fix --force` — it force-upgrades Vite across a major version. See [local-development.md](local-development.md).
+- **Client dependencies audit clean too, dev tooling included** (`npm --prefix client audit` → 0 vulnerabilities). Keep vitest ≥ 4.1.11: Vitest 3 requires `tinypool` 1.x, every 1.x release is affected, and 4.x drops it. Do not run `npm audit fix --force` — it jumps straight to the newest major version (it proposed Vitest 5 when 4.1.11 was the fix). See [local-development.md](local-development.md).
 - **Cloud docs describe an *intended* deployment.** Nothing in this branch proves a live GCE deployment exists.
 
 ## Deployment Shape

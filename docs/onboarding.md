@@ -134,7 +134,7 @@ Add a **new** numbered migration in `server/src/initDatabase.js` (`NNN_short_des
 - **`server/src/services/tarExecutable.js`** — on Windows it deliberately picks the native `System32\tar.exe`; spawning bare `tar` breaks backups.
 - **The SSE disconnect handling in `server/src/routes/repairPlan.js`** — the response-vs-request `"close"` distinction is subtle and load-bearing (the comment in the file explains why).
 - **`server/data/` and `server/uploads/`** — that's the user's real data. Don't commit it, don't script against it, don't delete it.
-- **`npm audit fix --force`** — force-upgrades Vite across a major version. Don't ([local-development.md](local-development.md)).
+- **`npm audit fix --force`** — jumps straight to the newest major version of whatever it touches instead of the smallest fix. Don't; upgrade deliberately and re-verify ([local-development.md](local-development.md)).
 - **Real secrets** — only in `server/.env` (gitignored) or deployment env vars; never in code, docs, or commits.
 
 ## 9. First Day Checklist
