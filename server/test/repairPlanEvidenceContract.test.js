@@ -418,3 +418,26 @@ test("the planner rejects a near-miss electrical value before any tolerance appl
   assert.equal(accepted.length, 1);
   assert.equal(accepted[0].claim, "the battery should read 12.6 V");
 });
+
+test("a current-symbol value verifies when restated and is redacted when rejected", () => {
+  // The planner shares Ask's detector and redaction, so "15A" is now a checked
+  // value: a restatement as printed still verifies, and a rejected statement
+  // does not reprint its figure to the owner.
+  const fuseText = "Inspection: the EFI fuse is 15A and must show continuity.";
+  const result = build(
+    [
+      claim({ claim: "the EFI fuse is 15A", sourceId: "S1", evidenceQuote: "the EFI fuse is 15A" }),
+      claim({ claim: "the EFI fuse is 25A", sourceId: "S1", evidenceQuote: "the EFI fuse is 25A" }),
+    ],
+    { sources: [makeSource("S1", fuseText)] }
+  );
+
+  assert.deepEqual(
+    result.verifiedClaims.map((verified) => verified.claim),
+    ["the EFI fuse is 15A"]
+  );
+
+  const gapText = result.gaps.join(" ");
+  assert.match(gapText, /\[unverified value\]/);
+  assert.doesNotMatch(gapText, /25/, "the rejected value must not be reprinted in the gaps");
+});

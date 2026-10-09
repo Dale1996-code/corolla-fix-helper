@@ -78,14 +78,16 @@ state a plan imagined.
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
 - **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
-  `Ω`, and `kΩ` are detected (N4's second slice), but case-sensitively: a lowercase `v` is
-  not read as volts, and other symbols such as `kV`, `mΩ`, `A`, or `mA` are not detected at
-  all, so a value written that way still gets neither the numeric check nor the subject guard.
-  (Amps and milliamps are detected only spelled out; the corpus prints `A` mostly as fuse
-  ratings on wiring diagrams, and detecting it would change behaviour for other units — see
-  the iteration log's N4 decision 1 entry.) In the other direction, `mV` and `V`, and `kΩ`
-  and `Ω`, are never converted into each other, so a claim restating its quote in the other
-  unit is rejected rather than accepted.
+  `Ω`, and `kΩ` are detected (N4's second slice), and so are `A` and `mA`, but
+  case-sensitively: a lowercase `v` or `a` is not read as volts or amps, and other symbols
+  such as `kV` or `mΩ` are not detected at all, so a value written that way still gets
+  neither the numeric check nor the subject guard. Current gets the numeric check only,
+  never a subject guard. Because the corpus prints `A` mostly as fuse ratings on wiring
+  diagrams, a current symbol in a quote counts only for a current claim, so it changes
+  nothing for any other unit — see the iteration log's current-symbols entry. A step number
+  before a flowchart branch label ("GO TO STEP 10 A") still reads as a current. In the other
+  direction, `mV` and `V`, `kΩ` and `Ω`, and `mA` and `A` are never converted into each
+  other, so a claim restating its quote in the other unit is rejected rather than accepted.
 - **Compound claims get one subject.** The subject guard derives a single part name per
   claim, so a claim stating two specifications — "the drain plug torque is 37 Nm and the
   battery voltage is 12.6 volts" — has only one component compared with its quote; the

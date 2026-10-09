@@ -2967,3 +2967,136 @@ This is same-machine timing on unchanged retrieval, not a product signal.
   setting, or verifier rule, and no case was promoted.
 
 Counts after this run: **44 cases, 14 verified, 30 templates** — unchanged.
+
+## Current symbols — `A` and `mA` are checked, and change nothing else (2026-10-06, offline)
+
+The follow-up the N4 decision 1 entry left open. **No `eval:answers` run and no provider calls.**
+Until now a claim written "0.5 A" or "3.5 mA" carried no detected specification, so it passed
+with no numeric check at all.
+
+### What changed
+
+`askEvidenceContract.js` now detects the symbols `A` and `mA`.
+
+- **Separate pattern.** `CURRENT_SYMBOL_REGEX` is matched case-sensitively, with the electrical
+  symbols' guards plus one more: a following `/` is refused, because "1 A/C" and "bank 1 A/F"
+  are part names. `ELECTRICAL_SYMBOL_REGEX` and `ELECTRICAL_UNITS`, which hand the subject
+  guard its nouns, are untouched, so current still has no subject guard.
+- **Exact values.** A current claim must equal a printed value, as decision 1 already
+  required for spelled amps. `A` is the same unit as amps/amperes and `mA` the same as
+  milliamps/milliamperes. Nothing converts between `mA` and `A`.
+- **The scoping rule.** A current symbol in a quote counts only for a current claim. It
+  neither supports nor gates any other claim, so it cannot switch off the bare-number
+  fallback for a torque or voltage claim. Only the symbols are set aside: a spelled "amps" in
+  a quote counted before and still does.
+- **Also:** the spelled form "milliamperes" is detected; `milliamps` used to match first and
+  then fail its word boundary. Current values are redacted from gap text like every other
+  specification.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Code | Measured on the working tree of branch `fix/n4-current-symbols` (based on `b733bd0`) before it was committed. It was then rebased onto `2df40d6`, which carries `b733bd0` as squash commit `7e965df`, and committed unchanged. Verifier blob `739ab2b` in both, against `c81f1f5` before |
+| Data | A fresh byte-for-byte copy of the real database, MD5 `c1c5f794a261757569d846ca270ebcfd`, opened **read-only**. The live WAL was empty and the app was not running |
+| Method | Scratch scripts, not committed. The "before" verifier was extracted with `git show b733bd0:…` and its blob hash checked. A naive variant was measured alongside: `mA\|A` added to `ELECTRICAL_SYMBOL_REGEX` with its exact guards, and no scoping rule |
+| Corpus | 1,443 documents, 20,447 chunks |
+
+**Self-checks:** the branch detects non-current specifications identically to `b733bd0` on
+20,447 of 20,447 chunks. It finds 2,568 current values, the 2,576 guarded matches minus 8 "A/C".
+
+### What the corpus means by `A`
+
+| Meaning | Matches | Chunks | Documents |
+| --- | --- | --- | --- |
+| Fuse ratings ("10A", "ABS NO. 1 (50 A) fuse") | 1,969 | 608 | 197 |
+| Fuse ratings OCR'd as "7. 5A", which reads as 5 A | 96 | 84 | 53 |
+| Real current specifications (heater current, throttle actuator, A/F sensor mA, charging-system current) | 256 | 168 | 25 |
+| False: flowchart branch labels ("GO TO STEP 10 A --") | 74 | 65 | 23 |
+| False: connector and pin labels, OCR noise | 173 | 140 | 72 |
+| False: "1 A/C", refused by the `/` guard | 8 | 8 | 5 |
+
+Letter designators such as "Bolt A" never match, because the pattern needs a number before
+the letter. The 6 chunks printing "Bolt A" yield no detection.
+
+### Measured
+
+**1. Other units are unchanged.**
+
+| Replay | Pairs | Naive variant changed | Branch changed |
+| --- | --- | --- | --- |
+| Bare-number fallback: claims from each spec-free chunk's own numbers, 10 units × 4 variants (all 667 affected chunks plus every 25th other spec-free chunk) | 418,080 | **224,067** | **0** |
+| Every printed specification × 6 variants against its own chunk | 200,316 | 0 | 0 |
+| 22 non-current units × 4 variants against every chunk that prints a current symbol (958 chunks) | 1,275,032 | — | **0** |
+| Subject guard, two-specification claims against the same chunks | 14,489 | — | 0 |
+
+The naive variant would have stopped the fallback in 667 chunks across 210 documents: 451 fuse
+diagrams, 103 noise-only, 53 branch-label-only, and 60 with real current specifications. It
+would have rejected 72,060 correct restatements, for torque, pressure, length, volume,
+temperature, rpm, volts, and ohms.
+
+**2. Current claims, against their own chunk.**
+
+| Claim | Before | After |
+| --- | --- | --- |
+| A printed current restated (2,568) | all accepted, unchecked | all accepted |
+| Restated spelled out, "10 amps" against "10A" (2,568) | 1,909 | **2,568** |
+| +0.1 / +0.5 near miss | 100% | 0% |
+| The next fuse rating up (10 → 15) | 100% | 26%, each one printed for another fuse on the same page |
+| A current value printed elsewhere in the corpus (47,491) | 47,491 | **0** |
+| Real specifications, quote ±80 characters: exact / near miss | 241 / 482 of 482 | 241 / 0 of 482 |
+
+The spelled-out row fixes a defect that predates this change. Spelled amps were detected and
+the symbol was not, so on a page that also printed another unit, "10 amps" had nothing to
+match and was rejected.
+
+**3. Costs.**
+
+- **"7.5 A" against an OCR-split "7. 5A"** is accepted on 4 of 84 chunks, down from 84. This
+  fails closed: the quote does not say 7.5.
+- **Rounding is now rejected.** Five printed values carry two or more significant decimals
+  (0.997 A, 2.49 A, 19.92 A, 127.99 mA, 0.004 mA). "1 A" for "0.997 A" fails.
+- **Fuse checks are presence-only.** There is no subject guard for current, and a fuse chunk
+  prints a median of 2 distinct ratings (90th percentile 3, maximum 10).
+- **Unsourced guidance naming a current is removed**, as for every other unit. So is a false
+  detection in model text, such as "go to step 5 A".
+
+**4. Real model output.** Experiment H's captured replies (36 replies, 280 sources, 171
+claims, 28 guidance lines, 68 gaps) were replayed through both verifiers. None contains `A` or
+`mA`, and no verdict differs. No eval case asks about current, so the answer eval cannot
+observe this change.
+
+**5. The Repair Planner** shares the detector and redaction. Planner-shaped claims, each sitting
+inside its quote, cut at word boundaries: 0 of 25,257 change.
+
+### Tests and checks
+
+- **`askEvidenceContract.test.js`: ten new tests; `repairPlanEvidenceContract.test.js`: one.**
+- **Red first.** Before the change, the eight behaviour tests failed. The three guard tests passed,
+  as guards should: no `A/C` reading, other units unchanged, no subject guard.
+- **Six mutations, each caught:**
+  - the naive gate;
+  - no `/` guard;
+  - no symbol-to-spelled identity;
+  - current with the old tolerance;
+  - lowercase `a` read as amps;
+  - no redaction.
+
+**Re-checked after the rebase onto `2df40d6`** (the same verifier blob, `739ab2b`, against
+`c81f1f5` on main):
+
+- Gates: lint and typecheck clean; server **1030/1030** (`NETWORK_MODE=0`); client **410/410**
+  in 31 files, on Vitest 4.1.11; `build` green; `smoke` 13/13.
+- The red check was repeated: with main's verifier swapped in, exactly the eight behaviour
+  tests fail.
+- A fresh replay ran on a copy of the same database (MD5 `c1c5f794…`, plus its WAL). It
+  reproduced this entry's figures: 2,568 current values in 958 chunks; 667 chunks in 210
+  documents where the naive variant stops the fallback; spelled "amps" 1,909 → 2,568.
+- In that replay, **0 of 1,199,408** non-current claim/evidence pairs and 0 of 71,908
+  subject-guard pairs changed. Redaction differs only by current symbols. The naive variant,
+  as a positive control, changes 360,240 of the same pairs.
+- Constructed end-to-end replies and planner claims changed only where a claim carries a
+  current figure. Those were 300 of 2,343 replies, and 13 of 17,830 planner claims. All 13
+  planner claims are windows cut mid-number ("5A" out of "7.5A"), which now fail closed.
+
+Counts: **44 cases, 14 verified, 30 templates** — unchanged.

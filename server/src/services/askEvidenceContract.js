@@ -286,7 +286,7 @@ const UNIT_PATTERN =
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
   "lit(?:er|re)s?|ml|millilit(?:er|re)s?|qt|quarts?|pints?|gal(?:lons?)?|fl\\s*oz|" +
   "ohms?|kilohms?|k\\s*ohms?|Ω|" +
-  "volts?|millivolts?|amps?|amperes?|milliamps?|" +
+  "volts?|millivolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
   "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
   "rpm|hz|kilohertz|khz";
 
@@ -318,6 +318,18 @@ const SPEC_NUMBER_REGEX = new RegExp(
 const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
 const ELECTRICAL_SYMBOL_REGEX = new RegExp(
   String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+  "g"
+);
+
+// Current symbols, "A" and "mA", with the same case-sensitive guards plus one
+// more: a following slash is refused, because "1 A/C" and "bank 1 A/F" name
+// parts in these manuals, never a current. Kept out of ELECTRICAL_SYMBOL_REGEX
+// so that pattern, and the subject nouns ELECTRICAL_UNITS hands out, stay
+// exactly as they were. A step number before a flowchart branch label ("GO TO
+// STEP 10 A") still reads as a current: in a claim that is an extra rejection,
+// and in a quote it can only ever meet a current claim (see specIsPresent).
+const CURRENT_SYMBOL_REGEX = new RegExp(
+  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mA|A)(?![A-Za-z0-9_/-])`,
   "g"
 );
 
@@ -372,11 +384,13 @@ export function extractSpecNumbers(text) {
     }
   }
 
-  for (const match of source.matchAll(ELECTRICAL_SYMBOL_REGEX)) {
-    const value = Number(String(match[1]).replace(",", "."));
+  for (const regex of [ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
+    for (const match of source.matchAll(regex)) {
+      const value = Number(String(match[1]).replace(",", "."));
 
-    if (Number.isFinite(value)) {
-      found.push({ value, raw: match[0].trim(), unit: match[2] });
+      if (Number.isFinite(value)) {
+        found.push({ value, raw: match[0].trim(), unit: match[2] });
+      }
     }
   }
 
@@ -472,12 +486,32 @@ function withinTolerance(left, right) {
 //
 // Current lives here rather than in ELECTRICAL_UNITS because that table also
 // gives the subject guard its head nouns, and current deliberately has none.
-// Only the spelled forms appear because only they are detected: UNIT_PATTERN
-// has no "A" or "mA" symbol, so a value written that way is not checked at all.
-const CURRENT_UNIT_REGEX = /^(amps?|amperes?|milliamps?)$/i;
+// Like ELECTRICAL_UNITS, it knows each unit in both printed forms: `symbol` is
+// compared case-sensitively, `spelled` as UNIT_PATTERN detects it.
+const CURRENT_UNITS = [
+  { name: "milliamp", symbol: /^mA$/, spelled: /^milliamp(?:ere)?s?$/i },
+  { name: "amp", symbol: /^A$/, spelled: /^amp(?:ere)?s?$/i },
+];
+
+/** The current unit a detected unit string names, spelled out or as a symbol. */
+function findCurrentUnit(unit) {
+  const cleaned = String(unit || "").trim();
+  const found = CURRENT_UNITS.find(
+    ({ symbol, spelled }) => symbol.test(cleaned) || spelled.test(cleaned)
+  );
+
+  return found || null;
+}
+
+/** Is this detected unit string "A" or "mA"? */
+function isCurrentSymbol(unit) {
+  const cleaned = String(unit || "").trim();
+
+  return CURRENT_UNITS.some(({ symbol }) => symbol.test(cleaned));
+}
 
 function requiresExactValue(unit) {
-  return Boolean(findElectricalUnit(unit)) || CURRENT_UNIT_REGEX.test(String(unit || "").trim());
+  return Boolean(findElectricalUnit(unit)) || Boolean(findCurrentUnit(unit));
 }
 
 /** Does this printed number support the claimed spec? Exact for electrical units. */
@@ -503,9 +537,16 @@ function isElectricalSymbol(unit) {
  * the unit it stands for, so a quote printing "12.6 V" still supports a claim
  * saying "12.6 volts", and the reverse -- without this, detecting symbols would
  * have started rejecting claims that were passing. Nothing here converts: mV and
- * V stay different units, as do kΩ and Ω.
+ * V stay different units, as do kΩ and Ω, and mA and A.
  */
 function sameLiteralUnit(left, right) {
+  if (isCurrentSymbol(left) || isCurrentSymbol(right)) {
+    const leftUnit = findCurrentUnit(left);
+    const rightUnit = findCurrentUnit(right);
+
+    return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
+  }
+
   if (isElectricalSymbol(left) || isElectricalSymbol(right)) {
     const leftUnit = findElectricalUnit(left);
     const rightUnit = findElectricalUnit(right);
@@ -525,12 +566,24 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
     return false;
   }
 
+  // A current symbol in the evidence counts only for a current claim. Most
+  // wiring diagrams print a fuse rating ("10A") and no other unit, and letting
+  // it count as the quote's specification would switch off the bare-number
+  // fallback below for every torque, pressure, or voltage claim citing one --
+  // measured on the real corpus, 667 chunks. It could never support such a
+  // claim anyway. Only the symbols are set aside: a spelled-out "amps" in the
+  // evidence counted before "A" was detected and still does, so no claim that
+  // is not a current is compared any differently.
+  const comparableSpecs = findCurrentUnit(spec.unit)
+    ? evidenceSpecs
+    : evidenceSpecs.filter((evidenceSpec) => !isCurrentSymbol(evidenceSpec.unit));
+
   // Prefer unit-aware comparison whenever the evidence names any technical
   // units. A matching numeral alone is not enough: "37 psi" must never be
   // grounded by an unrelated "37 N·m" torque passage.
   const claimCanonical = canonicalize(spec.value, spec.unit);
 
-  for (const evidenceSpec of evidenceSpecs) {
+  for (const evidenceSpec of comparableSpecs) {
     const evidenceCanonical = canonicalize(evidenceSpec.value, evidenceSpec.unit);
 
     if (
@@ -552,7 +605,7 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
     }
   }
 
-  if (evidenceSpecs.length) {
+  if (comparableSpecs.length) {
     return false;
   }
 
@@ -1041,6 +1094,7 @@ export function redactSpecNumbers(text) {
   return String(text || "")
     .replace(SPEC_NUMBER_REGEX, "[unverified value]")
     .replace(ELECTRICAL_SYMBOL_REGEX, "[unverified value]")
+    .replace(CURRENT_SYMBOL_REGEX, "[unverified value]")
     .replace(VISCOSITY_REGEX, "[unverified value]");
 }
 
