@@ -1037,6 +1037,181 @@ test("every other unit keeps the existing tolerance", () => {
   assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, true);
 });
 
+// ---- N4: current symbols ----
+//
+// The manuals print current as "A" and "mA" -- heater-current thresholds, the
+// throttle actuator, air-fuel ratio sensor current, and above all the fuse
+// ratings on every wiring diagram ("10A", "30A HOT AT ALL TIMES"). Until these
+// were detected, a claim of "0.5 A" passed with no numeric check at all. A fuse
+// rating says nothing about any OTHER unit, though, so these symbols must leave
+// torque, pressure, voltage, and every other check exactly as it was.
+
+test("A and mA are detected as symbols in the forms extracted PDF text uses", () => {
+  for (const [text, value, unit] of [
+    ["0.3 A", 0.3, "A"],
+    ["15A", 15, "A"],
+    ["7.5A", 7.5, "A"],
+    [`15${NBSP}A`, 15, "A"],
+    ["(50 A)", 50, "A"],
+    ["3.0 mA", 3, "mA"],
+    ["3.6mA", 3.6, "mA"],
+  ]) {
+    const specs = extractSpecNumbers(`Standard: ${text} fuse.`);
+
+    assert.deepEqual(
+      specs.map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  // Spelled "milliamperes" had slipped through: "milliamps" matched first and
+  // then failed its word boundary.
+  assert.deepEqual(
+    extractSpecNumbers("Less than 1.0 milliamperes.").map((spec) => spec.value),
+    [1]
+  );
+});
+
+test("lowercase a, A/C and A/F, identifiers, and words starting with A are not read as current", () => {
+  // Case-sensitive like the electrical symbols: a lowercase "a" would read the
+  // refrigerant "HFC-134a" as 134 amps. A slash is refused after the symbol,
+  // which the electrical symbols do not need, because "1 A/C" and "bank 1 A/F"
+  // are part names here, never a current.
+  for (const text of [
+    "Charge with refrigerant HFC-134a.",
+    "Inspect the bank 1 A/F sensor.",
+    "Disconnect the 1 A/C pressure sensor.",
+    "Connector M12A is behind the dash.",
+    "Code P012A is stored.",
+    "Remove the 2 ASSY bolts.",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+
+  const result = verifySingleClaim(
+    "Inspect the bank 1 A/F sensor.",
+    "Inspect the air fuel ratio sensor. Standard voltage: 3.3 V"
+  );
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.documentSupported.length, 1);
+});
+
+test("a current-symbol claim must equal a printed value", () => {
+  const heater = "Heated oxygen sensor heater current less than 0.3 A (1 trip detection logic)";
+  const afSensor = "Standard current: Less than 3.0 mA";
+  const fuseBox = "HOT AT ALL TIMES 15A EFI 10A ECU-B";
+
+  for (const [claim, quote] of [
+    ["The heater current limit is 0.5 A.", heater],
+    ["The heater current limit is 0.31 A.", heater],
+    ["The sensor current must be less than 3.5 mA.", afSensor],
+    ["The EFI fuse is rated 20 A.", fuseBox],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  for (const [claim, quote] of [
+    ["The heater current limit is 0.3 A.", heater],
+    ["The heater current limit is 0.30 A.", heater],
+    ["The sensor current must be less than 3 mA.", afSensor],
+    ["The EFI fuse is rated 15 A.", fuseBox],
+    ["The EFI fuse is rated 15A.", fuseBox],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
+  }
+});
+
+test("mA is not A", () => {
+  // A factor of a thousand, never converted, exactly like mV and V.
+  assert.equal(checkClaimNumbers("The draw is 300 mA.", "Standard current: 0.3 A").grounded, false);
+  assert.equal(checkClaimNumbers("The draw is 0.3 A.", "Standard current: 300 mA").grounded, false);
+});
+
+test("a current symbol and its spelled-out unit verify against each other", () => {
+  // The first quote is the charging-system check as printed. It also carries a
+  // voltage, so before symbols were detected the spelled claim had no amp figure
+  // to match and was rejected.
+  const charging = "Standard current: 10 A or less Standard voltage: 13.2 to 14.8 V";
+
+  for (const [claim, quote] of [
+    ["The charging current should be 10 amps or less.", charging],
+    ["The charging current should be 10 amperes or less.", charging],
+    ["The radiator fan motor draw is 15 A.", "Radiator fan motor draw: 15 amps"],
+    ["The sensor current is less than 3.0 milliamps.", "Standard current: Less than 3.0 mA"],
+    ["The sensor current is less than 1.0 milliamperes.", "Standard current: Less than 1.0 mA"],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
+  }
+
+  assert.equal(checkClaimNumbers("The charging current is 10 milliamps.", charging).grounded, false);
+});
+
+test("a current claim cannot borrow a number printed in another unit", () => {
+  // The quote's unit-bearing figure is a resistance, so "2" is not a current.
+  assert.equal(
+    checkClaimNumbers("The heater current is 2 A.", `Heater resistance: 2 ${OMEGA} at 20°C`).grounded,
+    false
+  );
+
+  // A row whose unit sits only in a header still compares bare numbers, exactly.
+  const ratingRow = "Fuse rating (A): EFI 15";
+
+  assert.equal(checkClaimNumbers("The EFI fuse is 15 A.", ratingRow).grounded, true);
+  assert.equal(checkClaimNumbers("The EFI fuse is 15.0 A.", ratingRow).grounded, true);
+  assert.equal(checkClaimNumbers("The EFI fuse is 15.5 A.", ratingRow).grounded, false);
+});
+
+test("a current symbol in the quote leaves every other unit's check unchanged", () => {
+  // Most wiring diagrams print a fuse rating and nothing else unit-bearing. Had
+  // "10A" counted as the quote's specification, the header-table fallback would
+  // have stopped for every torque, pressure, or voltage claim citing such a
+  // page: measured on the real corpus, 667 chunks and 224,067 verdicts.
+  const torqueRow = "Specified torque (N·m): mounting bolt 37. ECU-B 10A";
+  const voltageRow = "Terminal voltage (V): 11 to 14. EFI 15A";
+
+  assert.equal(checkClaimNumbers("The mounting bolt torque is 37 N·m.", torqueRow).grounded, true);
+  assert.equal(checkClaimNumbers("The mounting bolt torque is 37.4 N·m.", torqueRow).grounded, true);
+  assert.equal(checkClaimNumbers("The mounting bolt torque is 39 N·m.", torqueRow).grounded, false);
+  assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
+  assert.equal(checkClaimNumbers("The terminal voltage is 13.6 V.", voltageRow).grounded, false);
+
+  // Nor can a current figure support another unit when the quote does print one.
+  assert.equal(
+    checkClaimNumbers("Torque the bracket bolt to 10 N·m.", "EFI 10A. Bracket bolt: 37 N·m").grounded,
+    false
+  );
+});
+
+test("an invented current value is rejected and not reprinted", () => {
+  const result = verifySingleClaim("The EFI fuse is rated 20 A.", "HOT AT ALL TIMES 15A EFI");
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "numeric_anomaly");
+  assert.doesNotMatch(result.gaps.join(" "), /20/);
+});
+
+test("unsourced guidance naming a current is removed, like any other specification", () => {
+  const result = verifyEvidence(
+    payload({ generalGuidance: ["Replace it with a 15A fuse of the same rating."] }),
+    [chunk()]
+  );
+
+  assert.deepEqual(result.generalGuidance, []);
+  assert.equal(result.rejected[0].reason, "unsourced_specification");
+  assert.doesNotMatch(result.gaps.join(" "), /15/);
+});
+
+test("a current-symbol claim keeps only the numeric check, not the subject guard", () => {
+  // As with spelled-out amps: current wording gives the head-noun parser no part
+  // name to read, so no subject is claimed.
+  assert.deepEqual(
+    checkClaimSubject("The cooling fan current at high speed is 15 A.", "Radiator fan motor draw: 15 A"),
+    { grounded: true, checked: false, subject: "" }
+  );
+});
+
 // ---- Subject guard: word order and generic words (Experiment D, 2026-09-27) ----
 //
 // The first live answer eval after N4 found the subject guard rejecting CORRECT
