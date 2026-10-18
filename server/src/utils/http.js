@@ -69,6 +69,52 @@ export function parsePositiveIntArray(value) {
   return Array.from(uniqueIds);
 }
 
+// The names a browser on this machine uses for it. Exact names only: no other
+// 127.x address and no `*.localhost`, so the list stays what a person types.
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The hostname a `Host` header names, normalized for comparison: lowercase, no
+ * port, no trailing dot, IPv6 kept in brackets (`[::1]`).
+ *
+ * Returns `null` for anything that is not a bare `host[:port]`: userinfo
+ * (`localhost@evil.example`), a path (`evil.example/localhost`), a query, or a
+ * character no hostname may contain. Parsing goes through WHATWG `URL` so the
+ * result matches how a browser itself canonicalizes the name it sends.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function parseHostname(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  let url;
+
+  try {
+    url = new URL(`http://${value.trim()}`);
+  } catch {
+    return null;
+  }
+
+  if (url.username || url.password || url.pathname !== "/" || url.search) {
+    return null;
+  }
+
+  return url.hostname.replace(/\.$/, "") || null;
+}
+
+/**
+ * True when `hostname` (already normalized by `parseHostname`) is one of the
+ * names a browser on this machine uses for it.
+ *
+ * @param {string | null} hostname
+ */
+export function isLoopbackHostname(hostname) {
+  return typeof hostname === "string" && LOOPBACK_HOSTNAMES.has(hostname);
+}
+
 const EXACT_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 /**

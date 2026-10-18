@@ -27,6 +27,18 @@ function readBoolean(value, fallback) {
   return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
+// A comma- or space-separated list, trimmed, with empty entries dropped.
+function readList(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(/[\s,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 // Like readPositiveInteger but allows 0 as an explicit "disabled" value (the
 // daily AI ceiling uses 0/negative to mean "no limit").
 function readNonNegativeInteger(value, fallback) {
@@ -64,6 +76,12 @@ export const config = {
   port: Number(process.env.PORT || 4000),
   networkMode,
   host: networkMode ? "0.0.0.0" : "127.0.0.1",
+  // Extra names the app answers to in network mode, for names it cannot
+  // discover itself: an mDNS name (`my-pc.local`), a router or hosts-file
+  // alias, or the MagicDNS name when the tailscale CLI is not on PATH. Matched
+  // by hostname only. Ignored when NETWORK_MODE is off. See
+  // middleware/requestGuard.js and docs/environment-variables.md.
+  allowedHosts: readList(process.env.ALLOWED_HOSTS),
   clientPort,
   corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),

@@ -5,6 +5,7 @@ import express from "express";
 import { createAskRouter } from "./routes/ask.js";
 import { createRepairPlanRouter } from "./routes/repairPlan.js";
 import { createRateLimiter } from "./middleware/rateLimit.js";
+import { createHostAllowList, createHostGuard } from "./middleware/requestGuard.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
@@ -104,6 +105,18 @@ export function createApp(options = {}) {
     );
     next();
   });
+
+  // The request gate (middleware/requestGuard.js). The app has no login, so
+  // these checks are what keep other web pages from driving it. The Host
+  // allow-list runs ahead of every route and the built frontend, so a
+  // DNS-rebound page gets nothing. Injectable for network-mode tests.
+  const hostAllowList =
+    options.hostAllowList ||
+    createHostAllowList({
+      networkMode: config.networkMode,
+      allowedHosts: config.allowedHosts,
+    });
+  app.use(createHostGuard(hostAllowList));
 
   app.use(
     cors({
