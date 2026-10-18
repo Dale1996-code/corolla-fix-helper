@@ -48,6 +48,7 @@
     "server/test/procedureSuggestionService.test.js",
     "server/test/rowMapperCores.test.js",
     "server/test/safetyClassifier.test.js",
+    "server/test/safetyOracle.test.js",
     "server/test/askRouteSafety.test.js",
     "server/test/negativeCorpusPreconditions.test.js",
     "server/test/repairSafetyEndToEnd.test.js",
