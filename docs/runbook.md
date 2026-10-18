@@ -199,7 +199,7 @@ Full details live in [backup-restore.md](backup-restore.md); the short version:
 npm run restore -- "C:\path\to\corolla-fix-helper-backup-....tar.gz"
 ```
 
-Restore is fail-closed: it validates the archive **before** touching anything, snapshots current data to a `pre-restore-<timestamp>` folder next to the database, swaps atomically, and rolls back automatically if the swap fails. On failure it prints `Your existing data was left in place.`
+Restore is fail-closed: it validates the archive **before** touching anything, copies it beside your data, then swaps it in with renames only. Your current database (with any `-wal`/`-shm` files) moves into a `pre-restore-<timestamp>` folder next to it, and your uploads folder moves to `uploads.pre-restore-<timestamp>` beside it. Nothing is deleted. On failure the CLI says which of three things happened: nothing was changed; the restore was rolled back (everything moved back); or the rollback also failed, in which case it prints where your data now is and the exact moves that put it back.
 
 **Manual rollback** (if you restored the wrong thing): stop the server, copy the `pre-restore-<timestamp>` folder's `database/<name>.db` back over `DATABASE_FILE` and its `uploads/` contents back into `UPLOADS_DIR`, start the server.
 

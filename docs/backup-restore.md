@@ -74,16 +74,21 @@ What it does, in order:
    `uploads/` directory, and (if present) a `manifest.json` whose format version
    this app understands. A bad or incompatible archive is rejected here, before
    anything on disk is touched.
-3. **Snapshot** the current database (plus any `-wal`/`-shm` sidecars) and
-   uploads into a `pre-restore-<timestamp>` folder next to the database file.
-4. **Swap** the validated database and uploads into place. The database is
-   written to a temporary file on the target filesystem and then renamed over
-   the live file (atomic within a directory); stale WAL/SHM sidecars are removed
-   so the restored database is not reinterpreted through an old write-ahead log.
+3. **Copy** the validated database and uploads beside the live ones, as
+   `<DATABASE_FILE>.restore-<timestamp>` and `<UPLOADS_DIR>.restore-<timestamp>`.
+   Only new paths are written, so a failure here (a full disk, say) changes
+   nothing.
+4. **Swap** using renames only. The live uploads folder is renamed to
+   `<UPLOADS_DIR>.pre-restore-<timestamp>` beside it. The live database, together
+   with any `-wal`/`-shm` sidecars (after an unclean stop the newest rows can live
+   only in the `-wal`), moves into a `pre-restore-<timestamp>/database/` folder
+   next to the database file. Then the copies from step 3 are renamed into place.
+   The uploads go first: on Windows, a PDF open in another program makes that
+   rename fail before anything has moved.
 
-On success the CLI prints where the pre-restore snapshot was kept. Once you have
-confirmed the app shows the restored documents, symptoms, procedures, notes, and
-that PDFs open, you can delete that snapshot folder.
+On success the CLI prints where the previous database and uploads were kept.
+Once you have confirmed the app shows the restored documents, symptoms,
+procedures, notes, and that PDFs open, you can delete those two folders.
 
 ## Safety and atomicity
 
@@ -91,18 +96,29 @@ Restore is **fail-closed**:
 
 - It validates the archive **before** modifying any live data, so a corrupt or
   incompatible archive cannot start a partial overwrite.
-- It snapshots the current data **before** swapping, so the prior state is
-  always recoverable.
-- If the swap fails partway through, restore **rolls back** from the snapshot
-  and re-raises the error — your database and uploads return to their previous
-  contents.
+- It never deletes or overwrites your current database, its sidecars, or your
+  uploads. Each is moved aside whole, and after a successful restore it stays
+  there as the previous data.
+- If any step of the swap fails, restore moves everything back the same way, by
+  renaming. A rollback never deletes or overwrites anything either: whatever
+  it cannot move back stays where it is, and the CLI tells you where.
 
 ## If a restore fails
 
-- The CLI exits non-zero and prints `Your existing data was left in place.`
-  Nothing further is needed — the app is unchanged.
-- If a failure happened mid-swap, restore already rolled back from the snapshot.
-  You can also recover manually from the `pre-restore-<timestamp>` folder: copy
+The CLI exits non-zero and says which of three things happened:
+
+- **"Nothing was changed"**: the restore stopped before moving anything, and
+  your database and uploads are exactly as they were. The usual cause on Windows
+  is a file in use. Stop the app, close any program that has one of your
+  uploaded PDFs or the database open, and run the restore again.
+- **"The restore was rolled back"**: something had been moved, and all of it was
+  moved back. Nothing was deleted and the app is unchanged.
+- **"The rollback also failed"**: something could not be moved back. Nothing was
+  deleted. The CLI lists where your previous database and uploads now are,
+  followed by numbered steps (rename the restored copy out of the way, then move
+  each original back). Stop the app and follow them. Do not delete any
+  `pre-restore` folder until the app shows your data again.
+- You can also recover manually from the `pre-restore-<timestamp>` folder: copy
   its `database/<name>.db` back over `DATABASE_FILE` and its `uploads/` contents
   back into `UPLOADS_DIR` while the server is stopped.
 

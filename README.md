@@ -21,7 +21,7 @@ Storage is local, but the AI features are not offline: when `OPENAI_API_KEY` is 
 - **Symptoms, Procedures, Notes** — create/edit/delete with filters and sorting; link them to documents and to each other; attach photos (JPEG/PNG/WebP)
 - **Repair Checklists** — plan a repair job as a simple list of steps, check them off as you go, add a status (planned / in progress / blocked / done) and notes, and reorder steps with Up/Down
 - **Settings** — vehicle profile, document defaults, runtime info, and one-click backup export
-- **Backup & restore** — export a `.tar.gz` of everything; restore validates the archive, snapshots current data, swaps atomically, and rolls back on failure ([docs/backup-restore.md](docs/backup-restore.md))
+- **Backup & restore** — export a `.tar.gz` of everything; restore validates the archive, moves current data aside (never deletes it), swaps with renames, and moves it back on failure ([docs/backup-restore.md](docs/backup-restore.md))
 
 ### What things are called
 
