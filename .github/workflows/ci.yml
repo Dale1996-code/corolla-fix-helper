@@ -29,6 +29,11 @@ jobs:
       - name: Test
         run: npm run test
 
+      # Export -> wipe -> restore round trip through the real tar, on throwaway
+      # temp paths. An export you cannot restore is not a backup.
+      - name: Backup and restore drill
+        run: npm run backup:drill
+
       - name: Build
         run: npm run build
 
