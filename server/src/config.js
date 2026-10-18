@@ -83,7 +83,6 @@ export const config = {
   // middleware/requestGuard.js and docs/environment-variables.md.
   allowedHosts: readList(process.env.ALLOWED_HOSTS),
   clientPort,
-  corsOrigin: process.env.CORS_ORIGIN || `http://localhost:${clientPort}`,
   maxUploadSizeMb: Number(process.env.MAX_UPLOAD_SIZE_MB || 20),
   openAiApiKey: typeof process.env.OPENAI_API_KEY === "string" ? process.env.OPENAI_API_KEY : "",
   // Accidental-spend guards (not abuse defense — single-user, trusted-LAN app):

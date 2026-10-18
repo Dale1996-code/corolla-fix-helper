@@ -11,6 +11,7 @@
 //   1. Host allow-list: DNS rebinding (2A-03)
 //   2. Cross-site writes and side-effect GETs (2A-02, 2A-07)
 //   3. Backup export through a proxy such as `tailscale serve` (2A-08)
+//   4. No CORS grant for any origin (2A-04)
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -573,4 +574,18 @@ test("backup export still works on the host machine, directly and through the Vi
   assert.match(direct.headers["content-type"] || "", /gzip/);
   assert.equal(viaVite.status, 200);
   assert.match(viaVite.headers["content-type"] || "", /gzip/);
+});
+
+// ---------------------------------------------------------------------------
+// 4. No CORS grant (2A-04)
+// ---------------------------------------------------------------------------
+
+test("2A-04: no origin is granted CORS access, not even the Vite port", async () => {
+  const preflight = await request(app)
+    .options("/api/notes/1")
+    .set({ Origin: "http://localhost:5173", "Access-Control-Request-Method": "DELETE" });
+  const read = await request(app).get("/api/settings").set("Origin", "http://localhost:5173");
+
+  assert.equal(preflight.headers["access-control-allow-origin"], undefined);
+  assert.equal(read.headers["access-control-allow-origin"], undefined);
 });

@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import cors from "cors";
 import express from "express";
 import { createAskRouter } from "./routes/ask.js";
 import { createRepairPlanRouter } from "./routes/repairPlan.js";
@@ -132,11 +131,11 @@ export function createApp(options = {}) {
   app.use("/api", requireSameOriginWrite);
   app.get([BACKUP_EXPORT_PATH, SUGGESTED_PROCEDURES_PATH], requireSameOriginRequest);
 
-  app.use(
-    cors({
-      origin: config.corsOrigin,
-    })
-  );
+  // No CORS middleware, on purpose (2A-04). The client calls relative /api
+  // URLs, and in dev the Vite proxy makes those same-origin too, so the app
+  // never needs to grant another origin access. Granting one (it used to be
+  // http://localhost:5173, even under npm start) handed every page on that
+  // port read access to everything, the backup included.
   app.use(express.json());
 
   // Repair data must never be served stale — not by the service worker (which
