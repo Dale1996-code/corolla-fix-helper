@@ -32,10 +32,11 @@ Do not overwrite an existing `server\.env` unless you have checked what is insid
 NODE_ENV=development
 PORT=4000
 CLIENT_PORT=5173
-CORS_ORIGIN=http://localhost:5173
 DATABASE_FILE=./data/corolla-fix-helper.db
 UPLOADS_DIR=./uploads
 MAX_UPLOAD_SIZE_MB=20
+NETWORK_MODE=0
+ALLOWED_HOSTS=
 OPENAI_API_KEY=
 OPENAI_ANSWER_MODEL=gpt-5.5-2026-04-23
 # Model used only when an Ask request includes a saved image attachment.
@@ -66,11 +67,13 @@ What each one means:
 
 - `NODE_ENV` tells code whether it is running for development or production.
 - `PORT` is the backend port.
-- `CLIENT_PORT` is the frontend dev server port.
-- `CORS_ORIGIN` is the browser origin allowed to call the backend during local dev.
+- `CLIENT_PORT` is the frontend dev server port. The Settings page reports it.
 - `DATABASE_FILE` is the SQLite database file path.
 - `UPLOADS_DIR` is where uploaded PDFs are stored.
 - `MAX_UPLOAD_SIZE_MB` is the largest PDF upload size in megabytes.
+- `NETWORK_MODE` decides who can reach the app. The default `0` binds to `127.0.0.1`, so only this computer can. `1` listens on every interface so a phone on your Wi-Fi or Tailscale can reach it; the app still has no login. See [mobile-access.md](mobile-access.md).
+- `ALLOWED_HOSTS` lists extra names for this computer, comma-separated, for example `my-pc.local, garage-pc.home.arpa`. The app answers only to a `Host` it knows is this machine (protection against DNS rebinding): `localhost`, `127.0.0.1` and `[::1]` always, and with `NETWORK_MODE=1` also this computer's LAN and Tailscale addresses and its Tailscale MagicDNS name. Any other name gets `421` with a message naming this variable. Add a name here when you reach the app by one it cannot discover itself: an mDNS name, a router or hosts-file alias, the MagicDNS name when the `tailscale` CLI is not on `PATH`, or a VM's public address. Only hostnames are compared; a port or `http://` prefix in an entry is ignored. **Read only when `NETWORK_MODE=1`**: with `NETWORK_MODE=0` the app answers to the loopback names alone, so "only this computer" holds even when a local proxy such as `tailscale serve` relays other devices to it.
+- There is no `CORS_ORIGIN` any more. The app grants no origin cross-origin access: the client calls relative `/api` URLs, and in dev the Vite proxy makes them same-origin. An old `CORS_ORIGIN` line in `server/.env` is ignored and can be deleted.
 - `OPENAI_API_KEY` is the OpenAI API key used by the Ask AI feature. Settings → **AI** reports only whether it is set; the key itself is never sent to the browser.
 - `OPENAI_ANSWER_MODEL` is the OpenAI model name used for generated answers. The default is the pinned snapshot `gpt-5.5-2026-04-23`.
 - `OPENAI_VISION_MODEL` is the OpenAI model used only when Ask includes one already-saved image attachment. Leave it blank to reuse `OPENAI_ANSWER_MODEL`.
@@ -130,5 +133,7 @@ For the intended Docker-on-VM deployment, pass env values to Docker instead of s
 ```
 
 The `/data` path should be mounted to a persistent folder on the VM.
+
+Inside a container the app cannot see the VM's own addresses: the only LAN address it finds is the container's. To open it by the VM's IP or a DNS name, also pass `-e NETWORK_MODE=1` (so it listens on the container's interface at all) and `-e ALLOWED_HOSTS=VM_PUBLIC_IP` (or the DNS name). `http://localhost:4000` on the VM itself works without `ALLOWED_HOSTS`.
 
 Do not paste a real key into documentation, commits, screenshots, or pull request text.

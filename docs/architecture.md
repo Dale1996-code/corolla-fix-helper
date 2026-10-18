@@ -76,7 +76,7 @@ Only the client-side pages page from already-loaded data. Ask AI's documents car
 ES modules throughout. The layering rule:
 
 - `server/src/index.js` — starts the app (reads the port, listens).
-- `server/src/app.js` — `createApp(options)` builds the Express app: CORS, JSON parsing, all `/api` routers, the rate limiter on the AI endpoints, and static serving of `client/dist`.
+- `server/src/app.js` — `createApp(options)` builds the Express app: security headers, the request gate (Host allow-list, same-origin writes, JSON body contract; no CORS), JSON parsing, all `/api` routers, the rate limiter on the AI endpoints, the JSON 404 and error handlers, and static serving of `client/dist`.
 - `server/src/routes/` — **thin** HTTP handlers: parse/validate input, call a service, shape the JSON response.
 - `server/src/services/` — the actual logic (extraction, chunking, retrieval, answering, backup...).
 - Routes own HTTP-specific work: parsing and validating requests, choosing status codes, and shaping response/error behavior. Dedicated entity services own entity operations, database writes, and the canonical row shapes returned by those routes.
@@ -226,6 +226,7 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 | `server/src/initDatabase.js` | Schema creation + numbered migrations (`schema_migrations`) |
 | `server/src/database.js` | The shared `node:sqlite` connection |
 | `server/src/middleware/rateLimit.js` | In-house fixed-window rate limiter (20/min on AI routes) |
+| `server/src/middleware/requestGuard.js` | The no-login request gate: Host allow-list (421), same-origin writes and side-effect GETs (403), JSON body contract (415, `{}` default, 1 MB limit), JSON 404 and error handler |
 | `server/src/services/pdfService.js` | PDF text extraction (`pdfjs-dist`) + local OCR orchestration |
 | `server/src/services/documentService.js` | Document listing, search, delete cleanup, stored-file resolution |
 | `server/src/services/documentChunkService.js` | Rebuilds page-aware `document_chunks` |

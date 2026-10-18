@@ -79,6 +79,13 @@ This gives the app a private HTTPS address like `https://my-pc.tail1234.ts.net`
   works at home and away without ever re-installing, even if your router hands
   the computer a new LAN IP.
 
+Serve needs network mode too. It relays the phone's request to `localhost:4000`
+but keeps the address the phone typed, `my-pc.tail1234.ts.net`, and the app
+answers to that name only with `NETWORK_MODE=1`. Under `NETWORK_MODE=0` the
+phone gets "This server does not answer to …" (see
+[Troubleshooting](#troubleshooting)), which keeps "localhost only" true even with
+Serve still running.
+
 Useful commands: `tailscale serve status` shows what's being served;
 `tailscale serve reset` turns it off. Serve is **private to your Tailscale
 devices** — do not confuse it with `tailscale funnel`, which opens a service to
@@ -123,6 +130,23 @@ Work down the list; each step isolates one layer.
 6. **Old look after an update?** The app never caches your repair data, so
    nothing can be stale there; if the UI itself looks outdated after you pulled
    new code, close the app fully and reopen it.
+7. **"This server does not answer to "…"" (status 421)?** The app answers only
+   to names it knows belong to this computer, which is what stops a malicious
+   web page from tricking your browser into reaching it (DNS rebinding). Check
+   in order:
+   - Is the server in network mode? Without `NETWORK_MODE=1` it answers only to
+     `localhost`, from the computer itself.
+   - Are you using an address the banner printed? Those always work.
+   - Using another name, such as `my-pc.local` or a router alias, or the
+     MagicDNS name is refused because the `tailscale` CLI isn't on `PATH`? Add
+     the name to `ALLOWED_HOSTS` in `server\.env`, for example
+     `ALLOWED_HOSTS=my-pc.local`, and restart the server. Hostnames only; ports
+     don't matter.
+8. **"Refused: this request came from a page on another site" (status 403)?**
+   Saving and uploading work only from the app's own pages, so other websites
+   can't plant documents or change your data. Open the app at its own address
+   (the banner's, or the Home Screen icon) rather than through another site or
+   app.
 
 ## Security notes, in plain terms
 
@@ -135,8 +159,18 @@ Work down the list; each step isolates one layer.
   only enable network mode on networks where you trust every device.
 - **Never port-forward** port 4000 on your router and never use
   `tailscale funnel` with this app; both would put it on the public internet.
+- **Other web pages can't drive it.** No login doesn't mean any website can
+  use it. The app answers only to this computer's own names, which blocks DNS
+  rebinding, and it accepts a save, upload or delete only from its own pages
+  (status 403 otherwise). So a page you happen to have open elsewhere can't
+  plant a fake "factory manual" or change your data. This protects against web
+  pages, not against devices: anything on your Wi-Fi or tailnet that can reach
+  the port can still use the app directly.
 - **Backups download from the host only.** The Settings backup export
   (`/api/settings/backup-export`) streams your entire database and uploads, so it
-  is restricted to localhost and returns 403 from any other device even in network
-  mode. Pull backups from the computer that runs the app.
+  is restricted to the computer itself and returns 403 from any other device,
+  even in network mode and through `tailscale serve`: Serve relays the phone
+  from `localhost`, so the app also refuses any request carrying a proxy's
+  forwarding headers or addressed to a network name. Pull backups on the
+  computer that runs the app, at `http://localhost:4000`.
 - The `/api/ask` rate limit is a spend cap, not authentication.
