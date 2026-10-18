@@ -5,7 +5,12 @@ import express from "express";
 import { createAskRouter } from "./routes/ask.js";
 import { createRepairPlanRouter } from "./routes/repairPlan.js";
 import { createRateLimiter } from "./middleware/rateLimit.js";
-import { createHostAllowList, createHostGuard } from "./middleware/requestGuard.js";
+import {
+  createHostAllowList,
+  createHostGuard,
+  requireSameOriginRequest,
+  requireSameOriginWrite,
+} from "./middleware/requestGuard.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { config } from "./config.js";
 import { dashboardRouter } from "./routes/dashboard.js";
@@ -19,6 +24,13 @@ import { repairHistoryRouter } from "./routes/repairHistory.js";
 import { searchRouter } from "./routes/search.js";
 import { settingsRouter } from "./routes/settings.js";
 import { symptomsRouter } from "./routes/symptoms.js";
+
+// The GET routes that do work rather than only read: backup export stages
+// every upload into a temp directory (routes/settings.js), and procedure
+// suggestions make model calls (routes/symptoms.js). A cross-site <img src>
+// could start either, so they get the same-origin rule that writes get.
+const BACKUP_EXPORT_PATH = "/api/settings/backup-export";
+const SUGGESTED_PROCEDURES_PATH = "/api/symptoms/:id/suggested-procedures";
 
 function addApiInfoRoute(app) {
   app.get("/api", (_request, response) => {
@@ -117,6 +129,8 @@ export function createApp(options = {}) {
       allowedHosts: config.allowedHosts,
     });
   app.use(createHostGuard(hostAllowList));
+  app.use("/api", requireSameOriginWrite);
+  app.get([BACKUP_EXPORT_PATH, SUGGESTED_PROCEDURES_PATH], requireSameOriginRequest);
 
   app.use(
     cors({
@@ -137,6 +151,10 @@ export function createApp(options = {}) {
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/documents", documentsRouter);
   app.use("/api/search", searchRouter);
+  // Suggestions call the model from a GET, so they share the one AI window
+  // with /api/ask and /api/repair-plan (2A-07). The cross-site check above
+  // runs first, so a refused request never uses up the owner's window.
+  app.get(SUGGESTED_PROCEDURES_PATH, aiLimiter);
   app.use("/api/symptoms", symptomsRouter);
   app.use("/api/procedures", proceduresRouter);
   app.use("/api/notes", notesRouter);

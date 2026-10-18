@@ -9,12 +9,17 @@
 //
 // Sections follow the threat each one closes:
 //   1. Host allow-list: DNS rebinding (2A-03)
+//   2. Cross-site writes and side-effect GETs (2A-02, 2A-07)
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import request from "supertest";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const samplePdf = path.join(__dirname, "fixtures", "sample-maintenance-schedule.pdf");
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-request-guard-"));
 const clientDistDir = path.join(tempRoot, "client-dist");
@@ -34,6 +39,7 @@ process.env.ALLOWED_HOSTS = "";
 process.env.OCR_ENABLED = "false";
 
 const { createApp } = await import("../src/app.js");
+const { createRateLimiter } = await import("../src/middleware/rateLimit.js");
 const { db } = await import("../src/database.js");
 
 const app = createApp({ clientDistDir });
@@ -63,6 +69,18 @@ const TAILSCALE_SERVE_HEADERS = {
   "Tailscale-User-Login": "owner@example.com",
 };
 
+// What a current browser sends with a fetch() from a page the app served.
+function sameOriginHeaders(host = "localhost:4000", scheme = "http") {
+  return { Host: host, Origin: `${scheme}://${host}`, "Sec-Fetch-Site": "same-origin" };
+}
+
+// What a current browser sends when some other site's page fires the request.
+const CROSS_SITE = {
+  Host: "localhost:4000",
+  Origin: "https://evil.example",
+  "Sec-Fetch-Site": "cross-site",
+};
+
 async function createNetworkModeApp({
   networkMode = true,
   allowedHosts = [],
@@ -83,6 +101,24 @@ async function createNetworkModeApp({
     }),
     ...appOptions,
   });
+}
+
+function uploadSamplePdf(target, headers = {}) {
+  return request(target)
+    .post("/api/documents/upload")
+    .set(headers)
+    .field("title", "Toyota FSM")
+    .field("system", "Brakes")
+    .field("documentType", "Manual")
+    .attach("pdfFile", samplePdf);
+}
+
+async function createSymptom(target = app) {
+  const response = await request(target)
+    .post("/api/symptoms")
+    .send({ title: "Brake squeal", description: "Front caliper noise" });
+  assert.equal(response.status, 201);
+  return response.body.symptom.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,4 +286,241 @@ test("NETWORK_MODE=1 picks up a Wi-Fi address that changed after startup", async
     (await request(networkApp).get("/api/health").set("Host", "192.168.1.77:4000")).status,
     200
   );
+});
+
+// ---------------------------------------------------------------------------
+// 2. Cross-site writes and side-effect GETs (2A-02, 2A-07)
+// ---------------------------------------------------------------------------
+
+test("2A-02: a cross-site multipart upload is refused and plants nothing", async () => {
+  const before = (await request(app).get("/api/documents")).body;
+  const response = await uploadSamplePdf(app, CROSS_SITE);
+  const afterUpload = (await request(app).get("/api/documents")).body;
+
+  assert.equal(response.status, 403);
+  assert.match(response.headers["content-type"] || "", /application\/json/);
+  assert.deepEqual(afterUpload, before);
+});
+
+test("2A-02: a browser without Fetch Metadata is refused by its foreign Origin", async () => {
+  const response = await uploadSamplePdf(app, {
+    Host: "localhost:4000",
+    Origin: "https://evil.example",
+  });
+
+  assert.equal(response.status, 403);
+});
+
+test("a refused upload is still answered with its reason, not a dropped connection", async () => {
+  // The refusal comes before the body is read; the gate drains the upload
+  // first so the phone sees the 421 naming ALLOWED_HOSTS, not ECONNRESET.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await uploadSamplePdf(app, { Host: "my-pc.local:4000" });
+    assert.equal(response.status, 421);
+    assert.match(response.body.error, /ALLOWED_HOSTS/);
+  }
+});
+
+test("2A-02: a cross-site, body-less POST cannot re-run extraction", async () => {
+  const uploaded = await uploadSamplePdf(app);
+  assert.equal(uploaded.status, 201);
+
+  const response = await request(app)
+    .post(`/api/documents/${uploaded.body.document.id}/extract`)
+    .set(CROSS_SITE);
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: a page served from another localhost port cannot write", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ Host: "localhost:4000", Origin: "http://localhost:3000", "Sec-Fetch-Site": "same-site" })
+    .send({ title: "Planted by another dev server" });
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: Sec-Fetch-Site decides when present, whatever the Origin says", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ ...sameOriginHeaders(), "Sec-Fetch-Site": "cross-site" })
+    .send({ title: "Planted" });
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: Origin: null (a sandboxed frame or privacy redirect) cannot write", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ Host: "localhost:4000", Origin: "null" })
+    .send({ title: "Planted" });
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: an old browser's Origin must match the Host it was sent to, port included", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ Host: "localhost:4000", Origin: "http://localhost:3000" })
+    .send({ title: "Planted" });
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: a cross-site DELETE is refused and the record survives", async () => {
+  const created = await request(app).post("/api/notes").send({ title: "Keep me" });
+  assert.equal(created.status, 201);
+  const noteId = created.body.note.id;
+
+  const response = await request(app).delete(`/api/notes/${noteId}`).set(CROSS_SITE);
+
+  const notes = (await request(app).get("/api/notes")).body.notes;
+
+  assert.equal(response.status, 403);
+  assert.ok(notes.some((note) => note.id === noteId), "the note was deleted cross-site");
+});
+
+test("2A-02/2A-07: a cross-site GET (an <img src>) cannot start procedure suggestions", async () => {
+  const symptomId = await createSymptom();
+  const response = await request(app)
+    .get(`/api/symptoms/${symptomId}/suggested-procedures`)
+    .set({ Host: "localhost:4000", "Sec-Fetch-Site": "cross-site" });
+
+  assert.equal(response.status, 403);
+});
+
+test("2A-02: a cross-site GET cannot stage a backup", async () => {
+  const response = await request(app)
+    .get("/api/settings/backup-export")
+    .set({ Host: "localhost:4000", "Sec-Fetch-Site": "cross-site" });
+
+  assert.equal(response.status, 403);
+  assert.doesNotMatch(response.headers["content-type"] || "", /gzip/);
+});
+
+test("2A-07: procedure suggestions share the AI rate-limit window", async () => {
+  const limitedApp = createApp({
+    clientDistDir,
+    aiRateLimiter: createRateLimiter({ windowMs: 60_000, max: 2 }),
+  });
+  const symptomId = await createSymptom(limitedApp);
+  const statuses = [];
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await request(limitedApp)
+      .get(`/api/symptoms/${symptomId}/suggested-procedures`)
+      .set(sameOriginHeaders());
+    statuses.push(response.status);
+  }
+
+  assert.deepEqual(statuses, [200, 200, 429]);
+});
+
+test("2A-07: refused cross-site suggestion requests do not use up the AI window", async () => {
+  const limitedApp = createApp({
+    clientDistDir,
+    aiRateLimiter: createRateLimiter({ windowMs: 60_000, max: 1 }),
+  });
+  const symptomId = await createSymptom(limitedApp);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const refused = await request(limitedApp)
+      .get(`/api/symptoms/${symptomId}/suggested-procedures`)
+      .set({ Host: "localhost:4000", "Sec-Fetch-Site": "cross-site" });
+    assert.equal(refused.status, 403);
+  }
+
+  const owner = await request(limitedApp)
+    .get(`/api/symptoms/${symptomId}/suggested-procedures`)
+    .set(sameOriginHeaders());
+  assert.equal(owner.status, 200);
+});
+
+test("a same-origin page can write", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set(sameOriginHeaders())
+    .send({ title: "Same-origin note" });
+
+  assert.equal(response.status, 201);
+});
+
+test("a typed URL or bookmark (Sec-Fetch-Site: none) can open suggestions", async () => {
+  const symptomId = await createSymptom();
+  const response = await request(app)
+    .get(`/api/symptoms/${symptomId}/suggested-procedures`)
+    .set({ Host: "localhost:4000", "Sec-Fetch-Site": "none" });
+
+  assert.equal(response.status, 200);
+});
+
+test("an old browser without Fetch Metadata can write when its Origin is this origin", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ Host: "localhost:4000", Origin: "http://localhost:4000" })
+    .send({ title: "Old Safari note" });
+
+  assert.equal(response.status, 201);
+});
+
+test("a non-browser client (curl, scripts, the smoke test) can write", async () => {
+  const response = await request(app).post("/api/notes").send({ title: "curl note" });
+
+  assert.equal(response.status, 201);
+});
+
+test("the Vite dev proxy keeps working: Host and Origin are both localhost:5173", async () => {
+  const modern = await request(app)
+    .post("/api/notes")
+    .set(sameOriginHeaders("localhost:5173"))
+    .send({ title: "Dev-mode note" });
+  const old = await request(app)
+    .post("/api/notes")
+    .set({ Host: "localhost:5173", Origin: "http://localhost:5173" })
+    .send({ title: "Dev-mode note, old browser" });
+
+  assert.equal(modern.status, 201);
+  assert.equal(old.status, 201);
+});
+
+test("a same-origin multipart upload still works", async () => {
+  const response = await uploadSamplePdf(app, sameOriginHeaders());
+
+  assert.equal(response.status, 201);
+});
+
+test("NETWORK_MODE=1: the phone on Wi-Fi or plain MagicDNS can write", async () => {
+  const networkApp = await createNetworkModeApp();
+
+  for (const host of ["192.168.1.20:4000", `${MAGIC_DNS_NAME}:4000`]) {
+    const response = await request(networkApp)
+      .post("/api/notes")
+      .set(sameOriginHeaders(host))
+      .send({ title: `Phone note via ${host}` });
+    assert.equal(response.status, 201, host);
+  }
+});
+
+test("NETWORK_MODE=1: the phone through tailscale serve can write and upload", async () => {
+  const networkApp = await createNetworkModeApp();
+  const serveOrigin = `https://${MAGIC_DNS_NAME}`;
+
+  const modern = await request(networkApp)
+    .post("/api/notes")
+    .set({ ...TAILSCALE_SERVE_HEADERS, Origin: serveOrigin, "Sec-Fetch-Site": "same-origin" })
+    .send({ title: "Phone note via tailscale serve" });
+  const oldSafari = await request(networkApp)
+    .post("/api/notes")
+    .set({ ...TAILSCALE_SERVE_HEADERS, Origin: serveOrigin })
+    .send({ title: "Old Safari note via tailscale serve" });
+  const upload = await uploadSamplePdf(networkApp, {
+    ...TAILSCALE_SERVE_HEADERS,
+    Origin: serveOrigin,
+    "Sec-Fetch-Site": "same-origin",
+  });
+
+  assert.equal(modern.status, 201);
+  assert.equal(oldSafari.status, 201);
+  assert.equal(upload.status, 201);
 });
