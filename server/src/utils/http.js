@@ -136,10 +136,25 @@ export function isLoopbackAddress(address) {
   return /^127\.\d+\.\d+\.\d+$/.test(address) || /^::ffff:127\./.test(address);
 }
 
+// Headers a reverse proxy adds when it relays someone else's request.
+// `tailscale serve` always sets X-Forwarded-For and X-Forwarded-Host.
+const FORWARDING_HEADERS = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip"];
+
 /**
- * True when the request originates from the host machine itself. Reads the raw
- * socket peer address (not a client-supplied header) so it cannot be spoofed by
- * a proxy header — this app does not run behind a trusted proxy.
+ * True when the request carries any header a reverse proxy adds when it relays
+ * another device's request. The values are never trusted, only noticed.
+ */
+export function hasForwardingHeaders(request) {
+  const headers = request?.headers || {};
+  return FORWARDING_HEADERS.some((name) => headers[name] !== undefined);
+}
+
+/**
+ * True when the TCP peer is this machine. Reads the raw socket address, never
+ * a client-supplied header, so it cannot be spoofed. It is not proof the
+ * request started here: a proxy on this machine (such as `tailscale serve`)
+ * is a loopback peer for every device it relays, which is why host-only
+ * routes also check `hasForwardingHeaders` and the Host name.
  */
 export function isLoopbackRequest(request) {
   return isLoopbackAddress(

@@ -10,6 +10,7 @@
 // Sections follow the threat each one closes:
 //   1. Host allow-list: DNS rebinding (2A-03)
 //   2. Cross-site writes and side-effect GETs (2A-02, 2A-07)
+//   3. Backup export through a proxy such as `tailscale serve` (2A-08)
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -523,4 +524,53 @@ test("NETWORK_MODE=1: the phone through tailscale serve can write and upload", a
   assert.equal(modern.status, 201);
   assert.equal(oldSafari.status, 201);
   assert.equal(upload.status, 201);
+});
+
+// ---------------------------------------------------------------------------
+// 3. Backup export through a proxy (2A-08)
+// ---------------------------------------------------------------------------
+
+test("2A-08: backup export refuses a request that came through tailscale serve", async () => {
+  const networkApp = await createNetworkModeApp();
+  const response = await request(networkApp)
+    .get("/api/settings/backup-export")
+    .set({ ...TAILSCALE_SERVE_HEADERS, "Sec-Fetch-Site": "same-origin" });
+
+  assert.equal(response.status, 403);
+  assert.match(response.body.error, /host machine/i);
+});
+
+test("2A-08: backup export refuses any request carrying proxy forwarding headers", async () => {
+  for (const forwarding of [
+    { "X-Forwarded-For": "192.168.1.50" },
+    { Forwarded: "for=192.168.1.50;proto=http" },
+    { "X-Forwarded-Host": "corolla.example" },
+  ]) {
+    const response = await request(app)
+      .get("/api/settings/backup-export")
+      .set({ Host: "localhost:4000", ...forwarding });
+    assert.equal(response.status, 403, JSON.stringify(forwarding));
+  }
+});
+
+test("2A-08: backup export refuses a loopback connection addressed to a network name", async () => {
+  // e.g. the Vite dev server started with --host, proxying a phone's request.
+  const networkApp = await createNetworkModeApp();
+  const response = await request(networkApp)
+    .get("/api/settings/backup-export")
+    .set("Host", "192.168.1.20:4000");
+
+  assert.equal(response.status, 403);
+});
+
+test("backup export still works on the host machine, directly and through the Vite proxy", async () => {
+  const direct = await request(app).get("/api/settings/backup-export").set("Host", "localhost:4000");
+  const viaVite = await request(app)
+    .get("/api/settings/backup-export")
+    .set({ Host: "localhost:5173", "Sec-Fetch-Site": "same-origin" });
+
+  assert.equal(direct.status, 200);
+  assert.match(direct.headers["content-type"] || "", /gzip/);
+  assert.equal(viaVite.status, 200);
+  assert.match(viaVite.headers["content-type"] || "", /gzip/);
 });
