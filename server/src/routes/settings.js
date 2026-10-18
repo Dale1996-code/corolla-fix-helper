@@ -157,16 +157,48 @@ export function createBackupExportHandler({
   return async function backupExportHandler(_request, response) {
     let stagingRoot = "";
     let tarProcess;
+    let tarExited = false;
     let stderr = "";
     let streamingStarted = false;
     let settled = false;
+    let cancelled = false;
 
+    // Runs from event handlers, where a throw would crash the server, so a
+    // staging folder that cannot be removed is logged instead.
     const cleanup = () => {
       if (stagingRoot) {
-        removeStagingDir(stagingRoot);
+        const dir = stagingRoot;
         stagingRoot = "";
+
+        try {
+          removeStagingDir(dir);
+        } catch (error) {
+          logger.error(`Could not remove the backup staging folder ${dir}: ${error.message}`);
+        }
       }
     };
+
+    // The browser went away before the archive was complete: the download was
+    // cancelled or the tab closed. Without this, tar kept running, blocked on
+    // a pipe nobody reads, and the staging copy of the whole database and
+    // uploads stayed in the temp folder.
+    response.on("close", () => {
+      if (settled || response.writableFinished) {
+        return;
+      }
+
+      settled = true;
+      cancelled = true;
+      logger.error("Backup export cancelled before it finished; stopping tar.");
+
+      if (tarProcess && !tarExited) {
+        // The staging folder is removed on tar's "close", once tar no longer
+        // holds the staged files open (Windows will not delete open files).
+        tarProcess.kill();
+      } else {
+        cleanup();
+      }
+    });
 
     const fail = (error, exitCode = null) => {
       if (settled) {
@@ -193,6 +225,14 @@ export function createBackupExportHandler({
 
     try {
       stagingRoot = await createStagingDir();
+
+      // `destroyed` covers a browser that left before the "close" event above
+      // has been delivered.
+      if (cancelled || response.destroyed) {
+        cleanup();
+        return;
+      }
+
       const tarExecutable = resolveTar();
       const args = [
         "-czf",
@@ -225,10 +265,24 @@ export function createBackupExportHandler({
       });
 
       tarProcess.on("error", (error) => {
+        tarExited = true;
+
+        if (cancelled) {
+          cleanup();
+          return;
+        }
+
         fail(new Error(`tar could not start: ${error.message}`));
       });
 
       tarProcess.on("close", (exitCode) => {
+        tarExited = true;
+
+        if (cancelled) {
+          cleanup();
+          return;
+        }
+
         if (exitCode !== 0) {
           fail(
             new Error(
@@ -253,6 +307,11 @@ export function createBackupExportHandler({
         }
       });
     } catch (error) {
+      if (cancelled) {
+        cleanup();
+        return;
+      }
+
       fail(error);
     }
   };
