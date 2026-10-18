@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { createApp } from "./app.js";
+import { closeDatabase } from "./database.js";
 import { describePhoneAccessUrls } from "./services/networkAddresses.js";
 import { startServer } from "./serverLifecycle.js";
 
@@ -7,6 +8,9 @@ startServer({
   app: createApp(),
   port: config.port,
   host: config.host,
+  // Ctrl+C, a closed console window, or SIGTERM checkpoints the WAL into the
+  // .db file and closes it, so the .db file alone holds every committed row.
+  closeDatabase,
   onListening(server) {
     const address = server.address();
     const port = address && typeof address === "object" ? address.port : config.port;

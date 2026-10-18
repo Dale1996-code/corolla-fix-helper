@@ -50,7 +50,8 @@ Handles env file, key entry, install, import, embedding, build, and start in one
 
 ## Stop and Restart Safely
 
-- **Stop:** press `Ctrl+C` in the terminal running the app (for `npm run dev`, `concurrently` stops both servers). Closing the terminal window also stops it.
+- **Stop:** press `Ctrl+C` in the terminal running the app (for `npm run dev`, `concurrently` stops both servers). Closing the terminal window also stops it. Either way the backend stops accepting requests, folds the SQLite write-ahead log into the `.db` file, and closes it, so the `-wal`/`-shm` files disappear. A connection still open after 3 seconds is cut; pressing `Ctrl+C` a second time skips that wait. If `-wal`/`-shm` files are still there after a stop, the process was killed rather than stopped. Leave them beside the `.db` file, because they may hold the newest changes.
+- **Port already in use:** if the backend prints `Port 4000 on 127.0.0.1 is already in use` and exits, another copy of the app (perhaps from another folder) or another program holds the port. Stop it, or set `PORT` in `server\.env`.
 - The app is safe to stop at any time for normal use — SQLite commits transactions as it goes. Avoid killing it in the middle of a **bulk import** or **restore** if you can; both are resumable/recoverable, but let them finish when possible.
 - **Restart:** just run the start command again. There is no daemon, no service manager, no PID file.
 - After changing anything in `server\.env`, a backend restart is required — env vars are read once at startup by `server/src/config.js`.
