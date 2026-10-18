@@ -36,6 +36,7 @@
     "server/test/defeatRequestClassifier.test.js",
     "server/test/defeatRequestGate.test.js",
     "server/test/documentServiceMutations.test.js",
+    "server/test/evidenceOracle.test.js",
     "server/test/importFolder.test.js",
     "server/test/initDatabaseMigration.test.js",
     "server/test/networkAddresses.test.js",
