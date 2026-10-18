@@ -118,9 +118,33 @@ The CLI exits non-zero and says which of three things happened:
   followed by numbered steps (rename the restored copy out of the way, then move
   each original back). Stop the app and follow them. Do not delete any
   `pre-restore` folder until the app shows your data again.
-- You can also recover manually from the `pre-restore-<timestamp>` folder: copy
-  its `database/<name>.db` back over `DATABASE_FILE` and its `uploads/` contents
-  back into `UPLOADS_DIR` while the server is stopped.
+
+## Undo a restore that succeeded
+
+If you restored the wrong archive and still have the right one, restore that
+one with `npm run restore`. That is the safest undo, because the CLI handles
+the SQLite sidecar files for you.
+
+To go back to the data you had *before* the restore, put the two pre-restore
+folders back by hand. A SQLite database in WAL mode is the `.db` file **plus**
+its `-wal`/`-shm` files: the `-wal` can hold the newest committed rows, and a
+`-wal` left over from a different database gets replayed into the wrong one.
+Always move those files together, and never copy the `.db` file alone.
+
+1. Stop the app (`Ctrl+C`) and wait for it to exit.
+2. Move the restored database out of the way: rename `DATABASE_FILE` **and**
+   any `DATABASE_FILE-wal`, `-shm` or `-journal` next to it, for example by
+   adding `.unwanted` to each name.
+3. Move everything in `pre-restore-<timestamp>/database/` (the `<name>.db` and
+   any `<name>.db-wal` / `-shm` / `-journal` beside it) back next to
+   `DATABASE_FILE`, keeping the names exactly as they are.
+4. Rename `UPLOADS_DIR` out of the way (for example `uploads.unwanted`), then
+   rename `<UPLOADS_DIR>.pre-restore-<timestamp>` to `UPLOADS_DIR`.
+5. Start the app and check your documents, notes and PDFs. Then delete the
+   `.unwanted` items and the empty `pre-restore-<timestamp>` folder.
+
+A restore that *failed* needs none of this. The CLI either changed nothing,
+moved everything back, or printed the exact moves to make.
 
 ## Prove it works: the backup + restore drill
 
