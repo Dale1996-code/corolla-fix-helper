@@ -43,9 +43,13 @@ open, so it has to happen with the server stopped. Settings shows these same
 instructions next to the export button so the two halves are discoverable
 together.
 
-> **Stop the server first** (or restart it afterward). The running app keeps a
-> live SQLite connection open on the database file, and restore replaces that
-> file on disk.
+> **Stop the server first, and keep it stopped until the restore finishes.**
+> Restarting it afterward is not a substitute. The running app keeps the
+> database file open, and restore moves that file aside. On Windows the move is
+> refused and the restore rolls back. On macOS/Linux the move succeeds, and
+> anything the still-running server writes afterward goes into the moved-aside
+> previous database, not the restored one, so it is missing once the app
+> restarts.
 
 Run the restore CLI with the path to a backup archive:
 

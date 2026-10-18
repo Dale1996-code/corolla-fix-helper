@@ -537,9 +537,10 @@ function discardUnusedRestorePaths(plan, fs, log) {
  * there was nothing to move aside or keepSnapshot is false. Rejects only with
  * a RestoreError whose `outcome` is one of RESTORE_OUTCOMES.
  *
- * IMPORTANT: this replaces the database file on disk. Run it with the server
- * stopped, or restart the server afterward, because the live SQLite connection
- * keeps a handle on the old file.
+ * IMPORTANT: run it only with the server stopped. Restarting afterward is not
+ * a substitute: a running server keeps its handle on the database file. On
+ * Windows that makes the move fail (rolled_back). On POSIX the move succeeds,
+ * and every later write lands in the moved-aside previous database.
  */
 export async function restoreBackup({
   archivePath,

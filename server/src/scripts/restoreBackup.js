@@ -8,8 +8,10 @@
 // swaps it in with renames. If anything goes wrong it moves the previous data
 // back, and this script reports exactly which of those happened.
 //
-// Stop the dev/prod server before running this (or restart it afterward): the
-// live SQLite connection holds a handle on the database file being replaced.
+// Stop the dev/prod server before running this, and keep it stopped until the
+// restore finishes. Restarting afterward is not a substitute: the running
+// server holds the database file open, and anything it writes after the swap
+// lands in the moved-aside previous database rather than the restored one.
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
