@@ -31,6 +31,14 @@
 // reply, and by then the PDF is planted. So every write under /api, and the
 // GETs that do work rather than just read, must come from the app's own pages
 // (see isSameOriginRequest).
+//
+// Bodies and errors (1B-06, 4A-04). Express 5 leaves request.body undefined
+// when no parser ran, so a text/plain body or a body-less POST used to throw a
+// TypeError in the route and come back as an HTML stack trace. Now a write's
+// body must be JSON (or multipart, for the upload routes), a missing body is
+// `{}`, and anything a route does not answer itself, from a malformed body to
+// an unknown /api path to an unexpected throw, is `{ error }` JSON with no
+// stack and no file path.
 
 import os from "node:os";
 import { config } from "../config.js";
@@ -379,4 +387,133 @@ export function requireSameOriginRequest(request, response, next) {
   }
 
   refuseCrossSite(request, response);
+}
+
+// The largest JSON body /api accepts. Express's default is 100 kB, which turned
+// away a long note (a pasted forum thread, a page of repair log) with an
+// unreadable 413. 1 MB is about a thousand pages of plain text, and every other
+// JSON body is a short form. PDFs and images are multipart, with their own
+// limits (MAX_UPLOAD_SIZE_MB).
+export const JSON_BODY_LIMIT = "1mb";
+
+const ACCEPTED_BODY_TYPES = ["application/json", "multipart/form-data"];
+
+/**
+ * Mounted on `/api` ahead of the JSON parser: a write that carries a body must
+ * send it as JSON, or as multipart for the upload routes, else 415. A body-less
+ * write (no Content-Length, or 0) is fine and gets `{}` from `defaultEmptyBody`.
+ *
+ * @param {import("express").Request} request
+ * @param {import("express").Response} response
+ * @param {import("express").NextFunction} next
+ */
+export function requireJsonBody(request, response, next) {
+  if (
+    SAFE_METHODS.has(request.method) ||
+    !hasRequestBody(request) ||
+    request.is(ACCEPTED_BODY_TYPES)
+  ) {
+    next();
+    return;
+  }
+
+  refuse(
+    request,
+    response,
+    415,
+    "Send the request body as JSON, with the header Content-Type: application/json."
+  );
+}
+
+/**
+ * Mounted on `/api` after the JSON parser: a request with no body reads as
+ * `{}`, so a route can read a field without first checking the body exists.
+ *
+ * @param {import("express").Request} request
+ * @param {import("express").Response} _response
+ * @param {import("express").NextFunction} next
+ */
+export function defaultEmptyBody(request, _response, next) {
+  if (request.body === undefined) {
+    request.body = {};
+  }
+
+  next();
+}
+
+/**
+ * Mounted on `/api` after every API router: an address no route matched is a
+ * JSON 404, not Express's HTML page (which the client cannot parse).
+ *
+ * @param {import("express").Request} request
+ * @param {import("express").Response} response
+ */
+export function apiNotFound(request, response) {
+  refuse(request, response, 404, "No API route matches this address.");
+}
+
+// Errors a client caused, from body-parser and other http-errors producers,
+// answered with their own status and a message safe to show.
+function describeClientError(error) {
+  switch (error?.type) {
+    case "entity.parse.failed":
+      return { status: 400, message: "The request body is not valid JSON." };
+    case "entity.too.large":
+      return { status: 413, message: `The request body is larger than ${JSON_BODY_LIMIT}.` };
+    case "encoding.unsupported":
+    case "charset.unsupported":
+      return { status: 415, message: "Send the request body as UTF-8 JSON." };
+    default:
+      break;
+  }
+
+  const status = Number(error?.status ?? error?.statusCode);
+
+  if (Number.isInteger(status) && status >= 400 && status < 500) {
+    return {
+      status,
+      message:
+        error.expose && typeof error.message === "string"
+          ? error.message
+          : "The request could not be processed.",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * The app's final error handler. A client error keeps its 4xx status; anything
+ * else is a 500 with a generic message, and the real error (which can hold
+ * SQLite text or absolute file paths) goes only to the server log. Registered
+ * last, after the frontend routes. Logger injectable for tests.
+ *
+ * @param {{ logger?: Pick<Console, "error"> }} [options]
+ */
+export function createJsonErrorHandler({ logger = console } = {}) {
+  /**
+   * @param {any} error
+   * @param {import("express").Request} request
+   * @param {import("express").Response} response
+   * @param {import("express").NextFunction} next
+   */
+  return function jsonErrorHandler(error, request, response, next) {
+    if (response.headersSent) {
+      // A stream (SSE, backup download) already started: let Express close it.
+      next(error);
+      return;
+    }
+
+    const clientError = describeClientError(error);
+
+    if (clientError) {
+      response.status(clientError.status).json({ error: clientError.message });
+      return;
+    }
+
+    logger.error(`Unhandled error in ${request.method} ${request.path}:`, error);
+    response.status(500).json({
+      error: "Something went wrong on the server. The details are in the server console.",
+    });
+  };
 }

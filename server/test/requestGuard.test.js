@@ -12,12 +12,14 @@
 //   2. Cross-site writes and side-effect GETs (2A-02, 2A-07)
 //   3. Backup export through a proxy such as `tailscale serve` (2A-08)
 //   4. No CORS grant for any origin (2A-04)
+//   5. Body contract and JSON errors (1B-06, 4A-04, 2A-12)
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
+import express from "express";
 import request from "supertest";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -588,4 +590,126 @@ test("2A-04: no origin is granted CORS access, not even the Vite port", async ()
 
   assert.equal(preflight.headers["access-control-allow-origin"], undefined);
   assert.equal(read.headers["access-control-allow-origin"], undefined);
+});
+
+// ---------------------------------------------------------------------------
+// 5. Body contract and JSON errors (1B-06, 4A-04, 2A-12)
+// ---------------------------------------------------------------------------
+
+test("1B-06: a text/plain body is a JSON 415, never an HTML 500, and writes nothing", async () => {
+  const before = (await request(app).get("/api/notes")).body;
+  const response = await request(app)
+    .post("/api/notes")
+    .set("Content-Type", "text/plain")
+    .send(JSON.stringify({ title: "x", content: "y" }));
+  const afterPost = (await request(app).get("/api/notes")).body;
+
+  assert.equal(response.status, 415);
+  assert.match(response.headers["content-type"] || "", /application\/json/);
+  assert.match(response.body.error, /application\/json/);
+  assert.deepEqual(afterPost, before);
+});
+
+test("4A-04: JSON write routes answer a form-encoded body with 415", async () => {
+  for (const [method, pathname] of [
+    ["post", "/api/notes"],
+    ["put", "/api/notes/1"],
+    ["post", "/api/symptoms"],
+    ["post", "/api/procedures"],
+    ["put", "/api/settings/vehicle"],
+    ["post", "/api/ask"],
+    ["post", "/api/repair-plan"],
+  ]) {
+    const response = await request(app)[method](pathname).type("form").send("title=Planted");
+    assert.equal(response.status, 415, `${method.toUpperCase()} ${pathname}`);
+  }
+});
+
+test("1B-06: malformed JSON is a JSON 400 without a stack trace", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set("Content-Type", "application/json")
+    .send("{bad json");
+
+  assert.equal(response.status, 400);
+  assert.match(response.headers["content-type"] || "", /application\/json/);
+  assert.equal(typeof response.body.error, "string");
+  assert.doesNotMatch(response.text, /node_modules|at JSON\.parse|SyntaxError/);
+});
+
+test("4A-04: a body-less POST is a JSON 400 validation error, not a 500", async () => {
+  for (const pathname of ["/api/notes", "/api/symptoms", "/api/procedures"]) {
+    const response = await request(app).post(pathname);
+    assert.equal(response.status, 400, pathname);
+    assert.match(response.body.error, /required/i, pathname);
+  }
+});
+
+test("4A-04: a browser POST with Content-Length: 0 is body-less, not a 415", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .set({ ...sameOriginHeaders(), "Content-Length": "0" });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /Title is required/);
+});
+
+test("1B-06: a long note well past the old 100 kB default is saved", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .send({ title: "Long note", content: "torque spec ".repeat(25_000) });
+
+  assert.equal(response.status, 201);
+});
+
+test("1B-06: a body over the JSON limit is a JSON 413", async () => {
+  const response = await request(app)
+    .post("/api/notes")
+    .send({ title: "Huge note", content: "x".repeat(2 * 1024 * 1024) });
+
+  assert.equal(response.status, 413);
+  assert.match(response.headers["content-type"] || "", /application\/json/);
+});
+
+test("1B-06: an unknown /api route is a JSON 404", async () => {
+  for (const [method, pathname] of [
+    ["get", "/api/does-not-exist"],
+    ["post", "/api/does-not-exist"],
+    ["get", "/api/notes/1/not-a-route"],
+  ]) {
+    const response = await request(app)[method](pathname);
+    assert.equal(response.status, 404, `${method.toUpperCase()} ${pathname}`);
+    assert.match(response.headers["content-type"] || "", /application\/json/);
+  }
+});
+
+test("an unknown non-API path still serves the app shell", async () => {
+  const response = await request(app).get("/documents/some/client/route");
+
+  assert.equal(response.status, 200);
+  assert.match(response.text, /Built Corolla app/);
+});
+
+test("2A-12: responses do not advertise Express", async () => {
+  const response = await request(app).get("/api/health");
+
+  assert.equal(response.headers["x-powered-by"], undefined);
+});
+
+test("4A-04: an unexpected error is a generic JSON 500 and the detail is only logged", async () => {
+  const { createJsonErrorHandler } = await import("../src/middleware/requestGuard.js");
+  const logged = [];
+  const probe = express();
+  probe.get("/boom", () => {
+    throw new Error("SQLITE_CONSTRAINT at C:\\Users\\owner\\corolla.db");
+  });
+  probe.use(createJsonErrorHandler({ logger: { error: (...args) => logged.push(args) } }));
+
+  const response = await request(probe).get("/boom");
+
+  assert.equal(response.status, 500);
+  assert.match(response.headers["content-type"] || "", /application\/json/);
+  assert.equal(typeof response.body.error, "string");
+  assert.doesNotMatch(response.text, /SQLITE|Users|owner/);
+  assert.equal(logged.length, 1);
 });
