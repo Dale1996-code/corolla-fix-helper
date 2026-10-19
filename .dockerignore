@@ -3,6 +3,11 @@ node_modules
 **/dist
 server/data
 server/uploads
+# The two lines above match only at the context root. Worktrees under .claude/
+# carry their own copies of the database and the PDFs.
+**/server/data
+**/server/uploads
+.claude
 .env
 **/.env
 **/.env.*

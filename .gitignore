@@ -7,6 +7,9 @@ server/data/*.db
 server/data/*.db-shm
 server/data/*.db-wal
 server/data/diagnostics/
+# A restore snapshot is a full copy of the database and every uploaded PDF,
+# and even a failed restore leaves one behind.
+server/data/pre-restore-*/
 server/uploads/*
 !server/uploads/.gitkeep
 .env
