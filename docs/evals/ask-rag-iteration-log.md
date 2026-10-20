@@ -3103,9 +3103,10 @@ Counts: **44 cases, 14 verified, 30 templates** — unchanged.
 
 ## Stage 2 — the Ask verifier fails closed (2026-10-20)
 
-Stage 2 of the 2026-10-18 audit follow-up plan. This entry is the offline work. Its one approved
+Stage 2 of the 2026-10-18 audit follow-up plan. This entry is the offline work. Its approved
 live run (owner decision D3) is **Experiment I**, the next entry, and three follow-up commits
-came out of it.
+came out of it. A second run the owner approved, **Experiment J**, confirms them: 14/14
+verified.
 
 The audit reproduced wrong specifications shown as verified — 0.5 mm of disc runout against a
 printed 0.05 mm, 4.7 L of oil against 4.2 L, 50 ft-lbs of lug-nut torque against a printed
@@ -3363,9 +3364,10 @@ colour (blue), or a pin label. The manuals write capacities as "liters".
 - **The 8 model-driven verified cases** passed live, and their captured replies get identical
   verdicts under `f880c73`.
 
-**Not established: a live run at `f880c73`.** The probe question itself, "What is the oil
-drain plug torque?", makes no model call, so it was never captured. Two captured drain-plug
-retrievals stand in for it. Whether to spend a second run is the owner's call.
+**Not established by this run: a live result at `f880c73`.** The probe question itself, "What
+is the oil drain plug torque?", makes no model call, so it was never captured. Two captured
+drain-plug retrievals stand in for it. The owner approved a second run, **Experiment J**, which
+confirms it: 14/14 verified.
 
 ### Limits, stated plainly
 
@@ -3373,5 +3375,100 @@ retrievals stand in for it. Whether to spend a second run is the owner's call.
 - The replay rebuilds sources from prompt text, so evidence ids differ from the live run's.
   They do not affect verdicts.
 - **Nothing was promoted.** The two new templates stay `verified: false`.
+
+Counts after this run: **46 cases, 14 verified, 32 templates.**
+
+## EXPERIMENT J — confirming live eval of Stage 2 at `f880c73`, 2026-10-20
+
+**The eleventh `eval:answers` run, approved separately by the owner after Experiment I, on the
+verifier at `f880c73`. 14/14 verified PASS. Exit code 0. Overall 35/46. The Stage 2 merge bar
+is met.**
+
+- **The three failures Experiment I traced to the probes now pass live:**
+  `reject-invented-drain-plug-torque`, `reject-wrong-component-torque`, and the
+  `reject-unrecognized-figure` template, whose sentinel no longer reaches any gap.
+- **No answer the model wrote changed status because of Stage 2:** 0 of 37 in the replay, as in
+  Experiment I.
+- **The first live cost of the three-word quote rule (1A-11):** 1 of 181 claims, with no change
+  to any answer's status.
+
+### What is under test
+
+Against Experiment I, the three follow-up commits only.
+
+| Commit | Change |
+| --- | --- |
+| `52ecd89` | A rejected claim's gap redacts unreadable figures |
+| `13f2296` | The probes quote whole words |
+| `f880c73` | An engine designation is a name; a quote's bare `L` counts only for a volume claim |
+
+| Piece | Blob | Against I |
+| --- | --- | --- |
+| Verifier | `d31394b` | `7fd93c1` |
+| Probes | `bb653d2` | `0210bd1` |
+| Case definitions | `b2663e2` | Identical |
+| Scoring | `e2c9693` | Identical |
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | Experiment I's, unchanged, with fresh scratch paths. 2026-10-20 12:31:27–12:36:39 (UTC−5) |
+| Revision | Worktree HEAD `75795e5`, whose `server/` and `client/` trees are byte-identical to `f880c73` (the commit after it is docs only). Clean worktree, no `server/.env`, not pushed. `origin/main` had meanwhile gained `c71ae82` (Stage 4-D1, PR #148), which touches none of these files |
+| Data | A fresh copy of the same database, files byte-identical to Experiment I's: `.db` MD5 `c1c5f794…`, WAL MD5 `dd999735…`. The app was stopped, and the live files' MD5s were unchanged after the run |
+| Model and settings | As in I: `gpt-5.5-2026-04-23`, effort `low`, `max_output_tokens` 2048, all confirmed in the 38 captured requests |
+| Cases | 46 (14 verified, 32 templates) |
+| Provider requests | **~83.** 38 Responses requests were captured (37 evidence answers plus 1 follow-up rewrite). All returned HTTP 200 and `completed`, for 105,250 input and 13,477 output tokens, 152 reasoning tokens, and a longest reply of 1,419. ~45 embedding requests were not captured |
+| Infrastructure noise | 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 21/32. Overall **35/46**.
+
+| Category | J | I |
+| --- | --- | --- |
+| torque | 2/7 | 2/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 8/11 | 8/11 |
+| procedure | 7/9 | 8/9 |
+| behavior | 2/3 | 2/3 |
+| verifier | 8/8 | 5/8 |
+
+### Every case movement against Experiment I
+
+| Case | I | J | Attributable to the follow-ups? |
+| --- | --- | --- | --- |
+| `reject-invented-drain-plug-torque` (verified) | FAIL | PASS | **Yes,** `13f2296`: its quote now ends on a whole word, so the claim reaches the numeric check |
+| `reject-wrong-component-torque` (verified) | FAIL | PASS | **Yes,** `13f2296`, through the subject check |
+| `reject-unrecognized-figure` | FAIL | PASS | **Yes,** `13f2296` and `52ecd89`: the right reason, and no sentinel in the gap |
+| `front-lower-ball-joint-procedure` | PASS | FAIL | **No.** All 13 of its claims are accepted by both verifiers, and its status is `partial` under both. It fails only the content check (no "control arm" or "knuckle" wording), so the model wrote a different answer. On the unstable list |
+
+### The replay
+
+All captured replies were replayed through main's verifier (`739ab2b`) and `f880c73`'s.
+**Scope:** 37 replies, 181 claims.
+
+- **Status changes: 0.** **Accepted claims: 168 → 167.**
+- **The one lost claim** is "The Rear Speed Sensor RH Circuit article includes a wiring
+  diagram", quoting only "WIRING DIAGRAM". The three-word rule now refuses it as
+  `quote_too_short`.
+  - Its answer is `partial` under both verifiers.
+  - Its case, `applicability-abs-wiring-variant`, fails its content check under both.
+  - It is the first observed cost of the 1A-11 rule: a true two-word heading quoted for a
+    non-numeric claim.
+- **Six claims change only their rejection reason.** They are the same shapes as in I, and each
+  was rejected by both verifiers:
+  - five flattened torque rows quoted without their header;
+  - the OCR's "3.7 lmp. qts".
+- **The engine designation:** the model wrote no "1.8L" in this run's claims, and no model gap
+  is redacted for it.
+- **Claims refused for a conversion: 0 of 181.**
+
+### Limits, stated plainly
+
+- **n = 2 for the verifier, n = 1 for these follow-ups.**
+- The replay rebuilds sources from prompt text.
+- **Nothing was promoted.** `reject-unrecognized-figure` and `reject-one-word-quote` have now
+  passed live once each (J). Promoting them is the owner's call.
 
 Counts after this run: **46 cases, 14 verified, 32 templates.**

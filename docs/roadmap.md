@@ -408,7 +408,8 @@ and 3A-03; every Ask row of the evidence oracle gates. Its live answer eval (Exp
 `8ef79cf`) scored 12/14 verified. Both failures were rejection probes whose 400-character
 quotes the new token-boundary check refused, and no answer the model wrote changed status.
 The probes, a gap leak the run found, and an engine-designation misreading its replay found
-are fixed in follow-up commits, proven offline but not yet by a second live run. See the
+are fixed in follow-up commits. A second live run on `f880c73` (Experiment J) passed 14/14
+verified, 35/46 overall, again with no answer changing status. See the
 [iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
 multi-specification claims, where one subject is derived per claim (described in the known
