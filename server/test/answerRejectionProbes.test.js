@@ -91,6 +91,33 @@ test("every declared probe trips exactly one rejection", async () => {
   }
 });
 
+test("on a chunk longer than the quote bound, every probe still trips its own reason", async () => {
+  // The live Stage 2 eval failed both verified quote-based probes: a raw
+  // 400-character slice of a real chunk stopped inside a word, which the
+  // token-boundary quote check (1A-03) rightly refuses, so they died one step
+  // early as quote_not_in_source. Every fixture above is shorter than the bound,
+  // which is why this file never saw it. The text below puts character 400
+  // inside a word, after the torque.
+  const filler = "Inspect the gasket surfaces for damage and clean them thoroughly. ";
+  const long = {
+    ...chunk(),
+    chunkText:
+      "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf). " +
+      filler.repeat(8),
+  };
+
+  assert.ok(long.chunkText.length > 450 && /\S/.test(long.chunkText[400]) && /\S/.test(long.chunkText[399]));
+
+  for (const name of REJECTION_PROBE_NAMES) {
+    const reply = await createRejectionProbe(name)({ chunks: [long] });
+    const verified = verifyEvidence(reply, [long]);
+
+    assert.equal(verified.rejected.length, 1, name);
+    assert.equal(verified.rejected[0].reason, name, `${name} died as ${verified.rejected[0].reason}`);
+    assert.doesNotMatch(verified.gaps.join(" "), REJECTION_PROBE_SENTINEL_PATTERN, name);
+  }
+});
+
 test("an unknown probe name fails loudly rather than stubbing nothing", () => {
   // A silent no-op probe would turn a rejection case into an ordinary refusal
   // case that passes for the wrong reason.

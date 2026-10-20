@@ -55,21 +55,38 @@ export const REJECTION_PROBE_FABRICATED_QUOTE =
   "Tighten the flux capacitor mounting bolt with the calibrated dilithium wrench.";
 
 /** A torque value as printed in these manuals ("37 Nm", "5.5 N*m", "27 N·m"). */
-const TORQUE_VALUE_PATTERN = /\d+(?:\.\d+)?\s*N\s*[*·.]?\s*m\b/i;
+// Never starts inside a number: "10 Nm" read out of "110 Nm" is not printed, so
+// the claim built from it would fail the numeric check before the subject one.
+const TORQUE_VALUE_PATTERN = /(?<![\d.,])\d+(?:\.\d+)?\s*N\s*[*·.]?\s*m\b/i;
 
 /** Longest verbatim slice we quote back. Bounded so a probe stays readable. */
 const QUOTE_LENGTH = 400;
 
 /**
- * A genuine substring of the retrieved chunk.
+ * A genuine quote of the retrieved chunk: its opening, up to QUOTE_LENGTH
+ * characters, ending on a whole word.
  *
  * This is what makes the numeric probe sharp rather than trivial: the quote
  * really is in the document, so the claim clears the source and quote checks and
  * can only fail on the number itself. A fabricated quote would be rejected one
  * step earlier as quote_not_in_source and would never reach the detector.
+ *
+ * Cut at a word boundary on purpose. Since Stage 2 (1A-03), text that stops
+ * inside a word or number is not a quote of the page, so a raw 400-character
+ * slice was rejected as quote_not_in_source in the live eval, and the probes
+ * stopped testing the checks they are named for.
  */
 function verbatimQuote(chunk) {
-  return String(chunk?.chunkText || "").slice(0, QUOTE_LENGTH);
+  const text = String(chunk?.chunkText || "");
+  const bounded = text.slice(0, QUOTE_LENGTH);
+
+  if (text.length <= QUOTE_LENGTH || /\s/.test(text[QUOTE_LENGTH])) {
+    return bounded.trimEnd();
+  }
+
+  const lastBreak = bounded.search(/\s\S*$/);
+
+  return lastBreak > 0 ? bounded.slice(0, lastBreak).trimEnd() : bounded;
 }
 
 /**
