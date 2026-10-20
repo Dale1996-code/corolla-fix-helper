@@ -258,6 +258,61 @@ test("kgf/cm2 in every printed form is a pressure, not a torque (1A-13)", () => 
   assert.equal(checkClaimNumbers("The bolt torque is 377 kgf*cm.", "Torque 37 N*m (377 kgf*cm)").grounded, true);
 });
 
+test("inches, miles, angles, percentages, kV, mΩ, and MΩ are detected (1A-04)", () => {
+  for (const [text, value, unit] of [
+    ["0.906 in.", 0.906, "in."],
+    ["(0.906 in)", 0.906, "in"],
+    ["0.906 inches", 0.906, "inches"],
+    ["100,000 miles", 100000, "miles"],
+    ["160,000 km", 160000, "km"],
+    ["an additional 90°", 90, "°"],
+    ["an additional 90 degrees", 90, "degrees"],
+    ["a 50% mixture", 50, "%"],
+    ["35 kV", 35, "kV"],
+    [`5 m${OMEGA}`, 5, `m${OMEGA}`],
+    [`1 M${OMEGA}`, 1, `M${OMEGA}`],
+    ["2 megohms", 2, "megohms"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Specification: ${text} here.`).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  // The preposition "in", an in.Hg vacuum, and a temperature are not these units.
+  for (const [text, expected] of [
+    ["Install 2 in the bracket.", []],
+    ["Vacuum 17.7 in.Hg.", []],
+    ["Coolant at 90°C.", [{ value: 90, unit: "°C" }]],
+    ["Coolant at 90 degrees Celsius.", [{ value: 90, unit: "degrees Celsius" }]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      expected,
+      text
+    );
+  }
+
+  for (const [claim, quote, grounded] of [
+    ["The minimum thickness is 0.906 in.", "Minimum thickness 23.0 mm (0.906 in.)", true],
+    ["The minimum thickness is 0.800 in.", "Minimum thickness 23.0 mm (0.906 in.)", false],
+    ["Replace the coolant at 100,000 miles.", "Replace the coolant at the first 100,000 miles", true],
+    ["Replace the coolant every 30,000 miles.", "Replace the coolant at the first 100,000 miles", false],
+    ["Turn the bolts a further 90 degrees.", "Tighten the bolts an additional 90°", true],
+    ["Turn the bolts a further 180°.", "Tighten the bolts an additional 90°", false],
+    ["Use a 50% coolant mixture.", "Coolant concentration 50%", true],
+    ["Use a 60% coolant mixture.", "Coolant concentration 50%", false],
+    // The angle is not a temperature, nor the reverse.
+    ["Turn the bolt a further 90°.", "Hold the coolant at 90°C", false],
+    // Spellings of one temperature unit match each other (1A-12 I1 and I2).
+    ["The coolant temperature is 90°C.", "Coolant temperature 90 ° C", true],
+    ["The coolant temperature is 90 deg C.", "Coolant temperature 90°C", true],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
+});
+
 test("an invented spec is flagged even when the quote is real", () => {
   const result = checkClaimNumbers("Torque the drain plug to 54 Nm.", chunk().chunkText);
 

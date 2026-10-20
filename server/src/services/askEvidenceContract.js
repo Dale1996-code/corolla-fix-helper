@@ -291,6 +291,12 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // trailing "2" once defeated the unit's word boundary, so the ASCII forms were
 // not detected at all, and "kgf/cm²" was read as kgf*cm and filed with torque
 // (1A-13). A "kgf/cm" with no "2" can only be a pressure misprinted.
+//
+// Also detected since 1A-04: inches ("0.906 in." -- the abbreviation needs its
+// period or closing punctuation, so the preposition in "2 in the bracket" is
+// never a length), miles and kilometres, a turn angle ("an additional 90°", a
+// degree sign with no C or F after it), percentages, kilovolts, and milliohms
+// and megohms. Each of these let a wrong figure pass unchecked.
 const UNIT_PATTERN =
   "n\\s*[·.*\\-]?\\s*m|nm|newton[-\\s]*met(?:er|re)s?|" +
   "ft\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]?\\s*ft|foot[-\\s]*pounds?|" +
@@ -299,12 +305,15 @@ const UNIT_PATTERN =
   "kgf\\s*[-·.*]?\\s*cm(?![2²])|kgf\\s*[-·.*]?\\s*m|kg\\s*[-·.*]?\\s*cm(?![2²])|" +
   "kpa|mpa|psi|bar|" +
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
+  "inch(?:es)?|in\\.|in(?=[)\\],;:]|$)|" +
   "lit(?:er|re)s?|ml|millilit(?:er|re)s?|" +
   "imp(?:\\.|erial)?\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
   "(?:US\\s*)?(?:qts?|quarts?|pints?|gal(?:lons?)?)|fl\\s*oz|" +
-  "ohms?|kilohms?|k\\s*ohms?|Ω(?=[A-Za-z0-9_])|" +
-  "volts?|millivolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
-  "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
+  "miles?|kilomet(?:er|re)s?|km\\s*\\/\\s*h|kph|mph|km|" +
+  "ohms?|kilohms?|k\\s*ohms?|milliohms?|meg(?:a)?ohms?|Ω(?=[A-Za-z0-9_])|" +
+  "volts?|millivolts?|kilovolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
+  "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|(?:°\\s*|deg(?:rees)?\\s*)?(?:celsius|fahrenheit)|" +
+  "°|deg(?:rees)?|%|percent|" +
   "rpm|hz|kilohertz|khz";
 
 // One number as these manuals print it, read as a whole token. A comma followed
@@ -399,7 +408,7 @@ const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
 const SYMBOL_VALUE_GUARD = String.raw`(?<![A-Za-z0-9_]|\d[.,])`;
 const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
   SYMBOL_VALUE_GUARD,
-  String.raw`mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}]`,
+  String.raw`mV|kV|V|k\s*[${OHM_SYMBOLS}]|M\s*[${OHM_SYMBOLS}]|m\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}]`,
   "(?![A-Za-z0-9_-])",
   "g"
 );
@@ -433,11 +442,24 @@ const SPEC_REGEXES = [
 const ELECTRICAL_UNITS = [
   { name: "millivolt", noun: "voltage", symbol: /^mV$/, spelled: /^millivolts?$/i },
   { name: "volt", noun: "voltage", symbol: /^V$/, spelled: /^volts?$/i },
+  { name: "kilovolt", noun: "voltage", symbol: /^kV$/, spelled: /^kilovolts?$/i },
   {
     name: "kilohm",
     noun: "resistance",
     symbol: new RegExp(String.raw`^k\s*[${OHM_SYMBOLS}]$`),
     spelled: /^(kilohms?|k\s*ohms?)$/i,
+  },
+  {
+    name: "megohm",
+    noun: "resistance",
+    symbol: new RegExp(String.raw`^M\s*[${OHM_SYMBOLS}]$`),
+    spelled: /^meg(a)?ohms?$/i,
+  },
+  {
+    name: "milliohm",
+    noun: "resistance",
+    symbol: new RegExp(String.raw`^m\s*[${OHM_SYMBOLS}]$`),
+    spelled: /^milliohms?$/i,
   },
   {
     name: "ohm",
@@ -568,6 +590,7 @@ const MEASUREMENT_UNITS = [
   { id: "fl oz", family: "volume", match: /^fl\s*oz$/i },
   { id: "mm", family: "length", match: /^(millimet(er|re)s?|mm)$/i },
   { id: "cm", family: "length", match: /^(centimet(er|re)s?|cm)$/i },
+  { id: "in", family: "length", match: /^(in\.?|inch(es)?)$/i },
   { id: "µm", family: "length", match: /^(microns?)$/i },
 ];
 
@@ -617,38 +640,52 @@ function isCurrentSymbol(unit) {
   return CURRENT_UNITS.some(({ symbol }) => symbol.test(cleaned));
 }
 
-/** Is this detected unit string one of the case-sensitive electrical symbols? */
-function isElectricalSymbol(unit) {
-  const cleaned = String(unit || "").trim();
+// Spellings of one unit outside the measurement and electrical tables, so "90
+// degrees" matches "90°", "82 deg C" matches "82 °C", and "30,000 mile" matches
+// "30,000 miles". A unit not listed compares by its normalized text, as before.
+const UNIT_ALIASES = [
+  { id: "°C", match: /^(°\s*c|deg(rees)?\s*c|(°\s*|deg(rees)?\s*)?celsius)$/i },
+  { id: "°F", match: /^(°\s*f|deg(rees)?\s*f|(°\s*|deg(rees)?\s*)?fahrenheit)$/i },
+  { id: "°", match: /^(°|deg(rees)?)$/i },
+  { id: "%", match: /^(%|percent)$/i },
+  { id: "mi", match: /^miles?$/i },
+  { id: "km", match: /^(km|kilomet(er|re)s?)$/i },
+  { id: "km/h", match: /^(km\s*\/\s*h|kph)$/i },
+  { id: "kHz", match: /^(khz|kilohertz)$/i },
+];
 
-  return ELECTRICAL_UNITS.some(({ symbol }) => symbol.test(cleaned));
+/** The id of a unit outside the measurement and electrical tables. */
+function unitAlias(unit) {
+  const cleaned = String(unit || "").trim();
+  const found = UNIT_ALIASES.find(({ match }) => match.test(cleaned));
+
+  return found ? found.id : normalizeForMatch(cleaned);
 }
 
 /**
  * Do two units outside the measurement families name the same unit?
  *
- * Spelled-out units compare exactly as they always have. A symbol is compared by
- * the unit it stands for, so a quote printing "12.6 V" still supports a claim
- * saying "12.6 volts", and the reverse -- without this, detecting symbols would
- * have started rejecting claims that were passing. Nothing here converts: mV and
- * V stay different units, as do kΩ and Ω, and mA and A.
+ * An electrical or current unit is compared by the unit it names, so a quote
+ * printing "12.6 V" supports a claim saying "12.6 volts" and "5 ohms" supports
+ * "5 ohm". Nothing here converts: mV and V stay different units, as do kΩ and Ω,
+ * and mA and A. Everything else compares by its UNIT_ALIASES id.
  */
 function sameLiteralUnit(left, right) {
-  if (isCurrentSymbol(left) || isCurrentSymbol(right)) {
+  if (findCurrentUnit(left) || findCurrentUnit(right)) {
     const leftUnit = findCurrentUnit(left);
     const rightUnit = findCurrentUnit(right);
 
     return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
   }
 
-  if (isElectricalSymbol(left) || isElectricalSymbol(right)) {
+  if (findElectricalUnit(left) || findElectricalUnit(right)) {
     const leftUnit = findElectricalUnit(left);
     const rightUnit = findElectricalUnit(right);
 
     return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
   }
 
-  return normalizeForMatch(left) === normalizeForMatch(right);
+  return unitAlias(left) === unitAlias(right);
 }
 
 /** Do two detected unit strings name the same unit, however each is spelled? */
@@ -867,8 +904,8 @@ const SPEC_SUBJECT_NOUNS = [
 // unit both spelled out and as a symbol, so "12.6 V" gates the subject exactly
 // as "12.6 volts" does, and "2.4 kΩ" exactly as "2.4 kilohms".
 const OTHER_GUARDED_FAMILIES = [
-  { pattern: /^rpm$/i, noun: "speed" },
-  { pattern: /^(°\s*[cf]|deg(?:rees)?\s*[cf])$/i, noun: "temperature" },
+  { ids: ["rpm"], noun: "speed" },
+  { ids: ["°C", "°F"], noun: "temperature" },
 ];
 
 function otherFamilySubjectNoun(unit) {
@@ -878,8 +915,8 @@ function otherFamilySubjectNoun(unit) {
     return electrical.noun;
   }
 
-  const cleaned = String(unit || "").trim();
-  const family = OTHER_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
+  const id = unitAlias(unit);
+  const family = OTHER_GUARDED_FAMILIES.find(({ ids }) => ids.includes(id));
 
   return family ? family.noun : "";
 }

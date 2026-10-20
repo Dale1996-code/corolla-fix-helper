@@ -202,7 +202,6 @@ export const ASK_ORACLE = [
     claim: "The front disc minimum thickness is 0.800 in.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "Inches are not detected, so 0.800 is never compared with 0.906.",
   },
   {
@@ -225,7 +224,6 @@ export const ASK_ORACLE = [
     claim: "Replace the engine coolant every 30,000 miles.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "Miles are not detected, so 30,000 is never compared with 100,000.",
   },
   {
@@ -237,7 +235,6 @@ export const ASK_ORACLE = [
     claim: "Tighten the cylinder head bolts an additional 180°.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "An angle without C or F is not detected; 180° doubles the printed turn.",
   },
 
