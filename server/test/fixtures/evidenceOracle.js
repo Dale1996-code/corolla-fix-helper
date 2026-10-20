@@ -134,7 +134,6 @@ export const ASK_ORACLE = [
     claim: "The compression pressure is 1,000 kPa.",
     expect: "reject",
     finding: "1A-02",
-    todo: "1A-02",
     note: "1,000 and 1,500 differ by a third; parsed as 1.0 and 1.5 they look close.",
   },
   {
@@ -146,7 +145,6 @@ export const ASK_ORACLE = [
     claim: "The fast idle speed is 1,900 rpm.",
     expect: "reject",
     finding: "1A-02",
-    todo: "1A-02",
     note: "1,900 rpm is not the printed 1,500 rpm.",
   },
   {
@@ -158,7 +156,6 @@ export const ASK_ORACLE = [
     claim: "The fast idle speed is 1500 rpm.",
     expect: "accept",
     finding: "1A-02",
-    todo: "1A-02",
     note: "False rejection: 1500 is the printed 1,500 written without a separator.",
   },
 

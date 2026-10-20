@@ -290,9 +290,32 @@ const UNIT_PATTERN =
   "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
   "rpm|hz|kilohertz|khz";
 
+// One number as these manuals print it, read as a whole token. A comma followed
+// by groups of exactly three digits is a thousands separator ("1,500 kPa",
+// "1,050 kgf*cm", "100,000 miles"); a comma followed by one or two digits and
+// nothing more is a decimal mark ("12,6 V"). Reading every comma as a decimal
+// point made "1,500" the number 1.5, so a wrong 1,000 kPa looked close to it and
+// a correct "1500" was rejected against it. Order matters: the grouped form is
+// tried first, and a grouped or comma-decimal number may not run on into
+// another digit.
+const NUMBER_PATTERN = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)|\d+,\d{1,2}(?!\d|,\d)|\d+(?:\.\d+)?)`;
+
+// Refuses a start inside a number, so a scan that failed on "1,5000" cannot
+// pick up the "5000" behind the comma, or the "5" of "1.5".
+const NOT_INSIDE_NUMBER = String.raw`(?<!\d|\d[.,])`;
+
+/** The value of one NUMBER_PATTERN token. */
+function parseNumber(text) {
+  const raw = String(text);
+
+  return Number(
+    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(raw) ? raw.replace(/,/g, "") : raw.replace(",", ".")
+  );
+}
+
 /** number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts" */
 const SPEC_NUMBER_REGEX = new RegExp(
-  `(\\d+(?:[.,]\\d+)?)\\s*(?:${UNIT_PATTERN})\\b`,
+  `${NOT_INSIDE_NUMBER}(${NUMBER_PATTERN})\\s*(?:${UNIT_PATTERN})\\b`,
   "gi"
 );
 
@@ -317,7 +340,7 @@ const SPEC_NUMBER_REGEX = new RegExp(
 // identical on the page.
 const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
 const ELECTRICAL_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+  String.raw`(?<![A-Za-z0-9_]|\d[.,])(${NUMBER_PATTERN})\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
   "g"
 );
 
@@ -329,7 +352,7 @@ const ELECTRICAL_SYMBOL_REGEX = new RegExp(
 // STEP 10 A") still reads as a current: in a claim that is an extra rejection,
 // and in a quote it can only ever meet a current claim (see specIsPresent).
 const CURRENT_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mA|A)(?![A-Za-z0-9_/-])`,
+  String.raw`(?<![A-Za-z0-9_]|\d[.,])(${NUMBER_PATTERN})\s*(mA|A)(?![A-Za-z0-9_/-])`,
   "g"
 );
 
@@ -377,7 +400,7 @@ export function extractSpecNumbers(text) {
   const found = [];
 
   for (const match of source.matchAll(SPEC_NUMBER_REGEX)) {
-    const value = Number(String(match[1]).replace(",", "."));
+    const value = parseNumber(match[1]);
 
     if (Number.isFinite(value)) {
       found.push({ value, raw: match[0].trim(), unit: match[0].replace(match[1], "").trim() });
@@ -386,7 +409,7 @@ export function extractSpecNumbers(text) {
 
   for (const regex of [ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
     for (const match of source.matchAll(regex)) {
-      const value = Number(String(match[1]).replace(",", "."));
+      const value = parseNumber(match[1]);
 
       if (Number.isFinite(value)) {
         found.push({ value, raw: match[0].trim(), unit: match[2] });
@@ -615,10 +638,12 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   return evidenceNumbers.some((candidate) => printedValueSupports(candidate, spec));
 }
 
+const BARE_NUMBER_REGEX = new RegExp(`${NOT_INSIDE_NUMBER}${NUMBER_PATTERN}`, "g");
+
 /** All numbers appearing anywhere in the evidence text, unit or not. */
 function allNumbersIn(text) {
-  return [...String(text || "").matchAll(/\d+(?:[.,]\d+)?/g)]
-    .map((match) => Number(String(match[0]).replace(",", ".")))
+  return [...String(text || "").matchAll(BARE_NUMBER_REGEX)]
+    .map((match) => parseNumber(match[0]))
     .filter(Number.isFinite);
 }
 

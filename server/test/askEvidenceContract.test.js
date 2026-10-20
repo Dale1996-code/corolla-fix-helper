@@ -998,6 +998,41 @@ test("exact means numeric equality, so formatting differences still match", () =
   }
 });
 
+test("a comma before three digits groups thousands; before one or two it is a decimal mark", () => {
+  // 3A-03: "12,6 V" above is the decimal 12.6, and it must stay one. But reading
+  // EVERY comma as a decimal point made "1,500 kPa" the number 1.5, so a wrong
+  // 1,000 kPa sat close to it and the correct "1500 kPa" was rejected (1A-02).
+  for (const [text, value] of [
+    ["Compression pressure 1,500 kPa", 1500],
+    ["Torque 103 N*m (1,050 kgf*cm, 76 ft-lbf)", 1050],
+    ["Fast idle speed 1,500 rpm", 1500],
+    ["Battery voltage 12,6 V", 12.6],
+    ["Battery voltage 12,60 V", 12.6],
+    ["Clearance 0,05 mm", 0.05],
+    ["Pressure 1,500.5 kPa", 1500.5],
+  ]) {
+    assert.ok(
+      extractSpecNumbers(text).some((spec) => spec.value === value),
+      `${text}: ${JSON.stringify(extractSpecNumbers(text))}`
+    );
+  }
+
+  // A run-on like "1,5000" is not a number these manuals print. It is not
+  // misread as 1.5 or as the 5000 behind the comma.
+  assert.deepEqual(extractSpecNumbers("Reading 1,5000 kPa"), []);
+
+  for (const [claim, quote, grounded] of [
+    ["The fast idle speed is 1500 rpm.", "Fast idle speed 1,500 rpm", true],
+    ["The fast idle speed is 1,500 rpm.", "Fast idle speed 1500 rpm", true],
+    ["The compression pressure is 1,000 kPa.", "Compression pressure: Standard 1,500 kPa", false],
+    ["The fast idle speed is 1,900 rpm.", "Fast idle speed 1,500 rpm", false],
+    ["The compression pressure is 1500 kPa.", "Compression pressure (kPa): 1,500", true],
+    ["The compression pressure is 1.5 kPa.", "Compression pressure (kPa): 1,500", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, `${claim} | ${quote}`);
+  }
+});
+
 test("a bare table number needs the exact value for an electrical claim", () => {
   // Some tables print the unit only in a column header, so the row holds a bare
   // number and the quote carries no unit-bearing specification at all. The
