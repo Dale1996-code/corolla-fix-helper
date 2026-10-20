@@ -404,7 +404,11 @@ Imperial quarts, inches, miles, angles, `%`, `kgf/cm2` (as a pressure), `kV`, `m
 needs a header unit, a claim with no specification needs a three-word quote
 (`quote_too_short`), and a reply with more than 40 claims can no longer read as
 `answered`. Closes 1A-01, 1A-02, 1A-03, 1A-04, 1A-10, 1A-11, 1A-13, 1A-14, 3B-01, 3A-01,
-and 3A-03; every Ask row of the evidence oracle gates. See the
+and 3A-03; every Ask row of the evidence oracle gates. Its live answer eval (Experiment I, on
+`8ef79cf`) scored 12/14 verified. Both failures were rejection probes whose 400-character
+quotes the new token-boundary check refused, and no answer the model wrote changed status.
+The probes, a gap leak the run found, and an engine-designation misreading its replay found
+are fixed in follow-up commits, proven offline but not yet by a second live run. See the
 [iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
 multi-specification claims, where one subject is derived per claim (described in the known
