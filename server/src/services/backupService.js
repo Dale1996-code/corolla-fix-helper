@@ -8,9 +8,11 @@
 //                        gracefully when an older archive omits it.
 //
 // Restore is deliberately fail-closed: it extracts and validates the archive
-// first, snapshots the live database + uploads, and only then swaps the new
-// data into place. Any failure during the swap rolls the snapshot back, so a
-// bad or incompatible archive can never leave a half-written install behind.
+// first, copies the restored data beside the live data, and only then swaps it
+// in with renames. The live database (with its WAL sidecars) and the live
+// uploads folder are never deleted or overwritten: each is moved aside whole,
+// so a failure is undone by moving it back. Every failure reports one of three
+// outcomes (RESTORE_OUTCOMES) so the caller never has to guess what happened.
 //
 // Every external dependency (extract, archive, filesystem, clock) is
 // injectable so the logic is testable without a real tar binary or on-disk
@@ -43,6 +45,65 @@ class BackupValidationError extends Error {
 }
 
 export { BackupValidationError };
+
+// What a failed restore did to the live data.
+export const RESTORE_OUTCOMES = Object.freeze({
+  // Nothing live was moved: the database and uploads are exactly as before.
+  FAILED_BEFORE_CHANGE: "failed_before_change",
+  // Something was moved, and every move was undone.
+  ROLLED_BACK: "rolled_back",
+  // Something was moved and at least one move could not be undone. Nothing
+  // was deleted: `unrestoredMoves` says where each item now sits.
+  ROLLBACK_FAILED: "rollback_failed",
+});
+
+/**
+ * The only error restoreBackup rejects with. `message` is the underlying
+ * failure's message and `cause` the underlying error; `outcome` is one of
+ * RESTORE_OUTCOMES. A move is `{ from, to, holds }`, where `holds` is
+ * "previous" (the owner's data, moved aside from `from`) or "restored" (the
+ * backup's copy, moved into the live path `to`).
+ */
+export class RestoreError extends Error {
+  /**
+   * @param {string} message
+   * @param {{
+   *   outcome: string,
+   *   cause?: unknown,
+   *   databaseFile?: string | null,
+   *   uploadsDir?: string | null,
+   *   snapshotDir?: string | null,
+   *   previousUploadsDir?: string | null,
+   *   unrestoredMoves?: Array<{ from: string, to: string, holds: string }>,
+   *   rollbackErrors?: unknown[],
+   * }} details
+   */
+  constructor(
+    message,
+    {
+      outcome,
+      cause,
+      databaseFile = null,
+      uploadsDir = null,
+      snapshotDir = null,
+      previousUploadsDir = null,
+      unrestoredMoves = [],
+      rollbackErrors = [],
+    }
+  ) {
+    super(message, { cause });
+    this.name = "RestoreError";
+    this.outcome = outcome;
+    this.databaseFile = databaseFile;
+    this.uploadsDir = uploadsDir;
+    // Where the previous database and uploads sit when they were NOT moved
+    // back (rollback_failed); null otherwise.
+    this.snapshotDir = snapshotDir;
+    this.previousUploadsDir = previousUploadsDir;
+    this.unrestoredMoves = unrestoredMoves;
+    this.rollbackErrors = rollbackErrors;
+  }
+}
 
 function timestampSlug(date) {
   return date.toISOString().replace(/[:.]/g, "-");
@@ -229,12 +290,6 @@ async function defaultCreateArchive(stagingDir, outFile, entries) {
 
 const SQLITE_SIDECAR_SUFFIXES = ["-wal", "-shm", "-journal"];
 
-function removeSqliteSidecars(databaseFile, fs) {
-  for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
-    fs.rmSync(`${databaseFile}${suffix}`, { force: true });
-  }
-}
-
 function copyTree(source, destination, fs) {
   fs.mkdirSync(destination, { recursive: true });
   fs.cpSync(source, destination, { recursive: true });
@@ -308,93 +363,184 @@ export async function createBackupArchive({
   }
 }
 
-function snapshotLiveData({ databaseFile, uploadsDir, snapshotDir, fs }) {
-  fs.mkdirSync(snapshotDir, { recursive: true });
+function isSameOrInside(parentPath, childPath) {
+  const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
-  const snapshot = { dir: snapshotDir, databaseFile: null, uploadsDir: null };
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  if (fs.existsSync(databaseFile)) {
-    const snapshotDatabaseDir = path.join(snapshotDir, BACKUP_DATABASE_DIRNAME);
-    fs.mkdirSync(snapshotDatabaseDir, { recursive: true });
-
-    const snapshotDatabaseFile = path.join(
-      snapshotDatabaseDir,
-      path.basename(databaseFile)
+/**
+ * Decide every path the restore will use, refusing any that already exists.
+ *
+ * The restored copies are staged *beside* their live counterparts (same
+ * folder, so the same volume) because the swap must be plain renames, and a
+ * rename cannot cross volumes; the extracted archive itself sits under the OS
+ * temp folder, which may be another drive.
+ */
+function planRestorePaths({ databaseFile, uploadsDir, slug, fs }) {
+  if (isSameOrInside(uploadsDir, databaseFile)) {
+    throw new Error(
+      `The database file (${databaseFile}) is inside the uploads folder (${uploadsDir}), so restore cannot move one without the other. Point DATABASE_FILE outside UPLOADS_DIR.`
     );
-    fs.copyFileSync(databaseFile, snapshotDatabaseFile);
-    snapshot.databaseFile = snapshotDatabaseFile;
+  }
 
-    for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
-      const sidecar = `${databaseFile}${suffix}`;
+  const snapshotDir = path.join(path.dirname(databaseFile), `pre-restore-${slug}`);
+  const plan = {
+    snapshotDir,
+    snapshotDatabaseFile: path.join(
+      snapshotDir,
+      BACKUP_DATABASE_DIRNAME,
+      path.basename(databaseFile)
+    ),
+    previousUploadsDir: `${uploadsDir}.pre-restore-${slug}`,
+    stagedDatabaseFile: `${databaseFile}.restore-${slug}`,
+    stagedUploadsDir: `${uploadsDir}.restore-${slug}`,
+    /** @type {Array<{ from: string, to: string, holds: string }>} */
+    moves: [],
+  };
 
-      if (fs.existsSync(sidecar)) {
-        fs.copyFileSync(sidecar, `${snapshotDatabaseFile}${suffix}`);
-      }
+  for (const target of [
+    plan.snapshotDir,
+    plan.previousUploadsDir,
+    plan.stagedDatabaseFile,
+    plan.stagedUploadsDir,
+  ]) {
+    if (fs.existsSync(target)) {
+      throw new Error(`Restore target already exists: ${target}. Move it away and try again.`);
     }
   }
 
-  if (fs.existsSync(uploadsDir)) {
-    const snapshotUploadsDir = path.join(snapshotDir, BACKUP_UPLOADS_DIRNAME);
-    copyTree(uploadsDir, snapshotUploadsDir, fs);
-    snapshot.uploadsDir = snapshotUploadsDir;
-  }
-
-  return snapshot;
+  return plan;
 }
 
-function rollbackFromSnapshot({ databaseFile, uploadsDir, snapshot, fs }) {
-  removeSqliteSidecars(databaseFile, fs);
-
-  if (snapshot.databaseFile) {
-    fs.mkdirSync(path.dirname(databaseFile), { recursive: true });
-    fs.copyFileSync(snapshot.databaseFile, databaseFile);
-
-    for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
-      const sidecar = `${snapshot.databaseFile}${suffix}`;
-
-      if (fs.existsSync(sidecar)) {
-        fs.copyFileSync(sidecar, `${databaseFile}${suffix}`);
-      }
-    }
-  } else {
-    fs.rmSync(databaseFile, { force: true });
-  }
-
-  fs.rmSync(uploadsDir, { recursive: true, force: true });
-
-  if (snapshot.uploadsDir) {
-    copyTree(snapshot.uploadsDir, uploadsDir, fs);
-  }
-}
-
-function swapInRestoredData({ source, databaseFile, uploadsDir, fs }) {
-  // Database: copy to a temp path on the target filesystem, then rename over
-  // the live file (atomic within a directory). Drop stale WAL/SHM first so the
-  // restored database is not reinterpreted through an old write-ahead log.
+/**
+ * Copy the validated backup beside the live data and list the renames that
+ * swap it in. Only copies into new paths, so a failure here changes nothing
+ * live.
+ */
+function stageRestoredData({ plan, source, databaseFile, uploadsDir, fs }) {
   fs.mkdirSync(path.dirname(databaseFile), { recursive: true });
-  removeSqliteSidecars(databaseFile, fs);
+  fs.copyFileSync(source.databaseFile, plan.stagedDatabaseFile);
+  copyTree(source.uploadsDir, plan.stagedUploadsDir, fs);
 
-  const tempDatabaseFile = `${databaseFile}.restore-${process.pid}`;
-  fs.copyFileSync(source.databaseFile, tempDatabaseFile);
-  fs.renameSync(tempDatabaseFile, databaseFile);
+  // Uploads go first. On Windows a PDF held open by a viewer makes the folder
+  // rename fail (the whole rename is refused, nothing moves), and failing on
+  // the very first move means the live install has not changed at all.
+  if (fs.existsSync(uploadsDir)) {
+    plan.moves.push({ from: uploadsDir, to: plan.previousUploadsDir, holds: "previous" });
+  }
 
-  // Uploads: replace the directory contents. The snapshot is the safety net,
-  // so a clean wipe-then-copy is acceptable here.
-  fs.rmSync(uploadsDir, { recursive: true, force: true });
-  copyTree(source.uploadsDir, uploadsDir, fs);
+  plan.moves.push({ from: plan.stagedUploadsDir, to: uploadsDir, holds: "restored" });
+
+  // The database moves together with its -wal/-shm/-journal sidecars: after an
+  // unclean stop, committed rows can exist only in the -wal file, and a .db
+  // separated from its WAL silently loses them.
+  const liveDatabaseParts = ["", ...SQLITE_SIDECAR_SUFFIXES].filter((suffix) =>
+    fs.existsSync(`${databaseFile}${suffix}`)
+  );
+
+  if (liveDatabaseParts.length > 0) {
+    fs.mkdirSync(path.dirname(plan.snapshotDatabaseFile), { recursive: true });
+  }
+
+  for (const suffix of liveDatabaseParts) {
+    plan.moves.push({
+      from: `${databaseFile}${suffix}`,
+      to: `${plan.snapshotDatabaseFile}${suffix}`,
+      holds: "previous",
+    });
+  }
+
+  plan.moves.push({ from: plan.stagedDatabaseFile, to: databaseFile, holds: "restored" });
+}
+
+function applyMoves(moves, fs) {
+  const completed = [];
+
+  try {
+    for (const move of moves) {
+      fs.renameSync(move.from, move.to);
+      completed.push(move);
+    }
+
+    return { completed, error: null };
+  } catch (error) {
+    return { completed, error };
+  }
+}
+
+/**
+ * Undo completed moves, newest first, by renaming each item back. Never
+ * deletes or overwrites anything: a move whose original path is occupied, or
+ * whose rename back fails, is left where it is and reported.
+ */
+function undoMoves(completed, fs) {
+  const unrestoredMoves = [];
+  const rollbackErrors = [];
+
+  for (const move of [...completed].reverse()) {
+    try {
+      if (fs.existsSync(move.from)) {
+        throw new Error(`Cannot move ${move.to} back: ${move.from} is in the way.`);
+      }
+
+      fs.renameSync(move.to, move.from);
+    } catch (error) {
+      rollbackErrors.push(error);
+      unrestoredMoves.unshift(move);
+    }
+  }
+
+  return { unrestoredMoves, rollbackErrors };
+}
+
+/**
+ * Remove what a failed restore created and no longer needs: the staged copies
+ * of the backup (never the owner's data — "previous" moves only ever go to the
+ * pre-restore paths) and the pre-restore folder if it is empty. Best effort: a
+ * cleanup failure is logged and never replaces the restore's real outcome.
+ */
+function discardUnusedRestorePaths(plan, fs, log) {
+  for (const stagedPath of [plan.stagedDatabaseFile, plan.stagedUploadsDir]) {
+    try {
+      fs.rmSync(stagedPath, { recursive: true, force: true });
+    } catch (error) {
+      log(`Could not remove the staged copy ${stagedPath}: ${errorMessage(error)}`);
+    }
+  }
+
+  // rmdirSync only removes an empty folder, so this cannot delete data.
+  for (const dir of [path.dirname(plan.snapshotDatabaseFile), plan.snapshotDir]) {
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      // Missing or not empty: either way, leave it.
+    }
+  }
 }
 
 /**
  * Restore a backup archive into the configured database file and uploads dir.
  *
- * Steps: extract -> validate -> snapshot live data -> atomically swap -> on any
- * failure during the swap, roll the snapshot back and rethrow. On success the
- * snapshot is kept (unless keepSnapshot is false) so the prior state remains
- * recoverable.
+ * Steps: extract -> validate -> copy the backup beside the live data -> swap
+ * with renames. The live uploads folder is renamed aside to
+ * `<uploadsDir>.pre-restore-<timestamp>` and the live database (with any
+ * sidecars) into `pre-restore-<timestamp>/database/` next to it, then the
+ * staged copies are renamed into place. No step deletes or overwrites live
+ * data; on failure every completed rename is undone by renaming back.
  *
- * IMPORTANT: this replaces the database file on disk. Run it with the server
- * stopped, or restart the server afterward, because the live SQLite connection
- * keeps a handle on the old file.
+ * Resolves on success with `{ databaseFile, uploadsDir, snapshotDir,
+ * previousUploadsDir, manifest }`; the two previous-data paths are null when
+ * there was nothing to move aside or keepSnapshot is false. Rejects only with
+ * a RestoreError whose `outcome` is one of RESTORE_OUTCOMES.
+ *
+ * IMPORTANT: run it only with the server stopped. Restarting afterward is not
+ * a substitute: a running server keeps its handle on the database file. On
+ * Windows that makes the move fail (rolled_back). On POSIX the move succeeds,
+ * and every later write lands in the moved-aside previous database.
  */
 export async function restoreBackup({
   archivePath,
@@ -406,68 +552,137 @@ export async function restoreBackup({
   keepSnapshot = true,
   logger = null,
 }) {
-  if (!archivePath) {
-    throw new Error("A backup archive path is required.");
-  }
-
-  if (!fs.existsSync(archivePath)) {
-    throw new Error(`Backup archive not found: ${archivePath}`);
-  }
-
   const log = (message) => {
     if (logger && typeof logger.log === "function") {
       logger.log(message);
     }
   };
 
-  const workDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "corolla-fix-helper-restore-")
-  );
+  const live = { databaseFile, uploadsDir };
+  const failedBeforeChange = (error) =>
+    new RestoreError(errorMessage(error), {
+      outcome: RESTORE_OUTCOMES.FAILED_BEFORE_CHANGE,
+      cause: error,
+      ...live,
+    });
 
-  let snapshot = null;
-  let swapped = false;
+  if (!archivePath) {
+    throw failedBeforeChange(new Error("A backup archive path is required."));
+  }
+
+  if (!fs.existsSync(archivePath)) {
+    throw failedBeforeChange(new Error(`Backup archive not found: ${archivePath}`));
+  }
+
+  let workDir = null;
+  let plan = null;
+  let manifest;
 
   try {
-    log(`Extracting ${archivePath} ...`);
-    await extractArchive(archivePath, workDir);
+    // Phase 1: everything that can fail without touching live data.
+    try {
+      workDir = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-restore-"));
+      log(`Extracting ${archivePath} ...`);
+      await extractArchive(archivePath, workDir);
 
-    const source = validateExtractedBackup(workDir, { fs });
-    log("Backup archive validated.");
+      const source = validateExtractedBackup(workDir, { fs });
+      manifest = source.manifest;
+      log("Backup archive validated.");
 
-    const snapshotDir = path.join(
-      path.dirname(databaseFile),
-      `pre-restore-${timestampSlug(now())}`
-    );
-    snapshot = snapshotLiveData({ databaseFile, uploadsDir, snapshotDir, fs });
-    log(`Snapshotted current data to ${snapshotDir}`);
+      plan = planRestorePaths({ databaseFile, uploadsDir, slug: timestampSlug(now()), fs });
+      stageRestoredData({ plan, source, databaseFile, uploadsDir, fs });
+      log("Backup copied beside the current data.");
+    } catch (error) {
+      if (plan) {
+        discardUnusedRestorePaths(plan, fs, log);
+      }
 
-    swapped = true;
-    swapInRestoredData({ source, databaseFile, uploadsDir, fs });
-    log("Restore complete.");
-
-    if (!keepSnapshot) {
-      fs.rmSync(snapshot.dir, { recursive: true, force: true });
-      snapshot = null;
+      throw failedBeforeChange(error);
     }
 
-    return {
-      databaseFile,
-      uploadsDir,
-      snapshotDir: snapshot ? snapshot.dir : null,
-      manifest: source.manifest,
-    };
-  } catch (error) {
-    if (swapped && snapshot) {
-      log("Restore failed after swap; rolling back to the snapshot.");
-      rollbackFromSnapshot({ databaseFile, uploadsDir, snapshot, fs });
+    // Phase 2: the swap, made only of renames.
+    const { completed, error: swapError } = applyMoves(plan.moves, fs);
+
+    if (!swapError) {
+      const movedAside = (holdsPath) =>
+        plan.moves.some((move) => move.holds === "previous" && isSameOrInside(holdsPath, move.to));
+      const result = {
+        ...live,
+        snapshotDir: movedAside(plan.snapshotDir) ? plan.snapshotDir : null,
+        previousUploadsDir: movedAside(plan.previousUploadsDir) ? plan.previousUploadsDir : null,
+        manifest,
+      };
+
+      if (result.snapshotDir) {
+        log(`Previous database moved to ${result.snapshotDir}`);
+      }
+
+      if (result.previousUploadsDir) {
+        log(`Previous uploads moved to ${result.previousUploadsDir}`);
+      }
+
+      log("Restore complete.");
+
+      if (!keepSnapshot) {
+        // Success path only, and only because the caller asked for it. The
+        // restore already succeeded, so a cleanup failure is logged, and the
+        // path stays in the result because the folder is still there.
+        for (const key of ["snapshotDir", "previousUploadsDir"]) {
+          if (result[key]) {
+            try {
+              fs.rmSync(result[key], { recursive: true, force: true });
+              result[key] = null;
+            } catch (error) {
+              log(`Could not remove ${result[key]}: ${errorMessage(error)}`);
+            }
+          }
+        }
+      }
+
+      return result;
     }
 
-    if (snapshot && !keepSnapshot) {
-      fs.rmSync(snapshot.dir, { recursive: true, force: true });
+    if (completed.length === 0) {
+      log("Restore failed before anything was moved; nothing was changed.");
+      discardUnusedRestorePaths(plan, fs, log);
+      throw failedBeforeChange(swapError);
     }
 
-    throw error;
+    log("Restore failed partway; moving the previous data back.");
+    const { unrestoredMoves, rollbackErrors } = undoMoves(completed, fs);
+
+    if (unrestoredMoves.length === 0) {
+      discardUnusedRestorePaths(plan, fs, log);
+      log("Rollback complete: the previous data is back in place.");
+      throw new RestoreError(errorMessage(swapError), {
+        outcome: RESTORE_OUTCOMES.ROLLED_BACK,
+        cause: swapError,
+        ...live,
+      });
+    }
+
+    log("Rollback failed. Nothing was deleted; see the recovery steps.");
+    const stillAside = (holdsPath) =>
+      unrestoredMoves.some(
+        (move) => move.holds === "previous" && isSameOrInside(holdsPath, move.to)
+      );
+
+    throw new RestoreError(errorMessage(swapError), {
+      outcome: RESTORE_OUTCOMES.ROLLBACK_FAILED,
+      cause: swapError,
+      ...live,
+      snapshotDir: stillAside(plan.snapshotDir) ? plan.snapshotDir : null,
+      previousUploadsDir: stillAside(plan.previousUploadsDir) ? plan.previousUploadsDir : null,
+      unrestoredMoves,
+      rollbackErrors,
+    });
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    if (workDir) {
+      try {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      } catch (error) {
+        log(`Could not remove the temporary folder ${workDir}: ${errorMessage(error)}`);
+      }
+    }
   }
 }

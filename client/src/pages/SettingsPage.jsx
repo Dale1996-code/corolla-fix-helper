@@ -298,10 +298,12 @@ function RestoreInstructions({ restore }) {
         </li>
         <li>Stop the running server first, then start it again once the restore finishes.</li>
         <li>
-          The command starts immediately — there is no confirmation prompt. It saves your
-          current data to a <code className="rounded bg-white px-1 py-0.5 text-xs">pre-restore-…</code>{" "}
-          folder next to the database file first, and rolls back automatically if
-          anything fails.
+          The command starts immediately — there is no confirmation prompt. It deletes
+          nothing: your current database moves into a{" "}
+          <code className="rounded bg-white px-1 py-0.5 text-xs">pre-restore-…</code>{" "}
+          folder next to it and your uploads folder to{" "}
+          <code className="rounded bg-white px-1 py-0.5 text-xs">uploads.pre-restore-…</code>
+          , and both move back automatically if anything fails.
         </li>
         <li>
           Full details are in{" "}

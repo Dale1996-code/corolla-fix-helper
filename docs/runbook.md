@@ -50,7 +50,8 @@ Handles env file, key entry, install, import, embedding, build, and start in one
 
 ## Stop and Restart Safely
 
-- **Stop:** press `Ctrl+C` in the terminal running the app (for `npm run dev`, `concurrently` stops both servers). Closing the terminal window also stops it.
+- **Stop:** press `Ctrl+C` in the terminal running the app (for `npm run dev`, `concurrently` stops both servers). Closing the terminal window also stops it. Either way the backend stops accepting requests, folds the SQLite write-ahead log into the `.db` file, and closes it, so the `-wal`/`-shm` files disappear. A connection still open after 3 seconds is cut; pressing `Ctrl+C` a second time skips that wait. If `-wal`/`-shm` files are still there after a stop, the process was killed rather than stopped. Leave them beside the `.db` file, because they may hold the newest changes.
+- **Port already in use:** if the backend prints `Port 4000 on 127.0.0.1 is already in use` and exits, another copy of the app (perhaps from another folder) or another program holds the port. Stop it, or set `PORT` in `server\.env`.
 - The app is safe to stop at any time for normal use — SQLite commits transactions as it goes. Avoid killing it in the middle of a **bulk import** or **restore** if you can; both are resumable/recoverable, but let them finish when possible.
 - **Restart:** just run the start command again. There is no daemon, no service manager, no PID file.
 - After changing anything in `server\.env`, a backend restart is required — env vars are read once at startup by `server/src/config.js`.
@@ -166,7 +167,7 @@ Repair Planner failures follow the same pattern; its stream also emits explicit 
 
 ### Database problems
 
-The database is one file: `DATABASE_FILE` (default `server/data/corolla-fix-helper.db`), possibly with `-wal`/`-shm` sidecar files next to it — those sidecars are normal SQLite write-ahead-log files, **never delete them while the app runs**.
+The database is one file: `DATABASE_FILE` (default `server/data/corolla-fix-helper.db`), possibly with `-wal`/`-shm` sidecar files next to it — those sidecars are normal SQLite write-ahead-log files, **never delete them while the app runs**. Never copy, move, or put back the `.db` file without its `-wal`/`-shm`: after an unclean stop, the `-wal` can hold the newest committed rows. To copy the database, use Settings → **Export backup**, which takes a consistent `VACUUM INTO` snapshot.
 
 1. **"Data disappeared"** — almost always the app is pointed at a different file. Check Settings → runtime info; check `DATABASE_FILE` in `server\.env` (relative paths are relative to the `server/` folder).
 2. **Startup migration error** — the schema migrates on startup (`server/src/initDatabase.js`); migrations are transactional, so a failure leaves the previous schema intact. Read the terminal error; if it points at a code bug, fix or revert the migration code — do not hand-edit the database.
@@ -199,9 +200,9 @@ Full details live in [backup-restore.md](backup-restore.md); the short version:
 npm run restore -- "C:\path\to\corolla-fix-helper-backup-....tar.gz"
 ```
 
-Restore is fail-closed: it validates the archive **before** touching anything, snapshots current data to a `pre-restore-<timestamp>` folder next to the database, swaps atomically, and rolls back automatically if the swap fails. On failure it prints `Your existing data was left in place.`
+Restore is fail-closed: it validates the archive **before** touching anything, copies it beside your data, then swaps it in with renames only. Your current database (with any `-wal`/`-shm` files) moves into a `pre-restore-<timestamp>` folder next to it, and your uploads folder moves to `uploads.pre-restore-<timestamp>` beside it. Nothing is deleted. On failure the CLI says which of three things happened: nothing was changed; the restore was rolled back (everything moved back); or the rollback also failed, in which case it prints where your data now is and the exact moves that put it back.
 
-**Manual rollback** (if you restored the wrong thing): stop the server, copy the `pre-restore-<timestamp>` folder's `database/<name>.db` back over `DATABASE_FILE` and its `uploads/` contents back into `UPLOADS_DIR`, start the server.
+**Manual rollback** (if you restored the wrong thing): if you still have the right archive, just restore it with `npm run restore`. Otherwise stop the server and move, never copy, the files back. First rename the restored `DATABASE_FILE` **and** its `-wal`/`-shm`/`-journal` files out of the way. Then move everything in `pre-restore-<timestamp>/database/` (the `.db` plus any sidecars) back next to `DATABASE_FILE`. Then rename `UPLOADS_DIR` out of the way and rename `<UPLOADS_DIR>.pre-restore-<timestamp>` to `UPLOADS_DIR`. Start the server. Never put back the `.db` alone: its `-wal` can hold the newest rows, and a leftover `-wal` from the restored database would be replayed into the old one. Step by step: [backup-restore.md](backup-restore.md#undo-a-restore-that-succeeded).
 
 **Prove the machinery works** (run after touching backup/storage code, or periodically):
 

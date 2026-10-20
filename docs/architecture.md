@@ -249,7 +249,7 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 ## Design Decisions and Trade-offs
 
 - **Node's built-in SQLite instead of an npm driver.** Zero native-module install pain; the cost is a hard Node `>=24 <25` requirement.
-- **One SQLite file + a folder instead of a database server.** Perfect for a single-user local app and makes backup a file copy; the trade-off is that restore requires stopping the server, and there is no concurrent multi-writer story.
+- **One SQLite file + a folder instead of a database server.** Perfect for a single-user local app, and it makes a backup simple: a consistent `VACUUM INTO` snapshot of the database plus a tar of the uploads folder (never a raw copy of the `.db` file, which can miss rows still in its `-wal`). The trade-off is that restore requires stopping the server, and there is no concurrent multi-writer story.
 - **Raw `fetch` + dependency injection instead of the OpenAI SDK / an agents framework.** Fewer dependencies to break, and the whole AI pipeline is testable offline with mock clients. The cost is some hand-rolled plumbing (SSE parsing in `openAiResponsesClient.js`) that an SDK would provide.
 - **In-memory cosine scan instead of a vector database.** For one vehicle's worth of PDFs the chunk count is small; a linear scan is simple and fast enough. This deliberately would not scale to a huge corpus — and doesn't need to.
 - **Embeddings as a separate manual step (`embed:backfill`) instead of embedding at upload time.** Uploads stay fast and never fail because OpenAI is down; keyword search works immediately. The cost: semantic ranking is missing until you run the backfill (the Documents page shows an embedding-pending indicator).

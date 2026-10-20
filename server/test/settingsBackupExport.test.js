@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { setImmediate } from "node:timers";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import test, { after } from "node:test";
+import express from "express";
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "settings-export-test-"));
 process.env.DATABASE_FILE = path.join(tempRoot, "test.db");
@@ -63,6 +68,13 @@ function fakeTarProcess() {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    // A killed process reports close asynchronously, with no exit code.
+    setImmediate(() => child.emit("close", null, "SIGTERM"));
+    return true;
+  };
   return child;
 }
 
@@ -159,6 +171,116 @@ test("Settings backup export destroys and logs a failed response after streaming
   assert.match(response.destroyError.message, /tar exited with code 2/);
   assert.match(logMessages.join("\n"), /archive write failed/);
   assert.match(logMessages.join("\n"), /code 2/);
+});
+
+test("Settings backup export stops tar and removes the staging copy when the download is cancelled", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const removed = [];
+  const handler = buildHandler(tarProcess, {
+    removeStagingDir: (stagingRoot) => removed.push(stagingRoot),
+  });
+
+  await handler({}, response);
+  tarProcess.stdout.write("partial archive");
+  await nextTurn();
+
+  // The browser goes away mid-download: Express destroys the response.
+  response.destroy();
+  await nextTurn();
+
+  assert.equal(tarProcess.killed, true, "tar must be stopped");
+  await nextTurn();
+  assert.deepEqual(removed, ["test-staging"]);
+});
+
+test("Settings backup export never starts tar when the download is cancelled while staging", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const removed = [];
+  let spawned = false;
+  let finishStaging;
+  const handler = buildHandler(tarProcess, {
+    createStagingDir: () =>
+      new Promise((resolve) => {
+        finishStaging = () => resolve("test-staging");
+      }),
+    spawnProcess: () => {
+      spawned = true;
+      return tarProcess;
+    },
+    removeStagingDir: (stagingRoot) => removed.push(stagingRoot),
+  });
+
+  const handling = handler({}, response);
+  response.destroy();
+  finishStaging();
+  await handling;
+
+  assert.equal(spawned, false);
+  assert.deepEqual(removed, ["test-staging"]);
+});
+
+test("a real cancelled download kills the archiver process and deletes the staging folder", async () => {
+  // A real child process stands in for tar: it writes archive-sized chunks
+  // forever, so once the browser stops reading it blocks on a full pipe —
+  // the audit's leaked tar.exe. The staging folder is real too.
+  const stagingRoot = fs.mkdtempSync(path.join(tempRoot, "staging-"));
+  fs.writeFileSync(path.join(stagingRoot, "copy-of-database.db"), "a full copy of the data");
+  let archiver;
+
+  const app = express();
+  app.get(
+    "/backup-export",
+    createBackupExportHandler({
+      resolveTar: () => process.execPath,
+      spawnProcess: (_tar, _args, options) => {
+        archiver = spawn(
+          process.execPath,
+          ["-e", "const c = Buffer.alloc(65536, 120); (function w() { process.stdout.write(c, w); })();"],
+          options
+        );
+        return archiver;
+      },
+      createStagingDir: async () => stagingRoot,
+      logger: { error() {}, warn() {} },
+    })
+  );
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const { port } = /** @type {import("node:net").AddressInfo} */ (server.address());
+
+  try {
+    await new Promise((resolve) => {
+      const request = http.get(`http://127.0.0.1:${port}/backup-export`, (response) => {
+        response.once("data", () => {
+          request.destroy();
+          resolve();
+        });
+      });
+      request.on("error", () => {});
+    });
+
+    const deadline = Date.now() + 5000;
+
+    while (
+      (archiver.exitCode === null && archiver.signalCode === null) ||
+      fs.existsSync(stagingRoot)
+    ) {
+      if (Date.now() > deadline) {
+        assert.fail(
+          `after 5 s: archiver running=${archiver.exitCode === null && archiver.signalCode === null}, ` +
+            `staging folder present=${fs.existsSync(stagingRoot)}`
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  } finally {
+    archiver?.kill();
+    server.closeAllConnections();
+    server.close();
+  }
 });
 
 test("Settings backup export streams data and ends only after tar succeeds", async () => {
