@@ -319,7 +319,6 @@ export const ASK_ORACLE = [
     claim: "The standard voltage is 5 to 14 V.",
     expect: "reject",
     finding: "1A-10",
-    todo: "1A-10",
     note: "Only the number before the unit is checked, so the wrong 5 V lower bound passes.",
   },
   {
@@ -331,7 +330,6 @@ export const ASK_ORACLE = [
     claim: "The thermostat valve opening temperature is 80 °C.",
     expect: "accept",
     finding: "1A-10",
-    todo: "1A-10",
     note: "False rejection: 80 °C is the printed lower end of the range.",
   },
   {
@@ -343,7 +341,6 @@ export const ASK_ORACLE = [
     claim: "The sensor output voltage is -5 V.",
     expect: "reject",
     finding: "1A-10",
-    todo: "1A-10",
     note: "-5 V is not 5 V.",
   },
 
@@ -495,7 +492,6 @@ export const PLANNER_ORACLE = [
     task: "Check the charging voltage",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "The claim starts inside 13.2, turning the lower bound into 2 V.",
   },
   {

@@ -313,11 +313,39 @@ function parseNumber(text) {
   );
 }
 
+// A minus sign belongs to the value only when it stands in front of it -- at the
+// start, or after a space, bracket, or colon. Between two digits ("9-16V") it
+// separates a range, and after a letter ("B-12V") it joins an identifier. A
+// dropped sign let "-5 V" pass against a printed "5 V".
+const signGroup = (name) => String.raw`(?:(?<=^|[\s(\[:])(?<${name}>[-−]))?`;
+
+// What may stand between a range's two ends: "9-16V" (a bare hyphen, so a dash
+// used as punctuation, "bolt 1 - 37 N*m", is not read as a range), an en dash,
+// em dash, or tilde with or without spaces, or the word "to".
+const RANGE_SEPARATOR = String.raw`(?:-|\s*[–—~]\s*|\s+(?:to|TO|To)\s+)`;
+
+// The low end of a range may not continue an identifier ("M10-1.25 mm").
+const RANGE_LOW_GUARD = String.raw`(?<![A-Za-z0-9_]|\d[.,])`;
+
+/**
+ * One specification regex: a value and its unit, optionally preceded by the
+ * low end of a range that unit also applies to. Until both ends were read, only
+ * the number touching the unit was checked: a wrong lower bound ("5 to 14 V"
+ * against "10.5 to 14 V") passed, and a correct one ("80 °C" from "80 to 84
+ * °C") was rejected because the printed 80 was never read as a temperature.
+ * Because one match spans the whole range, redaction removes both ends at once.
+ */
+function buildSpecRegex(valueGuard, unitPattern, unitGuard, flags) {
+  return new RegExp(
+    String.raw`(?:${RANGE_LOW_GUARD}${signGroup("lowSign")}(?<low>${NUMBER_PATTERN})${RANGE_SEPARATOR}` +
+      String.raw`|\b[Bb]etween\s+${signGroup("betweenSign")}(?<betweenLow>${NUMBER_PATTERN})\s+and\s+)?` +
+      String.raw`${valueGuard}${signGroup("sign")}(?<value>${NUMBER_PATTERN})(?<gap>\s*)(?<unit>${unitPattern})${unitGuard}`,
+    flags
+  );
+}
+
 /** number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts" */
-const SPEC_NUMBER_REGEX = new RegExp(
-  `${NOT_INSIDE_NUMBER}(${NUMBER_PATTERN})\\s*(?:${UNIT_PATTERN})\\b`,
-  "gi"
-);
+const SPEC_NUMBER_REGEX = buildSpecRegex(NOT_INSIDE_NUMBER, `(?:${UNIT_PATTERN})`, "\\b", "gi");
 
 // Electrical symbols, matched CASE-SENSITIVELY and apart from UNIT_PATTERN. That
 // pattern's "i" flag suits spelled-out units, but it would read every lowercase
@@ -333,14 +361,17 @@ const SPEC_NUMBER_REGEX = new RegExp(
 // a decimal separator, so "M1.5V" does not yield a partial "5V". A preceding
 // hyphen is deliberately NOT refused: in "9-16V" or "-9 V" it separates a range
 // or signs a value, and hiding that value would let a wrong claim pass with
-// nothing to check. The cost is that "B-12V" still reads as "12 V" -- an extra
-// rejection, never a false verification. The optional whitespace covers a
-// normal space, a nonbreaking space, or none, and the ohm symbol arrives as
-// either U+03A9 (Greek capital omega) or U+2126 (the ohm sign), which look
-// identical on the page.
+// nothing to check (buildSpecRegex reads both). The cost is that "B-12V" still
+// reads as "12 V" -- an extra rejection, never a false verification. The
+// optional whitespace covers a normal space, a nonbreaking space, or none, and
+// the ohm symbol arrives as either U+03A9 (Greek capital omega) or U+2126 (the
+// ohm sign), which look identical on the page.
 const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
-const ELECTRICAL_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(${NUMBER_PATTERN})\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+const SYMBOL_VALUE_GUARD = String.raw`(?<![A-Za-z0-9_]|\d[.,])`;
+const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
+  SYMBOL_VALUE_GUARD,
+  String.raw`mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}]`,
+  "(?![A-Za-z0-9_-])",
   "g"
 );
 
@@ -351,10 +382,7 @@ const ELECTRICAL_SYMBOL_REGEX = new RegExp(
 // exactly as they were. A step number before a flowchart branch label ("GO TO
 // STEP 10 A") still reads as a current: in a claim that is an extra rejection,
 // and in a quote it can only ever meet a current claim (see specIsPresent).
-const CURRENT_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(${NUMBER_PATTERN})\s*(mA|A)(?![A-Za-z0-9_/-])`,
-  "g"
-);
+const CURRENT_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "mA|A", "(?![A-Za-z0-9_/-])", "g");
 
 // The electrical units known in both printed forms. `symbol` is compared
 // case-sensitively for the reason above; `spelled` keeps exactly the
@@ -389,8 +417,46 @@ function findElectricalUnit(unit) {
 /** Viscosity grades: 5W-30, 0W20. A grade is a spec even without a unit. */
 const VISCOSITY_REGEX = /\b\d+\s*w\s*[-–]?\s*\d+\b/gi;
 
+/** A signed NUMBER_PATTERN token's value. */
+function signedValue(sign, text) {
+  const value = parseNumber(text);
+
+  return sign ? -value : value;
+}
+
 /**
- * Numeric specifications asserted by a piece of text.
+ * The specifications one buildSpecRegex match states: its value, and the low
+ * end of its range when it has one, in the same unit.
+ */
+function specsFromMatch(match) {
+  const { groups } = match;
+  const unit = groups.unit.trim();
+  const specs = [];
+  const lowText = groups.low ?? groups.betweenLow;
+
+  if (lowText !== undefined) {
+    const lowSign = groups.low !== undefined ? groups.lowSign : groups.betweenSign;
+
+    specs.push({
+      value: signedValue(lowSign, lowText),
+      raw: `${lowSign || ""}${lowText}${groups.gap}${groups.unit}`.trim(),
+      unit,
+      index: match.index,
+    });
+  }
+
+  specs.push({
+    value: signedValue(groups.sign, groups.value),
+    raw: `${groups.sign || ""}${groups.value}${groups.gap}${groups.unit}`.trim(),
+    unit,
+    index: match.index + (lowText === undefined ? 0 : 1),
+  });
+
+  return specs.filter((spec) => Number.isFinite(spec.value));
+}
+
+/**
+ * Numeric specifications asserted by a piece of text, in the order they appear.
  *
  * @param {string} text
  * @returns {Array<{ value: number, raw: string, unit: string }>}
@@ -399,29 +465,19 @@ export function extractSpecNumbers(text) {
   const source = String(text || "");
   const found = [];
 
-  for (const match of source.matchAll(SPEC_NUMBER_REGEX)) {
-    const value = parseNumber(match[1]);
-
-    if (Number.isFinite(value)) {
-      found.push({ value, raw: match[0].trim(), unit: match[0].replace(match[1], "").trim() });
-    }
-  }
-
-  for (const regex of [ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
+  for (const regex of [SPEC_NUMBER_REGEX, ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
     for (const match of source.matchAll(regex)) {
-      const value = parseNumber(match[1]);
-
-      if (Number.isFinite(value)) {
-        found.push({ value, raw: match[0].trim(), unit: match[2] });
-      }
+      found.push(...specsFromMatch(match));
     }
   }
 
   for (const match of source.matchAll(VISCOSITY_REGEX)) {
-    found.push({ value: NaN, raw: match[0].trim(), unit: "viscosity" });
+    found.push({ value: NaN, raw: match[0].trim(), unit: "viscosity", index: match.index });
   }
 
-  return found;
+  return found
+    .sort((left, right) => left.index - right.index)
+    .map(({ value, raw, unit }) => ({ value, raw, unit }));
 }
 
 // Unit families, each with a canonical unit. A manual prints a torque table as

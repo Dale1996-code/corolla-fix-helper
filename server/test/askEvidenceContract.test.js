@@ -10,6 +10,7 @@ import {
   deriveEvidenceStatus,
   extractSpecNumbers,
   quoteAppearsInChunk,
+  redactSpecNumbers,
   renderEvidenceAnswer,
   validateEvidencePayload,
   verifyEvidence,
@@ -744,32 +745,91 @@ test("a symbol value inside an identifier is not read as a specification", () =>
 test("a hyphen before a symbol value keeps ranges and signed values checked", () => {
   // The identifier boundary deliberately does not refuse a preceding hyphen.
   // Hiding "16V" in "9-16V" or "9 V" in "-9 V" would leave nothing to check and
-  // let a fabricated value pass. Only the unit-bearing endpoint is read, and the
-  // sign is not kept -- both documented limits. "B-12V" still reads as "12 V"
-  // for the same reason: an extra rejection, never a false verification.
-  for (const [text, raw] of [
-    ["Charging voltage: 9-16V.", "16V"],
-    ["Charging voltage: 13.2-16.8V.", "16.8V"],
-    ["Reference is -9 V.", "9 V"],
+  // let a fabricated value pass. "B-12V" still reads as "12 V" for the same
+  // reason: an extra rejection, never a false verification. Both ends of a range
+  // are read now, and a leading minus is kept (1A-10); these used to be
+  // documented limits.
+  for (const [text, raws] of [
+    ["Charging voltage: 9-16V.", ["9V", "16V"]],
+    ["Charging voltage: 13.2-16.8V.", ["13.2V", "16.8V"]],
+    ["Reference is -9 V.", ["-9 V"]],
+    ["Connector B-12V is behind the dash.", ["12V"]],
   ]) {
     assert.deepEqual(
       extractSpecNumbers(text).map((spec) => spec.raw),
-      [raw],
+      raws,
       text
     );
   }
 
   for (const [claim, quote, unsupported] of [
-    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", "16V"],
-    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", "16.8V"],
-    ["Reference should be -9 V.", "Reference: -5 V", "9 V"],
+    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", ["16V"]],
+    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", ["16.8V"]],
+    ["Charging voltage should be 9-14V.", "Charging voltage: 11-14V", ["9V"]],
+    ["Reference should be -9 V.", "Reference: -5 V", ["-9 V"]],
+    ["Reference should be -5 V.", "Reference: 5 V", ["-5 V"]],
+    ["Reference should be 5 V.", "Reference: -5 V", ["5 V"]],
   ]) {
     assert.deepEqual(
       checkClaimNumbers(claim, quote),
-      { grounded: false, unsupported: [unsupported] },
+      { grounded: false, unsupported },
       claim
     );
   }
+});
+
+test("both ends of a range are specifications in the range's unit (1A-10)", () => {
+  // Only the number touching the unit used to be read, so a wrong lower bound
+  // passed and a correct one could never be verified.
+  for (const [text, values] of [
+    ["Standard voltage 10.5 to 14 V", [10.5, 14]],
+    ["Thermostat opening 80 to 84 °C (176 to 183 °F)", [80, 84, 176, 183]],
+    ["Fuel pressure 304 to 343 kPa", [304, 343]],
+    ["Gap 1.0–1.1 mm", [1, 1.1]],
+    ["Gap 1.0 ~ 1.1 mm", [1, 1.1]],
+    ["Fast idle 1,500-2,000 rpm", [1500, 2000]],
+    ["Hold between 80 and 84 °C", [80, 84]],
+    ["Ambient -40 to -10 °C", [-40, -10]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.value),
+      values,
+      text
+    );
+  }
+
+  // A dash used as punctuation, and an identifier, are not the low end of a range.
+  for (const [text, values] of [
+    ["Bolt 1 - 37 N*m", [37]],
+    ["Use an M10-1.25 mm bolt", [1.25]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.value),
+      values,
+      text
+    );
+  }
+
+  // Either printed end supports a claim stating that one value, and a claimed
+  // range needs both of its ends printed.
+  const quote = "Thermostat valve opening temperature 80 to 84 °C";
+
+  for (const [claim, grounded] of [
+    ["The thermostat opens at 80 °C.", true],
+    ["The thermostat is fully open at 84 °C.", true],
+    ["The thermostat opens between 80 and 84 °C.", true],
+    ["The thermostat opens at 80 to 84 °C.", true],
+    ["The thermostat opens at 76 to 84 °C.", false],
+    ["The thermostat opens at 80 to 88 °C.", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
+
+  // A redacted range loses both of its ends, not just the one touching the unit.
+  assert.equal(
+    redactSpecNumbers("The standard voltage is 10.5 to 14 V."),
+    "The standard voltage is [unverified value]."
+  );
 });
 
 test("a matching electrical-symbol claim is verified, not merely invisible", () => {
