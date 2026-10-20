@@ -2131,3 +2131,95 @@ test("an unverified legacy answer still gets openable context without looking do
     })
   ).toHaveAttribute("href", "/api/documents/7/file#page=1");
 });
+
+// ---- The manual's printed figure beside a claim (owner decision D1) --------
+//
+// Synthetic one-line quotes only; none of this is text from a real manual.
+
+const hubNutQuote = "Hub nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)";
+
+const printedFiguresPayload = (claims) => ({
+  question: "What is the hub nut torque?",
+  status: "answered",
+  answer: "",
+  citations: [
+    {
+      documentId: 7,
+      documentTitle: "Axle Manual",
+      originalFilename: "axle.pdf",
+      pageNumber: 3,
+      chunkIndex: 0,
+      snippet: hubNutQuote,
+      documentAvailable: true,
+    },
+  ],
+  evidence: {
+    documentSupported: claims.map((overrides) => ({
+      evidenceQuote: hubNutQuote,
+      documentId: 7,
+      documentTitle: "Axle Manual",
+      pageNumber: 3,
+      chunkIndex: 0,
+      ...overrides,
+    })),
+    generalGuidance: [],
+    gaps: [],
+  },
+});
+
+async function claimItem(askSection, claim) {
+  return (await within(askSection).findByText(claim)).closest("li");
+}
+
+test("a verified claim shows the figure the manual prints beside it", async () => {
+  const askSection = await askAndGetSection(
+    printedFiguresPayload([
+      { claim: "Tighten the hub nut to 76 ft-lbs.", printedFigures: ["76 ft.*lbf"] },
+      {
+        claim: "The hub nut torque is 103 N·m (1050 kgf-cm).",
+        printedFigures: ["103 N*m", "1,050 kgf*cm"],
+      },
+    ]),
+    "What is the hub nut torque?"
+  );
+
+  const single = await claimItem(askSection, "Tighten the hub nut to 76 ft-lbs.");
+  expect(within(single).getByText("Manual prints:")).toBeInTheDocument();
+  expect(within(single).getByText("76 ft.*lbf")).toBeInTheDocument();
+
+  // A thousands separator is the manual's own, so figures are not comma-joined.
+  const pair = await claimItem(askSection, "The hub nut torque is 103 N·m (1050 kgf-cm).");
+  expect(within(pair).getByText("103 N*m")).toBeInTheDocument();
+  expect(within(pair).getByText("1,050 kgf*cm")).toBeInTheDocument();
+  expect(within(pair).getByText("Manual prints:").closest("p")).toHaveTextContent(
+    "Manual prints: 103 N*m; 1,050 kgf*cm"
+  );
+});
+
+test("a claim with no printed figure, or none that is in its quote, shows no figure line", async () => {
+  const askSection = await askAndGetSection(
+    printedFiguresPayload([
+      { claim: "Replace the hub nut with a new one.", printedFigures: [] },
+      { claim: "The hub nut must not be reused." },
+      // A figure the shown quote does not contain would be a figure from nowhere.
+      { claim: "Tighten the hub nut to 99 ft-lbs.", printedFigures: ["99 ft.*lbf"] },
+      { claim: "Torque the hub nut to 103 N*m.", printedFigures: "103 N*m" },
+      { claim: "Hub nut torque is 76 ft-lbf.", printedFigures: ["76 ft.*lbf", 76] },
+    ]),
+    "What is the hub nut torque?"
+  );
+
+  for (const claim of [
+    "Replace the hub nut with a new one.",
+    "The hub nut must not be reused.",
+    "Tighten the hub nut to 99 ft-lbs.",
+    "Torque the hub nut to 103 N*m.",
+    "Hub nut torque is 76 ft-lbf.",
+  ]) {
+    const item = await claimItem(askSection, claim);
+
+    // The claim itself still renders; only the figure line is withheld.
+    expect(item, claim).not.toBeNull();
+    expect(within(item).queryByText("Manual prints:"), claim).not.toBeInTheDocument();
+  }
+});

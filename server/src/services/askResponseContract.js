@@ -108,6 +108,10 @@ export const ASK_RESPONSE_SCHEMA = Object.freeze({
         originalFilename: { type: "string" },
         pageNumber: { type: "integer", minimum: 1 },
         chunkIndex: { type: "integer", minimum: 0 },
+        // The quote's own verbatim text for each figure the claim states (owner
+        // decision D1). Empty when the claim states no specification; optional
+        // so a response from before the field existed still validates.
+        printedFigures: { type: "array", items: { type: "string", minLength: 1 } },
       },
     },
     // The sanitized rejection record. Exactly these five fields: the verifier's
@@ -235,6 +239,14 @@ function checkEvidence(evidence, errors) {
 
       if (item.evidenceId !== undefined && !EVIDENCE_ID_PATTERN.test(String(item.evidenceId))) {
         errors.push(`${path}.evidenceId: malformed`);
+      }
+
+      if (item.printedFigures !== undefined) {
+        if (!Array.isArray(item.printedFigures)) {
+          errors.push(`${path}.printedFigures: not_an_array`);
+        } else if (!item.printedFigures.every(isNonEmptyString)) {
+          errors.push(`${path}.printedFigures: item_not_a_non_empty_string`);
+        }
       }
     });
   }

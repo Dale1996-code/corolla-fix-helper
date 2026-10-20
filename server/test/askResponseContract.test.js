@@ -8,6 +8,7 @@ import {
   ASK_RESPONSE_STATUSES,
   validateAskResponse,
 } from "../src/services/askResponseContract.js";
+import { verifyEvidence } from "../src/services/askEvidenceContract.js";
 
 const source = (overrides = {}) => ({
   documentId: 7,
@@ -270,6 +271,85 @@ test("an evidence claim must name a real location and a non-empty quote", () => 
       `${field} not checked`
     );
   }
+});
+
+const evidenceItem = (overrides = {}) => ({
+  claim: "The oil drain plug torque is 37 Nm.",
+  evidenceQuote: "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+  documentId: 7,
+  pageNumber: 1,
+  chunkIndex: 0,
+  ...overrides,
+});
+
+const withEvidenceItem = (item) =>
+  response({ evidence: { documentSupported: [item], generalGuidance: [], gaps: [] } });
+
+test("the schema declares printedFigures as a list of strings on an evidence claim", () => {
+  assert.deepEqual(ASK_RESPONSE_SCHEMA.definitions.evidenceSource.properties.printedFigures, {
+    type: "array",
+    items: { type: "string", minLength: 1 },
+  });
+});
+
+test("printedFigures validates as a list of figures, an empty list, or absent", () => {
+  /** @type {Array<Record<string, any>>} */
+  const items = [
+    evidenceItem({ printedFigures: ["37 Nm"] }),
+    evidenceItem({ printedFigures: ["37 Nm", "27 ft-lbf"] }),
+    evidenceItem({ printedFigures: [] }),
+    evidenceItem(),
+  ];
+
+  for (const item of items) {
+    const result = validateAskResponse(withEvidenceItem(item));
+
+    assert.deepEqual(result.errors, [], JSON.stringify(item.printedFigures));
+  }
+});
+
+test("malformed printedFigures are reported by path and reason only", () => {
+  /** @type {Array<[any, string]>} */
+  const cases = [
+    ["37 Nm", "evidence.documentSupported[0].printedFigures: not_an_array"],
+    [null, "evidence.documentSupported[0].printedFigures: not_an_array"],
+    [["37 Nm", 37], "evidence.documentSupported[0].printedFigures: item_not_a_non_empty_string"],
+    [["  "], "evidence.documentSupported[0].printedFigures: item_not_a_non_empty_string"],
+  ];
+
+  for (const [printedFigures, expected] of cases) {
+    const result = validateAskResponse(withEvidenceItem(evidenceItem({ printedFigures })));
+
+    assert.equal(result.ok, false, JSON.stringify(printedFigures));
+    assert.deepEqual(result.errors, [expected]);
+  }
+});
+
+test("a claim the verifier accepted passes the contract with its printed figures", () => {
+  const quote = "Hub nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)";
+  const verified = verifyEvidence(
+    {
+      documentSupported: [
+        { claim: "Tighten the hub nut to 76 ft-lbs.", sourceId: "S1", evidenceQuote: quote },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    },
+    [
+      {
+        documentId: 7,
+        documentTitle: "Hub",
+        originalFilename: "hub.pdf",
+        pageNumber: 2,
+        chunkIndex: 0,
+        chunkText: quote,
+      },
+    ]
+  );
+  const result = validateAskResponse(withEvidenceItem(verified.documentSupported[0]));
+
+  assert.deepEqual(verified.documentSupported[0].printedFigures, ["76 ft.*lbf"]);
+  assert.deepEqual(result.errors, []);
 });
 
 test("evidence and retrievedContext are optional", () => {
