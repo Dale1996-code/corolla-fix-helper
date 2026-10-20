@@ -223,6 +223,41 @@ test("the torque and capacity spellings of manuals and owners are detected (3B-0
   }
 });
 
+test("kgf/cm2 in every printed form is a pressure, not a torque (1A-13)", () => {
+  // The ASCII "2" defeated the unit's word boundary, so "kgf/cm2" and the
+  // manuals' "kgf*cm2" went undetected, and "kgf/cm²" was read as the kgf*cm
+  // torque unit.
+  for (const text of ["3.1 kgf/cm2", "3.1 kgf/cm²", "3.1 kgf*cm2", "3.1 kgf·cm²", "3.1 kg/cm2"]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Fuel pressure ${text}.`).map((spec) => spec.value),
+      [3.1],
+      text
+    );
+  }
+
+  const fuel = "Fuel pressure 304 to 343 kPa (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi)";
+
+  for (const [claim, grounded] of [
+    ["The fuel pressure is 3.1 to 3.5 kgf/cm2.", true],
+    ["The fuel pressure is 3.5 kgf/cm².", true],
+    ["The fuel pressure is 5.5 kgf/cm2.", false],
+    // The torque spelling is a different unit, so it cannot borrow the figure.
+    ["The fuel pressure is 3.1 kgf*cm.", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, fuel).grounded, grounded, claim);
+  }
+
+  // And a pressure claim gets the pressure subject guard.
+  assert.deepEqual(checkClaimSubject("The fuel pressure is 3.1 kgf/cm2.", "Oil pressure 3.1 kgf/cm2"), {
+    grounded: false,
+    checked: true,
+    subject: "fuel",
+  });
+
+  // The torque unit is still a torque.
+  assert.equal(checkClaimNumbers("The bolt torque is 377 kgf*cm.", "Torque 37 N*m (377 kgf*cm)").grounded, true);
+});
+
 test("an invented spec is flagged even when the quote is real", () => {
   const result = checkClaimNumbers("Torque the drain plug to 54 Nm.", chunk().chunkText);
 

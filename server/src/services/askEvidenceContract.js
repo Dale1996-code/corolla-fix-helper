@@ -285,17 +285,24 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // Imperial quarts, pints, and gallons are different sizes, so "Imp." stays part
 // of the unit; a bare "qt" is the US quart. A bare "L" is matched apart from
 // this case-insensitive pattern -- see VOLUME_SYMBOL_REGEX.
+//
+// "kgf/cm2", "kgf/cm²", and "kgf*cm2" are a PRESSURE (kilogram-force per square
+// centimetre), tried before the "kgf*cm" torque spelling they start with. The
+// trailing "2" once defeated the unit's word boundary, so the ASCII forms were
+// not detected at all, and "kgf/cm²" was read as kgf*cm and filed with torque
+// (1A-13). A "kgf/cm" with no "2" can only be a pressure misprinted.
 const UNIT_PATTERN =
   "n\\s*[·.*\\-]?\\s*m|nm|newton[-\\s]*met(?:er|re)s?|" +
   "ft\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]?\\s*ft|foot[-\\s]*pounds?|" +
   "in\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]\\s*in|inch[-\\s]*pounds?|" +
-  "kgf\\s*[-·.*\\/]?\\s*cm|kgf\\s*[-·.*\\/]?\\s*m|kg\\s*[-·.*]?\\s*cm|" +
+  "kgf?\\s*[-·.*\\/]?\\s*cm[2²]|kgf\\s*\\/\\s*cm|" +
+  "kgf\\s*[-·.*]?\\s*cm(?![2²])|kgf\\s*[-·.*]?\\s*m|kg\\s*[-·.*]?\\s*cm(?![2²])|" +
   "kpa|mpa|psi|bar|" +
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
   "lit(?:er|re)s?|ml|millilit(?:er|re)s?|" +
   "imp(?:\\.|erial)?\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
   "(?:US\\s*)?(?:qts?|quarts?|pints?|gal(?:lons?)?)|fl\\s*oz|" +
-  "ohms?|kilohms?|k\\s*ohms?|Ω|" +
+  "ohms?|kilohms?|k\\s*ohms?|Ω(?=[A-Za-z0-9_])|" +
   "volts?|millivolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
   "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
   "rpm|hz|kilohertz|khz";
@@ -354,8 +361,20 @@ function buildSpecRegex(valueGuard, unitPattern, unitGuard, flags) {
   );
 }
 
-/** number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts" */
-const SPEC_NUMBER_REGEX = buildSpecRegex(NOT_INSIDE_NUMBER, `(?:${UNIT_PATTERN})`, "\\b", "gi");
+/**
+ * number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts". The unit
+ * may not run on into a letter, digit, or underscore. That is what a word
+ * boundary did for units ending in a letter, but a boundary can never follow a
+ * unit ending in "²", "." or "°", so those need this lookahead instead. The "Ω"
+ * alternative keeps its old reach: only when a word character follows it, which
+ * ELECTRICAL_SYMBOL_REGEX refuses, so the two never claim the same text.
+ */
+const SPEC_NUMBER_REGEX = buildSpecRegex(
+  NOT_INSIDE_NUMBER,
+  `(?:${UNIT_PATTERN})`,
+  "(?![A-Za-z0-9_])",
+  "gi"
+);
 
 // Electrical symbols, matched CASE-SENSITIVELY and apart from UNIT_PATTERN. That
 // pattern's "i" flag suits spelled-out units, but it would read every lowercase
@@ -529,12 +548,13 @@ const MEASUREMENT_UNITS = [
     family: "torque",
     match: /^(in\.?\s*[-·.*]?\s*lb[fs]?|lb[fs]?\s*[-·.*]\s*in|inch[-\s]*pounds?)$/i,
   },
-  { id: "kgf·cm", family: "torque", match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i },
+  { id: "kgf·cm", family: "torque", match: /^(kgf\s*[-·.*]?\s*cm|kg\s*[-·.*]?\s*cm)$/i },
   { id: "kgf·m", family: "torque", match: /^(kgf\s*[-·.*/]?\s*m)$/i },
   { id: "kPa", family: "pressure", match: /^kpa$/i },
   { id: "MPa", family: "pressure", match: /^mpa$/i },
   { id: "psi", family: "pressure", match: /^psi$/i },
   { id: "bar", family: "pressure", match: /^bar$/i },
+  { id: "kgf/cm²", family: "pressure", match: /^(kgf?\s*[-·.*/]?\s*cm[2²]|kgf\s*\/\s*cm)$/i },
   // "L" is the symbol VOLUME_SYMBOL_REGEX detects, compared case-sensitively.
   // The lowercase "l" this pattern used to list was never detected (3B-13).
   { id: "L", family: "volume", match: /^lit(er|re)s?$/i, symbol: "L" },

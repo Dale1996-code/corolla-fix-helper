@@ -214,7 +214,6 @@ export const ASK_ORACLE = [
     claim: "The fuel pressure is 5.5 kgf/cm2.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "The trailing ASCII 2 defeats the unit's word boundary.",
   },
   {
