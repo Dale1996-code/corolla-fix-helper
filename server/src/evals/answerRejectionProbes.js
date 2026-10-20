@@ -134,6 +134,39 @@ const PROBES = {
   }),
 
   /**
+   * A real source and a quote that really is in it -- one whole word -- under
+   * a claim that word cannot support.
+   *
+   * A claim with no specification is checked only through its quote, so a
+   * one-word quote would let any sentence through. The word is read out of the
+   * retrieved chunk at run time, so the quote check passes and only the length
+   * rule can stop it.
+   */
+  quote_too_short: (chunks) => {
+    const word = String(chunks[0]?.chunkText || "")
+      .split(/\s+/)
+      .find((piece) => /^[A-Za-z]{4,}$/.test(piece));
+
+    if (!word) {
+      // Loudly, for the same reason as subject_mismatch: a silent fallback
+      // would reject for some other reason and still go green.
+      throw new Error("quote_too_short probe: no plain word in the first retrieved chunk");
+    }
+
+    return {
+      documentSupported: [
+        {
+          claim: "It is safe to reuse the old oil drain plug gasket.",
+          sourceId: "S1",
+          evidenceQuote: word,
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    };
+  },
+
+  /**
    * An otherwise well-formed claim citing a label that was never issued.
    * Source ids are prompt-local and assigned per request, so a model naming S999
    * is citing something that does not exist for this question.

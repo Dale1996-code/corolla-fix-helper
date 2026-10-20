@@ -1674,6 +1674,38 @@ test("the letter A gets the same word-order reading as any other letter", () => 
   }
 });
 
+// ---- Quote length (1A-11) ----
+
+test("a claim with no specification needs a quote of at least three words", () => {
+  const page = "Inspect the gasket. If it is OK, continue. Do not reuse a damaged gasket.";
+
+  for (const quote of ["OK", "If it", "the gasket."]) {
+    const result = verifyEvidence(
+      payload({
+        documentSupported: [{ claim: "Yes, it is OK to reuse the gasket.", sourceId: "S1", evidenceQuote: quote }],
+      }),
+      [chunk({ chunkText: page })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, quote);
+    assert.equal(result.rejected[0].reason, "quote_too_short", quote);
+    assert.equal(deriveEvidenceStatus(result), "not_found", quote);
+  }
+
+  // Three words are enough, and a claim WITH a specification is anchored by the
+  // numeric check, so its figure alone may be the quote.
+  for (const [claim, quote] of [
+    ["Do not reuse a damaged gasket.", "Do not reuse a damaged gasket"],
+    ["Inspect the gasket first.", "Inspect the gasket"],
+    ["Use 37 Nm.", "37 Nm"],
+  ]) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.deepEqual(result.rejected, [], claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
 // ---- The vocabulary boundary (1A-04): a figure nothing can read fails closed ----
 
 test("a figure in a unit the detector does not know must be printed in its quote", () => {
@@ -1822,6 +1854,8 @@ function everyRejection() {
           sourceId: "S1",
           evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
         },
+        // quote_too_short -- a real one-word quote under a claim with no spec
+        { claim: "Reuse the old gasket.", sourceId: "S1", evidenceQuote: "gasket" },
         // unrecognized_figure -- a figure in no detected unit, not printed
         {
           claim: "Replace the drain plug gasket every 3 oil changes.",

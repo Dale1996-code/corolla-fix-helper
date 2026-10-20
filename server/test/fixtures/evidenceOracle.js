@@ -385,7 +385,6 @@ export const ASK_ORACLE = [
     claim: "Yes, it is OK to reuse the gasket.",
     expect: "reject",
     finding: "1A-11",
-    todo: "1A-11",
     note: "A one-word quote cannot support a sentence, least of all one the page contradicts.",
   },
   {

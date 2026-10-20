@@ -627,6 +627,17 @@ export const answerQualityCases = [
     mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
     verified: false,
   },
+  {
+    id: "reject-one-word-quote",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["quote_too_short"],
+    rejectionProbe: "quote_too_short",
+    verified: false,
+  },
 
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
   // The model may describe the attached photo, but it must STILL refuse a spec

@@ -1408,6 +1408,20 @@ export function redactSpecNumbers(text) {
 }
 
 /**
+ * The fewest words a quote needs to support a claim that states no
+ * specification. A claim WITH one is anchored by the numeric check, so "37 Nm"
+ * alone may still quote its figure.
+ */
+const MIN_QUOTE_WORDS_WITHOUT_SPEC = 3;
+
+/** Words in a quote: whitespace-separated pieces holding a letter or digit. */
+function quoteWordCount(quote) {
+  return String(quote || "")
+    .split(/\s+/)
+    .filter((piece) => /[\p{L}\p{N}]/u.test(piece)).length;
+}
+
+/**
  * Every reason this module can remove a claim, guidance line, or gap for.
  *
  * Exported so the response contract and the metrics sanitizer describe exactly
@@ -1419,6 +1433,7 @@ export function redactSpecNumbers(text) {
 export const ASK_REJECTION_REASONS = Object.freeze([
   "unknown_source",
   "quote_not_in_source",
+  "quote_too_short",
   "numeric_anomaly",
   "unrecognized_figure",
   "subject_mismatch",
@@ -1495,6 +1510,23 @@ export function verifyEvidence(validated, chunks) {
       rejected.push({ ...origin, claim: claim.claim, reason: "quote_not_in_source" });
       gaps.push(
         `Unverified (quote not found in the cited page): ${redactSpecNumbers(claim.claim)}`
+      );
+      continue;
+    }
+
+    // A claim with no specification has only its words to check, and a quote
+    // as short as "OK" cannot support a sentence -- least of all "it is OK to
+    // reuse the gasket" on a page saying not to (1A-11).
+    if (
+      !extractSpecNumbers(claim.claim).length &&
+      quoteWordCount(claim.evidenceQuote) < MIN_QUOTE_WORDS_WITHOUT_SPEC
+    ) {
+      rejected.push({ ...origin, claim: claim.claim, reason: "quote_too_short" });
+      gaps.push(
+        `Unverified (the quote is too short to support it): ${redactFigures(
+          claim.claim,
+          checkUnrecognizedFigures(claim.claim, claim.evidenceQuote).unsupported
+        )}`
       );
       continue;
     }
