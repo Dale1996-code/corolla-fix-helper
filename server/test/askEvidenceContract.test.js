@@ -173,6 +173,56 @@ test("a converted figure is not grounded; the figure printed in the claim's unit
   }
 });
 
+test("the torque and capacity spellings of manuals and owners are detected (3B-01)", () => {
+  // Each of these used to be invisible, so the claim carried "no specification"
+  // and its number was never checked at all.
+  for (const [text, value, unit] of [
+    ["50 ft-lbs", 50, "ft-lbs"],
+    ["76 ft lbs", 76, "ft lbs"],
+    ["76 ft.*lbf", 76, "ft.*lbf"],
+    ["76 ft. lbs", 76, "ft. lbs"],
+    ["76 lb-ft", 76, "lb-ft"],
+    ["76 lbf·ft", 76, "lbf·ft"],
+    ["27 foot-pounds", 27, "foot-pounds"],
+    ["44 in.*lbf", 44, "in.*lbf"],
+    ["37 newton-meters", 37, "newton-meters"],
+    ["4.2 L", 4.2, "L"],
+    ["4.2L", 4.2, "L"],
+    ["5.5 qts", 5.5, "qts"],
+    ["4.4 US qts", 4.4, "US qts"],
+    ["3.7 Imp. qts", 3.7, "Imp. qts"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Specification: ${text}.`).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  // The litre symbol is case-sensitive and is not the start of a word.
+  for (const text of ["Remove the 2 L-shaped brackets.", "Loosen the 2 LH bolts.", "Use 4 Lines."]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+
+  const lugNut = "Wheel lug nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)";
+  const oil = "Engine oil capacity with oil filter change 4.2 liters (4.4 US qts, 3.7 Imp. qts)";
+
+  for (const [claim, quote, grounded] of [
+    ["The wheel lug nut torque is 76 ft-lbs.", lugNut, true],
+    ["The wheel lug nut torque is 76 lb-ft.", lugNut, true],
+    ["The wheel lug nut torque is 50 ft-lbs.", lugNut, false],
+    ["The engine oil capacity is 4.4 qts.", oil, true],
+    ["The engine oil capacity is 4.4 US quarts.", oil, true],
+    ["The engine oil capacity is 3.7 Imp. quarts.", oil, true],
+    // A US owner reading "3.7 qts" would underfill by about 0.7 L.
+    ["The engine oil capacity is 3.7 qts.", oil, false],
+    ["The engine oil capacity is 4.2 L.", oil, true],
+    ["The engine oil capacity is 5.5 L.", oil, false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
+});
+
 test("an invented spec is flagged even when the quote is real", () => {
   const result = checkClaimNumbers("Torque the drain plug to 54 Nm.", chunk().chunkText);
 

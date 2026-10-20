@@ -277,14 +277,24 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // ordinals pass untouched -- gating those would mangle ordinary procedure prose
 // and push the model toward vaguer, less useful text.
 
+// A unit this pattern does not know is a specification the verifier cannot
+// check, so a spelling missing here once meant a figure passed unexamined: "50
+// ft-lbs" against a printed 103 N*m, "5.5 L" or "5.5 qts" against 4.2 liters
+// (3B-01). The torque spellings cover the manuals' own "ft.*lbf" and "in.*lbf"
+// (two separators) and the owner's "ft-lbs", "ft lbs", and "lb-ft". US and
+// Imperial quarts, pints, and gallons are different sizes, so "Imp." stays part
+// of the unit; a bare "qt" is the US quart. A bare "L" is matched apart from
+// this case-insensitive pattern -- see VOLUME_SYMBOL_REGEX.
 const UNIT_PATTERN =
-  "n\\s*[·.*\\-]?\\s*m|nm|newton\\s*met(?:er|re)s?|" +
-  "ft\\s*[-·.*]?\\s*lbf?|lb\\s*[-·.*]?\\s*ft|foot\\s*pounds?|" +
-  "in\\s*[-·.*]?\\s*lbf?|inch\\s*pounds?|" +
+  "n\\s*[·.*\\-]?\\s*m|nm|newton[-\\s]*met(?:er|re)s?|" +
+  "ft\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]?\\s*ft|foot[-\\s]*pounds?|" +
+  "in\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]\\s*in|inch[-\\s]*pounds?|" +
   "kgf\\s*[-·.*\\/]?\\s*cm|kgf\\s*[-·.*\\/]?\\s*m|kg\\s*[-·.*]?\\s*cm|" +
   "kpa|mpa|psi|bar|" +
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
-  "lit(?:er|re)s?|ml|millilit(?:er|re)s?|qt|quarts?|pints?|gal(?:lons?)?|fl\\s*oz|" +
+  "lit(?:er|re)s?|ml|millilit(?:er|re)s?|" +
+  "imp(?:\\.|erial)?\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
+  "(?:US\\s*)?(?:qts?|quarts?|pints?|gal(?:lons?)?)|fl\\s*oz|" +
   "ohms?|kilohms?|k\\s*ohms?|Ω|" +
   "volts?|millivolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
   "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
@@ -384,6 +394,20 @@ const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
 // and in a quote it can only ever meet a current claim (see specIsPresent).
 const CURRENT_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "mA|A", "(?![A-Za-z0-9_/-])", "g");
 
+// The litre symbol, "4.2 L", matched case-sensitively like the electrical
+// symbols: a lowercase "l" after a number is too easily a typo for "1", and a
+// following letter, hyphen, or slash is refused so "2 L-shaped brackets" and
+// "LH" stay words.
+const VOLUME_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "L", "(?![A-Za-z0-9_/-])", "g");
+
+/** Every unit-bearing specification pattern; they never claim the same text. */
+const SPEC_REGEXES = [
+  SPEC_NUMBER_REGEX,
+  ELECTRICAL_SYMBOL_REGEX,
+  CURRENT_SYMBOL_REGEX,
+  VOLUME_SYMBOL_REGEX,
+];
+
 // The electrical units known in both printed forms. `symbol` is compared
 // case-sensitively for the reason above; `spelled` keeps exactly the
 // case-insensitive spellings the subject guard already recognized.
@@ -465,7 +489,7 @@ export function extractSpecNumbers(text) {
   const source = String(text || "");
   const found = [];
 
-  for (const regex of [SPEC_NUMBER_REGEX, ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
+  for (const regex of SPEC_REGEXES) {
     for (const match of source.matchAll(regex)) {
       found.push(...specsFromMatch(match));
     }
@@ -498,20 +522,29 @@ const MEASUREMENT_UNITS = [
   {
     id: "ft·lbf",
     family: "torque",
-    match: /^(ft\s*[-·.*]?\s*lbf?|lb\s*[-·.*]?\s*ft|foot\s*pounds?)$/i,
+    match: /^(ft\.?\s*[-·.*]?\s*lb[fs]?|lb[fs]?\s*[-·.*]?\s*ft|foot[-\s]*pounds?)$/i,
   },
-  { id: "in·lbf", family: "torque", match: /^(in\s*[-·.*]?\s*lbf?|inch\s*pounds?)$/i },
+  {
+    id: "in·lbf",
+    family: "torque",
+    match: /^(in\.?\s*[-·.*]?\s*lb[fs]?|lb[fs]?\s*[-·.*]\s*in|inch[-\s]*pounds?)$/i,
+  },
   { id: "kgf·cm", family: "torque", match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i },
   { id: "kgf·m", family: "torque", match: /^(kgf\s*[-·.*/]?\s*m)$/i },
   { id: "kPa", family: "pressure", match: /^kpa$/i },
   { id: "MPa", family: "pressure", match: /^mpa$/i },
   { id: "psi", family: "pressure", match: /^psi$/i },
   { id: "bar", family: "pressure", match: /^bar$/i },
-  { id: "L", family: "volume", match: /^(lit(er|re)s?|l)$/i },
+  // "L" is the symbol VOLUME_SYMBOL_REGEX detects, compared case-sensitively.
+  // The lowercase "l" this pattern used to list was never detected (3B-13).
+  { id: "L", family: "volume", match: /^lit(er|re)s?$/i, symbol: "L" },
   { id: "mL", family: "volume", match: /^(millilit(er|re)s?|ml)$/i },
-  { id: "qt", family: "volume", match: /^(qt|quarts?)$/i },
-  { id: "pt", family: "volume", match: /^pints?$/i },
-  { id: "gal", family: "volume", match: /^(gal|gallons?)$/i },
+  { id: "qt", family: "volume", match: /^(US\s*)?(qts?|quarts?)$/i },
+  { id: "pt", family: "volume", match: /^(US\s*)?pints?$/i },
+  { id: "gal", family: "volume", match: /^(US\s*)?(gal|gallons?)$/i },
+  { id: "imp qt", family: "volume", match: /^imp(\.|erial)?\s*(qts?|quarts?)$/i },
+  { id: "imp pt", family: "volume", match: /^imp(\.|erial)?\s*pints?$/i },
+  { id: "imp gal", family: "volume", match: /^imp(\.|erial)?\s*(gal|gallons?)$/i },
   { id: "fl oz", family: "volume", match: /^fl\s*oz$/i },
   { id: "mm", family: "length", match: /^(millimet(er|re)s?|mm)$/i },
   { id: "cm", family: "length", match: /^(centimet(er|re)s?|cm)$/i },
@@ -526,7 +559,10 @@ const MEASUREMENT_UNITS = [
 function findMeasurementUnit(unit) {
   const cleaned = String(unit || "").trim();
 
-  return MEASUREMENT_UNITS.find(({ match }) => match.test(cleaned)) || null;
+  return (
+    MEASUREMENT_UNITS.find(({ match, symbol }) => match.test(cleaned) || symbol === cleaned) ||
+    null
+  );
 }
 
 // Electrical readings were the first family held to the printed value (N4): the
@@ -1127,11 +1163,10 @@ function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote })
  * the gap stays useful; the value is kept server-side in `rejected`.
  */
 export function redactSpecNumbers(text) {
-  return String(text || "")
-    .replace(SPEC_NUMBER_REGEX, "[unverified value]")
-    .replace(ELECTRICAL_SYMBOL_REGEX, "[unverified value]")
-    .replace(CURRENT_SYMBOL_REGEX, "[unverified value]")
-    .replace(VISCOSITY_REGEX, "[unverified value]");
+  return [...SPEC_REGEXES, VISCOSITY_REGEX].reduce(
+    (redacted, regex) => redacted.replace(regex, "[unverified value]"),
+    String(text || "")
+  );
 }
 
 /**

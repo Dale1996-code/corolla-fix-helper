@@ -252,7 +252,6 @@ export const ASK_ORACLE = [
     claim: "The wheel lug nut torque is 50 ft-lbs.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "ft-lbs is not detected; 50 ft-lbs is about two thirds of the printed 76 ft-lbf.",
   },
   {
@@ -264,7 +263,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity with oil filter change is 5.5 L.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "A bare L is not detected; 5.5 L overfills the engine.",
   },
   {
@@ -276,7 +274,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity with oil filter change is 5.5 qts.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "qts is not detected; 5.5 qts is about 5.2 liters, not 4.2.",
   },
   {
@@ -288,7 +285,6 @@ export const ASK_ORACLE = [
     claim: "Refill with about 4.7 L of oil (5 qts).",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "General guidance cites nothing, so any specification in it must be removed.",
   },
   {
@@ -300,7 +296,6 @@ export const ASK_ORACLE = [
     claim: "Tighten the lug nuts to 76 ft lbs.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "An unsourced torque must not survive under the general-guidance heading.",
   },
 
