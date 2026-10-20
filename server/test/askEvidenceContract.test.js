@@ -150,16 +150,27 @@ test("a spec present in the evidence is grounded", () => {
   assert.equal(result.grounded, true);
 });
 
-test("a unit-variant conversion is treated as grounded, not an anomaly", () => {
-  // The manual prints 37 N·m; the answer states the ft-lbf figure. Flagging that
-  // as an anomaly would punish a correct conversion.
-  const result = checkClaimNumbers("Torque the drain plug to 27 ft-lb.", "Torque : 37 N·m");
-  assert.equal(result.grounded, true, JSON.stringify(result));
-});
+test("a converted figure is not grounded; the figure printed in the claim's unit is", () => {
+  // Owner decision D1 (2026-10-19), reversing what this test used to pin: the
+  // verifier no longer converts. These manuals print a torque in every unit they
+  // support, so a figure the quote does not print is the model's arithmetic, not
+  // the manual's, and must not be called verified.
+  for (const claim of ["Torque the drain plug to 27 ft-lb.", "377 kgf-cm", "327 in-lbf"]) {
+    assert.equal(checkClaimNumbers(claim, "Torque : 37 N·m").grounded, false, claim);
+  }
 
-test("kgf-cm and in-lbf conversions are also recognized", () => {
-  assert.equal(checkClaimNumbers("377 kgf-cm", "Torque : 37 N·m").grounded, true);
-  assert.equal(checkClaimNumbers("327 in-lbf", "Torque : 37 N·m").grounded, true);
+  const table = "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+
+  for (const claim of [
+    "Torque the drain plug to 27 ft-lbf.",
+    "Torque the drain plug to 27 ft-lb.",
+    "377 kgf-cm",
+    "37 N·m",
+    "37 N*m",
+    "37 newton meters",
+  ]) {
+    assert.equal(checkClaimNumbers(claim, table).grounded, true, claim);
+  }
 });
 
 test("an invented spec is flagged even when the quote is real", () => {
@@ -492,7 +503,7 @@ test("the guard covers the spaced unit spellings these manuals print too", () =>
 
 test("the electrical, speed, and temperature guards still accept a matching subject", () => {
   // Fail-closed must not mean fail-always: the same component in claim and quote
-  // passes, exactly as it does for the four convertible families.
+  // passes, exactly as it does for the four measurement families.
   const cases = [
     ["The battery voltage should read 12.6 volts.", "Battery voltage (engine off): 12.6 volts"],
     [
@@ -580,7 +591,7 @@ test("current in amps keeps only the numeric check, not the subject guard", () =
   assert.equal(inventedValue.rejected[0].reason, "numeric_anomaly");
 });
 
-test("a convertible-family claim keeps its own subject when it also names a temperature", () => {
+test("a measurement-family claim keeps its own subject when it also names a temperature", () => {
   // The new head nouns must not steal the subject from the families that
   // already had one: "capacity" still decides this claim, not "temperature".
   const quote = "Engine oil capacity (with filter): 4.2 liters";
@@ -974,13 +985,13 @@ test("the ASCII ohm spellings were already covered and still are", () => {
 
 // ---- N4: electrical values must equal the printed value ----
 //
-// Every other unit is compared within max(0.51 absolute, 2% relative). That
-// slack exists for torque tables that print one figure in three units, and it
-// is far too wide for electrical readings: it let 0.9 V pass against a printed
+// Electrical readings were the first family held to the printed value: the
+// max(0.51 absolute, 2% relative) tolerance let 0.9 V pass against a printed
 // 0.5 V, 12.4 V against a printed 12.6 V (a battery at 75% charge, not 100%),
 // and 12 Ω against a printed 12.4 Ω. Volts, millivolts, ohms, kilohms, amps,
-// and milliamps -- spelled out or as a symbol -- now need the printed number
-// itself. "Exact" is NUMERIC equality: 12.40 and 12.4 are the same number.
+// and milliamps -- spelled out or as a symbol -- need the printed number itself,
+// and since owner decision D1 every other unit does too. "Exact" is NUMERIC
+// equality: 12.40 and 12.4 are the same number.
 
 test("an electrical value near, but not equal to, the printed value is not grounded", () => {
   const cases = [
@@ -1110,11 +1121,12 @@ test("a bare table number needs the exact value for an electrical claim", () => 
   assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
 });
 
-test("every other unit keeps the existing tolerance", () => {
-  // Pinned so the electrical rule cannot leak into the families it does not
-  // cover. Each claim differs from its quote by an amount the shared
-  // max(0.51, 2%) tolerance has always accepted.
-  const cases = [
+test("every unit needs the printed value, not a near one (1A-01)", () => {
+  // Replaces "every other unit keeps the existing tolerance" (3A-01), which
+  // pinned these same pairs as grounded. The max(0.51, 2%) tolerance it
+  // protected accepted 0.5 mm against a printed 0.05 mm and 4.7 L against 4.2 L,
+  // so the electrical rule now covers every unit (owner decision D1).
+  const near = [
     ["Torque the drain plug to 37.5 Nm.", "Torque : 37 N·m"],
     ["The fuel pressure is 304 kPa.", "Fuel pressure: 300 kPa"],
     ["The engine oil capacity is 4.4 liters.", "Engine oil capacity: 4.2 liters"],
@@ -1122,14 +1134,30 @@ test("every other unit keeps the existing tolerance", () => {
     ["The thermostat opens at 83°C.", "Thermostat valve opening temperature: 84°C"],
     ["The idle speed is 710 rpm.", "Idle speed: 700 rpm"],
     ["The signal frequency is 50.5 Hz.", "Signal frequency: 50 Hz"],
+    ["The maximum disc runout is 0.5 mm.", "Disc runout: Maximum 0.05 mm"],
   ];
 
-  for (const [claim, quote] of cases) {
+  for (const [claim, quote] of near) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  // The printed number itself still matches, however it is formatted.
+  const printed = [
+    ["Torque the drain plug to 37.0 Nm.", "Torque : 37 N·m"],
+    ["The fuel pressure is 300 kPa.", "Fuel pressure: 300 kPa"],
+    ["The engine oil capacity is 4.20 liters.", "Engine oil capacity: 4.2 liters"],
+    ["The maximum disc runout is 0.050 mm.", "Disc runout: Maximum 0.05 mm"],
+    ["The thermostat opens at 84°C.", "Thermostat valve opening temperature: 84°C"],
+    ["The idle speed is 700 rpm.", "Idle speed: 700 rpm"],
+  ];
+
+  for (const [claim, quote] of printed) {
     assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
   }
 
-  // The bare-number fallback keeps its tolerance for these units as well.
-  assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, true);
+  // The bare-number fallback is exact as well.
+  assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, false);
+  assert.equal(checkClaimNumbers("Torque to 37 Nm.", "Torque (N·m): 37").grounded, true);
 });
 
 // ---- N4: current symbols ----
@@ -1267,7 +1295,7 @@ test("a current symbol in the quote leaves every other unit's check unchanged", 
   const voltageRow = "Terminal voltage (V): 11 to 14. EFI 15A";
 
   assert.equal(checkClaimNumbers("The mounting bolt torque is 37 N·m.", torqueRow).grounded, true);
-  assert.equal(checkClaimNumbers("The mounting bolt torque is 37.4 N·m.", torqueRow).grounded, true);
+  assert.equal(checkClaimNumbers("The mounting bolt torque is 37.4 N·m.", torqueRow).grounded, false);
   assert.equal(checkClaimNumbers("The mounting bolt torque is 39 N·m.", torqueRow).grounded, false);
   assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
   assert.equal(checkClaimNumbers("The terminal voltage is 13.6 V.", voltageRow).grounded, false);

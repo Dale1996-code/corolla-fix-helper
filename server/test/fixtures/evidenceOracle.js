@@ -61,7 +61,6 @@ export const ASK_ORACLE = [
     claim: "The maximum disc runout is 0.5 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "0.5 mm is ten times the printed 0.05 mm limit.",
   },
   {
@@ -73,7 +72,6 @@ export const ASK_ORACLE = [
     claim: "The minimum brake pad thickness is 0.5 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "Half the printed minimum pad thickness.",
   },
   {
@@ -85,7 +83,6 @@ export const ASK_ORACLE = [
     claim: "The spark plug electrode gap is 1.6 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "1.6 mm is outside the printed 1.0 to 1.1 mm range.",
   },
   {
@@ -97,7 +94,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity is 4.7 liters.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "Half a litre over the printed capacity overfills the engine.",
   },
   {
@@ -109,7 +105,6 @@ export const ASK_ORACLE = [
     claim: "The intake valve clearance is 0.75 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "0.75 mm is far outside the printed 0.19 to 0.29 mm range.",
   },
   {
@@ -380,7 +375,6 @@ export const ASK_ORACLE = [
     claim: "The fuel pressure is 0.3 N*m.",
     expect: "reject",
     finding: "1A-13",
-    todo: "1A-13",
     note: "A pressure cannot ground a torque; 3.1 kgf/cm² is read as 3.1 kgf*cm = 0.3 N*m.",
   },
 

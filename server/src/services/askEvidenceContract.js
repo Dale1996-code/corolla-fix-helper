@@ -480,88 +480,60 @@ export function extractSpecNumbers(text) {
     .map(({ value, raw, unit }) => ({ value, raw, unit }));
 }
 
-// Unit families, each with a canonical unit. A manual prints a torque table as
-// "37 (377, 27)" -- N·m, kgf-cm, ft-lbf -- so an answer stating the ft-lbf
-// figure IS supported by a chunk stating the N·m figure, and flagging that would
-// punish a correct conversion.
+// The measurement units, grouped by family. Nothing converts between them
+// (owner decision D1, 2026-10-19): a claimed number must be printed in its quote
+// IN THE SAME UNIT. Toyota tables print a specification in every unit they
+// support -- "37 N*m (377 kgf*cm, 27 ft.*lbf)" -- so the model never needs to
+// convert, and a converted or rounded figure is not in the manual and must not
+// be called verified. This table used to carry conversion factors, and every
+// non-electrical comparison a max(0.51, 2%) tolerance sized for them. In
+// millimetres and litres that slack accepted 0.5 mm of disc runout against a
+// printed 0.05 mm and 4.7 L of engine oil against 4.2 L (1A-01).
 //
-// Conversion is deliberately WITHIN a family only. Applying every factor to
-// every number produces false groundings: 377 kgf-cm times the kPa->psi factor
-// is 54.7, which would have "grounded" an invented 54 N·m against a chunk that
-// says 37 N·m.
-const UNIT_FAMILIES = [
+// Each entry is ONE unit, and its pattern lists that unit's spellings, so "37 Nm"
+// still supports "37 N·m". The family only decides which head nouns the subject
+// guard reads (SPEC_SUBJECT_NOUNS).
+const MEASUREMENT_UNITS = [
+  { id: "N·m", family: "torque", match: /^(n\s*[·.*-]?\s*m|nm|newton\s*met(er|re)s?)$/i },
   {
+    id: "ft·lbf",
     family: "torque",
-    units: [
-      { match: /^(n\s*[·.*-]?\s*m|nm|newton\s*met(er|re)s?)$/i, factor: 1 },
-      { match: /^(ft\s*[-·.*]?\s*lbf?|lb\s*[-·.*]?\s*ft|foot\s*pounds?)$/i, factor: 1.355818 },
-      { match: /^(in\s*[-·.*]?\s*lbf?|inch\s*pounds?)$/i, factor: 0.1129848 },
-      { match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i, factor: 0.0980665 },
-      { match: /^(kgf\s*[-·.*/]?\s*m)$/i, factor: 9.80665 },
-    ],
+    match: /^(ft\s*[-·.*]?\s*lbf?|lb\s*[-·.*]?\s*ft|foot\s*pounds?)$/i,
   },
-  {
-    family: "pressure",
-    units: [
-      { match: /^kpa$/i, factor: 1 },
-      { match: /^mpa$/i, factor: 1000 },
-      { match: /^psi$/i, factor: 6.894757 },
-      { match: /^bar$/i, factor: 100 },
-    ],
-  },
-  {
-    family: "volume",
-    units: [
-      { match: /^(lit(er|re)s?|l)$/i, factor: 1 },
-      { match: /^(millilit(er|re)s?|ml)$/i, factor: 0.001 },
-      { match: /^(qt|quarts?)$/i, factor: 0.9463529 },
-      { match: /^pints?$/i, factor: 0.4731765 },
-      { match: /^(gal|gallons?)$/i, factor: 3.785412 },
-      { match: /^fl\s*oz$/i, factor: 0.0295735 },
-    ],
-  },
-  {
-    family: "length",
-    units: [
-      { match: /^(millimet(er|re)s?|mm)$/i, factor: 1 },
-      { match: /^(centimet(er|re)s?|cm)$/i, factor: 10 },
-      { match: /^(microns?)$/i, factor: 0.001 },
-    ],
-  },
+  { id: "in·lbf", family: "torque", match: /^(in\s*[-·.*]?\s*lbf?|inch\s*pounds?)$/i },
+  { id: "kgf·cm", family: "torque", match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i },
+  { id: "kgf·m", family: "torque", match: /^(kgf\s*[-·.*/]?\s*m)$/i },
+  { id: "kPa", family: "pressure", match: /^kpa$/i },
+  { id: "MPa", family: "pressure", match: /^mpa$/i },
+  { id: "psi", family: "pressure", match: /^psi$/i },
+  { id: "bar", family: "pressure", match: /^bar$/i },
+  { id: "L", family: "volume", match: /^(lit(er|re)s?|l)$/i },
+  { id: "mL", family: "volume", match: /^(millilit(er|re)s?|ml)$/i },
+  { id: "qt", family: "volume", match: /^(qt|quarts?)$/i },
+  { id: "pt", family: "volume", match: /^pints?$/i },
+  { id: "gal", family: "volume", match: /^(gal|gallons?)$/i },
+  { id: "fl oz", family: "volume", match: /^fl\s*oz$/i },
+  { id: "mm", family: "length", match: /^(millimet(er|re)s?|mm)$/i },
+  { id: "cm", family: "length", match: /^(centimet(er|re)s?|cm)$/i },
+  { id: "µm", family: "length", match: /^(microns?)$/i },
 ];
 
 /**
- * Canonicalize a value+unit into its family, or null when the unit is outside
- * the families we convert (volts, ohms, rpm, temperature). Those still get the
- * literal-presence check, just no conversion -- temperature in particular has an
- * offset, so a naive factor would be wrong.
+ * The measurement unit (torque, pressure, volume, length) a detected unit string
+ * names, or null for the units outside those families (volts, ohms, rpm,
+ * temperature), which compare by sameLiteralUnit instead.
  */
-function canonicalize(value, unit) {
+function findMeasurementUnit(unit) {
   const cleaned = String(unit || "").trim();
 
-  for (const entry of UNIT_FAMILIES) {
-    for (const candidate of entry.units) {
-      if (candidate.match.test(cleaned)) {
-        return { family: entry.family, canonical: value * candidate.factor };
-      }
-    }
-  }
-
-  return null;
+  return MEASUREMENT_UNITS.find(({ match }) => match.test(cleaned)) || null;
 }
 
-function withinTolerance(left, right) {
-  return Math.abs(left - right) <= Math.max(0.51, Math.abs(right) * 0.02);
-}
-
-// Electrical readings get no tolerance at all. The max(0.51, 2%) slack above was
-// sized for torque tables that print one figure in three units; on an
-// electrical reading it let 0.9 V pass against a printed 0.5 V, 12.4 V against a
-// printed 12.6 V, and 12 Ω against a printed 12.4 Ω. The comparison is between
+// Electrical readings were the first family held to the printed value (N4): the
+// shared tolerance let 0.9 V pass against a printed 0.5 V and 12 Ω against a
+// printed 12.4 Ω. Every unit is now held to that rule. The comparison is between
 // PARSED numbers, never strings, so 12.40, 12.400, and 12.4 are the same value
-// -- only a different number fails. Nothing is converted: mV and V, kΩ and Ω,
-// and milliamps and amps stay separate units, exactly as sameLiteralUnit keeps
-// them.
+// -- only a different number fails.
 //
 // Current lives here rather than in ELECTRICAL_UNITS because that table also
 // gives the subject guard its head nouns, and current deliberately has none.
@@ -589,19 +561,6 @@ function isCurrentSymbol(unit) {
   return CURRENT_UNITS.some(({ symbol }) => symbol.test(cleaned));
 }
 
-function requiresExactValue(unit) {
-  return Boolean(findElectricalUnit(unit)) || Boolean(findCurrentUnit(unit));
-}
-
-/** Does this printed number support the claimed spec? Exact for electrical units. */
-function printedValueSupports(evidenceValue, spec) {
-  if (requiresExactValue(spec.unit)) {
-    return evidenceValue === spec.value;
-  }
-
-  return withinTolerance(evidenceValue, spec.value);
-}
-
 /** Is this detected unit string one of the case-sensitive electrical symbols? */
 function isElectricalSymbol(unit) {
   const cleaned = String(unit || "").trim();
@@ -610,7 +569,7 @@ function isElectricalSymbol(unit) {
 }
 
 /**
- * Do two units that are never converted name the same unit?
+ * Do two units outside the measurement families name the same unit?
  *
  * Spelled-out units compare exactly as they always have. A symbol is compared by
  * the unit it stands for, so a quote printing "12.6 V" still supports a claim
@@ -636,10 +595,21 @@ function sameLiteralUnit(left, right) {
   return normalizeForMatch(left) === normalizeForMatch(right);
 }
 
-/**
- * Is the claimed spec present in the evidence -- literally, or as a conversion
- * within the same unit family?
- */
+/** Do two detected unit strings name the same unit, however each is spelled? */
+function sameUnit(left, right) {
+  const leftMeasurement = findMeasurementUnit(left);
+  const rightMeasurement = findMeasurementUnit(right);
+
+  if (leftMeasurement || rightMeasurement) {
+    return Boolean(
+      leftMeasurement && rightMeasurement && leftMeasurement.id === rightMeasurement.id
+    );
+  }
+
+  return sameLiteralUnit(left, right);
+}
+
+/** Is the claimed spec printed in the evidence: the same number, in the same unit? */
 function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   if (!Number.isFinite(spec.value)) {
     return false;
@@ -659,29 +629,15 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
 
   // Prefer unit-aware comparison whenever the evidence names any technical
   // units. A matching numeral alone is not enough: "37 psi" must never be
-  // grounded by an unrelated "37 N·m" torque passage.
-  const claimCanonical = canonicalize(spec.value, spec.unit);
-
-  for (const evidenceSpec of comparableSpecs) {
-    const evidenceCanonical = canonicalize(evidenceSpec.value, evidenceSpec.unit);
-
-    if (
-      claimCanonical &&
-      evidenceCanonical &&
-      evidenceCanonical.family === claimCanonical.family &&
-      withinTolerance(evidenceCanonical.canonical, claimCanonical.canonical)
-    ) {
-      return true;
-    }
-
-    if (
-      !claimCanonical &&
-      !evidenceCanonical &&
-      sameLiteralUnit(evidenceSpec.unit, spec.unit) &&
-      printedValueSupports(evidenceSpec.value, spec)
-    ) {
-      return true;
-    }
+  // grounded by an unrelated "37 N·m" torque passage, nor "27 ft-lbf" by the
+  // "37 N·m" it might have been converted from.
+  if (
+    comparableSpecs.some(
+      (evidenceSpec) =>
+        evidenceSpec.value === spec.value && sameUnit(evidenceSpec.unit, spec.unit)
+    )
+  ) {
+    return true;
   }
 
   if (comparableSpecs.length) {
@@ -690,8 +646,9 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
 
   // Some extracted manual tables put units in a header and only numbers in the
   // row. Preserve that fallback only when the quote contains no other explicit
-  // unit-bearing specification to contradict the claim's unit family.
-  return evidenceNumbers.some((candidate) => printedValueSupports(candidate, spec));
+  // unit-bearing specification to contradict the claim's unit family -- and,
+  // like every other comparison, only for the printed number itself.
+  return evidenceNumbers.some((candidate) => candidate === spec.value);
 }
 
 const BARE_NUMBER_REGEX = new RegExp(`${NOT_INSIDE_NUMBER}${NUMBER_PATTERN}`, "g");
@@ -832,12 +789,10 @@ const SPEC_SUBJECT_NOUNS = [
   "depth",
 ];
 
-// Units that are NOT converted but are still component-scoped, added in N4.
-// Voltage, resistance, engine-speed, and temperature values were passing on a
-// numeric match alone: 13.5 V at the charging system is not 13.5 V at the
-// battery, and 700 rpm of cooling fan is not 700 rpm of idle. Conversion stays
-// out of it -- temperature has an offset, and volts and ohms have no sibling
-// unit in these manuals worth converting -- so these gate the SUBJECT only.
+// Units outside the measurement families that are still component-scoped, added
+// in N4. Voltage, resistance, engine-speed, and temperature values were passing
+// on a numeric match alone: 13.5 V at the charging system is not 13.5 V at the
+// battery, and 700 rpm of cooling fan is not 700 rpm of idle.
 //
 // Each family carries its OWN head noun rather than sharing one pooled list.
 // extractSpecSubject takes the last matching noun in the clause, so a pooled
@@ -855,12 +810,12 @@ const SPEC_SUBJECT_NOUNS = [
 // Voltage and resistance take their noun from ELECTRICAL_UNITS, which knows each
 // unit both spelled out and as a symbol, so "12.6 V" gates the subject exactly
 // as "12.6 volts" does, and "2.4 kΩ" exactly as "2.4 kilohms".
-const NON_CONVERTIBLE_GUARDED_FAMILIES = [
+const OTHER_GUARDED_FAMILIES = [
   { pattern: /^rpm$/i, noun: "speed" },
   { pattern: /^(°\s*[cf]|deg(?:rees)?\s*[cf])$/i, noun: "temperature" },
 ];
 
-function nonConvertibleSubjectNoun(unit) {
+function otherFamilySubjectNoun(unit) {
   const electrical = findElectricalUnit(unit);
 
   if (electrical) {
@@ -868,7 +823,7 @@ function nonConvertibleSubjectNoun(unit) {
   }
 
   const cleaned = String(unit || "").trim();
-  const family = NON_CONVERTIBLE_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
+  const family = OTHER_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
 
   return family ? family.noun : "";
 }
@@ -1089,11 +1044,11 @@ function phraseNamesSubject(subject, evidenceText) {
  * certified by a quote about an "oil drain plug, 37 Nm", and "engine oil
  * capacity, 4.2 liters" must not be certified by a coolant capacity that
  * happens to print the same figure. Two sets of units are gated: the four
- * families we convert, and the non-convertible families added in N4 (volts,
- * ohms, rpm, temperature), which were reaching the owner on a numeric match
- * alone. The convertible set keeps its own pooled nouns; each non-convertible
- * family contributes only its own noun, so a qualifier naming another family
- * cannot steal the subject from the specification being checked.
+ * measurement families (torque, pressure, volume, length), and the families
+ * added in N4 (volts, ohms, rpm, temperature), which were reaching the owner on
+ * a numeric match alone. The measurement families share one pooled noun list;
+ * each N4 family contributes only its own noun, so a qualifier naming another
+ * family cannot steal the subject from the specification being checked.
  *
  * The parsed subject passes when its words occur in the quote as one unbroken,
  * in-order run -- or, failing that, when ONE phrase of the quote names the same
@@ -1110,25 +1065,25 @@ function phraseNamesSubject(subject, evidenceText) {
  */
 export function checkClaimSubject(claimText, evidenceText) {
   const specs = extractSpecNumbers(claimText);
-  const hasConvertibleSpec = specs.some(
-    (spec) => spec.unit !== "viscosity" && Boolean(canonicalize(spec.value, spec.unit))
+  const hasMeasurementSpec = specs.some(
+    (spec) => spec.unit !== "viscosity" && Boolean(findMeasurementUnit(spec.unit))
   );
   // Only the nouns of the families actually detected are offered to the parser.
   // Passing all four would let "at operating temperature" outrank the voltage
   // this claim is really about, because the last noun in the clause wins.
-  const nonConvertibleNouns = [
-    ...new Set(specs.map((spec) => nonConvertibleSubjectNoun(spec.unit)).filter(Boolean)),
+  const otherFamilyNouns = [
+    ...new Set(specs.map((spec) => otherFamilySubjectNoun(spec.unit)).filter(Boolean)),
   ];
 
-  if (!hasConvertibleSpec && !nonConvertibleNouns.length) {
+  if (!hasMeasurementSpec && !otherFamilyNouns.length) {
     return { grounded: true, checked: false, subject: "" };
   }
 
-  // A claim carrying a convertible spec keeps the original noun list, so its
+  // A claim carrying a measurement spec keeps the original noun list, so its
   // parse is byte-identical to the behavior shipped in PR #122.
   const subject = extractSpecSubject(
     claimText,
-    hasConvertibleSpec ? SPEC_SUBJECT_NOUNS : nonConvertibleNouns
+    hasMeasurementSpec ? SPEC_SUBJECT_NOUNS : otherFamilyNouns
   );
 
   if (!subject.length) {
