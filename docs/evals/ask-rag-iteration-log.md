@@ -3100,3 +3100,118 @@ inside its quote, cut at word boundaries: 0 of 25,257 change.
   planner claims are windows cut mid-number ("5A" out of "7.5A"), which now fail closed.
 
 Counts: **44 cases, 14 verified, 30 templates** — unchanged.
+
+## Stage 2 — the Ask verifier fails closed (2026-10-20, offline; the live eval is pending)
+
+Stage 2 of the 2026-10-18 audit follow-up plan. **No `eval:answers` run and no provider calls
+yet.** The one approved run (owner decision D3) is recorded below once it has happened.
+
+The audit reproduced wrong specifications shown as verified — 0.5 mm of disc runout against a
+printed 0.05 mm, 4.7 L of oil against 4.2 L, 50 ft-lbs of lug-nut torque against a printed
+103 N·m — and traced every one to the code, not the model: a loose tolerance, and a unit
+vocabulary that failed open.
+
+### What changed
+
+`askEvidenceContract.js` only, one commit per finding, in the plan's order. Each commit removes
+`todo` from the oracle rows it makes pass.
+
+| Commit | Finding | Change |
+| --- | --- | --- |
+| `5d6cfed` | 1A-02, 3A-03 | A comma before groups of three digits groups thousands ("1,500" is 1500); before one or two it is a decimal mark ("12,6 V" stays 12.6) |
+| `f393fef` | 1A-10 | A leading minus is kept; both ends of a range are read in the range's unit |
+| `6e65070` | 1A-01, 3A-01 | **Owner decision D1.** A claimed number must equal a number printed in its quote in the same unit. No conversion, no tolerance. Deliberately reverses three pinned tests |
+| `eac71b9` | 3B-01 | `ft-lbs`, `ft lbs`, `ft.*lbf`, `lb-ft`, a bare `L`, `qts`, US and Imperial quarts |
+| `ea123d5` | 1A-13 | `kgf/cm2`, `kgf/cm²`, `kgf*cm2` are a pressure, not the `kgf*cm` torque unit |
+| `315bf82` | 1A-04 | Inches, miles, km, angles, `%`, `kV`, `mΩ`, `MΩ`; one alias table for unit spellings |
+| `25d0cab` | 1A-04 | **Fail closed at the boundary.** A number no unit pattern reads must be printed in the quote (`unrecognized_figure`) |
+| `c38d0b1` | 1A-03 | Quotes match on token boundaries; the bare-number fallback needs a header unit |
+| `3295534` | 1A-11 | A claim with no specification needs a quote of at least three words (`quote_too_short`) |
+| `8ef79cf` | 1A-14 | Claims past the 40th are counted, so the answer reads as `partial` |
+
+Two new rejection reasons, `quote_too_short` and `unrecognized_figure`, each got the probe and
+eval case the every-reason invariant requires: `reject-one-word-quote` and
+`reject-unrecognized-figure`. Both are `verified: false`, so the gated set stays the same 14.
+Promoting them is the owner's call after a live run.
+
+### The oracle
+
+- **All 26 Ask `todo` rows from Stage 1a now gate.** The four new rows written with the fail-closed
+  commit gate too: E1 and E2 must reject, two controls must accept.
+- **Every must-accept control is green.**
+- **Two planner rows stopped being `todo` through the shared helpers:**
+  - P2, the range cut "2 to 14.8 V", now has its "2 V" low end read.
+  - P3a, a claim ending inside "103", is no longer inside its quote.
+- **Still `todo`, all Stage 5 or 6:**
+  - planner P1a and P1b (dropped negations, 1A-05), P4 (no task-part guard, 1A-06), and P5a
+    (one-letter item, 1A-07);
+  - the 8 safety rows, 6 HTTP rows, the SSE row, and the 2 integrity rows.
+
+### Measurement: plan step 2
+
+**The replay is still pending.** `eval:replay` belongs to the unmerged Stage 1b branch, and
+Experiment H's capture no longer exists: session `d9fc04ae`'s scratch holds only an empty
+`uploads` folder. What follows is the free synthetic sweep the plan allows instead.
+
+**Method.** A scratch script, `matchingRuleSweep.mjs`, not committed; a copy is in the
+session-notes folder. It compares three candidate rules on identical specifications, extracted
+by the final Stage 2 code, so the only difference is how a claimed number is compared with a
+printed one:
+
+- **today's rule:** `max(0.51, 2%)`, with conversion within a family;
+- **the D1 fallback:** same unit exact; a converted figure within ±1% plus half the last
+  printed digit of the evidence figure;
+- **exact:** the D1 default, as shipped.
+
+Its exact rule agrees with the shipped `checkClaimNumbers` on every row: 0 disagreements. The
+sweep ran over:
+
+- the 27 Ask oracle rows whose claim carries a specification;
+- 12 honest claims written for it, in the oracle's synthetic style.
+
+| | today | fallback | exact |
+| --- | --- | --- | --- |
+| Oracle must-reject rows wrongly accepted on the numbers | 6: A1–A5 and C1 | 0 | 0 |
+| Oracle must-accept rows wrongly rejected | 0 | 0 | 0 |
+| Honest: the figure is printed in the quote, in another unit's column (2) | 0 rejected | 0 | 0 |
+| Honest: a correct conversion the quote does not print, e.g. "76 ft-lbs" against "103 N*m" (8) | 0 rejected | 0 | **8** |
+| Honest: a converted temperature, °C to °F (1) | 1 | 1 | 1 |
+| A same-unit rounding, "about 4 liters" for 4.2 (1) | 0 rejected | 1 | 1 |
+
+C2 and C3 are quote-boundary defects that no numeric rule can see. In every Stage 2
+configuration they are rejected by `quoteAppearsInChunk`.
+
+**What it shows.** Exact matching costs nothing when the quote prints the claim's unit. Its
+whole cost is a correct conversion to a unit the quote does not print, and the fallback exists
+for exactly that. What a synthetic sweep cannot show is how often the model converts on real
+questions. That needs captured replies, which the pending live run provides (below).
+
+**Choice.** Exact, as D1 decided. By D1's own condition, the fallback is used only if a
+measurement shows too many honest rejections, and nothing measured here does. If the live run's
+captured claims show conversions being refused often, that is the evidence to revisit.
+
+### Tests and checks
+
+At `8ef79cf`, in this worktree, which has no `server/.env`:
+
+- lint 0 and typecheck 0;
+- server **1,123 tests: 1,102 pass, 0 fail, 21 todo**; client **410/410** in 31 files;
+- `build` green;
+- `smoke` **13/13** from a plain-path detached worktree, since smoke fails under `.claude\`.
+
+The Repair Planner suites pass unchanged: it shares `quoteAppearsInChunk`,
+`checkClaimNumbers`, and `redactSpecNumbers`.
+
+### What this costs, stated plainly
+
+- **Refusal over a converted or rounded figure.** A model that quotes "37 N·m" and states
+  "27 ft-lbf", or rounds 4.2 L to 4 L, now gets `partial` or `not_found`. This is intended.
+- **Counts and step numbers are figures too.** "Step 3: remove the drain plug" is refused
+  against a quote with no 3. Identifier shapes are exempt: codes, pins, engine codes, part
+  numbers, and model years.
+- **An unknown unit is checked by its number only.** "50 N" passes against "490 N (50 kgf)".
+- **The header-table fallback cannot tell columns apart.** In "N*m kgf*cm ft.*lbf … 37 377 27",
+  a claim of "377 N·m" passes.
+
+Counts: **46 cases, 14 verified, 32 templates.** The two new templates are the Stage 2
+rejection probes.

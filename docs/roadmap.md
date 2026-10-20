@@ -78,10 +78,11 @@ state a plan imagined.
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
 - **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
-  `Ω`, and `kΩ` are detected (N4's second slice), and so are `A` and `mA`, but
-  case-sensitively: a lowercase `v` or `a` is not read as volts or amps, and other symbols
-  such as `kV` or `mΩ` are not detected at all, so a value written that way still gets
-  neither the numeric check nor the subject guard. Current gets the numeric check only,
+  `Ω`, and `kΩ` are detected (N4's second slice), so are `A` and `mA`, and since Stage 2 of
+  the 2026-10-18 audit so are `kV`, `mΩ`, and `MΩ`, but case-sensitively: a lowercase `v`
+  or `a` is not read as volts or amps. A value written in a form the detector does not read
+  no longer passes unexamined: its number must be printed in the quote, though its unit is
+  not compared and it gets no subject guard. Current gets the numeric check only,
   never a subject guard. Because the corpus prints `A` mostly as fuse ratings on wiring
   diagrams, a current symbol in a quote counts only for a current claim, so it changes
   nothing for any other unit — see the iteration log's current-symbols entry. A step number
@@ -94,15 +95,21 @@ state a plan imagined.
   other rides through on the numeric check alone. This predates N4 (PR #122's guard behaves
   identically) and was surfaced by the N4 review. The evidence contract asks the model for
   atomic claims, but nothing enforces it. Deciding this is the one thing left in N4.
-- **Temperature and engine speed still match within a tolerance.** Electrical values no
-  longer do (N4's first decision, below): volts, millivolts, ohms, kilohms, amps, and
-  milliamps must equal a printed value. Every other unit still matches within
-  `max(0.51 absolute, 2% relative)`. That suits torque and capacity conversions, but it
-  also lets a claimed `83 °C` pass against a printed `84 °C` and `710 rpm` against
-  `700 rpm`. Whether those need the same treatment has not been measured.
-- **Two numeric-parser limits are known and unchanged.** A leading sign is not part of the
-  extracted number, so `-5 V` is compared as `5 V`. In a range such as `5 to 14 V`, only the
-  number directly carrying the unit (`14`) is checked; the other end is not.
+- **A converted or rounded figure is refused, even when it is right.** Since Stage 2 of
+  the 2026-10-18 audit (owner decision D1), every claimed number must be printed in its
+  quote in the same unit; the `max(0.51 absolute, 2% relative)` tolerance and all unit
+  conversion are gone. That tolerance, applied in millimetres and litres, had verified
+  0.5 mm of disc runout against a printed 0.05 mm and 4.7 L of oil against 4.2 L. The cost:
+  a model that quotes only "37 N·m" and states "27 ft-lbf", or rounds 4.2 L to 4 L, now gets
+  `partial` or `not_found`. How often that happens on real questions is measured by the
+  Stage 2 answer eval; a synthetic sweep shows it is confined to quotes that omit the
+  claim's unit (see the [iteration log](evals/ask-rag-iteration-log.md)).
+- **The fail-closed boundary checks unknown units by their number only.** A number in a
+  claim that no unit pattern reads — a time, a count, a step number, a force in `N` — must be
+  printed in the quote, so "Step 3: remove the drain plug" is refused against a quote with
+  no 3. But "50 N" passes against "490 N (50 kgf)": the number is printed, the unit is not
+  compared. The bare-number table fallback, now limited to quotes carrying a header unit in
+  the claim's unit, still cannot tell which column of a flattened row a number came from.
 - **The Repair Planner has no subject guard.** Its evidence contract shares only the quote
   check, the numeric check, and gap redaction with Ask, so a planner task can cite a real
   number that belongs to a different component. This is a separate limitation; no roadmap
@@ -383,6 +390,22 @@ model reply in that run was captured and replayed through both verifier versions
 got a different verdict. So the run shows the change costs nothing on the current questions,
 but not that it catches anything: no answer stated an electrical value that differed from its
 quote. See the [iteration log](evals/ask-rag-iteration-log.md).
+*Stage 2 of the 2026-10-18 audit — the Ask verifier fails closed (October 2026):* the
+audit reproduced wrong specifications shown as verified — 0.5 mm runout against a printed
+0.05 mm, 4.7 L of oil against 4.2 L, 50 ft-lbs of lug-nut torque against 103 N·m — from
+two causes in the code, not the model: a loose tolerance and a unit vocabulary that failed
+open. Owner decision D1 replaced the first with the electrical rule for every unit: a
+claimed number must be printed in its quote in the same unit, with no conversion and no
+tolerance. Closing the second: thousands separators are read as part of the number, signs
+and both ends of a range are checked, `ft-lbs`/`ft.*lbf`/`lb-ft`, a bare `L`, US and
+Imperial quarts, inches, miles, angles, `%`, `kgf/cm2` (as a pressure), `kV`, `mΩ`, and
+`MΩ` are detected, and any number nothing reads must itself be printed in the quote
+(`unrecognized_figure`). Quotes match only on token boundaries, the bare-number fallback
+needs a header unit, a claim with no specification needs a three-word quote
+(`quote_too_short`), and a reply with more than 40 claims can no longer read as
+`answered`. Closes 1A-01, 1A-02, 1A-03, 1A-04, 1A-10, 1A-11, 1A-13, 1A-14, 3B-01, 3A-01,
+and 3A-03; every Ask row of the evidence oracle gates. See the
+[iteration log](evals/ask-rag-iteration-log.md).
 *Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
 multi-specification claims, where one subject is derived per claim (described in the known
 limitations above).
