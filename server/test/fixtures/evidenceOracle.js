@@ -238,6 +238,54 @@ export const ASK_ORACLE = [
     note: "An angle without C or F is not detected; 180° doubles the printed turn.",
   },
 
+  // ---- 1A-04, the boundary itself: a figure in an unlisted unit fails closed ----
+  // Added with the fix (Stage 2). Whatever the vocabulary lists, the next unit it
+  // misses must not mean "nothing to check".
+  {
+    id: "E1-unlisted-unit-wait-time",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal.",
+    quote: "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal",
+    claim: "Wait 30 seconds after disconnecting the negative battery cable.",
+    expect: "reject",
+    finding: "1A-04",
+    note: "Seconds are not a detected unit; 30 is not the printed 90, and the wait protects the airbag.",
+  },
+  {
+    id: "E2-unlisted-count",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Remove the 4 bolts and the cylinder head cover.",
+    quote: "Remove the 4 bolts and the cylinder head cover",
+    claim: "Remove the 6 bolts and the cylinder head cover.",
+    expect: "reject",
+    finding: "1A-04",
+    note: "A count is a figure the code cannot read; 6 is not printed.",
+  },
+  {
+    id: "control-count-printed",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Remove the 4 bolts and the cylinder head cover.",
+    quote: "Remove the 4 bolts and the cylinder head cover",
+    claim: "Remove the 4 bolts and the cylinder head cover.",
+    expect: "accept",
+    finding: "control",
+    note: "An unlisted figure the quote prints passes.",
+  },
+  {
+    id: "control-identifiers-are-names",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Install spark plug 90919-01253 on the 2ZR-FE engine. Check terminals B9-1 and B9-2.",
+    quote: "Install spark plug 90919-01253 on the 2ZR-FE engine",
+    claim: "On the 2009 2ZR-FE engine, install spark plug 90919-01253.",
+    expect: "accept",
+    finding: "control",
+    note: "A model year, an engine code, and a part number name things; they are not figures.",
+  },
+
   // ---- 3B-01: the commonest torque and capacity spellings are not detected ----
   {
     id: "3B01-lug-nut-ft-lbs",

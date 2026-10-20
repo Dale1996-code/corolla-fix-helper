@@ -607,6 +607,27 @@ export const answerQualityCases = [
     verified: true,
   },
 
+  // ---- TEMPLATE: Stage 2 rejection paths (2026-10-20). verified:false. ----
+  //
+  // Probe-driven like the verified cases above, so their outcome is a property
+  // of the verifier's rules. They start as templates anyway: the Stage 2 merge
+  // bar is that the verified set stays the same 14 cases, and promoting these is
+  // the owner's call once a live run has shown them passing end to end.
+  {
+    id: "reject-unrecognized-figure",
+    question: "What is the oil drain plug torque?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["unrecognized_figure"],
+    rejectionProbe: "unrecognized_figure",
+    // A figure in a unit nothing reads must not reach the owner, even inside
+    // the gap that says it was rejected.
+    mustNotIncludeAny: [REJECTION_PROBE_SENTINEL_PATTERN],
+    verified: false,
+  },
+
   // ---- TEMPLATE: Vision Ask guard (Phase 2). verified:false. ----
   // The model may describe the attached photo, but it must STILL refuse a spec
   // the uploaded PDF chunks do not support — an image is never a source for a

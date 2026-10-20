@@ -112,6 +112,28 @@ const PROBES = {
   }),
 
   /**
+   * A real source, a real verbatim quote, and an invented figure in a unit the
+   * specification detector does not know.
+   *
+   * The shape the vocabulary boundary exists for: "drain cycles" is no unit, so
+   * the numeric check sees nothing to compare. Before Stage 2 that meant the
+   * claim passed; now a figure nothing could read must be printed in its quote.
+   * The sentinel's digits stand alone so the probe cannot be confused with the
+   * unit-bearing sentinel the numeric_anomaly probe uses.
+   */
+  unrecognized_figure: (chunks) => ({
+    documentSupported: [
+      {
+        claim: "Replace the oil drain plug gasket every 999999 drain cycles.",
+        sourceId: "S1",
+        evidenceQuote: verbatimQuote(chunks[0]),
+      },
+    ],
+    generalGuidance: [],
+    gaps: [],
+  }),
+
+  /**
    * An otherwise well-formed claim citing a label that was never issued.
    * Source ids are prompt-local and assigned per request, so a model naming S999
    * is citing something that does not exist for this question.

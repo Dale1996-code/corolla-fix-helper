@@ -791,6 +791,104 @@ export function checkClaimNumbers(claimText, evidenceText) {
   return { grounded: unsupported.length === 0, unsupported };
 }
 
+// ---------------------------------------------------------------------------
+// The vocabulary boundary
+// ---------------------------------------------------------------------------
+//
+// The specification detector can only check the units it knows. Every unit it
+// did not know used to mean "no specification here", so the claim passed with
+// its number unexamined -- the mechanism behind "50 ft-lbs" and "5.5 qts"
+// (3B-01). Adding spellings closes known holes but can never close the next
+// one, so the boundary itself fails closed (owner decision D1): a number in a
+// claim that no specification pattern read must be printed in the quote, or the
+// claim is unverified.
+//
+// Counts and step numbers fall under this rule too ("remove the 4 bolts" needs
+// a 4 in its quote), which is deliberate: the code cannot tell a count from a
+// figure in a unit it does not know. Only shapes that are names, never
+// quantities, are exempt.
+
+// A minus sign, as signGroup reads it, then one number.
+const SIGNED_NUMBER_REGEX = new RegExp(
+  `${NOT_INSIDE_NUMBER}${signGroup("sign")}(?<value>${NUMBER_PATTERN})`,
+  "g"
+);
+
+// Whitespace-delimited tokens that name something rather than measure it. A
+// letter before the first digit: codes, connectors, and pins (P0420, B9-1,
+// M12V, A51, No.1, HFC-134a). Digits then capitals: engine and drive codes
+// (2ZR-FE, 1ZZ-FE, 4WD). Ordinals. Toyota part and service-tool numbers
+// (90919-01253, 09843-18040). Model years, alone or as a span (2009-2013).
+const IDENTIFIER_TOKEN_PATTERNS = [
+  /^[A-Za-z][^\s]*\d/,
+  /^\d+[A-Z]+(?:[-/][A-Z0-9]+)*$/,
+  /^\d+(?:st|nd|rd|th)$/i,
+  /^\d{5}-[0-9A-Z]{5}(?:-[0-9A-Z]{2})?$/,
+  /^(?:19[89]\d|20[0-3]\d)(?:[-–](?:19[89]\d|20[0-3]\d))?$/,
+];
+
+/** Every signed number in the text, with where it sits. */
+function signedNumbers(text) {
+  return [...String(text || "").matchAll(SIGNED_NUMBER_REGEX)].map((match) => ({
+    value: signedValue(match.groups.sign, match.groups.value),
+    raw: match[0],
+    index: match.index,
+  }));
+}
+
+/** [start, end) spans of every unit-bearing specification and viscosity grade. */
+function specificationSpans(text) {
+  const source = String(text || "");
+
+  return [...SPEC_REGEXES, VISCOSITY_REGEX].flatMap((regex) =>
+    [...source.matchAll(regex)].map((match) => [match.index, match.index + match[0].length])
+  );
+}
+
+/** The whitespace-delimited token around a position, without wrapping punctuation. */
+function tokenAt(text, index) {
+  let start = index;
+  let end = index;
+
+  while (start > 0 && !/\s/.test(text[start - 1])) start -= 1;
+  while (end < text.length && !/\s/.test(text[end])) end += 1;
+
+  return text.slice(start, end).replace(/^[("'[{]+|[)"'\]},.;:!?]+$/g, "");
+}
+
+/**
+ * Numbers in a claim that no specification pattern read and no identifier
+ * shape explains, and that its evidence does not print.
+ *
+ * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }> }}
+ */
+export function checkUnrecognizedFigures(claimText, evidenceText) {
+  const claim = String(claimText || "");
+  const spans = specificationSpans(claim);
+  const printed = signedNumbers(evidenceText).map((number) => number.value);
+  const unsupported = signedNumbers(claim)
+    .filter(({ index }) => !spans.some(([start, end]) => index >= start && index < end))
+    .filter(({ index }) => !IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(claim, index))))
+    .filter(({ value }) => !printed.includes(value))
+    .map(({ raw, index }) => ({ raw, index }));
+
+  return { grounded: unsupported.length === 0, unsupported };
+}
+
+/** The claim as a gap may show it: no specification, and none of these figures. */
+function redactFigures(text, figures) {
+  const source = String(text || "");
+  const withoutFigures = [...figures]
+    .sort((left, right) => right.index - left.index)
+    .reduce(
+      (redacted, { raw, index }) =>
+        redacted.slice(0, index) + "[unverified value]" + redacted.slice(index + raw.length),
+      source
+    );
+
+  return redactSpecNumbers(withoutFigures);
+}
+
 function normalizeSubjectToken(token) {
   const normalized = String(token || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
 
@@ -1239,6 +1337,7 @@ export const ASK_REJECTION_REASONS = Object.freeze([
   "unknown_source",
   "quote_not_in_source",
   "numeric_anomaly",
+  "unrecognized_figure",
   "subject_mismatch",
   "unsourced_specification",
   "unsourced_gap_specification",
@@ -1331,6 +1430,26 @@ export function verifyEvidence(validated, chunks) {
       gaps.push(
         `Unverified specification (not found in the cited text): ${redactSpecNumbers(
           claim.claim
+        )}`
+      );
+      continue;
+    }
+
+    // A number no specification pattern could read is checked the only way
+    // left: it must be printed in the quote. An unknown unit fails closed.
+    const figures = checkUnrecognizedFigures(claim.claim, claim.evidenceQuote);
+
+    if (!figures.grounded) {
+      rejected.push({
+        ...origin,
+        claim: claim.claim,
+        reason: "unrecognized_figure",
+        unsupported: figures.unsupported.map((figure) => figure.raw),
+      });
+      gaps.push(
+        `Unverified (a figure in it is not printed in the cited text): ${redactFigures(
+          claim.claim,
+          figures.unsupported
         )}`
       );
       continue;

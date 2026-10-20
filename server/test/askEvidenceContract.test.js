@@ -7,6 +7,7 @@ import {
   ASK_REJECTION_REASONS,
   checkClaimNumbers,
   checkClaimSubject,
+  checkUnrecognizedFigures,
   deriveEvidenceStatus,
   extractSpecNumbers,
   quoteAppearsInChunk,
@@ -1352,9 +1353,11 @@ test("lowercase a, A/C and A/F, identifiers, and words starting with A are not r
     assert.deepEqual(extractSpecNumbers(text), [], text);
   }
 
+  // The quote names bank 1 itself: a "1" the quote did not print would now be
+  // rejected as an unrecognized figure, which is not what this test is about.
   const result = verifySingleClaim(
     "Inspect the bank 1 A/F sensor.",
-    "Inspect the air fuel ratio sensor. Standard voltage: 3.3 V"
+    "Inspect the bank 1 air fuel ratio sensor. Standard voltage: 3.3 V"
   );
 
   assert.equal(result.rejected.length, 0);
@@ -1618,6 +1621,54 @@ test("the letter A gets the same word-order reading as any other letter", () => 
   }
 });
 
+// ---- The vocabulary boundary (1A-04): a figure nothing can read fails closed ----
+
+test("a figure in a unit the detector does not know must be printed in its quote", () => {
+  const airbag = "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal";
+
+  for (const [claim, quote, grounded] of [
+    ["Wait 30 seconds after disconnecting the battery.", airbag, false],
+    ["Wait 90 seconds after disconnecting the battery.", airbag, true],
+    ["Remove the 6 bolts.", "Remove the 4 bolts and the cover", false],
+    ["Remove the 4 bolts.", "Remove the 4 bolts and the cover", true],
+    // A step number the quote does not print is a figure like any other.
+    ["Step 3: remove the drain plug.", "Remove the drain plug", false],
+    ["Repeat for cylinders 1 and 4.", "Repeat for the No. 1 and No. 4 cylinders", true],
+    ["The sensor reads -5.", "Sensor output 5", false],
+    ["The thread is M10 x 1.25.", "Use an M10 bolt", false],
+  ]) {
+    assert.equal(checkUnrecognizedFigures(claim, quote).grounded, grounded, claim);
+  }
+
+  // Names are not figures: codes, pins, ordinals, part numbers, model years.
+  for (const claim of [
+    "On 2009 models the 2ZR-FE engine uses spark plug 90919-01253.",
+    "Check terminals B9-1 and B9-2 of connector A51 for code P0420.",
+    "Tighten in the 1st and 2nd passes.",
+    "Recharge with HFC-134a on 4WD and 2009-2013 models.",
+  ]) {
+    assert.deepEqual(checkUnrecognizedFigures(claim, "Inspect the part."), { grounded: true, unsupported: [] }, claim);
+  }
+
+  // A recognized specification is the numeric check's business, not this one's.
+  assert.equal(checkUnrecognizedFigures("Torque the bolt to 54 N*m.", "Torque 37 N*m").grounded, true);
+  assert.equal(checkUnrecognizedFigures("Use 0W-20 oil.", "Use 5W-30 oil").grounded, true);
+});
+
+test("an unreadable figure rejects the claim and is not reprinted in its gap", () => {
+  const result = verifySingleClaim(
+    "Wait 30 seconds after disconnecting the battery.",
+    "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal"
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "unrecognized_figure");
+  assert.deepEqual(result.rejected[0].unsupported, ["30"]);
+  assert.equal(deriveEvidenceStatus(result), "not_found");
+  assert.doesNotMatch(result.gaps.join(" "), /30/);
+  assert.match(result.gaps[0], /Wait \[unverified value\] seconds/);
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
@@ -1695,7 +1746,7 @@ test("the rendered answer keeps the two channels visibly distinct", () => {
 // declared, the sanitizer drops the entry and the telemetry silently loses a
 // rejection — so drive every path and check the declarations cover them.
 
-/** One payload that trips all six rejection paths at once. */
+/** One payload that trips every rejection path at once. */
 function everyRejection() {
   return verifyEvidence(
     payload({
@@ -1717,6 +1768,12 @@ function everyRejection() {
           claim: "Torque the oil filter cap to 37 Nm.",
           sourceId: "S1",
           evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+        // unrecognized_figure -- a figure in no detected unit, not printed
+        {
+          claim: "Replace the drain plug gasket every 3 oil changes.",
+          sourceId: "S1",
+          evidenceQuote: "Clean and install the oil drain plug with a new gasket.",
         },
       ],
       // unsourced_specification
