@@ -1799,6 +1799,32 @@ test("general guidance with only structural numbers is kept", () => {
   assert.equal(result.generalGuidance.length, 1);
 });
 
+// ---- Reply size (1A-14) ----
+
+test("claims past the 40th are counted, and the answer can no longer read as answered", () => {
+  const quote = "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+  const claims = (count) =>
+    Array.from({ length: count }, () => ({
+      claim: "The oil drain plug torque is 37 Nm.",
+      sourceId: "S1",
+      evidenceQuote: quote,
+    }));
+
+  const exactlyForty = validateEvidencePayload(payload({ documentSupported: claims(40) }));
+
+  assert.equal(exactlyForty.value.droppedClaimCount, 0);
+  assert.equal(deriveEvidenceStatus(verifyEvidence(exactlyForty.value, [chunk()])), "answered");
+
+  const fortyTwo = validateEvidencePayload(payload({ documentSupported: claims(42) }));
+  const verified = verifyEvidence(fortyTwo.value, [chunk()]);
+
+  assert.equal(fortyTwo.value.documentSupported.length, 40);
+  assert.equal(fortyTwo.value.droppedClaimCount, 2);
+  assert.equal(verified.documentSupported.length, 40);
+  assert.equal(deriveEvidenceStatus(verified), "partial");
+  assert.match(verified.gaps.join(" "), /2 more claims were not checked/);
+});
+
 // ---- Derived status ----
 
 test("status is derived from what actually verified", () => {

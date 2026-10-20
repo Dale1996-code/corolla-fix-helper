@@ -151,10 +151,15 @@ function readStringArray(value) {
  * Validate the parsed model reply.
  *
  * @param {any} payload
+ * Claims past MAX_ITEMS are not checked, but they are counted: dropping them
+ * silently let an answer whose last claims were never examined still read as
+ * fully `answered` (1A-14). verifyEvidence turns the count into a gap.
+ *
  * @returns {{ ok: boolean, reason?: string, value?: {
  *   documentSupported: Array<{claim: string, sourceId: string, evidenceQuote: string}>,
  *   generalGuidance: string[],
  *   gaps: string[],
+ *   droppedClaimCount?: number,
  * } }}
  */
 export function validateEvidencePayload(payload) {
@@ -221,6 +226,7 @@ export function validateEvidencePayload(payload) {
       documentSupported,
       generalGuidance: readStringArray(payload.generalGuidance),
       gaps: readStringArray(payload.gaps),
+      droppedClaimCount: Math.max(0, payload.documentSupported.length - MAX_ITEMS),
     },
   };
 }
@@ -1462,7 +1468,7 @@ export const ASK_REJECTION_CHANNELS = Object.freeze([
  * values that failed verification, so anything shipping this off the server must
  * sanitize first — see buildRejectedMetrics in aiAnswerService.js.
  *
- * @param {{ documentSupported: any[], generalGuidance: string[], gaps: string[] }} validated
+ * @param {{ documentSupported: any[], generalGuidance: string[], gaps: string[], droppedClaimCount?: number }} validated
  * @param {any[]} chunks - retrieval order; index maps to S1..Sn
  */
 export function verifyEvidence(validated, chunks) {
@@ -1602,6 +1608,19 @@ export function verifyEvidence(validated, chunks) {
       pageNumber: mapped.chunk.pageNumber,
       chunkIndex: mapped.chunk.chunkIndex,
     });
+  }
+
+  // Claims the validator dropped past MAX_ITEMS were never checked. Saying so
+  // is also what keeps the answer from reading as complete: a gap makes the
+  // derived status `partial`, never `answered`.
+  const dropped = Number(validated.droppedClaimCount) || 0;
+
+  if (dropped > 0) {
+    gaps.push(
+      `This answer is incomplete: ${dropped} more ${
+        dropped === 1 ? "claim was" : "claims were"
+      } not checked, so ${dropped === 1 ? "it is" : "they are"} not shown.`
+    );
   }
 
   // General guidance is not sourced, so ANY technical specification in it is
