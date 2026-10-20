@@ -964,6 +964,18 @@ export function checkUnrecognizedFigures(claimText, evidenceText) {
   return { grounded: unsupported.length === 0, unsupported };
 }
 
+/**
+ * A rejected claim as its gap may show it. A gap explains what could NOT be
+ * verified, so it must not reprint a figure that failed: every specification is
+ * redacted, and so is every unreadable figure its quote does not print.
+ * `trustedQuote` is "" when the quote itself failed (an unknown source, or a
+ * quote not in the source), so no figure is spared by it. Without this, a claim
+ * rejected for its quote reprinted "999999 drain cycles" in full.
+ */
+function gapClaimText(claim, trustedQuote) {
+  return redactFigures(claim, checkUnrecognizedFigures(claim, trustedQuote).unsupported);
+}
+
 /** The claim as a gap may show it: no specification, and none of these figures. */
 function redactFigures(text, figures) {
   const source = String(text || "");
@@ -1508,14 +1520,14 @@ export function verifyEvidence(validated, chunks) {
 
     if (!mapped) {
       rejected.push({ ...origin, claim: claim.claim, reason: "unknown_source" });
-      gaps.push(`Unverified (source not recognized): ${redactSpecNumbers(claim.claim)}`);
+      gaps.push(`Unverified (source not recognized): ${gapClaimText(claim.claim, "")}`);
       continue;
     }
 
     if (!quoteAppearsInChunk(claim.evidenceQuote, mapped.chunk.chunkText)) {
       rejected.push({ ...origin, claim: claim.claim, reason: "quote_not_in_source" });
       gaps.push(
-        `Unverified (quote not found in the cited page): ${redactSpecNumbers(claim.claim)}`
+        `Unverified (quote not found in the cited page): ${gapClaimText(claim.claim, "")}`
       );
       continue;
     }
@@ -1529,9 +1541,9 @@ export function verifyEvidence(validated, chunks) {
     ) {
       rejected.push({ ...origin, claim: claim.claim, reason: "quote_too_short" });
       gaps.push(
-        `Unverified (the quote is too short to support it): ${redactFigures(
+        `Unverified (the quote is too short to support it): ${gapClaimText(
           claim.claim,
-          checkUnrecognizedFigures(claim.claim, claim.evidenceQuote).unsupported
+          claim.evidenceQuote
         )}`
       );
       continue;
@@ -1549,8 +1561,9 @@ export function verifyEvidence(validated, chunks) {
       });
       // The failing value is deliberately NOT reprinted here.
       gaps.push(
-        `Unverified specification (not found in the cited text): ${redactSpecNumbers(
-          claim.claim
+        `Unverified specification (not found in the cited text): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
         )}`
       );
       continue;
@@ -1568,9 +1581,9 @@ export function verifyEvidence(validated, chunks) {
         unsupported: figures.unsupported.map((figure) => figure.raw),
       });
       gaps.push(
-        `Unverified (a figure in it is not printed in the cited text): ${redactFigures(
+        `Unverified (a figure in it is not printed in the cited text): ${gapClaimText(
           claim.claim,
-          figures.unsupported
+          claim.evidenceQuote
         )}`
       );
       continue;
@@ -1586,8 +1599,9 @@ export function verifyEvidence(validated, chunks) {
         subject: subject.subject,
       });
       gaps.push(
-        `Unverified (the cited text does not name the same part): ${redactSpecNumbers(
-          claim.claim
+        `Unverified (the cited text does not name the same part): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
         )}`
       );
       continue;

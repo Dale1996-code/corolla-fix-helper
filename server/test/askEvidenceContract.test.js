@@ -1754,6 +1754,35 @@ test("an unreadable figure rejects the claim and is not reprinted in its gap", (
   assert.match(result.gaps[0], /Wait \[unverified value\] seconds/);
 });
 
+test("a claim rejected for its source or quote never reprints an unreadable figure", () => {
+  // Found by the Stage 2 live eval: the reject-unrecognized-figure probe was
+  // rejected one step early, as quote_not_in_source, and that gap printed
+  // "999999 drain cycles" in full because only specifications were redacted.
+  const claim = "Replace the drain plug gasket every 999999 drain cycles.";
+
+  for (const [sourceId, quote, reason] of [
+    ["S9", "Clean and install the oil drain plug with a new gasket.", "unknown_source"],
+    ["S1", "A sentence that is not on the page at all.", "quote_not_in_source"],
+  ]) {
+    const result = verifyEvidence(payload({ documentSupported: [{ claim, sourceId, evidenceQuote: quote }] }), [
+      chunk(),
+    ]);
+
+    assert.equal(result.rejected[0].reason, reason);
+    assert.doesNotMatch(result.gaps.join(" "), /999999/, reason);
+    assert.match(result.gaps[0], /every \[unverified value\] drain cycles/, reason);
+  }
+
+  // A figure the cited quote really prints may stay; a name always stays.
+  const result = verifySingleClaim(
+    "On the 2009 model, torque the 4 drain plug bolts to 54 N*m.",
+    "On the 2009 model, torque the 4 drain plug bolts to 37 N*m."
+  );
+
+  assert.equal(result.rejected[0].reason, "numeric_anomaly");
+  assert.match(result.gaps[0], /2009 model, torque the 4 drain plug bolts to \[unverified value\]/);
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
