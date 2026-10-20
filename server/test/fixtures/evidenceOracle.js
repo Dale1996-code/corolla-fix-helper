@@ -164,7 +164,6 @@ export const ASK_ORACLE = [
     claim: "Tighten the bolts to 10 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The 10 is a step number, not a torque.",
   },
   {
@@ -176,7 +175,6 @@ export const ASK_ORACLE = [
     claim: "The wheel lug nut torque is 10 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The quote stops inside 103, so it is not a quote of anything the page says.",
   },
   {
@@ -188,7 +186,6 @@ export const ASK_ORACLE = [
     claim: "The oil filter cap torque is 5 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The quote starts inside 25.",
   },
 
@@ -400,7 +397,6 @@ export const ASK_ORACLE = [
     claim: "Replace the timing chain.",
     expect: "reject",
     finding: "1A-11",
-    todo: "1A-11",
     note: "A single letter is not evidence for anything.",
   },
 
@@ -537,7 +533,6 @@ export const PLANNER_ORACLE = [
     task: "Install the wheels",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "The claim stops inside 103 and has no unit, so no number check runs.",
   },
   {

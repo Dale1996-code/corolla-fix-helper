@@ -245,6 +245,45 @@ function collapseForMatch(text) {
     .trim();
 }
 
+const LETTER = /\p{L}/u;
+const DIGIT = /\d/;
+const DECIMAL_MARK = /[.,]/;
+
+/** Does a quote placed at `at` start on a token boundary of the chunk? */
+function startsOnBoundary(haystack, at, needle) {
+  const previous = haystack[at - 1] || "";
+  const beforePrevious = haystack[at - 2] || "";
+  const startsNumber =
+    DIGIT.test(needle[0]) || (DECIMAL_MARK.test(needle[0]) && DIGIT.test(needle[1] || ""));
+
+  if (LETTER.test(needle[0]) && LETTER.test(previous)) {
+    return false;
+  }
+
+  return !(
+    startsNumber &&
+    (DIGIT.test(previous) || (DECIMAL_MARK.test(previous) && DIGIT.test(beforePrevious)))
+  );
+}
+
+/** Does a quote ending just before `end` end on a token boundary of the chunk? */
+function endsOnBoundary(haystack, end, needle) {
+  const last = needle[needle.length - 1];
+  const beforeLast = needle[needle.length - 2] || "";
+  const next = haystack[end] || "";
+  const afterNext = haystack[end + 1] || "";
+
+  if (LETTER.test(last) && LETTER.test(next)) {
+    return false;
+  }
+
+  if (DIGIT.test(last) && (DIGIT.test(next) || (DECIMAL_MARK.test(next) && DIGIT.test(afterNext)))) {
+    return false;
+  }
+
+  return !(DECIMAL_MARK.test(last) && DIGIT.test(beforeLast) && DIGIT.test(next));
+}
+
 /**
  * Is the quote genuinely present in the source chunk?
  *
@@ -252,6 +291,13 @@ function collapseForMatch(text) {
  * spacing, but otherwise strict: no paraphrase passes. This is checkable
  * server-side with no model cooperation, which is what makes it worth more than
  * a chunk id (a chunk id proves retrieval, not support).
+ *
+ * The quote must also start and end on token boundaries: never inside a word,
+ * and never inside a number. A raw substring let "Wheel lug nut torque 10" be
+ * "quoted" from "torque 103 N*m" and "5 N*m" from "25 N*m" (1A-03). Every
+ * occurrence is tried, so a cut match earlier in the chunk cannot hide a whole
+ * one later. Shared with the Repair Planner, which uses it for both of its
+ * containment checks (quote in source, claim in quote).
  */
 export function quoteAppearsInChunk(quote, chunkText) {
   const needle = normalizeForMatch(quote);
@@ -261,7 +307,16 @@ export function quoteAppearsInChunk(quote, chunkText) {
     return false;
   }
 
-  return haystack.includes(needle);
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (
+      startsOnBoundary(haystack, at, needle) &&
+      endsOnBoundary(haystack, at + needle.length, needle)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +758,7 @@ function sameUnit(left, right) {
 }
 
 /** Is the claimed spec printed in the evidence: the same number, in the same unit? */
-function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
+function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   if (!Number.isFinite(spec.value)) {
     return false;
   }
@@ -738,18 +793,45 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   }
 
   // Some extracted manual tables put units in a header and only numbers in the
-  // row. Preserve that fallback only when the quote contains no other explicit
-  // unit-bearing specification to contradict the claim's unit family -- and,
-  // like every other comparison, only for the printed number itself.
-  return evidenceNumbers.some((candidate) => candidate === spec.value);
+  // row: "Torque (N*m): mounting bolt 37". Preserve that fallback only when the
+  // quote contains no other explicit unit-bearing specification to contradict
+  // the claim's unit, only when it really carries such a header IN THE CLAIM'S
+  // UNIT, and, like every other comparison, only for the printed number itself.
+  // Without the header requirement any number at all would do: "from 1 to 10",
+  // a step sequence, verified "tighten the bolts to 10 N*m" (1A-03).
+  return (
+    headerUnits.some((unit) => sameUnit(unit, spec.unit)) &&
+    evidenceNumbers.some((candidate) => candidate === spec.value)
+  );
 }
 
-const BARE_NUMBER_REGEX = new RegExp(`${NOT_INSIDE_NUMBER}${NUMBER_PATTERN}`, "g");
+// A unit standing alone in a quote, attached to no number: the column header of
+// a flattened table. Spelled units may stand bare ("N*m kgf*cm ft.*lbf"); a
+// one-letter symbol ("V", "A", "L") is a header only in brackets, "(V)", because
+// bare it is too often a word or a part's letter.
+const SPELLED_HEADER_UNIT_REGEX = new RegExp(
+  `(?<![\\d.,]\\s*)(?<![A-Za-z0-9_])(?:${UNIT_PATTERN})(?![A-Za-z0-9_])`,
+  "gi"
+);
+const SYMBOL_HEADER_UNIT_REGEX = new RegExp(
+  String.raw`[(\[]\s*(mV|kV|V|mA|A|L|[kMm]?\s*[${OHM_SYMBOLS}])\s*[)\]]`,
+  "g"
+);
 
-/** All numbers appearing anywhere in the evidence text, unit or not. */
+/** The header units a quote carries. */
+function headerUnitsIn(text) {
+  const source = String(text || "");
+
+  return [
+    ...[...source.matchAll(SPELLED_HEADER_UNIT_REGEX)].map((match) => match[0]),
+    ...[...source.matchAll(SYMBOL_HEADER_UNIT_REGEX)].map((match) => match[1]),
+  ];
+}
+
+/** All numbers appearing anywhere in the evidence text, unit or not, signed. */
 function allNumbersIn(text) {
-  return [...String(text || "").matchAll(BARE_NUMBER_REGEX)]
-    .map((match) => parseNumber(match[0]))
+  return signedNumbers(text)
+    .map((number) => number.value)
     .filter(Number.isFinite);
 }
 
@@ -767,6 +849,7 @@ export function checkClaimNumbers(claimText, evidenceText) {
 
   const evidenceNumbers = allNumbersIn(evidenceText);
   const evidenceSpecs = extractSpecNumbers(evidenceText);
+  const headerUnits = headerUnitsIn(evidenceText);
   const normalizedEvidence = normalizeForMatch(evidenceText);
   const unsupported = [];
 
@@ -783,7 +866,7 @@ export function checkClaimNumbers(claimText, evidenceText) {
       continue;
     }
 
-    if (!specIsPresent(spec, evidenceNumbers, evidenceSpecs)) {
+    if (!specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits)) {
       unsupported.push(spec.raw);
     }
   }

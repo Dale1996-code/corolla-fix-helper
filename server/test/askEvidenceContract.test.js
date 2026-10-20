@@ -108,6 +108,34 @@ test("an empty quote is rejected", () => {
   assert.equal(quoteAppearsInChunk("37 Nm", ""), false);
 });
 
+test("a quote must start and end on a token boundary, never inside a number or word (1A-03)", () => {
+  const lugNut = "Wheel lug nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf).";
+
+  for (const [quote, text] of [
+    ["Wheel lug nut torque 10", lugNut],
+    ["5 N*m to the oil filter cap", "Apply 25 N*m to the oil filter cap."],
+    ["5 mm", "Minimum thickness 1.5 mm"],
+    ["thickness 1.", "Minimum thickness 1.5 mm"],
+    ["500 kPa", "Compression 1,500 kPa"],
+    ["orque : 37 Nm", chunk().chunkText],
+    ["e", "Inspect the gasket."],
+  ]) {
+    assert.equal(quoteAppearsInChunk(quote, text), false, quote);
+  }
+
+  for (const [quote, text] of [
+    ["Wheel lug nut torque 103 N*m", lugNut],
+    ["76 ft.*lbf).", lugNut],
+    ["Torque : 37 Nm", chunk().chunkText],
+    // Only the same kind of character is a cut: a number glued to a word is not.
+    ["37 Nm", "Torque37 Nm"],
+    // A cut occurrence earlier in the text does not hide a whole one later.
+    ["torque 10 N*m", "Bolt A torque 103 N*m. Bolt B torque 10 N*m."],
+  ]) {
+    assert.equal(quoteAppearsInChunk(quote, text), true, quote);
+  }
+});
+
 // ---- Numeric anomaly detector: scope ----
 
 test("unit-bearing specifications are detected", () => {
@@ -1242,6 +1270,31 @@ test("a comma before three digits groups thousands; before one or two it is a de
     ["The compression pressure is 1.5 kPa.", "Compression pressure (kPa): 1,500", false],
   ]) {
     assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, `${claim} | ${quote}`);
+  }
+});
+
+test("the bare-number fallback needs a header unit in the claim's unit (1A-03)", () => {
+  // A quote with no unit-bearing figure used to ground any claim whose number
+  // appeared anywhere in it -- a step sequence verified a torque.
+  for (const [claim, quote] of [
+    ["Tighten the bolts to 10 N*m.", "Tighten the bolts in the sequence shown, from 1 to 10."],
+    ["Set the tire pressure to 37 psi.", "Torque (N·m): 37"],
+    ["The terminal voltage is 14 V.", "Terminal voltage V 11 to 14"],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  // A flattened table carries its units as column headers: spelled units may
+  // stand bare, a one-letter symbol only in brackets.
+  const torqueTable = "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27";
+
+  for (const [claim, quote] of [
+    ["The oil pan drain plug torque is 37 N·m.", torqueTable],
+    ["The oil pan drain plug torque is 27 ft-lbs.", torqueTable],
+    ["The mounting bolt torque is 37 N·m.", "Torque (N·m): mounting bolt 37"],
+    ["The terminal voltage is 14 V.", "Terminal voltage (V): 11 to 14"],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
   }
 });
 
