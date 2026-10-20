@@ -252,6 +252,51 @@ test("the torque and capacity spellings of manuals and owners are detected (3B-0
   }
 });
 
+test("an engine designation is a name, and a bare L in a quote counts only for a volume", () => {
+  // Found by the Stage 2 live eval's replay: the model copies the vehicle
+  // descriptor "L4 1.8L 2ZR-FE" into its claims and gaps, and the bare litre
+  // symbol read it as 1.8 litres. In the corpus every glued one-decimal litre
+  // figure is an engine (1.8L or 2.4L), and a spaced "2 L" is a gear position or
+  // a wire colour, never a capacity.
+  for (const text of [
+    "For the 2009 Toyota Corolla L4 1.8L 2ZR-FE, see below.",
+    "Toyota Corolla L4-1.8L (2ZR-FE).",
+    "Connector (2.4L: TOP OF ENGINE)",
+    "Applies to the 1.8L 2ZR-FE engine.",
+    "W/ smart key system (1.8L)",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+    assert.equal(redactSpecNumbers(text), text, text);
+  }
+
+  // A capacity is still a volume, glued or not.
+  for (const [text, value] of [
+    ["Refill with 4.7 L of oil.", 4.7],
+    ["Capacity 4.2L.", 4.2],
+    ["Fill 2.4L of coolant.", 2.4],
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text).map((spec) => spec.value), [value], text);
+  }
+
+  // The descriptor is not an unreadable figure either.
+  assert.deepEqual(
+    checkUnrecognizedFigures(
+      "For the 2009 Toyota Corolla L4 1.8L 2ZR-FE, the oil pan drain plug torque is 37 N*m.",
+      "Oil pan drain plug torque 37 N*m"
+    ),
+    { grounded: true, unsupported: [] }
+  );
+
+  // A bare L in the quote no longer switches off the header fallback for
+  // another unit, and still gates a volume claim.
+  const wiring = "Specified torque (N*m): bracket bolt 37. Wire 2 L to terminal 3";
+
+  assert.equal(checkClaimNumbers("The bracket bolt torque is 37 N*m.", wiring).grounded, true);
+  assert.equal(checkClaimNumbers("The bracket bolt torque is 39 N*m.", wiring).grounded, false);
+  assert.equal(checkClaimNumbers("The capacity is 4.2 L.", "Capacity 4.2 L").grounded, true);
+  assert.equal(checkClaimNumbers("The capacity is 5.5 L.", "Capacity 4.2 L").grounded, false);
+});
+
 test("kgf/cm2 in every printed form is a pressure, not a torque (1A-13)", () => {
   // The ASCII "2" defeated the unit's word boundary, so "kgf/cm2" and the
   // manuals' "kgf*cm2" went undetected, and "kgf/cm²" was read as the kgf*cm

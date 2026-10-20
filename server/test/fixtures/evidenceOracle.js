@@ -272,6 +272,17 @@ export const ASK_ORACLE = [
     note: "An unlisted figure the quote prints passes.",
   },
   {
+    id: "control-engine-designation-is-a-name",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Oil pan drain plug torque 37 N*m (377 kgf*cm, 27 ft.*lbf).",
+    quote: "Oil pan drain plug torque 37 N*m",
+    claim: "For the 2009 Corolla L4 1.8L 2ZR-FE, the oil pan drain plug torque is 37 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "The vehicle descriptor's 1.8L names the engine; it is not a 1.8-litre capacity.",
+  },
+  {
     id: "control-identifiers-are-names",
     verifier: "ask",
     channel: "documentSupported",

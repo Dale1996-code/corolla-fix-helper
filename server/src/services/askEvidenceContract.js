@@ -483,11 +483,31 @@ const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
 // and in a quote it can only ever meet a current claim (see specIsPresent).
 const CURRENT_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "mA|A", "(?![A-Za-z0-9_/-])", "g");
 
+// An engine designation names an engine, not a capacity: "L4 1.8L 2ZR-FE",
+// "L4-1.8L (2ZR-FE)", "(2.4L: TOP OF ENGINE)". Every glued one-decimal litre
+// figure in the corpus is one of the two engines (3,370 "1.8L" and 162 "2.4L",
+// and no capacity written that way), and the model copies the vehicle
+// descriptor into its claims. Read as litres, it rejected those claims and
+// redacted the descriptor out of the model's gaps. Only the glued form standing
+// next to an engine name is a designation: after a cylinder layout, before an
+// engine code, or opening a bracketed variant label. "4.7 L of oil" and a bare
+// "4.2L" are still volumes.
+const GLUED_DISPLACEMENT = String.raw`\d\.\dL(?![A-Za-z0-9_])`;
+const ENGINE_DESIGNATION_SOURCE =
+  String.raw`(?:(?<=\b[LIV]\d[-\s])|(?<=\()|(?=${GLUED_DISPLACEMENT}\s*\(?\d[A-Z]{2,3}-[A-Z]{2,3}))` +
+  GLUED_DISPLACEMENT;
+const ENGINE_DESIGNATION_REGEX = new RegExp(ENGINE_DESIGNATION_SOURCE, "g");
+
 // The litre symbol, "4.2 L", matched case-sensitively like the electrical
 // symbols: a lowercase "l" after a number is too easily a typo for "1", and a
 // following letter, hyphen, or slash is refused so "2 L-shaped brackets" and
-// "LH" stay words.
-const VOLUME_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "L", "(?![A-Za-z0-9_/-])", "g");
+// "LH" stay words. An engine designation is never read as a volume.
+const VOLUME_SYMBOL_REGEX = buildSpecRegex(
+  `${SYMBOL_VALUE_GUARD}(?!${ENGINE_DESIGNATION_SOURCE})`,
+  "L",
+  "(?![A-Za-z0-9_/-])",
+  "g"
+);
 
 /** Every unit-bearing specification pattern; they never claim the same text. */
 const SPEC_REGEXES = [
@@ -694,6 +714,11 @@ function findCurrentUnit(unit) {
   return found || null;
 }
 
+/** Is this detected unit string the bare litre symbol "L"? */
+function isVolumeSymbol(unit) {
+  return String(unit || "").trim() === "L";
+}
+
 /** Is this detected unit string "A" or "mA"? */
 function isCurrentSymbol(unit) {
   const cleaned = String(unit || "").trim();
@@ -777,9 +802,18 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   // claim anyway. Only the symbols are set aside: a spelled-out "amps" in the
   // evidence counted before "A" was detected and still does, so no claim that
   // is not a current is compared any differently.
-  const comparableSpecs = findCurrentUnit(spec.unit)
-    ? evidenceSpecs
-    : evidenceSpecs.filter((evidenceSpec) => !isCurrentSymbol(evidenceSpec.unit));
+  //
+  // A bare litre symbol in the evidence counts only for a volume claim, for the
+  // same reason. These manuals write capacities as "liters"; a bare "L" after a
+  // number is a gear position ("2 L"), Toyota's wire-colour code for blue, or a
+  // connector pin label far more often than a volume, and it must not switch
+  // off the fallback for a torque or voltage claim citing such a page.
+  const isVolumeClaim = findMeasurementUnit(spec.unit)?.family === "volume";
+  const comparableSpecs = evidenceSpecs.filter(
+    (evidenceSpec) =>
+      (!isCurrentSymbol(evidenceSpec.unit) || Boolean(findCurrentUnit(spec.unit))) &&
+      (!isVolumeSymbol(evidenceSpec.unit) || isVolumeClaim)
+  );
 
   // Prefer unit-aware comparison whenever the evidence names any technical
   // units. A matching numeral alone is not enough: "37 psi" must never be
@@ -925,11 +959,14 @@ function signedNumbers(text) {
   }));
 }
 
-/** [start, end) spans of every unit-bearing specification and viscosity grade. */
+/**
+ * [start, end) spans of every unit-bearing specification and viscosity grade,
+ * and of every engine designation, which is a name like an engine code.
+ */
 function specificationSpans(text) {
   const source = String(text || "");
 
-  return [...SPEC_REGEXES, VISCOSITY_REGEX].flatMap((regex) =>
+  return [...SPEC_REGEXES, VISCOSITY_REGEX, ENGINE_DESIGNATION_REGEX].flatMap((regex) =>
     [...source.matchAll(regex)].map((match) => [match.index, match.index + match[0].length])
   );
 }
