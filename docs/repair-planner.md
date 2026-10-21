@@ -167,13 +167,47 @@ than becoming a task named after the brief.
 support two tasks), and a verbatim `evidenceQuote`. Claims for a `compound` task
 also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
 
-`server/src/services/agent/repairPlanEvidenceContract.js` then checks that the
-quote appears in the text the model was shown, that the claim appears
-word-for-word inside its own quote, and that every number in the claim is
-present in the quote. Anything that fails becomes a **gap** with its numbers
-redacted — reprinting an unverified torque value inside a warning still puts it
-in front of the owner. Structural problems are handed back for at most **two**
-corrections before the run fails.
+`server/src/services/agent/repairPlanEvidenceContract.js` then checks, in order:
+
+1. the quote appears, on word and number boundaries, in the text the model was
+   shown (`quote_not_in_source`);
+2. the claim appears word-for-word inside its own quote (`claim_not_in_quote`);
+3. where the claim sits (audit 1A-05, owner decision D2) — read in the
+   **source**, so trimming the quote too does not get around it:
+   - no "not", "no", "never", "without", "cannot", or "n't" in the three words
+     before the claim within its clause (`negation_dropped`);
+   - no cut through a range or a signed value: "14.8 V" from "13.2 to 14.8 V",
+     "37 °C" from "-37 °C" (`range_cut`);
+   - a `numeric_spec` or `safety_instruction` must be a whole clause of its
+     quote, from one `.` `;` `:` `!` `?` or `|` boundary to the next
+     (`not_whole_clause`). Other kinds may be any part of the quote that passes
+     the two rules above;
+4. every number in the claim is printed in the quote (`unsupported_number`);
+5. the claim names what it is about (audit 1A-06/1B-01, `subject_missing`):
+   - any claim carrying a figure, and every `numeric_spec`, must contain a word
+     that is not a unit, a function word, a repair verb, a position, or
+     "torque" — so a bare "37 N*m" never counts toward coverage;
+   - a `numeric_spec` must also share such a word with its **task** (the
+     clause its `clauseIndex` names, for a compound task), in the claim or in
+     its quote. Ask's subject guard could not do this: a planner claim is a
+     verbatim fragment of its quote, so its part is always "in the quote";
+6. a `required_tool` / `required_part` `itemName` is at least two words or
+   four letters (`item_name_too_short`) and appears in the claim as whole
+   words (`item_not_in_claim`).
+
+Anything that fails becomes a **gap** with its numbers redacted — reprinting an
+unverified torque value inside a warning still puts it in front of the owner.
+Structural problems are handed back for at most **two** corrections before the
+run fails.
+
+What these checks prove is where a statement came from, and that its value,
+negation, and part survived the copy. They do **not** prove it is the whole
+step or the right one: the whole-clause rule is measured against the quote, so
+a quote that itself stops mid-sentence can leave out a trailing qualifier ("at
+2,000 rpm"); a comma is not a boundary, so a later stage ("then a further 90°")
+is not tied to the first; and part matching is lexical, so it can reject an
+honest claim whose quote does not repeat the task's wording, and cannot tell
+two parts apart when both share a word with the task.
 
 | Status | Meaning |
 | --- | --- |
@@ -188,7 +222,7 @@ statement passed the checks, not that the uploaded PDFs cover the whole repair.
 
 | Item | Points | Met when |
 | --- | --- | --- |
-| Required tools verified and on hand | 25 | Every verified `required_tool` phrase appears in the owner's inventory, or a cited procedure states none are required |
+| Required tools verified and on hand | 25 | Every verified `required_tool` name is owned per the inventory rule below, or a cited procedure states none are required |
 | Required parts verified and on hand | 25 | Same rule for `required_part` |
 | Skill matches difficulty | 30 | Canonical tasks exist and none is rated above the stated skill level |
 | Safety-critical work acknowledged | 20 | Canonical tasks exist and none is safety-critical (acknowledgment is server-owned `false`) |
@@ -198,10 +232,21 @@ caps: `not_found` → `not_ready`; `partial` → at most `almost_ready`;
 unacknowledged safety-critical work → at most `almost_ready`; no canonical task
 → 0 / `not_ready`.
 
-Inventory matching is exact-phrase on normalized text — no fuzzy or embedding
-guesses, because a wrongly-awarded point tells an owner they are ready for a
-brake job they cannot finish. `none`, `n/a`, `unknown`, and `not sure` are
-treated as an empty inventory. An empty requirement list never means "none
+Inventory matching is whole-word, with no fuzzy or embedding guesses, because a
+wrongly-awarded point tells an owner they are ready for a brake job they cannot
+finish (audit 1A-07; until then it was a raw substring test). Both the
+requirement name and each inventory entry go through one normalizer
+(`normalizeRequirementName`: lowercase, hyphens and punctuation to spaces,
+parenthetical asides dropped, "n't" to "not", "&" to "and"). An entry owns an
+item when the item's words appear whole and **end** a name in it — "3-ton floor
+jack" owns a jack, but "jack stands" does not, nor does "110 mm wrench" own a
+"10 mm wrench" — though a joiner (`and`, `or`, `plus`, `with`, `but`) may
+follow, so "jack and jack stands" owns both. An entry with an absence word
+before the item ("no torque wrench", "don't have a jack", "need brake pads")
+counts as absent; "No. 2 Phillips" is a size, not a negation. This fails
+closed: "torque wrench 1/2 drive" does not own a torque wrench (an aside in
+parentheses would). `none`, `n/a`, `unknown`, and `not sure` are treated as an
+empty inventory. An empty requirement list never means "none
 required"; only a grounded `no_required_tools` / `no_required_parts` claim does.
 
 ## Streaming protocol
