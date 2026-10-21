@@ -90,6 +90,15 @@ const EXPECTED_NOT_CRITICAL = [
   "spring-loaded clip",
   "replace the cabin air filter",
   "clean the interior trim",
+  // Near-misses for the 1A-19 rules below.
+  "replace the USB hub",
+  "replace the hub caps",
+  "check the tire pressure",
+  "inspect the tire tread depth",
+  "replace the intake resonator",
+  "adjust the exhaust valve clearance",
+  "reorder the exhausted touch-up paint",
+  "crimp the ground lug",
 ];
 
 for (const phrase of EXPECTED_NOT_CRITICAL) {
@@ -125,6 +134,72 @@ test("shock absorber replacement is critical by policy, with a SUSPENSION warnin
 test("electrical shock and suspension shocks are told apart", () => {
   assert.deepEqual(matchedSafetyRuleIds("electrical shock hazard"), ["electrical"]);
   assert.deepEqual(matchedSafetyRuleIds("replace the rear shocks"), ["suspension"]);
+});
+
+// ---- Wheel, tire, axle, hub, and exhaust jobs (audit 1A-19) ----
+//
+// None of these matched any rule, so the planner could rate them Ready with no
+// warning. Each is done with the car lifted, a wheel off, or the exhaust hot,
+// and lug nuts and studs are all that hold a wheel on. The rule sets are exact
+// so a job cannot quietly gain or lose a warning: torquing lug nuts happens
+// with the car on the ground, so it carries no lifting warning.
+
+/** @type {Array<[string, string[]]>} */
+const WHEEL_AND_EXHAUST_JOBS = [
+  ["Rotate the tires", ["lifting", "wheel-retention"]],
+  ["Tire rotation", ["lifting", "wheel-retention"]],
+  ["Put on the spare tire", ["lifting", "wheel-retention"]],
+  ["Replace the front tires", ["lifting", "wheel-retention"]],
+  ["Torque the lug nuts", ["wheel-retention"]],
+  ["Replace the lug studs", ["wheel-retention"]],
+  ["Replace the CV axle", ["lifting"]],
+  ["Replace the CV-axle boot", ["lifting"]],
+  ["Remove the front drive shaft", ["lifting"]],
+  ["Replace the hub bearing", ["lifting"]],
+  ["Replace the rear hub assembly", ["lifting"]],
+  ["Replace the exhaust muffler", ["exhaust"]],
+  ["Fix the exhaust leak", ["exhaust"]],
+  ["Replace the catalytic converter", ["exhaust"]],
+  ["Replace the exhaust manifold gasket", ["exhaust"]],
+];
+
+for (const [phrase, expectedRuleIds] of WHEEL_AND_EXHAUST_JOBS) {
+  test(`critical: "${phrase}" matches ${expectedRuleIds.join(" + ")}`, () => {
+    assert.deepEqual(matchedSafetyRuleIds(phrase), expectedRuleIds);
+    assert.equal(isSafetyCriticalTask({ title: phrase }), true, `"${phrase}" should block Ready`);
+  });
+}
+
+test("the wheel-retention and exhaust warnings name their own hazard", () => {
+  assert.ok(detectSafetyFlags("Torque the lug nuts").some((flag) => /lug nuts/i.test(flag)));
+  assert.ok(
+    detectSafetyFlags("Replace the exhaust muffler").some((flag) => /carbon monoxide/.test(flag))
+  );
+});
+
+test("near-misses are not read as road-wheel, hub, or exhaust work", () => {
+  // Rule ids rather than the whole verdict: removing a steering wheel is real
+  // SRS-adjacent work, so pinning it as "not critical" would be wrong. What
+  // must hold is that it is never mistaken for taking a ROAD wheel off.
+  /** @type {Array<[string, string[]]>} */
+  const nearMisses = [
+    ["remove the steering wheel", ["lifting", "wheel-retention"]],
+    ["steering wheel removal", ["lifting", "wheel-retention"]],
+    ["tighten the steering wheel nut", ["lifting", "wheel-retention"]],
+    ["the steering wheel hub nut", ["lifting", "wheel-retention"]],
+    ["replace the battery terminal lug", ["wheel-retention"]],
+    ["replace the exhaust camshaft", ["exhaust"]],
+    ["inspect the intake and exhaust valves", ["exhaust"]],
+    ["the battery is exhausted", ["exhaust"]],
+  ];
+
+  for (const [phrase, forbidden] of nearMisses) {
+    const ids = matchedSafetyRuleIds(phrase);
+
+    for (const ruleId of forbidden) {
+      assert.ok(!ids.includes(ruleId), `"${phrase}" matched ${ruleId}: ${JSON.stringify(ids)}`);
+    }
+  }
 });
 
 // ---- Regressions from the old substring matcher ----

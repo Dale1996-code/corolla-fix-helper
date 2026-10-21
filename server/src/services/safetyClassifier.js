@@ -62,6 +62,32 @@ const BRAKE_FRICTION_CUE = [
   `\\b(?:${BRAKE_SERVICE_VERB})\\s+(?:(?:${BRAKE_DETERMINER})\\s+)*(?:${BRAKE_FRICTION_NOUN})\\b`,
 ].join("|");
 
+// Tires coming off: the car is lifted, and every lug nut goes back on.
+//
+// A bare \btires?\b would make "check the tire pressure" and "inspect the tire
+// tread" lifting jobs. Same approach as BRAKE_FRICTION_CUE: a removal or
+// rotation verb with only determiners before the noun, a service noun after it
+// ("tire rotation"), or a spare or flat tire, which is only ever put on or taken
+// off. Inspection verbs are deliberately absent -- looking at a tire is not
+// taking it off.
+const TIRE_NOUN = "tires?|tyres?";
+const TIRE_SERVICE_VERB =
+  "rotate|rotating|remove|removing|replace|replacing|swap|swapping|change|changing|install|installing|mount|mounting|dismount|dismounting|take off|taking off|put on|putting on";
+const TIRE_DETERMINER = `the|my|a|an|both|all|two|four|new|old|worn|winter|summer|snow|${BRAKE_POSITION}`;
+
+const TIRE_SERVICE_CUE = [
+  `\\b(?:${TIRE_SERVICE_VERB})\\s+(?:(?:${TIRE_DETERMINER})\\s+)*(?:${TIRE_NOUN})\\b`,
+  `\\b(?:${TIRE_NOUN})\\s+(?:rotation|removal|change|swap|replacement|installation)\\b`,
+  `\\b(?:spare|flat)\\s+(?:${TIRE_NOUN})\\b`,
+].join("|");
+
+// Exhaust-system parts. "exhaust" alone is not enough: this engine's manuals
+// say "exhaust camshaft", "exhaust valve", and "exhaust VVT" far more often than
+// "muffler", and none of those is a hot pipe under the car.
+const EXHAUST_PART =
+  "systems?|pipes?|manifolds?|leaks?|hangers?|gaskets?|flanges?|clamps?|heat shields?|resonators?|tips?|fumes|work|repairs?";
+const ENGINE_EXHAUST_WORD = "cam\\w*|valves?|vvt\\w*|ports?|strokes?|gas|side";
+
 /**
  * Every rule currently blocks readiness: on a single-owner DIY car, each of
  * these hazards can injure the owner or someone on the road. `blocksReadiness`
@@ -123,12 +149,56 @@ export const SAFETY_RULES = [
     hazard: "vehicle lifting",
     // Only lifting THE VEHICLE. "valve lift" is a measurement, not a hazard,
     // and a "steering wheel" is not a road wheel that implies the car is up on
-    // stands -- hence the lookbehind rather than a bare \bwheels?\b.
-    pattern:
-      /\bjacks?\b|\bjacking\b|\bjack stands?\b|\b(lift|lifting|raise|raising|support|supporting)( the)? (vehicle|car)\b|\bunder the (vehicle|car)\b|\b(?<!steering )wheels?\b|\bwheel (bearing|hub)\b/,
+    // stands -- hence the lookbehinds rather than a bare \bwheels?\b.
+    //
+    // Tire, CV axle, and hub jobs are done with the car up and the wheel off
+    // (audit 1A-19). A hub needs a bearing, assembly, or position beside it, so
+    // a USB hub and a hub cap are not a road wheel's hub; "axle" cannot match
+    // inside "transaxle".
+    pattern: new RegExp(
+      [
+        "\\bjacks?\\b",
+        "\\bjacking\\b",
+        "\\bjack stands?\\b",
+        "\\b(lift|lifting|raise|raising|support|supporting)( the)? (vehicle|car)\\b",
+        "\\bunder the (vehicle|car)\\b",
+        "\\b(?<!steering )wheels?\\b",
+        "(?<!steering )\\bwheel (bearing|hub)\\b",
+        TIRE_SERVICE_CUE,
+        "\\baxles?\\b",
+        "\\bcv[ -]?(?:joints?|boots?)\\b",
+        "\\b(?:drive|half)[ -]?shafts?\\b",
+        "(?<!steering wheel )\\bhub (?:bearings?|assembl(?:y|ies)|units?|nuts?)\\b",
+        "\\b(?:axle|front|rear) hubs?\\b(?![ -]?caps?)",
+      ].join("|")
+    ),
     blocksReadiness: true,
     flag:
       "The vehicle must be lifted and supported. Use jack stands on level ground and never work under a vehicle held only by a jack. This is why the task cannot be marked Ready without acknowledging the risk.",
+  },
+  {
+    id: "wheel-retention",
+    system: null,
+    hazard: "wheel retention",
+    // The fasteners that hold a road wheel on, plus the jobs whose whole point
+    // is taking wheels off and putting them back. "wheel nut" excludes the
+    // steering wheel's retaining nut, and a bare "lug" is not enough: battery
+    // terminals and ground straps have lugs too.
+    //
+    // No lifting cue for the fasteners themselves: final lug-nut torque is done
+    // with the car back on the ground.
+    pattern: new RegExp(
+      [
+        "\\blug (?:nuts?|studs?|bolts?)\\b",
+        "(?<!steering )\\bwheel (?:nuts?|studs?|bolts?|locks?)\\b",
+        "(?<!steering )\\bwheel (?:rotation|removal|swap|change)\\b",
+        "\\brotat(?:e|es|ed|ing) (?:(?:the|all|four|my) )*wheels\\b",
+        TIRE_SERVICE_CUE,
+      ].join("|")
+    ),
+    blocksReadiness: true,
+    flag:
+      "Lug nuts and studs are all that hold a wheel on; an under-torqued, over-torqued, or cross-threaded one can let a wheel come off while driving. Support the car on jack stands while a wheel is off, tighten the lug nuts in a star pattern to the specified torque with a torque wrench, and re-check them after a short drive. This is why the task cannot be marked Ready without acknowledging the risk.",
   },
   {
     id: "suspension",
@@ -188,6 +258,27 @@ export const SAFETY_RULES = [
     blocksReadiness: true,
     flag:
       "A hot cooling system is pressurized and can spray scalding coolant. Let the engine cool fully before opening any cap or hose. This is why the task cannot be marked Ready without acknowledging the risk.",
+  },
+  {
+    id: "exhaust",
+    system: null,
+    hazard: "hot exhaust under the car",
+    // Parts of the exhaust system only; see EXHAUST_PART. "the exhaust" alone
+    // counts unless an engine-internal word follows it, and "exhausted" never
+    // matches \bexhaust\b. A resonator needs the word "exhaust" in front of it:
+    // this engine's air intake has one too.
+    pattern: new RegExp(
+      [
+        `\\bexhaust (?:${EXHAUST_PART})\\b`,
+        `\\bthe exhaust\\b(?! (?:${ENGINE_EXHAUST_WORD})\\b)`,
+        "\\bmufflers?\\b",
+        "\\b(?:catalytic|cat) converters?\\b",
+        "\\btail ?pipes?\\b",
+      ].join("|")
+    ),
+    blocksReadiness: true,
+    flag:
+      "Exhaust parts get hot enough to burn within minutes of the engine running, and most exhaust work is done under a raised car. Let the exhaust cool fully, support the car on jack stands, and wear eye protection against falling rust. An exhaust leak can let carbon monoxide into the cabin, so check for leaks before driving. This is why the task cannot be marked Ready without acknowledging the risk.",
   },
 ];
 
