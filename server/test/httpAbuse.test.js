@@ -40,7 +40,6 @@ const MINIMAL_PDF = Buffer.from("%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF
 
 test(
   "a cross-origin multipart upload is refused and creates nothing",
-  { todo: "2A-02" },
   async () => {
     const before = (await request(app).get("/api/documents")).body;
     const response = await request(app)
@@ -61,7 +60,6 @@ test(
 
 test(
   "a text/plain body to POST /api/notes is a JSON 4xx, never an HTML 500",
-  { todo: "1B-06" },
   async () => {
     const response = await request(app)
       .post("/api/notes")
@@ -73,7 +71,7 @@ test(
   }
 );
 
-test("malformed JSON is a JSON 400", { todo: "1B-06" }, async () => {
+test("malformed JSON is a JSON 400", async () => {
   const response = await request(app)
     .post("/api/notes")
     .set("Content-Type", "application/json")
@@ -83,21 +81,22 @@ test("malformed JSON is a JSON 400", { todo: "1B-06" }, async () => {
   assert.match(response.headers["content-type"] || "", /application\/json/);
 });
 
-test("an unknown /api route is a JSON 404", { todo: "1B-06" }, async () => {
+test("an unknown /api route is a JSON 404", async () => {
   const response = await request(app).get("/api/does-not-exist");
 
   assert.equal(response.status, 404);
   assert.match(response.headers["content-type"] || "", /application\/json/);
 });
 
-test("a request with a foreign Host header is refused", { todo: "2A-03" }, async () => {
+test("a request with a foreign Host header is refused", async () => {
   // DNS rebinding: a page on an attacker's domain re-resolves to 127.0.0.1 and
-  // then talks to the app as same-origin, carrying its own Host name.
+  // then talks to the app as same-origin, carrying its own Host name. 421
+  // Misdirected Request: this server does not answer to that name.
   const response = await request(app)
     .get("/api/documents")
     .set("Host", "rebind.attacker.example:4000");
 
-  assert.equal(response.status, 403, `foreign Host served with ${response.status}`);
+  assert.equal(response.status, 421, `foreign Host served with ${response.status}`);
 });
 
 test("an upload whose bytes are not a PDF is rejected", { todo: "2A-09" }, async () => {

@@ -119,7 +119,7 @@ When reporting or debugging a failure, capture the terminal output around the ti
 
 1. Confirm the backend is up (health check above).
 2. In dev, the Vite proxy forwards `/api` from 5173→4000 — if you changed `PORT`, update the proxy target in `client/vite.config.js` too.
-3. If CORS errors appear in the browser console, set `CORS_ORIGIN=http://localhost:5173` in `server\.env` and restart the backend.
+3. The app uses no CORS, so open it at its own address (`http://localhost:5173` in dev, `http://localhost:4000` after `npm start`). Status 421 means the `Host` is not on the allow-list (see `ALLOWED_HOSTS` in [environment-variables.md](environment-variables.md)). Status 403 on a save means the request did not come from the app's own page.
 
 ### Document upload fails
 

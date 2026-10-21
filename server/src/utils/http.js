@@ -69,6 +69,52 @@ export function parsePositiveIntArray(value) {
   return Array.from(uniqueIds);
 }
 
+// The names a browser on this machine uses for it. Exact names only: no other
+// 127.x address and no `*.localhost`, so the list stays what a person types.
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The hostname a `Host` header names, normalized for comparison: lowercase, no
+ * port, no trailing dot, IPv6 kept in brackets (`[::1]`).
+ *
+ * Returns `null` for anything that is not a bare `host[:port]`: userinfo
+ * (`localhost@evil.example`), a path (`evil.example/localhost`), a query, or a
+ * character no hostname may contain. Parsing goes through WHATWG `URL` so the
+ * result matches how a browser itself canonicalizes the name it sends.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function parseHostname(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  let url;
+
+  try {
+    url = new URL(`http://${value.trim()}`);
+  } catch {
+    return null;
+  }
+
+  if (url.username || url.password || url.pathname !== "/" || url.search) {
+    return null;
+  }
+
+  return url.hostname.replace(/\.$/, "") || null;
+}
+
+/**
+ * True when `hostname` (already normalized by `parseHostname`) is one of the
+ * names a browser on this machine uses for it.
+ *
+ * @param {string | null} hostname
+ */
+export function isLoopbackHostname(hostname) {
+  return typeof hostname === "string" && LOOPBACK_HOSTNAMES.has(hostname);
+}
+
 const EXACT_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 /**
@@ -90,10 +136,25 @@ export function isLoopbackAddress(address) {
   return /^127\.\d+\.\d+\.\d+$/.test(address) || /^::ffff:127\./.test(address);
 }
 
+// Headers a reverse proxy adds when it relays someone else's request.
+// `tailscale serve` always sets X-Forwarded-For and X-Forwarded-Host.
+const FORWARDING_HEADERS = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip"];
+
 /**
- * True when the request originates from the host machine itself. Reads the raw
- * socket peer address (not a client-supplied header) so it cannot be spoofed by
- * a proxy header — this app does not run behind a trusted proxy.
+ * True when the request carries any header a reverse proxy adds when it relays
+ * another device's request. The values are never trusted, only noticed.
+ */
+export function hasForwardingHeaders(request) {
+  const headers = request?.headers || {};
+  return FORWARDING_HEADERS.some((name) => headers[name] !== undefined);
+}
+
+/**
+ * True when the TCP peer is this machine. Reads the raw socket address, never
+ * a client-supplied header, so it cannot be spoofed. It is not proof the
+ * request started here: a proxy on this machine (such as `tailscale serve`)
+ * is a loopback peer for every device it relays, which is why host-only
+ * routes also check `hasForwardingHeaders` and the Host name.
  */
 export function isLoopbackRequest(request) {
   return isLoopbackAddress(

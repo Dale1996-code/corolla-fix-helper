@@ -15,7 +15,12 @@ import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import { getVehicle } from "../services/vehicleService.js";
 import { normalizeText } from "../utils/text.js";
-import { isLoopbackRequest } from "../utils/http.js";
+import {
+  hasForwardingHeaders,
+  isLoopbackHostname,
+  isLoopbackRequest,
+  parseHostname,
+} from "../utils/http.js";
 
 export const settingsRouter = Router();
 
@@ -23,10 +28,22 @@ export const settingsRouter = Router();
 // the host machine itself so it is never downloadable from a phone or another
 // device even when the app is deliberately run in network mode — pull backups
 // from the machine that runs the app.
+//
+// A loopback socket alone does not prove that (2A-08): a proxy on this machine,
+// such as `tailscale serve` or the Vite dev server started with --host, is a
+// loopback peer for every device it relays. So the request must also carry no
+// proxy forwarding headers and be addressed to a loopback name (localhost,
+// 127.0.0.1, [::1]) rather than a LAN or MagicDNS name.
 export function requireLoopback(request, response, next) {
-  if (!isLoopbackRequest(request)) {
+  if (
+    !isLoopbackRequest(request) ||
+    hasForwardingHeaders(request) ||
+    !isLoopbackHostname(parseHostname(request.headers?.host))
+  ) {
     response.status(403).json({
-      error: "Backups can only be downloaded from the host machine (localhost).",
+      error:
+        "Backups can only be downloaded on the host machine itself, at a localhost " +
+        "address, not from another device or through a proxy such as tailscale serve.",
     });
     return;
   }

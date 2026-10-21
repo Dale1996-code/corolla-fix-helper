@@ -6,15 +6,19 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 
 - **Base URL:** `http://localhost:4000` (dev frontend on `:5173` proxies `/api` there automatically).
 - **No authentication.** Anyone who can reach the server can call everything — see the warning in the [README](../README.md#current-limits).
-- **Requests/responses are JSON** unless noted (uploads are `multipart/form-data`; file/backup routes stream binary; the Repair Planner streams Server-Sent Events).
-- **Errors** are JSON with a single field and an appropriate status code:
+- **Request gate (no login, but not open to every web page).** `server/src/middleware/requestGuard.js` checks every request before any route runs:
+  - **Host allow-list → `421`.** The `Host` header must name this machine: `localhost`, `127.0.0.1` or `[::1]` on any port; with `NETWORK_MODE=1`, also its LAN and Tailscale addresses, its Tailscale MagicDNS name, and any name in `ALLOWED_HOSTS` (see [environment-variables.md](environment-variables.md)). Hostnames are compared, never ports. This is what stops DNS rebinding.
+  - **Same-origin writes → `403`.** Every `POST`, `PUT`, `PATCH` and `DELETE` under `/api`, plus `GET /api/settings/backup-export` and `GET /api/symptoms/:id/suggested-procedures`, must come from the app's own pages: `Sec-Fetch-Site` must be `same-origin` or `none` when the browser sends it, otherwise `Origin` must equal the request's own origin (port included). A client that sends neither header is not a browser (curl, scripts, the smoke test) and is allowed: browsers attach `Origin` to every write, so no web page can make such a request.
+  - **No CORS.** No origin is ever granted cross-origin access. The client uses relative `/api` URLs, and in dev the Vite proxy makes them same-origin.
+- **Requests/responses are JSON** unless noted (uploads are `multipart/form-data`; file/backup routes stream binary; the Repair Planner streams Server-Sent Events). A write that carries a body must send `Content-Type: application/json` (or `multipart/form-data` on the upload routes). A body-less write is fine and reads as `{}`. JSON bodies may be up to **1 MB**.
+- **Errors** are always JSON with a single field and an appropriate status code, including errors no route handles itself (malformed JSON, an oversized body, an unknown `/api` path, an unexpected exception):
 
   ```json
   { "error": "Human-readable message." }
   ```
 
-  `400` invalid input · `404` not found · `415` wrong media type (attachments) · `429` rate limited · `500` server failure.
-- **Rate limits:** `POST /api/ask` and `POST /api/repair-plan` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. Everything else is unlimited, including `POST /api/repair-plan/:runId/safety-acknowledgment`, which makes no model call.
+  `400` invalid input or malformed JSON · `403` cross-site request, or a backup export from anywhere but the host machine · `404` not found, including any `/api` path no route matches · `413` body too large · `415` body not JSON (or, on attachments, not a JPEG/PNG/WebP) · `421` `Host` not on the allow-list · `429` rate limited · `500` server failure, with a generic message (the detail goes to the server console only).
+- **Rate limits:** `POST /api/ask`, `POST /api/repair-plan` and `GET /api/symptoms/:id/suggested-procedures` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. A request the gate refuses never counts against it. Everything else is unlimited, including `POST /api/repair-plan/:runId/safety-acknowledgment`, which makes no model call.
 - **PowerShell examples:** plain `GET`/download requests use `curl.exe` (the real curl, not the PowerShell alias). Requests with a **JSON body** use `Invoke-RestMethod` instead. This is deliberate: passing inline JSON to `curl.exe` is mangled by Windows PowerShell 5.1's parser — it strips the double quotes before curl ever sees them (a literal, a `$variable`, and `ConvertTo-Json` output all break the same way), so the server receives invalid JSON and returns `400`. `Invoke-RestMethod` hands its `-Body` to the request in-process, so the JSON survives intact in both Windows PowerShell 5.1 and PowerShell 7. Multipart uploads (`-F`) still use `curl.exe`; if a field value contains spaces, run those from PowerShell 7 or a POSIX shell to avoid the same 5.1 quoting issue.
 
 ## Quick Endpoint List
@@ -569,7 +573,7 @@ Allowed values — `confidence`: `low` | `medium` (default) | `high`; `status`: 
 | `POST /api/symptoms` | body: `title` (required), `description`, `system`, `suspectedCauses`, `notes`, `confidence`, `status`, `linkedDocumentIds` (array). `201` → `{ "message", "symptom" }` |
 | `PUT /api/symptoms/:id` | same fields; partial update |
 | `PUT /api/symptoms/:id/procedures` | body `{ "procedureIds": [1, 2] }` — **replaces** the whole linked set; returns the updated symptom |
-| `GET /api/symptoms/:id/suggested-procedures` | ranks existing procedures for this symptom, grounded in retrieved chunks. Response carries `status` (`answered`/`not_found`), `aiConfigured`, and `mode` so the UI can show whether ranking was AI-assisted or the deterministic keyword/system fallback (no key needed) |
+| `GET /api/symptoms/:id/suggested-procedures` | ranks existing procedures for this symptom, grounded in retrieved chunks. Response carries `status` (`answered`/`not_found`), `aiConfigured`, and `mode` so the UI can show whether ranking was AI-assisted or the deterministic keyword/system fallback (no key needed). Shares the AI rate-limit window (`429`), and as a side-effect GET it refuses a cross-site request (`403`) |
 | `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments |
 
 ```powershell
@@ -861,8 +865,10 @@ Body: `commonSystems`, `documentTypes` — the option lists offered on the uploa
 
 Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire uploads tree) as a download. `500` with `{ "error": "Could not create backup export archive." }` if `tar` fails — see the [runbook](runbook.md#backup-export-fails). Restore is a CLI operation, not an API call ([backup-restore.md](backup-restore.md)).
 
+Host machine only, even with `NETWORK_MODE=1` (`requireLoopback` in `routes/settings.js`). `403` unless all three hold: the connection comes from this machine, the request carries no proxy forwarding header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`), and its `Host` is `localhost`, `127.0.0.1` or `[::1]`. The last two refuse a request relayed by a proxy on this machine, such as `tailscale serve` or a Vite dev server started with `--host`. Download backups on the laptop itself, at `http://localhost:4000` (or `:5173` in dev). It is also a side-effect GET, so a cross-site request gets `403` too.
+
 ---
 
 ## Keeping This Document Honest
 
-This reference was written against the route files on 2026-07-02 and last updated 2026-08-07 (`GET /api/settings` now returns the `ai` status block and `backupExport.restore`). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.
+This reference was written against the route files on 2026-07-02 and last updated 2026-10-18 (the request gate: Host allow-list, same-origin writes, the JSON body contract and error shapes, and the backup export's proxy refusal). When routes change, update this file in the same PR — the route files in `server/src/routes/` are always the source of truth.

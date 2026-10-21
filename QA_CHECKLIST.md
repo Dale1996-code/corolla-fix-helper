@@ -346,3 +346,50 @@ Check:
 - Browser refresh works on a frontend route such as `/documents`.
 
 For cloud deployment checks, use `docs/gcp-deployment.md`. No actual deployment is assumed by this checklist.
+
+## 17. Phone Access And The Request Gate
+
+Run this after any change to `server/src/middleware/requestGuard.js`, `app.js`, or `requireLoopback`. Automated tests cover the same Host values with stand-ins, but only a real phone proves the browser sends what they assume. Setup: [docs/mobile-access.md](docs/mobile-access.md).
+
+**A. Phone over Wi-Fi (`NETWORK_MODE=1`).**
+
+```powershell
+npm run build
+$env:NETWORK_MODE = "1"; npm start
+```
+
+On the iPhone, on the same Wi-Fi, open the banner's "On your phone" address (for example `http://192.168.1.42:4000`).
+
+Check:
+
+- The app loads and every page opens.
+- Upload a small PDF on Documents: it uploads and extracts.
+- Ask AI: ask one question and get an answer, or "AI not configured" with no key.
+- Create a note, then edit and delete it.
+- Settings → **Export backup** on the phone is refused with a message about the host machine (403).
+
+**B. Phone through `tailscale serve`.** Same server, plus `tailscale serve --bg 4000` once. On the iPhone, with Tailscale on, open the banner's "Install on iPhone from" address (`https://<machine>.<tailnet>.ts.net`), or the Home Screen app installed from it.
+
+Check:
+
+- The same four steps as A work: pages, PDF upload, Ask, note create/edit/delete.
+- Export backup is refused (403): Serve relays the phone from localhost, and the app still tells it apart.
+- If the phone shows "This server does not answer to …" (421), add the name it names to `ALLOWED_HOSTS` in `server\.env`, restart, and note it here, since the banner should have covered it.
+
+**C. On the laptop.**
+
+- Export backup from `http://localhost:4000/settings` downloads a `.tar.gz`.
+- `npm run dev`: the app at `http://localhost:5173` can still upload a PDF, save a note, and export a backup (through the Vite proxy).
+- A foreign Host is refused with 421:
+
+  ```powershell
+  curl.exe -i -H "Host: rebind.example" http://localhost:4000/api/health
+  ```
+
+- A cross-site write is refused with 403 and changes nothing:
+
+  ```powershell
+  curl.exe -i -X POST -H "Origin: https://evil.example" -H "Sec-Fetch-Site: cross-site" http://localhost:4000/api/documents/1/extract
+  ```
+
+- With `NETWORK_MODE` unset, the phone's Wi-Fi and Serve addresses are refused (connection refused, or 421 through Serve).

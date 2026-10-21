@@ -94,7 +94,7 @@ test("requireLoopback lets a request from the host machine through", () => {
   const response = new FakeResponse();
 
   requireLoopback(
-    { socket: { remoteAddress: "127.0.0.1" } },
+    { socket: { remoteAddress: "127.0.0.1" }, headers: { host: "localhost:4000" } },
     response,
     () => {
       nextCalled = true;

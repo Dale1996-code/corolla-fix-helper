@@ -39,7 +39,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 - Health check: `http://localhost:4000/api/health`
 - Production-style local start is `npm run build` then `npm start`. `server/src/index.js` prints `localhost` plus best-effort phone URLs for same-Wi-Fi, Tailscale, and HTTPS `tailscale serve` install access when those are detectable.
 - Use `QA_CHECKLIST.md` for manual verification after changes.
-- In dev, `client/vite.config.js` proxies `/api` to `http://localhost:4000`; if the backend `PORT` changes, update the Vite proxy target and `CORS_ORIGIN` together.
+- In dev, `client/vite.config.js` proxies `/api` to `http://localhost:4000`; if the backend `PORT` changes, update the Vite proxy target too. The proxy keeps `Host` and `Origin` as `localhost:5173` (no `changeOrigin`), which the request gate accepts; there is no CORS middleware.
 - For PowerShell API examples with JSON bodies, prefer `Invoke-RestMethod`; `docs/api.md` documents that Windows PowerShell 5.1 can mangle inline JSON passed to `curl.exe`. Plain GET/download requests and multipart uploads still use `curl.exe`.
 - On Windows, Vite/Vitest/build commands can fail inside the sandbox with an esbuild `Access is denied` error. Rerun outside the sandbox before treating that as a code failure.
 - `npm run build` writes generated frontend output under `client/dist`; do not hand-edit generated files.
@@ -119,7 +119,7 @@ Run these from `C:\Users\daleb\source\corolla-fix-helper`:
 ## Environment And AI Notes
 
 - Keep real secrets out of docs and commits. Put local secrets in `server/.env` or deployment environment variables.
-- `PORT`, `CLIENT_PORT`, `CORS_ORIGIN`, `DATABASE_FILE`, `UPLOADS_DIR`, `MAX_UPLOAD_SIZE_MB`, OpenAI model settings, reranker settings, and OCR settings are read in `server/src/config.js`; `.env.example` and `docs/environment-variables.md` are the current reference for placeholders and defaults.
+- `PORT`, `CLIENT_PORT`, `NETWORK_MODE`, `ALLOWED_HOSTS`, `DATABASE_FILE`, `UPLOADS_DIR`, `MAX_UPLOAD_SIZE_MB`, OpenAI model settings, reranker settings, and OCR settings are read in `server/src/config.js`; `.env.example` and `docs/environment-variables.md` are the current reference for placeholders and defaults.
 - `OPENAI_API_KEY` enables generated Ask AI answers, Repair Planner model calls, AI-assisted procedure suggestions, optional reranking, embedding backfill, and answer-quality evals.
 - `OPENAI_ANSWER_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, and `OPENAI_EMBEDDING_BATCH_SIZE` are read by server config. `OPENAI_MODEL` is still accepted as an older fallback for the answer model.
 - `OPENAI_VISION_MODEL` is used only when Ask includes a saved image; when unset, it falls back to `OPENAI_ANSWER_MODEL`.

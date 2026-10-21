@@ -40,15 +40,14 @@ If a port is busy, stop the other process or change the port in `server\.env`.
 
 ## Backend Starts But Frontend Cannot Call API
 
-Check `CORS_ORIGIN` in `server\.env`.
+The app uses no CORS: the frontend calls relative `/api` URLs, and in dev the Vite proxy in `client/vite.config.js` forwards them from port 5173 to the backend on 4000. Check:
 
-For normal local dev, use:
+1. The backend is running: `http://localhost:4000/api/health` returns OK.
+2. If you changed `PORT`, the Vite proxy target in `client/vite.config.js` matches it.
+3. Open the app at `http://localhost:5173` (dev) or `http://localhost:4000` (after `npm start`), not as a file or from another port. A page on any other address is refused (status 403), which is how other websites are kept from using the app.
+4. A "This server does not answer to …" error (status 421) means the browser used a name the app doesn't know is this computer. Use `localhost`, or see `ALLOWED_HOSTS` in `docs/environment-variables.md`.
 
-```env
-CORS_ORIGIN=http://localhost:5173
-```
-
-Restart the backend after changing env values.
+A `CORS_ORIGIN` line left in an old `server\.env` does nothing and can be deleted.
 
 ## Data Disappeared
 
