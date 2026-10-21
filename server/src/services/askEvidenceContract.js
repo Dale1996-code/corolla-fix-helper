@@ -151,10 +151,15 @@ function readStringArray(value) {
  * Validate the parsed model reply.
  *
  * @param {any} payload
+ * Claims past MAX_ITEMS are not checked, but they are counted: dropping them
+ * silently let an answer whose last claims were never examined still read as
+ * fully `answered` (1A-14). verifyEvidence turns the count into a gap.
+ *
  * @returns {{ ok: boolean, reason?: string, value?: {
  *   documentSupported: Array<{claim: string, sourceId: string, evidenceQuote: string}>,
  *   generalGuidance: string[],
  *   gaps: string[],
+ *   droppedClaimCount?: number,
  * } }}
  */
 export function validateEvidencePayload(payload) {
@@ -221,6 +226,7 @@ export function validateEvidencePayload(payload) {
       documentSupported,
       generalGuidance: readStringArray(payload.generalGuidance),
       gaps: readStringArray(payload.gaps),
+      droppedClaimCount: Math.max(0, payload.documentSupported.length - MAX_ITEMS),
     },
   };
 }
@@ -245,6 +251,45 @@ function collapseForMatch(text) {
     .trim();
 }
 
+const LETTER = /\p{L}/u;
+const DIGIT = /\d/;
+const DECIMAL_MARK = /[.,]/;
+
+/** Does a quote placed at `at` start on a token boundary of the chunk? */
+function startsOnBoundary(haystack, at, needle) {
+  const previous = haystack[at - 1] || "";
+  const beforePrevious = haystack[at - 2] || "";
+  const startsNumber =
+    DIGIT.test(needle[0]) || (DECIMAL_MARK.test(needle[0]) && DIGIT.test(needle[1] || ""));
+
+  if (LETTER.test(needle[0]) && LETTER.test(previous)) {
+    return false;
+  }
+
+  return !(
+    startsNumber &&
+    (DIGIT.test(previous) || (DECIMAL_MARK.test(previous) && DIGIT.test(beforePrevious)))
+  );
+}
+
+/** Does a quote ending just before `end` end on a token boundary of the chunk? */
+function endsOnBoundary(haystack, end, needle) {
+  const last = needle[needle.length - 1];
+  const beforeLast = needle[needle.length - 2] || "";
+  const next = haystack[end] || "";
+  const afterNext = haystack[end + 1] || "";
+
+  if (LETTER.test(last) && LETTER.test(next)) {
+    return false;
+  }
+
+  if (DIGIT.test(last) && (DIGIT.test(next) || (DECIMAL_MARK.test(next) && DIGIT.test(afterNext)))) {
+    return false;
+  }
+
+  return !(DECIMAL_MARK.test(last) && DIGIT.test(beforeLast) && DIGIT.test(next));
+}
+
 /**
  * Is the quote genuinely present in the source chunk?
  *
@@ -252,6 +297,13 @@ function collapseForMatch(text) {
  * spacing, but otherwise strict: no paraphrase passes. This is checkable
  * server-side with no model cooperation, which is what makes it worth more than
  * a chunk id (a chunk id proves retrieval, not support).
+ *
+ * The quote must also start and end on token boundaries: never inside a word,
+ * and never inside a number. A raw substring let "Wheel lug nut torque 10" be
+ * "quoted" from "torque 103 N*m" and "5 N*m" from "25 N*m" (1A-03). Every
+ * occurrence is tried, so a cut match earlier in the chunk cannot hide a whole
+ * one later. Shared with the Repair Planner, which uses it for both of its
+ * containment checks (quote in source, claim in quote).
  */
 export function quoteAppearsInChunk(quote, chunkText) {
   const needle = normalizeForMatch(quote);
@@ -261,7 +313,16 @@ export function quoteAppearsInChunk(quote, chunkText) {
     return false;
   }
 
-  return haystack.includes(needle);
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (
+      startsOnBoundary(haystack, at, needle) &&
+      endsOnBoundary(haystack, at + needle.length, needle)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,22 +338,111 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // ordinals pass untouched -- gating those would mangle ordinary procedure prose
 // and push the model toward vaguer, less useful text.
 
+// A unit this pattern does not know is a specification the verifier cannot
+// check, so a spelling missing here once meant a figure passed unexamined: "50
+// ft-lbs" against a printed 103 N*m, "5.5 L" or "5.5 qts" against 4.2 liters
+// (3B-01). The torque spellings cover the manuals' own "ft.*lbf" and "in.*lbf"
+// (two separators) and the owner's "ft-lbs", "ft lbs", and "lb-ft". US and
+// Imperial quarts, pints, and gallons are different sizes, so "Imp." stays part
+// of the unit; a bare "qt" is the US quart. A bare "L" is matched apart from
+// this case-insensitive pattern -- see VOLUME_SYMBOL_REGEX.
+//
+// "kgf/cm2", "kgf/cm²", and "kgf*cm2" are a PRESSURE (kilogram-force per square
+// centimetre), tried before the "kgf*cm" torque spelling they start with. The
+// trailing "2" once defeated the unit's word boundary, so the ASCII forms were
+// not detected at all, and "kgf/cm²" was read as kgf*cm and filed with torque
+// (1A-13). A "kgf/cm" with no "2" can only be a pressure misprinted.
+//
+// Also detected since 1A-04: inches ("0.906 in." -- the abbreviation needs its
+// period or closing punctuation, so the preposition in "2 in the bracket" is
+// never a length), miles and kilometres, a turn angle ("an additional 90°", a
+// degree sign with no C or F after it), percentages, kilovolts, and milliohms
+// and megohms. Each of these let a wrong figure pass unchecked.
 const UNIT_PATTERN =
-  "n\\s*[·.*\\-]?\\s*m|nm|newton\\s*met(?:er|re)s?|" +
-  "ft\\s*[-·.*]?\\s*lbf?|lb\\s*[-·.*]?\\s*ft|foot\\s*pounds?|" +
-  "in\\s*[-·.*]?\\s*lbf?|inch\\s*pounds?|" +
-  "kgf\\s*[-·.*\\/]?\\s*cm|kgf\\s*[-·.*\\/]?\\s*m|kg\\s*[-·.*]?\\s*cm|" +
+  "n\\s*[·.*\\-]?\\s*m|nm|newton[-\\s]*met(?:er|re)s?|" +
+  "ft\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]?\\s*ft|foot[-\\s]*pounds?|" +
+  "in\\.?\\s*[-·.*]?\\s*lb[fs]?|lb[fs]?\\s*[-·.*]\\s*in|inch[-\\s]*pounds?|" +
+  "kgf?\\s*[-·.*\\/]?\\s*cm[2²]|kgf\\s*\\/\\s*cm|" +
+  "kgf\\s*[-·.*]?\\s*cm(?![2²])|kgf\\s*[-·.*]?\\s*m|kg\\s*[-·.*]?\\s*cm(?![2²])|" +
   "kpa|mpa|psi|bar|" +
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
-  "lit(?:er|re)s?|ml|millilit(?:er|re)s?|qt|quarts?|pints?|gal(?:lons?)?|fl\\s*oz|" +
-  "ohms?|kilohms?|k\\s*ohms?|Ω|" +
-  "volts?|millivolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
-  "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|" +
+  "inch(?:es)?|in\\.|in(?=[)\\],;:]|$)|" +
+  "lit(?:er|re)s?|ml|millilit(?:er|re)s?|" +
+  "imp(?:\\.|erial)?\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
+  "(?:US\\s*)?(?:qts?|quarts?|pints?|gal(?:lons?)?)|fl\\s*oz|" +
+  "miles?|kilomet(?:er|re)s?|km\\s*\\/\\s*h|kph|mph|km|" +
+  "ohms?|kilohms?|k\\s*ohms?|milliohms?|meg(?:a)?ohms?|Ω(?=[A-Za-z0-9_])|" +
+  "volts?|millivolts?|kilovolts?|amps?|amperes?|milliamp(?:ere)?s?|" +
+  "°\\s*[cf]|deg(?:rees)?\\s*[cf]\\b|(?:°\\s*|deg(?:rees)?\\s*)?(?:celsius|fahrenheit)|" +
+  "°|deg(?:rees)?|%|percent|" +
   "rpm|hz|kilohertz|khz";
 
-/** number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts" */
-const SPEC_NUMBER_REGEX = new RegExp(
-  `(\\d+(?:[.,]\\d+)?)\\s*(?:${UNIT_PATTERN})\\b`,
+// One number as these manuals print it, read as a whole token. A comma followed
+// by groups of exactly three digits is a thousands separator ("1,500 kPa",
+// "1,050 kgf*cm", "100,000 miles"); a comma followed by one or two digits and
+// nothing more is a decimal mark ("12,6 V"). Reading every comma as a decimal
+// point made "1,500" the number 1.5, so a wrong 1,000 kPa looked close to it and
+// a correct "1500" was rejected against it. Order matters: the grouped form is
+// tried first, and a grouped or comma-decimal number may not run on into
+// another digit.
+const NUMBER_PATTERN = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)|\d+,\d{1,2}(?!\d|,\d)|\d+(?:\.\d+)?)`;
+
+// Refuses a start inside a number, so a scan that failed on "1,5000" cannot
+// pick up the "5000" behind the comma, or the "5" of "1.5".
+const NOT_INSIDE_NUMBER = String.raw`(?<!\d|\d[.,])`;
+
+/** The value of one NUMBER_PATTERN token. */
+function parseNumber(text) {
+  const raw = String(text);
+
+  return Number(
+    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(raw) ? raw.replace(/,/g, "") : raw.replace(",", ".")
+  );
+}
+
+// A minus sign belongs to the value only when it stands in front of it -- at the
+// start, or after a space, bracket, or colon. Between two digits ("9-16V") it
+// separates a range, and after a letter ("B-12V") it joins an identifier. A
+// dropped sign let "-5 V" pass against a printed "5 V".
+const signGroup = (name) => String.raw`(?:(?<=^|[\s(\[:])(?<${name}>[-−]))?`;
+
+// What may stand between a range's two ends: "9-16V" (a bare hyphen, so a dash
+// used as punctuation, "bolt 1 - 37 N*m", is not read as a range), an en dash,
+// em dash, or tilde with or without spaces, or the word "to".
+const RANGE_SEPARATOR = String.raw`(?:-|\s*[–—~]\s*|\s+(?:to|TO|To)\s+)`;
+
+// The low end of a range may not continue an identifier ("M10-1.25 mm").
+const RANGE_LOW_GUARD = String.raw`(?<![A-Za-z0-9_]|\d[.,])`;
+
+/**
+ * One specification regex: a value and its unit, optionally preceded by the
+ * low end of a range that unit also applies to. Until both ends were read, only
+ * the number touching the unit was checked: a wrong lower bound ("5 to 14 V"
+ * against "10.5 to 14 V") passed, and a correct one ("80 °C" from "80 to 84
+ * °C") was rejected because the printed 80 was never read as a temperature.
+ * Because one match spans the whole range, redaction removes both ends at once.
+ */
+function buildSpecRegex(valueGuard, unitPattern, unitGuard, flags) {
+  return new RegExp(
+    String.raw`(?:${RANGE_LOW_GUARD}${signGroup("lowSign")}(?<low>${NUMBER_PATTERN})${RANGE_SEPARATOR}` +
+      String.raw`|\b[Bb]etween\s+${signGroup("betweenSign")}(?<betweenLow>${NUMBER_PATTERN})\s+and\s+)?` +
+      String.raw`${valueGuard}${signGroup("sign")}(?<value>${NUMBER_PATTERN})(?<gap>\s*)(?<unit>${unitPattern})${unitGuard}`,
+    flags
+  );
+}
+
+/**
+ * number + unit, e.g. "37 Nm", "27 ft-lbf", "0.8 mm", "13.5 volts". The unit
+ * may not run on into a letter, digit, or underscore. That is what a word
+ * boundary did for units ending in a letter, but a boundary can never follow a
+ * unit ending in "²", "." or "°", so those need this lookahead instead. The "Ω"
+ * alternative keeps its old reach: only when a word character follows it, which
+ * ELECTRICAL_SYMBOL_REGEX refuses, so the two never claim the same text.
+ */
+const SPEC_NUMBER_REGEX = buildSpecRegex(
+  NOT_INSIDE_NUMBER,
+  `(?:${UNIT_PATTERN})`,
+  "(?![A-Za-z0-9_])",
   "gi"
 );
 
@@ -310,14 +460,17 @@ const SPEC_NUMBER_REGEX = new RegExp(
 // a decimal separator, so "M1.5V" does not yield a partial "5V". A preceding
 // hyphen is deliberately NOT refused: in "9-16V" or "-9 V" it separates a range
 // or signs a value, and hiding that value would let a wrong claim pass with
-// nothing to check. The cost is that "B-12V" still reads as "12 V" -- an extra
-// rejection, never a false verification. The optional whitespace covers a
-// normal space, a nonbreaking space, or none, and the ohm symbol arrives as
-// either U+03A9 (Greek capital omega) or U+2126 (the ohm sign), which look
-// identical on the page.
+// nothing to check (buildSpecRegex reads both). The cost is that "B-12V" still
+// reads as "12 V" -- an extra rejection, never a false verification. The
+// optional whitespace covers a normal space, a nonbreaking space, or none, and
+// the ohm symbol arrives as either U+03A9 (Greek capital omega) or U+2126 (the
+// ohm sign), which look identical on the page.
 const OHM_SYMBOLS = String.fromCharCode(0x03a9, 0x2126);
-const ELECTRICAL_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mV|V|k\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}])(?![A-Za-z0-9_-])`,
+const SYMBOL_VALUE_GUARD = String.raw`(?<![A-Za-z0-9_]|\d[.,])`;
+const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
+  SYMBOL_VALUE_GUARD,
+  String.raw`mV|kV|V|k\s*[${OHM_SYMBOLS}]|M\s*[${OHM_SYMBOLS}]|m\s*[${OHM_SYMBOLS}]|[${OHM_SYMBOLS}]`,
+  "(?![A-Za-z0-9_-])",
   "g"
 );
 
@@ -328,10 +481,41 @@ const ELECTRICAL_SYMBOL_REGEX = new RegExp(
 // exactly as they were. A step number before a flowchart branch label ("GO TO
 // STEP 10 A") still reads as a current: in a claim that is an extra rejection,
 // and in a quote it can only ever meet a current claim (see specIsPresent).
-const CURRENT_SYMBOL_REGEX = new RegExp(
-  String.raw`(?<![A-Za-z0-9_]|\d[.,])(\d+(?:[.,]\d+)?)\s*(mA|A)(?![A-Za-z0-9_/-])`,
+const CURRENT_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "mA|A", "(?![A-Za-z0-9_/-])", "g");
+
+// An engine designation names an engine, not a capacity: "L4 1.8L 2ZR-FE",
+// "L4-1.8L (2ZR-FE)", "(2.4L: TOP OF ENGINE)". Every glued one-decimal litre
+// figure in the corpus is one of the two engines (3,370 "1.8L" and 162 "2.4L",
+// and no capacity written that way), and the model copies the vehicle
+// descriptor into its claims. Read as litres, it rejected those claims and
+// redacted the descriptor out of the model's gaps. Only the glued form standing
+// next to an engine name is a designation: after a cylinder layout, before an
+// engine code, or opening a bracketed variant label. "4.7 L of oil" and a bare
+// "4.2L" are still volumes.
+const GLUED_DISPLACEMENT = String.raw`\d\.\dL(?![A-Za-z0-9_])`;
+const ENGINE_DESIGNATION_SOURCE =
+  String.raw`(?:(?<=\b[LIV]\d[-\s])|(?<=\()|(?=${GLUED_DISPLACEMENT}\s*\(?\d[A-Z]{2,3}-[A-Z]{2,3}))` +
+  GLUED_DISPLACEMENT;
+const ENGINE_DESIGNATION_REGEX = new RegExp(ENGINE_DESIGNATION_SOURCE, "g");
+
+// The litre symbol, "4.2 L", matched case-sensitively like the electrical
+// symbols: a lowercase "l" after a number is too easily a typo for "1", and a
+// following letter, hyphen, or slash is refused so "2 L-shaped brackets" and
+// "LH" stay words. An engine designation is never read as a volume.
+const VOLUME_SYMBOL_REGEX = buildSpecRegex(
+  `${SYMBOL_VALUE_GUARD}(?!${ENGINE_DESIGNATION_SOURCE})`,
+  "L",
+  "(?![A-Za-z0-9_/-])",
   "g"
 );
+
+/** Every unit-bearing specification pattern; they never claim the same text. */
+const SPEC_REGEXES = [
+  SPEC_NUMBER_REGEX,
+  ELECTRICAL_SYMBOL_REGEX,
+  CURRENT_SYMBOL_REGEX,
+  VOLUME_SYMBOL_REGEX,
+];
 
 // The electrical units known in both printed forms. `symbol` is compared
 // case-sensitively for the reason above; `spelled` keeps exactly the
@@ -339,11 +523,24 @@ const CURRENT_SYMBOL_REGEX = new RegExp(
 const ELECTRICAL_UNITS = [
   { name: "millivolt", noun: "voltage", symbol: /^mV$/, spelled: /^millivolts?$/i },
   { name: "volt", noun: "voltage", symbol: /^V$/, spelled: /^volts?$/i },
+  { name: "kilovolt", noun: "voltage", symbol: /^kV$/, spelled: /^kilovolts?$/i },
   {
     name: "kilohm",
     noun: "resistance",
     symbol: new RegExp(String.raw`^k\s*[${OHM_SYMBOLS}]$`),
     spelled: /^(kilohms?|k\s*ohms?)$/i,
+  },
+  {
+    name: "megohm",
+    noun: "resistance",
+    symbol: new RegExp(String.raw`^M\s*[${OHM_SYMBOLS}]$`),
+    spelled: /^meg(a)?ohms?$/i,
+  },
+  {
+    name: "milliohm",
+    noun: "resistance",
+    symbol: new RegExp(String.raw`^m\s*[${OHM_SYMBOLS}]$`),
+    spelled: /^milliohms?$/i,
   },
   {
     name: "ohm",
@@ -366,8 +563,46 @@ function findElectricalUnit(unit) {
 /** Viscosity grades: 5W-30, 0W20. A grade is a spec even without a unit. */
 const VISCOSITY_REGEX = /\b\d+\s*w\s*[-–]?\s*\d+\b/gi;
 
+/** A signed NUMBER_PATTERN token's value. */
+function signedValue(sign, text) {
+  const value = parseNumber(text);
+
+  return sign ? -value : value;
+}
+
 /**
- * Numeric specifications asserted by a piece of text.
+ * The specifications one buildSpecRegex match states: its value, and the low
+ * end of its range when it has one, in the same unit.
+ */
+function specsFromMatch(match) {
+  const { groups } = match;
+  const unit = groups.unit.trim();
+  const specs = [];
+  const lowText = groups.low ?? groups.betweenLow;
+
+  if (lowText !== undefined) {
+    const lowSign = groups.low !== undefined ? groups.lowSign : groups.betweenSign;
+
+    specs.push({
+      value: signedValue(lowSign, lowText),
+      raw: `${lowSign || ""}${lowText}${groups.gap}${groups.unit}`.trim(),
+      unit,
+      index: match.index,
+    });
+  }
+
+  specs.push({
+    value: signedValue(groups.sign, groups.value),
+    raw: `${groups.sign || ""}${groups.value}${groups.gap}${groups.unit}`.trim(),
+    unit,
+    index: match.index + (lowText === undefined ? 0 : 1),
+  });
+
+  return specs.filter((spec) => Number.isFinite(spec.value));
+}
+
+/**
+ * Numeric specifications asserted by a piece of text, in the order they appear.
  *
  * @param {string} text
  * @returns {Array<{ value: number, raw: string, unit: string }>}
@@ -376,113 +611,89 @@ export function extractSpecNumbers(text) {
   const source = String(text || "");
   const found = [];
 
-  for (const match of source.matchAll(SPEC_NUMBER_REGEX)) {
-    const value = Number(String(match[1]).replace(",", "."));
-
-    if (Number.isFinite(value)) {
-      found.push({ value, raw: match[0].trim(), unit: match[0].replace(match[1], "").trim() });
-    }
-  }
-
-  for (const regex of [ELECTRICAL_SYMBOL_REGEX, CURRENT_SYMBOL_REGEX]) {
+  for (const regex of SPEC_REGEXES) {
     for (const match of source.matchAll(regex)) {
-      const value = Number(String(match[1]).replace(",", "."));
-
-      if (Number.isFinite(value)) {
-        found.push({ value, raw: match[0].trim(), unit: match[2] });
-      }
+      found.push(...specsFromMatch(match));
     }
   }
 
   for (const match of source.matchAll(VISCOSITY_REGEX)) {
-    found.push({ value: NaN, raw: match[0].trim(), unit: "viscosity" });
+    found.push({ value: NaN, raw: match[0].trim(), unit: "viscosity", index: match.index });
   }
 
-  return found;
+  return found
+    .sort((left, right) => left.index - right.index)
+    .map(({ value, raw, unit }) => ({ value, raw, unit }));
 }
 
-// Unit families, each with a canonical unit. A manual prints a torque table as
-// "37 (377, 27)" -- N·m, kgf-cm, ft-lbf -- so an answer stating the ft-lbf
-// figure IS supported by a chunk stating the N·m figure, and flagging that would
-// punish a correct conversion.
+// The measurement units, grouped by family. Nothing converts between them
+// (owner decision D1, 2026-10-19): a claimed number must be printed in its quote
+// IN THE SAME UNIT. Toyota tables print a specification in every unit they
+// support -- "37 N*m (377 kgf*cm, 27 ft.*lbf)" -- so the model never needs to
+// convert, and a converted or rounded figure is not in the manual and must not
+// be called verified. This table used to carry conversion factors, and every
+// non-electrical comparison a max(0.51, 2%) tolerance sized for them. In
+// millimetres and litres that slack accepted 0.5 mm of disc runout against a
+// printed 0.05 mm and 4.7 L of engine oil against 4.2 L (1A-01).
 //
-// Conversion is deliberately WITHIN a family only. Applying every factor to
-// every number produces false groundings: 377 kgf-cm times the kPa->psi factor
-// is 54.7, which would have "grounded" an invented 54 N·m against a chunk that
-// says 37 N·m.
-const UNIT_FAMILIES = [
+// Each entry is ONE unit, and its pattern lists that unit's spellings, so "37 Nm"
+// still supports "37 N·m". The family only decides which head nouns the subject
+// guard reads (SPEC_SUBJECT_NOUNS).
+const MEASUREMENT_UNITS = [
+  { id: "N·m", family: "torque", match: /^(n\s*[·.*-]?\s*m|nm|newton\s*met(er|re)s?)$/i },
   {
+    id: "ft·lbf",
     family: "torque",
-    units: [
-      { match: /^(n\s*[·.*-]?\s*m|nm|newton\s*met(er|re)s?)$/i, factor: 1 },
-      { match: /^(ft\s*[-·.*]?\s*lbf?|lb\s*[-·.*]?\s*ft|foot\s*pounds?)$/i, factor: 1.355818 },
-      { match: /^(in\s*[-·.*]?\s*lbf?|inch\s*pounds?)$/i, factor: 0.1129848 },
-      { match: /^(kgf\s*[-·.*/]?\s*cm|kg\s*[-·.*]?\s*cm)$/i, factor: 0.0980665 },
-      { match: /^(kgf\s*[-·.*/]?\s*m)$/i, factor: 9.80665 },
-    ],
+    match: /^(ft\.?\s*[-·.*]?\s*lb[fs]?|lb[fs]?\s*[-·.*]?\s*ft|foot[-\s]*pounds?)$/i,
   },
   {
-    family: "pressure",
-    units: [
-      { match: /^kpa$/i, factor: 1 },
-      { match: /^mpa$/i, factor: 1000 },
-      { match: /^psi$/i, factor: 6.894757 },
-      { match: /^bar$/i, factor: 100 },
-    ],
+    id: "in·lbf",
+    family: "torque",
+    match: /^(in\.?\s*[-·.*]?\s*lb[fs]?|lb[fs]?\s*[-·.*]\s*in|inch[-\s]*pounds?)$/i,
   },
-  {
-    family: "volume",
-    units: [
-      { match: /^(lit(er|re)s?|l)$/i, factor: 1 },
-      { match: /^(millilit(er|re)s?|ml)$/i, factor: 0.001 },
-      { match: /^(qt|quarts?)$/i, factor: 0.9463529 },
-      { match: /^pints?$/i, factor: 0.4731765 },
-      { match: /^(gal|gallons?)$/i, factor: 3.785412 },
-      { match: /^fl\s*oz$/i, factor: 0.0295735 },
-    ],
-  },
-  {
-    family: "length",
-    units: [
-      { match: /^(millimet(er|re)s?|mm)$/i, factor: 1 },
-      { match: /^(centimet(er|re)s?|cm)$/i, factor: 10 },
-      { match: /^(microns?)$/i, factor: 0.001 },
-    ],
-  },
+  { id: "kgf·cm", family: "torque", match: /^(kgf\s*[-·.*]?\s*cm|kg\s*[-·.*]?\s*cm)$/i },
+  { id: "kgf·m", family: "torque", match: /^(kgf\s*[-·.*/]?\s*m)$/i },
+  { id: "kPa", family: "pressure", match: /^kpa$/i },
+  { id: "MPa", family: "pressure", match: /^mpa$/i },
+  { id: "psi", family: "pressure", match: /^psi$/i },
+  { id: "bar", family: "pressure", match: /^bar$/i },
+  { id: "kgf/cm²", family: "pressure", match: /^(kgf?\s*[-·.*/]?\s*cm[2²]|kgf\s*\/\s*cm)$/i },
+  // "L" is the symbol VOLUME_SYMBOL_REGEX detects, compared case-sensitively.
+  // The lowercase "l" this pattern used to list was never detected (3B-13).
+  { id: "L", family: "volume", match: /^lit(er|re)s?$/i, symbol: "L" },
+  { id: "mL", family: "volume", match: /^(millilit(er|re)s?|ml)$/i },
+  { id: "qt", family: "volume", match: /^(US\s*)?(qts?|quarts?)$/i },
+  { id: "pt", family: "volume", match: /^(US\s*)?pints?$/i },
+  { id: "gal", family: "volume", match: /^(US\s*)?(gal|gallons?)$/i },
+  { id: "imp qt", family: "volume", match: /^imp(\.|erial)?\s*(qts?|quarts?)$/i },
+  { id: "imp pt", family: "volume", match: /^imp(\.|erial)?\s*pints?$/i },
+  { id: "imp gal", family: "volume", match: /^imp(\.|erial)?\s*(gal|gallons?)$/i },
+  { id: "fl oz", family: "volume", match: /^fl\s*oz$/i },
+  { id: "mm", family: "length", match: /^(millimet(er|re)s?|mm)$/i },
+  { id: "cm", family: "length", match: /^(centimet(er|re)s?|cm)$/i },
+  { id: "in", family: "length", match: /^(in\.?|inch(es)?)$/i },
+  { id: "µm", family: "length", match: /^(microns?)$/i },
 ];
 
 /**
- * Canonicalize a value+unit into its family, or null when the unit is outside
- * the families we convert (volts, ohms, rpm, temperature). Those still get the
- * literal-presence check, just no conversion -- temperature in particular has an
- * offset, so a naive factor would be wrong.
+ * The measurement unit (torque, pressure, volume, length) a detected unit string
+ * names, or null for the units outside those families (volts, ohms, rpm,
+ * temperature), which compare by sameLiteralUnit instead.
  */
-function canonicalize(value, unit) {
+function findMeasurementUnit(unit) {
   const cleaned = String(unit || "").trim();
 
-  for (const entry of UNIT_FAMILIES) {
-    for (const candidate of entry.units) {
-      if (candidate.match.test(cleaned)) {
-        return { family: entry.family, canonical: value * candidate.factor };
-      }
-    }
-  }
-
-  return null;
+  return (
+    MEASUREMENT_UNITS.find(({ match, symbol }) => match.test(cleaned) || symbol === cleaned) ||
+    null
+  );
 }
 
-function withinTolerance(left, right) {
-  return Math.abs(left - right) <= Math.max(0.51, Math.abs(right) * 0.02);
-}
-
-// Electrical readings get no tolerance at all. The max(0.51, 2%) slack above was
-// sized for torque tables that print one figure in three units; on an
-// electrical reading it let 0.9 V pass against a printed 0.5 V, 12.4 V against a
-// printed 12.6 V, and 12 Ω against a printed 12.4 Ω. The comparison is between
+// Electrical readings were the first family held to the printed value (N4): the
+// shared tolerance let 0.9 V pass against a printed 0.5 V and 12 Ω against a
+// printed 12.4 Ω. Every unit is now held to that rule. The comparison is between
 // PARSED numbers, never strings, so 12.40, 12.400, and 12.4 are the same value
-// -- only a different number fails. Nothing is converted: mV and V, kΩ and Ω,
-// and milliamps and amps stay separate units, exactly as sameLiteralUnit keeps
-// them.
+// -- only a different number fails.
 //
 // Current lives here rather than in ELECTRICAL_UNITS because that table also
 // gives the subject guard its head nouns, and current deliberately has none.
@@ -503,6 +714,11 @@ function findCurrentUnit(unit) {
   return found || null;
 }
 
+/** Is this detected unit string the bare litre symbol "L"? */
+function isVolumeSymbol(unit) {
+  return String(unit || "").trim() === "L";
+}
+
 /** Is this detected unit string "A" or "mA"? */
 function isCurrentSymbol(unit) {
   const cleaned = String(unit || "").trim();
@@ -510,58 +726,70 @@ function isCurrentSymbol(unit) {
   return CURRENT_UNITS.some(({ symbol }) => symbol.test(cleaned));
 }
 
-function requiresExactValue(unit) {
-  return Boolean(findElectricalUnit(unit)) || Boolean(findCurrentUnit(unit));
-}
+// Spellings of one unit outside the measurement and electrical tables, so "90
+// degrees" matches "90°", "82 deg C" matches "82 °C", and "30,000 mile" matches
+// "30,000 miles". A unit not listed compares by its normalized text, as before.
+const UNIT_ALIASES = [
+  { id: "°C", match: /^(°\s*c|deg(rees)?\s*c|(°\s*|deg(rees)?\s*)?celsius)$/i },
+  { id: "°F", match: /^(°\s*f|deg(rees)?\s*f|(°\s*|deg(rees)?\s*)?fahrenheit)$/i },
+  { id: "°", match: /^(°|deg(rees)?)$/i },
+  { id: "%", match: /^(%|percent)$/i },
+  { id: "mi", match: /^miles?$/i },
+  { id: "km", match: /^(km|kilomet(er|re)s?)$/i },
+  { id: "km/h", match: /^(km\s*\/\s*h|kph)$/i },
+  { id: "kHz", match: /^(khz|kilohertz)$/i },
+];
 
-/** Does this printed number support the claimed spec? Exact for electrical units. */
-function printedValueSupports(evidenceValue, spec) {
-  if (requiresExactValue(spec.unit)) {
-    return evidenceValue === spec.value;
-  }
-
-  return withinTolerance(evidenceValue, spec.value);
-}
-
-/** Is this detected unit string one of the case-sensitive electrical symbols? */
-function isElectricalSymbol(unit) {
+/** The id of a unit outside the measurement and electrical tables. */
+function unitAlias(unit) {
   const cleaned = String(unit || "").trim();
+  const found = UNIT_ALIASES.find(({ match }) => match.test(cleaned));
 
-  return ELECTRICAL_UNITS.some(({ symbol }) => symbol.test(cleaned));
+  return found ? found.id : normalizeForMatch(cleaned);
 }
 
 /**
- * Do two units that are never converted name the same unit?
+ * Do two units outside the measurement families name the same unit?
  *
- * Spelled-out units compare exactly as they always have. A symbol is compared by
- * the unit it stands for, so a quote printing "12.6 V" still supports a claim
- * saying "12.6 volts", and the reverse -- without this, detecting symbols would
- * have started rejecting claims that were passing. Nothing here converts: mV and
- * V stay different units, as do kΩ and Ω, and mA and A.
+ * An electrical or current unit is compared by the unit it names, so a quote
+ * printing "12.6 V" supports a claim saying "12.6 volts" and "5 ohms" supports
+ * "5 ohm". Nothing here converts: mV and V stay different units, as do kΩ and Ω,
+ * and mA and A. Everything else compares by its UNIT_ALIASES id.
  */
 function sameLiteralUnit(left, right) {
-  if (isCurrentSymbol(left) || isCurrentSymbol(right)) {
+  if (findCurrentUnit(left) || findCurrentUnit(right)) {
     const leftUnit = findCurrentUnit(left);
     const rightUnit = findCurrentUnit(right);
 
     return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
   }
 
-  if (isElectricalSymbol(left) || isElectricalSymbol(right)) {
+  if (findElectricalUnit(left) || findElectricalUnit(right)) {
     const leftUnit = findElectricalUnit(left);
     const rightUnit = findElectricalUnit(right);
 
     return Boolean(leftUnit && rightUnit && leftUnit.name === rightUnit.name);
   }
 
-  return normalizeForMatch(left) === normalizeForMatch(right);
+  return unitAlias(left) === unitAlias(right);
 }
 
-/**
- * Is the claimed spec present in the evidence -- literally, or as a conversion
- * within the same unit family?
- */
-function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
+/** Do two detected unit strings name the same unit, however each is spelled? */
+function sameUnit(left, right) {
+  const leftMeasurement = findMeasurementUnit(left);
+  const rightMeasurement = findMeasurementUnit(right);
+
+  if (leftMeasurement || rightMeasurement) {
+    return Boolean(
+      leftMeasurement && rightMeasurement && leftMeasurement.id === rightMeasurement.id
+    );
+  }
+
+  return sameLiteralUnit(left, right);
+}
+
+/** Is the claimed spec printed in the evidence: the same number, in the same unit? */
+function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   if (!Number.isFinite(spec.value)) {
     return false;
   }
@@ -574,35 +802,30 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   // claim anyway. Only the symbols are set aside: a spelled-out "amps" in the
   // evidence counted before "A" was detected and still does, so no claim that
   // is not a current is compared any differently.
-  const comparableSpecs = findCurrentUnit(spec.unit)
-    ? evidenceSpecs
-    : evidenceSpecs.filter((evidenceSpec) => !isCurrentSymbol(evidenceSpec.unit));
+  //
+  // A bare litre symbol in the evidence counts only for a volume claim, for the
+  // same reason. These manuals write capacities as "liters"; a bare "L" after a
+  // number is a gear position ("2 L"), Toyota's wire-colour code for blue, or a
+  // connector pin label far more often than a volume, and it must not switch
+  // off the fallback for a torque or voltage claim citing such a page.
+  const isVolumeClaim = findMeasurementUnit(spec.unit)?.family === "volume";
+  const comparableSpecs = evidenceSpecs.filter(
+    (evidenceSpec) =>
+      (!isCurrentSymbol(evidenceSpec.unit) || Boolean(findCurrentUnit(spec.unit))) &&
+      (!isVolumeSymbol(evidenceSpec.unit) || isVolumeClaim)
+  );
 
   // Prefer unit-aware comparison whenever the evidence names any technical
   // units. A matching numeral alone is not enough: "37 psi" must never be
-  // grounded by an unrelated "37 N·m" torque passage.
-  const claimCanonical = canonicalize(spec.value, spec.unit);
-
-  for (const evidenceSpec of comparableSpecs) {
-    const evidenceCanonical = canonicalize(evidenceSpec.value, evidenceSpec.unit);
-
-    if (
-      claimCanonical &&
-      evidenceCanonical &&
-      evidenceCanonical.family === claimCanonical.family &&
-      withinTolerance(evidenceCanonical.canonical, claimCanonical.canonical)
-    ) {
-      return true;
-    }
-
-    if (
-      !claimCanonical &&
-      !evidenceCanonical &&
-      sameLiteralUnit(evidenceSpec.unit, spec.unit) &&
-      printedValueSupports(evidenceSpec.value, spec)
-    ) {
-      return true;
-    }
+  // grounded by an unrelated "37 N·m" torque passage, nor "27 ft-lbf" by the
+  // "37 N·m" it might have been converted from.
+  if (
+    comparableSpecs.some(
+      (evidenceSpec) =>
+        evidenceSpec.value === spec.value && sameUnit(evidenceSpec.unit, spec.unit)
+    )
+  ) {
+    return true;
   }
 
   if (comparableSpecs.length) {
@@ -610,15 +833,45 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs) {
   }
 
   // Some extracted manual tables put units in a header and only numbers in the
-  // row. Preserve that fallback only when the quote contains no other explicit
-  // unit-bearing specification to contradict the claim's unit family.
-  return evidenceNumbers.some((candidate) => printedValueSupports(candidate, spec));
+  // row: "Torque (N*m): mounting bolt 37". Preserve that fallback only when the
+  // quote contains no other explicit unit-bearing specification to contradict
+  // the claim's unit, only when it really carries such a header IN THE CLAIM'S
+  // UNIT, and, like every other comparison, only for the printed number itself.
+  // Without the header requirement any number at all would do: "from 1 to 10",
+  // a step sequence, verified "tighten the bolts to 10 N*m" (1A-03).
+  return (
+    headerUnits.some((unit) => sameUnit(unit, spec.unit)) &&
+    evidenceNumbers.some((candidate) => candidate === spec.value)
+  );
 }
 
-/** All numbers appearing anywhere in the evidence text, unit or not. */
+// A unit standing alone in a quote, attached to no number: the column header of
+// a flattened table. Spelled units may stand bare ("N*m kgf*cm ft.*lbf"); a
+// one-letter symbol ("V", "A", "L") is a header only in brackets, "(V)", because
+// bare it is too often a word or a part's letter.
+const SPELLED_HEADER_UNIT_REGEX = new RegExp(
+  `(?<![\\d.,]\\s*)(?<![A-Za-z0-9_])(?:${UNIT_PATTERN})(?![A-Za-z0-9_])`,
+  "gi"
+);
+const SYMBOL_HEADER_UNIT_REGEX = new RegExp(
+  String.raw`[(\[]\s*(mV|kV|V|mA|A|L|[kMm]?\s*[${OHM_SYMBOLS}])\s*[)\]]`,
+  "g"
+);
+
+/** The header units a quote carries. */
+function headerUnitsIn(text) {
+  const source = String(text || "");
+
+  return [
+    ...[...source.matchAll(SPELLED_HEADER_UNIT_REGEX)].map((match) => match[0]),
+    ...[...source.matchAll(SYMBOL_HEADER_UNIT_REGEX)].map((match) => match[1]),
+  ];
+}
+
+/** All numbers appearing anywhere in the evidence text, unit or not, signed. */
 function allNumbersIn(text) {
-  return [...String(text || "").matchAll(/\d+(?:[.,]\d+)?/g)]
-    .map((match) => Number(String(match[0]).replace(",", ".")))
+  return signedNumbers(text)
+    .map((number) => number.value)
     .filter(Number.isFinite);
 }
 
@@ -636,6 +889,7 @@ export function checkClaimNumbers(claimText, evidenceText) {
 
   const evidenceNumbers = allNumbersIn(evidenceText);
   const evidenceSpecs = extractSpecNumbers(evidenceText);
+  const headerUnits = headerUnitsIn(evidenceText);
   const normalizedEvidence = normalizeForMatch(evidenceText);
   const unsupported = [];
 
@@ -652,12 +906,125 @@ export function checkClaimNumbers(claimText, evidenceText) {
       continue;
     }
 
-    if (!specIsPresent(spec, evidenceNumbers, evidenceSpecs)) {
+    if (!specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits)) {
       unsupported.push(spec.raw);
     }
   }
 
   return { grounded: unsupported.length === 0, unsupported };
+}
+
+// ---------------------------------------------------------------------------
+// The vocabulary boundary
+// ---------------------------------------------------------------------------
+//
+// The specification detector can only check the units it knows. Every unit it
+// did not know used to mean "no specification here", so the claim passed with
+// its number unexamined -- the mechanism behind "50 ft-lbs" and "5.5 qts"
+// (3B-01). Adding spellings closes known holes but can never close the next
+// one, so the boundary itself fails closed (owner decision D1): a number in a
+// claim that no specification pattern read must be printed in the quote, or the
+// claim is unverified.
+//
+// Counts and step numbers fall under this rule too ("remove the 4 bolts" needs
+// a 4 in its quote), which is deliberate: the code cannot tell a count from a
+// figure in a unit it does not know. Only shapes that are names, never
+// quantities, are exempt.
+
+// A minus sign, as signGroup reads it, then one number.
+const SIGNED_NUMBER_REGEX = new RegExp(
+  `${NOT_INSIDE_NUMBER}${signGroup("sign")}(?<value>${NUMBER_PATTERN})`,
+  "g"
+);
+
+// Whitespace-delimited tokens that name something rather than measure it. A
+// letter before the first digit: codes, connectors, and pins (P0420, B9-1,
+// M12V, A51, No.1, HFC-134a). Digits then capitals: engine and drive codes
+// (2ZR-FE, 1ZZ-FE, 4WD). Ordinals. Toyota part and service-tool numbers
+// (90919-01253, 09843-18040). Model years, alone or as a span (2009-2013).
+const IDENTIFIER_TOKEN_PATTERNS = [
+  /^[A-Za-z][^\s]*\d/,
+  /^\d+[A-Z]+(?:[-/][A-Z0-9]+)*$/,
+  /^\d+(?:st|nd|rd|th)$/i,
+  /^\d{5}-[0-9A-Z]{5}(?:-[0-9A-Z]{2})?$/,
+  /^(?:19[89]\d|20[0-3]\d)(?:[-–](?:19[89]\d|20[0-3]\d))?$/,
+];
+
+/** Every signed number in the text, with where it sits. */
+function signedNumbers(text) {
+  return [...String(text || "").matchAll(SIGNED_NUMBER_REGEX)].map((match) => ({
+    value: signedValue(match.groups.sign, match.groups.value),
+    raw: match[0],
+    index: match.index,
+  }));
+}
+
+/**
+ * [start, end) spans of every unit-bearing specification and viscosity grade,
+ * and of every engine designation, which is a name like an engine code.
+ */
+function specificationSpans(text) {
+  const source = String(text || "");
+
+  return [...SPEC_REGEXES, VISCOSITY_REGEX, ENGINE_DESIGNATION_REGEX].flatMap((regex) =>
+    [...source.matchAll(regex)].map((match) => [match.index, match.index + match[0].length])
+  );
+}
+
+/** The whitespace-delimited token around a position, without wrapping punctuation. */
+function tokenAt(text, index) {
+  let start = index;
+  let end = index;
+
+  while (start > 0 && !/\s/.test(text[start - 1])) start -= 1;
+  while (end < text.length && !/\s/.test(text[end])) end += 1;
+
+  return text.slice(start, end).replace(/^[("'[{]+|[)"'\]},.;:!?]+$/g, "");
+}
+
+/**
+ * Numbers in a claim that no specification pattern read and no identifier
+ * shape explains, and that its evidence does not print.
+ *
+ * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }> }}
+ */
+export function checkUnrecognizedFigures(claimText, evidenceText) {
+  const claim = String(claimText || "");
+  const spans = specificationSpans(claim);
+  const printed = signedNumbers(evidenceText).map((number) => number.value);
+  const unsupported = signedNumbers(claim)
+    .filter(({ index }) => !spans.some(([start, end]) => index >= start && index < end))
+    .filter(({ index }) => !IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(claim, index))))
+    .filter(({ value }) => !printed.includes(value))
+    .map(({ raw, index }) => ({ raw, index }));
+
+  return { grounded: unsupported.length === 0, unsupported };
+}
+
+/**
+ * A rejected claim as its gap may show it. A gap explains what could NOT be
+ * verified, so it must not reprint a figure that failed: every specification is
+ * redacted, and so is every unreadable figure its quote does not print.
+ * `trustedQuote` is "" when the quote itself failed (an unknown source, or a
+ * quote not in the source), so no figure is spared by it. Without this, a claim
+ * rejected for its quote reprinted "999999 drain cycles" in full.
+ */
+function gapClaimText(claim, trustedQuote) {
+  return redactFigures(claim, checkUnrecognizedFigures(claim, trustedQuote).unsupported);
+}
+
+/** The claim as a gap may show it: no specification, and none of these figures. */
+function redactFigures(text, figures) {
+  const source = String(text || "");
+  const withoutFigures = [...figures]
+    .sort((left, right) => right.index - left.index)
+    .reduce(
+      (redacted, { raw, index }) =>
+        redacted.slice(0, index) + "[unverified value]" + redacted.slice(index + raw.length),
+      source
+    );
+
+  return redactSpecNumbers(withoutFigures);
 }
 
 function normalizeSubjectToken(token) {
@@ -751,12 +1118,10 @@ const SPEC_SUBJECT_NOUNS = [
   "depth",
 ];
 
-// Units that are NOT converted but are still component-scoped, added in N4.
-// Voltage, resistance, engine-speed, and temperature values were passing on a
-// numeric match alone: 13.5 V at the charging system is not 13.5 V at the
-// battery, and 700 rpm of cooling fan is not 700 rpm of idle. Conversion stays
-// out of it -- temperature has an offset, and volts and ohms have no sibling
-// unit in these manuals worth converting -- so these gate the SUBJECT only.
+// Units outside the measurement families that are still component-scoped, added
+// in N4. Voltage, resistance, engine-speed, and temperature values were passing
+// on a numeric match alone: 13.5 V at the charging system is not 13.5 V at the
+// battery, and 700 rpm of cooling fan is not 700 rpm of idle.
 //
 // Each family carries its OWN head noun rather than sharing one pooled list.
 // extractSpecSubject takes the last matching noun in the clause, so a pooled
@@ -774,20 +1139,20 @@ const SPEC_SUBJECT_NOUNS = [
 // Voltage and resistance take their noun from ELECTRICAL_UNITS, which knows each
 // unit both spelled out and as a symbol, so "12.6 V" gates the subject exactly
 // as "12.6 volts" does, and "2.4 kΩ" exactly as "2.4 kilohms".
-const NON_CONVERTIBLE_GUARDED_FAMILIES = [
-  { pattern: /^rpm$/i, noun: "speed" },
-  { pattern: /^(°\s*[cf]|deg(?:rees)?\s*[cf])$/i, noun: "temperature" },
+const OTHER_GUARDED_FAMILIES = [
+  { ids: ["rpm"], noun: "speed" },
+  { ids: ["°C", "°F"], noun: "temperature" },
 ];
 
-function nonConvertibleSubjectNoun(unit) {
+function otherFamilySubjectNoun(unit) {
   const electrical = findElectricalUnit(unit);
 
   if (electrical) {
     return electrical.noun;
   }
 
-  const cleaned = String(unit || "").trim();
-  const family = NON_CONVERTIBLE_GUARDED_FAMILIES.find(({ pattern }) => pattern.test(cleaned));
+  const id = unitAlias(unit);
+  const family = OTHER_GUARDED_FAMILIES.find(({ ids }) => ids.includes(id));
 
   return family ? family.noun : "";
 }
@@ -1008,11 +1373,11 @@ function phraseNamesSubject(subject, evidenceText) {
  * certified by a quote about an "oil drain plug, 37 Nm", and "engine oil
  * capacity, 4.2 liters" must not be certified by a coolant capacity that
  * happens to print the same figure. Two sets of units are gated: the four
- * families we convert, and the non-convertible families added in N4 (volts,
- * ohms, rpm, temperature), which were reaching the owner on a numeric match
- * alone. The convertible set keeps its own pooled nouns; each non-convertible
- * family contributes only its own noun, so a qualifier naming another family
- * cannot steal the subject from the specification being checked.
+ * measurement families (torque, pressure, volume, length), and the families
+ * added in N4 (volts, ohms, rpm, temperature), which were reaching the owner on
+ * a numeric match alone. The measurement families share one pooled noun list;
+ * each N4 family contributes only its own noun, so a qualifier naming another
+ * family cannot steal the subject from the specification being checked.
  *
  * The parsed subject passes when its words occur in the quote as one unbroken,
  * in-order run -- or, failing that, when ONE phrase of the quote names the same
@@ -1029,25 +1394,25 @@ function phraseNamesSubject(subject, evidenceText) {
  */
 export function checkClaimSubject(claimText, evidenceText) {
   const specs = extractSpecNumbers(claimText);
-  const hasConvertibleSpec = specs.some(
-    (spec) => spec.unit !== "viscosity" && Boolean(canonicalize(spec.value, spec.unit))
+  const hasMeasurementSpec = specs.some(
+    (spec) => spec.unit !== "viscosity" && Boolean(findMeasurementUnit(spec.unit))
   );
   // Only the nouns of the families actually detected are offered to the parser.
   // Passing all four would let "at operating temperature" outrank the voltage
   // this claim is really about, because the last noun in the clause wins.
-  const nonConvertibleNouns = [
-    ...new Set(specs.map((spec) => nonConvertibleSubjectNoun(spec.unit)).filter(Boolean)),
+  const otherFamilyNouns = [
+    ...new Set(specs.map((spec) => otherFamilySubjectNoun(spec.unit)).filter(Boolean)),
   ];
 
-  if (!hasConvertibleSpec && !nonConvertibleNouns.length) {
+  if (!hasMeasurementSpec && !otherFamilyNouns.length) {
     return { grounded: true, checked: false, subject: "" };
   }
 
-  // A claim carrying a convertible spec keeps the original noun list, so its
+  // A claim carrying a measurement spec keeps the original noun list, so its
   // parse is byte-identical to the behavior shipped in PR #122.
   const subject = extractSpecSubject(
     claimText,
-    hasConvertibleSpec ? SPEC_SUBJECT_NOUNS : nonConvertibleNouns
+    hasMeasurementSpec ? SPEC_SUBJECT_NOUNS : otherFamilyNouns
   );
 
   if (!subject.length) {
@@ -1091,11 +1456,24 @@ function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote })
  * the gap stays useful; the value is kept server-side in `rejected`.
  */
 export function redactSpecNumbers(text) {
-  return String(text || "")
-    .replace(SPEC_NUMBER_REGEX, "[unverified value]")
-    .replace(ELECTRICAL_SYMBOL_REGEX, "[unverified value]")
-    .replace(CURRENT_SYMBOL_REGEX, "[unverified value]")
-    .replace(VISCOSITY_REGEX, "[unverified value]");
+  return [...SPEC_REGEXES, VISCOSITY_REGEX].reduce(
+    (redacted, regex) => redacted.replace(regex, "[unverified value]"),
+    String(text || "")
+  );
+}
+
+/**
+ * The fewest words a quote needs to support a claim that states no
+ * specification. A claim WITH one is anchored by the numeric check, so "37 Nm"
+ * alone may still quote its figure.
+ */
+const MIN_QUOTE_WORDS_WITHOUT_SPEC = 3;
+
+/** Words in a quote: whitespace-separated pieces holding a letter or digit. */
+function quoteWordCount(quote) {
+  return String(quote || "")
+    .split(/\s+/)
+    .filter((piece) => /[\p{L}\p{N}]/u.test(piece)).length;
 }
 
 /**
@@ -1110,7 +1488,9 @@ export function redactSpecNumbers(text) {
 export const ASK_REJECTION_REASONS = Object.freeze([
   "unknown_source",
   "quote_not_in_source",
+  "quote_too_short",
   "numeric_anomaly",
+  "unrecognized_figure",
   "subject_mismatch",
   "unsourced_specification",
   "unsourced_gap_specification",
@@ -1137,7 +1517,7 @@ export const ASK_REJECTION_CHANNELS = Object.freeze([
  * values that failed verification, so anything shipping this off the server must
  * sanitize first — see buildRejectedMetrics in aiAnswerService.js.
  *
- * @param {{ documentSupported: any[], generalGuidance: string[], gaps: string[] }} validated
+ * @param {{ documentSupported: any[], generalGuidance: string[], gaps: string[], droppedClaimCount?: number }} validated
  * @param {any[]} chunks - retrieval order; index maps to S1..Sn
  */
 export function verifyEvidence(validated, chunks) {
@@ -1177,14 +1557,31 @@ export function verifyEvidence(validated, chunks) {
 
     if (!mapped) {
       rejected.push({ ...origin, claim: claim.claim, reason: "unknown_source" });
-      gaps.push(`Unverified (source not recognized): ${redactSpecNumbers(claim.claim)}`);
+      gaps.push(`Unverified (source not recognized): ${gapClaimText(claim.claim, "")}`);
       continue;
     }
 
     if (!quoteAppearsInChunk(claim.evidenceQuote, mapped.chunk.chunkText)) {
       rejected.push({ ...origin, claim: claim.claim, reason: "quote_not_in_source" });
       gaps.push(
-        `Unverified (quote not found in the cited page): ${redactSpecNumbers(claim.claim)}`
+        `Unverified (quote not found in the cited page): ${gapClaimText(claim.claim, "")}`
+      );
+      continue;
+    }
+
+    // A claim with no specification has only its words to check, and a quote
+    // as short as "OK" cannot support a sentence -- least of all "it is OK to
+    // reuse the gasket" on a page saying not to (1A-11).
+    if (
+      !extractSpecNumbers(claim.claim).length &&
+      quoteWordCount(claim.evidenceQuote) < MIN_QUOTE_WORDS_WITHOUT_SPEC
+    ) {
+      rejected.push({ ...origin, claim: claim.claim, reason: "quote_too_short" });
+      gaps.push(
+        `Unverified (the quote is too short to support it): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
+        )}`
       );
       continue;
     }
@@ -1201,8 +1598,29 @@ export function verifyEvidence(validated, chunks) {
       });
       // The failing value is deliberately NOT reprinted here.
       gaps.push(
-        `Unverified specification (not found in the cited text): ${redactSpecNumbers(
-          claim.claim
+        `Unverified specification (not found in the cited text): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
+        )}`
+      );
+      continue;
+    }
+
+    // A number no specification pattern could read is checked the only way
+    // left: it must be printed in the quote. An unknown unit fails closed.
+    const figures = checkUnrecognizedFigures(claim.claim, claim.evidenceQuote);
+
+    if (!figures.grounded) {
+      rejected.push({
+        ...origin,
+        claim: claim.claim,
+        reason: "unrecognized_figure",
+        unsupported: figures.unsupported.map((figure) => figure.raw),
+      });
+      gaps.push(
+        `Unverified (a figure in it is not printed in the cited text): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
         )}`
       );
       continue;
@@ -1218,8 +1636,9 @@ export function verifyEvidence(validated, chunks) {
         subject: subject.subject,
       });
       gaps.push(
-        `Unverified (the cited text does not name the same part): ${redactSpecNumbers(
-          claim.claim
+        `Unverified (the cited text does not name the same part): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
         )}`
       );
       continue;
@@ -1240,6 +1659,19 @@ export function verifyEvidence(validated, chunks) {
       pageNumber: mapped.chunk.pageNumber,
       chunkIndex: mapped.chunk.chunkIndex,
     });
+  }
+
+  // Claims the validator dropped past MAX_ITEMS were never checked. Saying so
+  // is also what keeps the answer from reading as complete: a gap makes the
+  // derived status `partial`, never `answered`.
+  const dropped = Number(validated.droppedClaimCount) || 0;
+
+  if (dropped > 0) {
+    gaps.push(
+      `This answer is incomplete: ${dropped} more ${
+        dropped === 1 ? "claim was" : "claims were"
+      } not checked, so ${dropped === 1 ? "it is" : "they are"} not shown.`
+    );
   }
 
   // General guidance is not sourced, so ANY technical specification in it is

@@ -3100,3 +3100,400 @@ inside its quote, cut at word boundaries: 0 of 25,257 change.
   planner claims are windows cut mid-number ("5A" out of "7.5A"), which now fail closed.
 
 Counts: **44 cases, 14 verified, 30 templates** — unchanged.
+
+## Stage 2 — the Ask verifier fails closed (2026-10-20)
+
+Stage 2 of the 2026-10-18 audit follow-up plan. This entry is the offline work. Its approved
+live run (owner decision D3) is **Experiment I**, the next entry, and three follow-up commits
+came out of it. A second run the owner approved, **Experiment J**, confirms them: 14/14
+verified.
+
+The audit reproduced wrong specifications shown as verified — 0.5 mm of disc runout against a
+printed 0.05 mm, 4.7 L of oil against 4.2 L, 50 ft-lbs of lug-nut torque against a printed
+103 N·m — and traced every one to the code, not the model: a loose tolerance, and a unit
+vocabulary that failed open.
+
+### What changed
+
+`askEvidenceContract.js` only, one commit per finding, in the plan's order. Each commit removes
+`todo` from the oracle rows it makes pass.
+
+| Commit | Finding | Change |
+| --- | --- | --- |
+| `5d6cfed` | 1A-02, 3A-03 | A comma before groups of three digits groups thousands ("1,500" is 1500); before one or two it is a decimal mark ("12,6 V" stays 12.6) |
+| `f393fef` | 1A-10 | A leading minus is kept; both ends of a range are read in the range's unit |
+| `6e65070` | 1A-01, 3A-01 | **Owner decision D1.** A claimed number must equal a number printed in its quote in the same unit. No conversion, no tolerance. Deliberately reverses three pinned tests |
+| `eac71b9` | 3B-01 | `ft-lbs`, `ft lbs`, `ft.*lbf`, `lb-ft`, a bare `L`, `qts`, US and Imperial quarts |
+| `ea123d5` | 1A-13 | `kgf/cm2`, `kgf/cm²`, `kgf*cm2` are a pressure, not the `kgf*cm` torque unit |
+| `315bf82` | 1A-04 | Inches, miles, km, angles, `%`, `kV`, `mΩ`, `MΩ`; one alias table for unit spellings |
+| `25d0cab` | 1A-04 | **Fail closed at the boundary.** A number no unit pattern reads must be printed in the quote (`unrecognized_figure`) |
+| `c38d0b1` | 1A-03 | Quotes match on token boundaries; the bare-number fallback needs a header unit |
+| `3295534` | 1A-11 | A claim with no specification needs a quote of at least three words (`quote_too_short`) |
+| `8ef79cf` | 1A-14 | Claims past the 40th are counted, so the answer reads as `partial` |
+| `52ecd89` | 1A-04 | After Experiment I: a rejected claim's gap never reprints an unreadable figure |
+| `13f2296` | 1A-03 | After Experiment I: the rejection probes quote whole words, not a 400-character slice |
+| `f880c73` | 3B-01 | After Experiment I: an engine designation (`L4 1.8L 2ZR-FE`) is a name, and a quote's bare `L` counts only for a volume claim |
+
+Two new rejection reasons, `quote_too_short` and `unrecognized_figure`, each got the probe and
+eval case the every-reason invariant requires: `reject-one-word-quote` and
+`reject-unrecognized-figure`. Both are `verified: false`, so the gated set stays the same 14.
+Promoting them is the owner's call after a live run.
+
+### The oracle
+
+- **All 26 Ask `todo` rows from Stage 1a now gate.** The four new rows written with the fail-closed
+  commit gate too: E1 and E2 must reject, two controls must accept.
+- **Every must-accept control is green.**
+- **Two planner rows stopped being `todo` through the shared helpers:**
+  - P2, the range cut "2 to 14.8 V", now has its "2 V" low end read.
+  - P3a, a claim ending inside "103", is no longer inside its quote.
+- **Still `todo`, all Stage 5 or 6:**
+  - planner P1a and P1b (dropped negations, 1A-05), P4 (no task-part guard, 1A-06), and P5a
+    (one-letter item, 1A-07);
+  - the 8 safety rows, 6 HTTP rows, the SSE row, and the 2 integrity rows.
+
+### Measurement: plan step 2
+
+**A replay of real replies was not possible before the live run.** `eval:replay` belongs to
+the unmerged Stage 1b branch, and Experiment H's capture no longer exists: session
+`d9fc04ae`'s scratch holds only an empty `uploads` folder. What follows is the free synthetic
+sweep the plan allows instead. The replay over real replies is in Experiment I.
+
+**Method.** A scratch script, `matchingRuleSweep.mjs`, not committed; a copy is in the
+session-notes folder. It compares three candidate rules on identical specifications, extracted
+by the final Stage 2 code, so the only difference is how a claimed number is compared with a
+printed one:
+
+- **today's rule:** `max(0.51, 2%)`, with conversion within a family;
+- **the D1 fallback:** same unit exact; a converted figure within ±1% plus half the last
+  printed digit of the evidence figure;
+- **exact:** the D1 default, as shipped.
+
+Its exact rule agrees with the shipped `checkClaimNumbers` on every row: 0 disagreements. The
+sweep ran over:
+
+- the 27 Ask oracle rows whose claim carries a specification;
+- 12 honest claims written for it, in the oracle's synthetic style.
+
+| | today | fallback | exact |
+| --- | --- | --- | --- |
+| Oracle must-reject rows wrongly accepted on the numbers | 6: A1–A5 and C1 | 0 | 0 |
+| Oracle must-accept rows wrongly rejected | 0 | 0 | 0 |
+| Honest: the figure is printed in the quote, in another unit's column (2) | 0 rejected | 0 | 0 |
+| Honest: a correct conversion the quote does not print, e.g. "76 ft-lbs" against "103 N*m" (8) | 0 rejected | 0 | **8** |
+| Honest: a converted temperature, °C to °F (1) | 1 | 1 | 1 |
+| A same-unit rounding, "about 4 liters" for 4.2 (1) | 0 rejected | 1 | 1 |
+
+C2 and C3 are quote-boundary defects that no numeric rule can see. In every Stage 2
+configuration they are rejected by `quoteAppearsInChunk`.
+
+**What it shows.** Exact matching costs nothing when the quote prints the claim's unit. Its
+whole cost is a correct conversion to a unit the quote does not print, and the fallback exists
+for exactly that. What a synthetic sweep cannot show is how often the model converts on real
+questions. That needs captured replies, and Experiment I has them: **0 of its 182 real claims
+was refused for a conversion.**
+
+**Choice.** Exact, as D1 decided. By D1's own condition, the fallback is used only if a
+measurement shows too many honest rejections. Neither this sweep nor Experiment I's replay
+shows any.
+
+### Tests and checks
+
+At `8ef79cf`, in this worktree, which has no `server/.env`:
+
+- lint 0 and typecheck 0;
+- server **1,123 tests: 1,102 pass, 0 fail, 21 todo**; client **410/410** in 31 files;
+- `build` green;
+- `smoke` **13/13** from a plain-path detached worktree, since smoke fails under `.claude\`.
+
+At `f880c73`, after Experiment I's three follow-ups: lint 0 and typecheck 0; server **1,127
+tests: 1,106 pass, 0 fail, 21 todo**; client **410/410**; `build` green; `smoke` **13/13**, from
+a plain path again.
+
+The Repair Planner suites pass unchanged: it shares `quoteAppearsInChunk`,
+`checkClaimNumbers`, and `redactSpecNumbers`.
+
+### What this costs, stated plainly
+
+- **Refusal over a converted or rounded figure.** A model that quotes "37 N·m" and states
+  "27 ft-lbf", or rounds 4.2 L to 4 L, now gets `partial` or `not_found`. This is intended.
+- **Counts and step numbers are figures too.** "Step 3: remove the drain plug" is refused
+  against a quote with no 3. Identifier shapes are exempt: codes, pins, engine codes, part
+  numbers, and model years.
+- **An unknown unit is checked by its number only.** "50 N" passes against "490 N (50 kgf)".
+- **The header-table fallback cannot tell columns apart.** In "N*m kgf*cm ft.*lbf … 37 377 27",
+  a claim of "377 N·m" passes.
+- **A flattened table row quoted without its header gets no fallback.** "Cylinder head cover x
+  Cylinder head 10 102 7" carries no unit, so "10 N·m" is refused against it. In Experiment I
+  that was 5 of 182 claims, all of which the subject guard rejected anyway.
+
+Counts: **46 cases, 14 verified, 32 templates.** The two new templates are the Stage 2
+rejection probes.
+
+## EXPERIMENT I — live answer eval of the fail-closed verifier, 2026-10-20
+
+**The tenth `eval:answers` run, and the one approved by owner decision D3 for Stage 2, on the
+verifier at `8ef79cf`. 12/14 verified. Exit code 1. Overall 33/46. The merge bar (14/14) was
+not met.**
+
+- **Both verified failures are probe cases, and both died on the probe's own quote.**
+  `reject-invented-drain-plug-torque` and `reject-wrong-component-torque` were rejected as
+  `quote_not_in_source`, one step before the check each is named for. The probes quoted the
+  first 400 characters of a real chunk, which stopped inside a word, and Stage 2's
+  token-boundary quote check (1A-03) rightly refuses that.
+- **The new `reject-unrecognized-figure` template failed the same way, and caught a real
+  leak.** Its sentinel, "999999 drain cycles", appeared in the gap: a claim rejected for its
+  quote had only its *specifications* redacted.
+- **No answer the model wrote got a different status from Stage 2.** Every captured reply was
+  replayed through main's verifier and this one. All 167 claims accepted before are accepted
+  after, and no answer's status changes.
+- Three follow-up commits fix the probes, the leak, and an engine-designation misreading the
+  replay found. Proven offline below; **not yet confirmed by a live run.**
+
+### What is under test
+
+Against main (`a40823e`), the Stage 2 verifier: `askEvidenceContract.js` blob `739ab2b` →
+`7fd93c1`, with the two Stage 2 rejection reasons.
+
+| Piece | Blob | Against H |
+| --- | --- | --- |
+| Case definitions | `b2663e2` | H's `01dc9ed` plus the two Stage 2 templates, `reject-unrecognized-figure` and `reject-one-word-quote` |
+| Scoring | `e2c9693` | Identical |
+| Probes | `0210bd1` | Plus the two new probes |
+
+There is no retrieval, prompt, model, or embedding change.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | `node --env-file=<main checkout>/server/.env --import <capture preload> src/scripts/evalAnswers.js`, run from the worktree's `server/` with `DATABASE_FILE`, `UPLOADS_DIR`, and `CAPTURE_FILE` set to scratch paths. H's command and preload. 2026-10-20 04:29:31–04:34:47 (UTC−5). The API key was read from that file and never copied or printed |
+| Revision | Worktree HEAD `3e598f2`, whose `server/` and `client/` trees are byte-identical to `8ef79cf` (the docs commit touched no code). Clean worktree, no `server/.env`, not pushed |
+| Data | A fresh byte-for-byte copy of the real database, taken with the app stopped. The `.db` file has MD5 `c1c5f794a261757569d846ca270ebcfd`, the same file E–H read. **Unlike H's, its WAL was not empty**: 115,392 bytes, last written 2026-10-08, MD5 `dd999735e009224200a3a735bfb93c9e`, copied with it. The live files' MD5s were unchanged after the run. `UPLOADS_DIR` was an empty scratch folder |
+| Corpus | 1,443 documents / 20,447 chunks, all embedded at `text-embedding-3-small@512`. Counted on a second throwaway copy, so the WAL's changes are outside the corpus |
+| Answer + vision model | `gpt-5.5-2026-04-23` (pinned); effort `low` and `max_output_tokens` 2048, both confirmed in all 38 captured requests |
+| Other settings | From the same `.env` as H. Reranker and relevance floor unset (off and shadow), retrieval diversity at its default of 3 |
+| Cases | 46 (14 verified, 32 templates) |
+| Provider requests | **~83.** 38 Responses requests were captured: 37 evidence answers, one of them vision, plus 1 follow-up rewrite. All returned HTTP 200 and `completed`, for 104,041 input and 13,207 output tokens, 0 reasoning tokens, and a longest reply of 1,581 tokens. ~45 embedding requests were not captured; that count is derived from the 44 cases that retrieve plus the follow-up |
+| Infrastructure noise | 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**12/14 verified. Exit code 1.** Templates 21/32. Overall **33/46**.
+
+| Category | I | H |
+| --- | --- | --- |
+| torque | 2/7 | 3/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 8/11 | 8/11 |
+| procedure | 8/9 | 5/9 |
+| behavior | 2/3 | 1/3 |
+| verifier | 5/8 | 6/6 |
+
+The verifier row adds the two Stage 2 templates. Of the 6 verified probes, 4 passed.
+
+### The two verified failures, and the leak
+
+| Case | Live | Why |
+| --- | --- | --- |
+| `reject-invented-drain-plug-torque` | FAIL: `quote_not_in_source`, wanted `numeric_anomaly` | The probe's quote, `chunkText.slice(0, 400)`, ends inside a word. Since 1A-03 that is not a quote of the page |
+| `reject-wrong-component-torque` | FAIL: `quote_not_in_source`, wanted `subject_mismatch` | The same slice, through `findTorqueEvidence` |
+| `reject-unrecognized-figure` (template) | FAIL: the same, and **the sentinel leaked into a gap** | The `quote_not_in_source` gap redacted specifications only, so the unreadable figure "999999 drain cycles" was reprinted |
+| `reject-one-word-quote` (template) | PASS | Its quote is one whole word, read from the chunk |
+
+`answerRejectionProbes.test.js` never saw the first two because every fixture in it is shorter
+than 400 characters.
+
+### The replay
+
+Every captured evidence reply was replayed through main's verifier (`739ab2b`) and Stage 2's
+(`7fd93c1`), with sources rebuilt from the prompt the model saw. **Scope:** 37 replies,
+182 claims.
+
+- **Status changes: 0.** **Accepted claims: 167 under both.**
+- **Six claims change only their rejection reason.** Each was rejected by both verifiers:
+  - **5 are flattened torque-table rows quoted without their header**, e.g. "Cylinder head
+    cover x Cylinder head 10 102 7". The subject guard rejected them before; now the
+    header-unit rule refuses the bare-number fallback first.
+  - **1 is the engine-oil claim.** The manual's OCR prints Imperial quarts as "3.7 lmp. qts",
+    lowercase L, which is not read as a quantity.
+- **One model gap is newly redacted, and wrongly.** It carried the vehicle descriptor "L4-1.8L
+  (2ZR-FE)", and the bare litre symbol read that as 1.8 litres. Two claims carried the same
+  descriptor; both were rejected anyway.
+- **Claims refused for a conversion: 0 of 182.**
+
+**Every template that fails here has the same status under both verifiers**, so none of its
+failure comes from Stage 2. H's entry records category totals rather than every case, so the
+movements are classified from this run's captured claims:
+
+| Template | I | Mechanism |
+| --- | --- | --- |
+| `wheel-lug-nut-torque` | FAIL (`not_found`) | Its one claim is rejected as `subject_mismatch` by both verifiers: the "lug nut" wording, as in G. It passed in H on different wording. Generation variance |
+| `engine-oil-capacity` | FAIL (`not_found`) | Rejected by both: subject before, the OCR "lmp." now. The figure is printed (see H) |
+| `rear-brake-caliper-torque`, `front-strut-mount-torque` | FAIL (`not_found`) | The model returned no document claims |
+| `valve-cover-bolt-torque` | FAIL (`not_found`) | A header-less table row, rejected by both |
+| `applicability-engine-mount-build-variant` | FAIL (`not_found`) | Header-less table rows, rejected by both. On the unstable list |
+| `charging-system-voltage` | FAIL (`partial`) | "2000 rpm" unsupported, as in D–H |
+| `auto-transaxle-fluid-type` | FAIL (`partial`) | The scorer's 220-character citation-preview limit |
+| `hazard-t3-airbag-module-shop-referral`, `applicability-abs-wiring-variant` | FAIL (`partial`) | Content checks. The first is on the unstable list |
+
+### The follow-ups, and what proves them
+
+| Commit | Change |
+| --- | --- |
+| `52ecd89` | Every claim-derived gap redacts each unreadable figure its quote does not print. When the quote itself failed, every such figure is redacted |
+| `13f2296` | `verbatimQuote` ends on a whole word, and the subject probe's torque may not start inside a number. A new test runs every probe on a chunk longer than the bound; it fails on the old probe for exactly the three live failures |
+| `f880c73` | An engine designation next to an engine name (`L4 1.8L`, `1.8L 2ZR-FE`, `(2.4L: …)`) is a name, not a volume. A bare `L` in a quote counts only for a volume claim, as fuse-rating `A` does for current |
+
+The corpus explains `f880c73`. Every glued one-decimal litre figure is an engine: 3,370 "1.8L"
+and 162 "2.4L", with no capacity written that way. A spaced "N L" is a gear position, a wire
+colour (blue), or a pin label. The manuals write capacities as "liters".
+
+**Offline proof, no provider calls:**
+
+- **Probe harness.** A scratch script, not committed, runs the 8 probe cases through the real
+  `askQuestionUsingDocuments` and the real scorer. Retrieval is replaced by the 8 chunks this
+  run actually retrieved for its two drain-plug questions, rebuilt from the captured prompts.
+  - **At `8ef79cf` it reproduces the live failures exactly:** the same three cases, the same
+    messages, on both retrievals.
+  - **At `f880c73`, all 12 verified probe runs pass** (6 cases × 2 retrievals), and all 16 with
+    the templates.
+- **Replay through `f880c73`.** Still 167 of 167 accepted claims are accepted, with 0 status
+  changes. The descriptor is no longer an unsupported figure, and its gap is no longer
+  redacted.
+- **The 8 model-driven verified cases** passed live, and their captured replies get identical
+  verdicts under `f880c73`.
+
+**Not established by this run: a live result at `f880c73`.** The probe question itself, "What
+is the oil drain plug torque?", makes no model call, so it was never captured. Two captured
+drain-plug retrievals stand in for it. The owner approved a second run, **Experiment J**, which
+confirms it: 14/14 verified.
+
+### Limits, stated plainly
+
+- **n = 1.**
+- The replay rebuilds sources from prompt text, so evidence ids differ from the live run's.
+  They do not affect verdicts.
+- **Nothing was promoted.** The two new templates stay `verified: false`.
+
+Counts after this run: **46 cases, 14 verified, 32 templates.**
+
+## EXPERIMENT J — confirming live eval of Stage 2 at `f880c73`, 2026-10-20
+
+**The eleventh `eval:answers` run, approved separately by the owner after Experiment I, on the
+verifier at `f880c73`. 14/14 verified PASS. Exit code 0. Overall 35/46. The Stage 2 merge bar
+is met.**
+
+- **The three failures Experiment I traced to the probes now pass live:**
+  `reject-invented-drain-plug-torque`, `reject-wrong-component-torque`, and the
+  `reject-unrecognized-figure` template, whose sentinel no longer reaches any gap.
+- **No answer the model wrote changed status because of Stage 2:** 0 of 37 in the replay, as in
+  Experiment I.
+- **The first live cost of the three-word quote rule (1A-11):** 1 of 181 claims, with no change
+  to any answer's status.
+
+### What is under test
+
+Against Experiment I, the three follow-up commits only.
+
+| Commit | Change |
+| --- | --- |
+| `52ecd89` | A rejected claim's gap redacts unreadable figures |
+| `13f2296` | The probes quote whole words |
+| `f880c73` | An engine designation is a name; a quote's bare `L` counts only for a volume claim |
+
+| Piece | Blob | Against I |
+| --- | --- | --- |
+| Verifier | `d31394b` | `7fd93c1` |
+| Probes | `bb653d2` | `0210bd1` |
+| Case definitions | `b2663e2` | Identical |
+| Scoring | `e2c9693` | Identical |
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Command | Experiment I's, unchanged, with fresh scratch paths. 2026-10-20 12:31:27–12:36:39 (UTC−5) |
+| Revision | Worktree HEAD `75795e5`, whose `server/` and `client/` trees are byte-identical to `f880c73` (the commit after it is docs only). Clean worktree, no `server/.env`, not pushed. `origin/main` had meanwhile gained `c71ae82` (Stage 4-D1, PR #148), which touches none of these files |
+| Data | A fresh copy of the same database, files byte-identical to Experiment I's: `.db` MD5 `c1c5f794…`, WAL MD5 `dd999735…`. The app was stopped, and the live files' MD5s were unchanged after the run |
+| Model and settings | As in I: `gpt-5.5-2026-04-23`, effort `low`, `max_output_tokens` 2048, all confirmed in the 38 captured requests |
+| Cases | 46 (14 verified, 32 templates) |
+| Provider requests | **~83.** 38 Responses requests were captured (37 evidence answers plus 1 follow-up rewrite). All returned HTTP 200 and `completed`, for 105,250 input and 13,477 output tokens, 152 reasoning tokens, and a longest reply of 1,419. ~45 embedding requests were not captured |
+| Infrastructure noise | 0 network failures, 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 21/32. Overall **35/46**.
+
+| Category | J | I |
+| --- | --- | --- |
+| torque | 2/7 | 2/7 |
+| refusal | 8/8 | 8/8 |
+| capacity | 8/11 | 8/11 |
+| procedure | 7/9 | 8/9 |
+| behavior | 2/3 | 2/3 |
+| verifier | 8/8 | 5/8 |
+
+### Every case movement against Experiment I
+
+| Case | I | J | Attributable to the follow-ups? |
+| --- | --- | --- | --- |
+| `reject-invented-drain-plug-torque` (verified) | FAIL | PASS | **Yes,** `13f2296`: its quote now ends on a whole word, so the claim reaches the numeric check |
+| `reject-wrong-component-torque` (verified) | FAIL | PASS | **Yes,** `13f2296`, through the subject check |
+| `reject-unrecognized-figure` | FAIL | PASS | **Yes,** `13f2296` and `52ecd89`: the right reason, and no sentinel in the gap |
+| `front-lower-ball-joint-procedure` | PASS | FAIL | **No.** All 13 of its claims are accepted by both verifiers, and its status is `partial` under both. It fails only the content check (no "control arm" or "knuckle" wording), so the model wrote a different answer. On the unstable list |
+
+### The replay
+
+All captured replies were replayed through main's verifier (`739ab2b`) and `f880c73`'s.
+**Scope:** 37 replies, 181 claims.
+
+- **Status changes: 0.** **Accepted claims: 168 → 167.**
+- **The one lost claim** is "The Rear Speed Sensor RH Circuit article includes a wiring
+  diagram", quoting only "WIRING DIAGRAM". The three-word rule now refuses it as
+  `quote_too_short`.
+  - Its answer is `partial` under both verifiers.
+  - Its case, `applicability-abs-wiring-variant`, fails its content check under both.
+  - It is the first observed cost of the 1A-11 rule: a true two-word heading quoted for a
+    non-numeric claim.
+- **Six claims change only their rejection reason.** They are the same shapes as in I, and each
+  was rejected by both verifiers:
+  - five flattened torque rows quoted without their header;
+  - the OCR's "3.7 lmp. qts".
+- **The engine designation:** the model wrote no "1.8L" in this run's claims, and no model gap
+  is redacted for it.
+- **Claims refused for a conversion: 0 of 181.**
+
+### Limits, stated plainly
+
+- **n = 2 for the verifier, n = 1 for these follow-ups.**
+- The replay rebuilds sources from prompt text.
+- **Nothing was promoted.** `reject-unrecognized-figure` and `reject-one-word-quote` have now
+  passed live once each (J). Promoting them is the owner's call.
+
+Counts after this run: **46 cases, 14 verified, 32 templates.**
+
+### Stage 2 after its rebase onto `c71ae82` (2026-10-21)
+
+The branch was rebased onto `origin/main` at `c71ae82` (Stage 4-D1, PR #148) before its PR.
+`git range-diff` shows every commit unchanged in content, and `c71ae82` touches no file on the
+Ask path:
+
+- **Unchanged blobs:** `askEvidenceContract.js` `d31394b`, `aiAnswerService.js` `c838a4f`, cases
+  `b2663e2`, scoring `e2c9693`, and probes `bb653d2`.
+- **Files `c71ae82` changes:** `database.js`, `index.js`, `serverLifecycle.js`, the restore and
+  backup code, and `routes/settings.js`.
+
+Experiment I ran at `8ef79cf` and Experiment J at `f880c73`, and their results carry over. The
+SHAs these Stage 2 entries cite map as follows:
+
+| Before | After | Before | After |
+| --- | --- | --- | --- |
+| `5d6cfed` | `7baaeeb` | `3295534` | `b5af76e` |
+| `f393fef` | `d763e1b` | `8ef79cf` | `409f561` |
+| `6e65070` | `4bc4716` | `3e598f2` | `a0e97f0` |
+| `eac71b9` | `1015851` | `52ecd89` | `873e461` |
+| `ea123d5` | `62e2f35` | `13f2296` | `2793d21` |
+| `315bf82` | `9159395` | `f880c73` | `62246f8` |
+| `25d0cab` | `cd1b9db` | `75795e5` | `07b93fd` |
+| `c38d0b1` | `e2f43b1` | `d9157fa` | `e3a5304` |

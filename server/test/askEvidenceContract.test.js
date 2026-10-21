@@ -7,9 +7,11 @@ import {
   ASK_REJECTION_REASONS,
   checkClaimNumbers,
   checkClaimSubject,
+  checkUnrecognizedFigures,
   deriveEvidenceStatus,
   extractSpecNumbers,
   quoteAppearsInChunk,
+  redactSpecNumbers,
   renderEvidenceAnswer,
   validateEvidencePayload,
   verifyEvidence,
@@ -106,6 +108,34 @@ test("an empty quote is rejected", () => {
   assert.equal(quoteAppearsInChunk("37 Nm", ""), false);
 });
 
+test("a quote must start and end on a token boundary, never inside a number or word (1A-03)", () => {
+  const lugNut = "Wheel lug nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf).";
+
+  for (const [quote, text] of [
+    ["Wheel lug nut torque 10", lugNut],
+    ["5 N*m to the oil filter cap", "Apply 25 N*m to the oil filter cap."],
+    ["5 mm", "Minimum thickness 1.5 mm"],
+    ["thickness 1.", "Minimum thickness 1.5 mm"],
+    ["500 kPa", "Compression 1,500 kPa"],
+    ["orque : 37 Nm", chunk().chunkText],
+    ["e", "Inspect the gasket."],
+  ]) {
+    assert.equal(quoteAppearsInChunk(quote, text), false, quote);
+  }
+
+  for (const [quote, text] of [
+    ["Wheel lug nut torque 103 N*m", lugNut],
+    ["76 ft.*lbf).", lugNut],
+    ["Torque : 37 Nm", chunk().chunkText],
+    // Only the same kind of character is a cut: a number glued to a word is not.
+    ["37 Nm", "Torque37 Nm"],
+    // A cut occurrence earlier in the text does not hide a whole one later.
+    ["torque 10 N*m", "Bolt A torque 103 N*m. Bolt B torque 10 N*m."],
+  ]) {
+    assert.equal(quoteAppearsInChunk(quote, text), true, quote);
+  }
+});
+
 // ---- Numeric anomaly detector: scope ----
 
 test("unit-bearing specifications are detected", () => {
@@ -149,16 +179,212 @@ test("a spec present in the evidence is grounded", () => {
   assert.equal(result.grounded, true);
 });
 
-test("a unit-variant conversion is treated as grounded, not an anomaly", () => {
-  // The manual prints 37 N·m; the answer states the ft-lbf figure. Flagging that
-  // as an anomaly would punish a correct conversion.
-  const result = checkClaimNumbers("Torque the drain plug to 27 ft-lb.", "Torque : 37 N·m");
-  assert.equal(result.grounded, true, JSON.stringify(result));
+test("a converted figure is not grounded; the figure printed in the claim's unit is", () => {
+  // Owner decision D1 (2026-10-19), reversing what this test used to pin: the
+  // verifier no longer converts. These manuals print a torque in every unit they
+  // support, so a figure the quote does not print is the model's arithmetic, not
+  // the manual's, and must not be called verified.
+  for (const claim of ["Torque the drain plug to 27 ft-lb.", "377 kgf-cm", "327 in-lbf"]) {
+    assert.equal(checkClaimNumbers(claim, "Torque : 37 N·m").grounded, false, claim);
+  }
+
+  const table = "Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+
+  for (const claim of [
+    "Torque the drain plug to 27 ft-lbf.",
+    "Torque the drain plug to 27 ft-lb.",
+    "377 kgf-cm",
+    "37 N·m",
+    "37 N*m",
+    "37 newton meters",
+  ]) {
+    assert.equal(checkClaimNumbers(claim, table).grounded, true, claim);
+  }
 });
 
-test("kgf-cm and in-lbf conversions are also recognized", () => {
-  assert.equal(checkClaimNumbers("377 kgf-cm", "Torque : 37 N·m").grounded, true);
-  assert.equal(checkClaimNumbers("327 in-lbf", "Torque : 37 N·m").grounded, true);
+test("the torque and capacity spellings of manuals and owners are detected (3B-01)", () => {
+  // Each of these used to be invisible, so the claim carried "no specification"
+  // and its number was never checked at all.
+  for (const [text, value, unit] of [
+    ["50 ft-lbs", 50, "ft-lbs"],
+    ["76 ft lbs", 76, "ft lbs"],
+    ["76 ft.*lbf", 76, "ft.*lbf"],
+    ["76 ft. lbs", 76, "ft. lbs"],
+    ["76 lb-ft", 76, "lb-ft"],
+    ["76 lbf·ft", 76, "lbf·ft"],
+    ["27 foot-pounds", 27, "foot-pounds"],
+    ["44 in.*lbf", 44, "in.*lbf"],
+    ["37 newton-meters", 37, "newton-meters"],
+    ["4.2 L", 4.2, "L"],
+    ["4.2L", 4.2, "L"],
+    ["5.5 qts", 5.5, "qts"],
+    ["4.4 US qts", 4.4, "US qts"],
+    ["3.7 Imp. qts", 3.7, "Imp. qts"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Specification: ${text}.`).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  // The litre symbol is case-sensitive and is not the start of a word.
+  for (const text of ["Remove the 2 L-shaped brackets.", "Loosen the 2 LH bolts.", "Use 4 Lines."]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+  }
+
+  const lugNut = "Wheel lug nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)";
+  const oil = "Engine oil capacity with oil filter change 4.2 liters (4.4 US qts, 3.7 Imp. qts)";
+
+  for (const [claim, quote, grounded] of [
+    ["The wheel lug nut torque is 76 ft-lbs.", lugNut, true],
+    ["The wheel lug nut torque is 76 lb-ft.", lugNut, true],
+    ["The wheel lug nut torque is 50 ft-lbs.", lugNut, false],
+    ["The engine oil capacity is 4.4 qts.", oil, true],
+    ["The engine oil capacity is 4.4 US quarts.", oil, true],
+    ["The engine oil capacity is 3.7 Imp. quarts.", oil, true],
+    // A US owner reading "3.7 qts" would underfill by about 0.7 L.
+    ["The engine oil capacity is 3.7 qts.", oil, false],
+    ["The engine oil capacity is 4.2 L.", oil, true],
+    ["The engine oil capacity is 5.5 L.", oil, false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
+});
+
+test("an engine designation is a name, and a bare L in a quote counts only for a volume", () => {
+  // Found by the Stage 2 live eval's replay: the model copies the vehicle
+  // descriptor "L4 1.8L 2ZR-FE" into its claims and gaps, and the bare litre
+  // symbol read it as 1.8 litres. In the corpus every glued one-decimal litre
+  // figure is an engine (1.8L or 2.4L), and a spaced "2 L" is a gear position or
+  // a wire colour, never a capacity.
+  for (const text of [
+    "For the 2009 Toyota Corolla L4 1.8L 2ZR-FE, see below.",
+    "Toyota Corolla L4-1.8L (2ZR-FE).",
+    "Connector (2.4L: TOP OF ENGINE)",
+    "Applies to the 1.8L 2ZR-FE engine.",
+    "W/ smart key system (1.8L)",
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text), [], text);
+    assert.equal(redactSpecNumbers(text), text, text);
+  }
+
+  // A capacity is still a volume, glued or not.
+  for (const [text, value] of [
+    ["Refill with 4.7 L of oil.", 4.7],
+    ["Capacity 4.2L.", 4.2],
+    ["Fill 2.4L of coolant.", 2.4],
+  ]) {
+    assert.deepEqual(extractSpecNumbers(text).map((spec) => spec.value), [value], text);
+  }
+
+  // The descriptor is not an unreadable figure either.
+  assert.deepEqual(
+    checkUnrecognizedFigures(
+      "For the 2009 Toyota Corolla L4 1.8L 2ZR-FE, the oil pan drain plug torque is 37 N*m.",
+      "Oil pan drain plug torque 37 N*m"
+    ),
+    { grounded: true, unsupported: [] }
+  );
+
+  // A bare L in the quote no longer switches off the header fallback for
+  // another unit, and still gates a volume claim.
+  const wiring = "Specified torque (N*m): bracket bolt 37. Wire 2 L to terminal 3";
+
+  assert.equal(checkClaimNumbers("The bracket bolt torque is 37 N*m.", wiring).grounded, true);
+  assert.equal(checkClaimNumbers("The bracket bolt torque is 39 N*m.", wiring).grounded, false);
+  assert.equal(checkClaimNumbers("The capacity is 4.2 L.", "Capacity 4.2 L").grounded, true);
+  assert.equal(checkClaimNumbers("The capacity is 5.5 L.", "Capacity 4.2 L").grounded, false);
+});
+
+test("kgf/cm2 in every printed form is a pressure, not a torque (1A-13)", () => {
+  // The ASCII "2" defeated the unit's word boundary, so "kgf/cm2" and the
+  // manuals' "kgf*cm2" went undetected, and "kgf/cm²" was read as the kgf*cm
+  // torque unit.
+  for (const text of ["3.1 kgf/cm2", "3.1 kgf/cm²", "3.1 kgf*cm2", "3.1 kgf·cm²", "3.1 kg/cm2"]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Fuel pressure ${text}.`).map((spec) => spec.value),
+      [3.1],
+      text
+    );
+  }
+
+  const fuel = "Fuel pressure 304 to 343 kPa (3.1 to 3.5 kgf*cm2, 44.1 to 49.7 psi)";
+
+  for (const [claim, grounded] of [
+    ["The fuel pressure is 3.1 to 3.5 kgf/cm2.", true],
+    ["The fuel pressure is 3.5 kgf/cm².", true],
+    ["The fuel pressure is 5.5 kgf/cm2.", false],
+    // The torque spelling is a different unit, so it cannot borrow the figure.
+    ["The fuel pressure is 3.1 kgf*cm.", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, fuel).grounded, grounded, claim);
+  }
+
+  // And a pressure claim gets the pressure subject guard.
+  assert.deepEqual(checkClaimSubject("The fuel pressure is 3.1 kgf/cm2.", "Oil pressure 3.1 kgf/cm2"), {
+    grounded: false,
+    checked: true,
+    subject: "fuel",
+  });
+
+  // The torque unit is still a torque.
+  assert.equal(checkClaimNumbers("The bolt torque is 377 kgf*cm.", "Torque 37 N*m (377 kgf*cm)").grounded, true);
+});
+
+test("inches, miles, angles, percentages, kV, mΩ, and MΩ are detected (1A-04)", () => {
+  for (const [text, value, unit] of [
+    ["0.906 in.", 0.906, "in."],
+    ["(0.906 in)", 0.906, "in"],
+    ["0.906 inches", 0.906, "inches"],
+    ["100,000 miles", 100000, "miles"],
+    ["160,000 km", 160000, "km"],
+    ["an additional 90°", 90, "°"],
+    ["an additional 90 degrees", 90, "degrees"],
+    ["a 50% mixture", 50, "%"],
+    ["35 kV", 35, "kV"],
+    [`5 m${OMEGA}`, 5, `m${OMEGA}`],
+    [`1 M${OMEGA}`, 1, `M${OMEGA}`],
+    ["2 megohms", 2, "megohms"],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(`Specification: ${text} here.`).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      [{ value, unit }],
+      text
+    );
+  }
+
+  // The preposition "in", an in.Hg vacuum, and a temperature are not these units.
+  for (const [text, expected] of [
+    ["Install 2 in the bracket.", []],
+    ["Vacuum 17.7 in.Hg.", []],
+    ["Coolant at 90°C.", [{ value: 90, unit: "°C" }]],
+    ["Coolant at 90 degrees Celsius.", [{ value: 90, unit: "degrees Celsius" }]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => ({ value: spec.value, unit: spec.unit })),
+      expected,
+      text
+    );
+  }
+
+  for (const [claim, quote, grounded] of [
+    ["The minimum thickness is 0.906 in.", "Minimum thickness 23.0 mm (0.906 in.)", true],
+    ["The minimum thickness is 0.800 in.", "Minimum thickness 23.0 mm (0.906 in.)", false],
+    ["Replace the coolant at 100,000 miles.", "Replace the coolant at the first 100,000 miles", true],
+    ["Replace the coolant every 30,000 miles.", "Replace the coolant at the first 100,000 miles", false],
+    ["Turn the bolts a further 90 degrees.", "Tighten the bolts an additional 90°", true],
+    ["Turn the bolts a further 180°.", "Tighten the bolts an additional 90°", false],
+    ["Use a 50% coolant mixture.", "Coolant concentration 50%", true],
+    ["Use a 60% coolant mixture.", "Coolant concentration 50%", false],
+    // The angle is not a temperature, nor the reverse.
+    ["Turn the bolt a further 90°.", "Hold the coolant at 90°C", false],
+    // Spellings of one temperature unit match each other (1A-12 I1 and I2).
+    ["The coolant temperature is 90°C.", "Coolant temperature 90 ° C", true],
+    ["The coolant temperature is 90 deg C.", "Coolant temperature 90°C", true],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
 });
 
 test("an invented spec is flagged even when the quote is real", () => {
@@ -491,7 +717,7 @@ test("the guard covers the spaced unit spellings these manuals print too", () =>
 
 test("the electrical, speed, and temperature guards still accept a matching subject", () => {
   // Fail-closed must not mean fail-always: the same component in claim and quote
-  // passes, exactly as it does for the four convertible families.
+  // passes, exactly as it does for the four measurement families.
   const cases = [
     ["The battery voltage should read 12.6 volts.", "Battery voltage (engine off): 12.6 volts"],
     [
@@ -579,7 +805,7 @@ test("current in amps keeps only the numeric check, not the subject guard", () =
   assert.equal(inventedValue.rejected[0].reason, "numeric_anomaly");
 });
 
-test("a convertible-family claim keeps its own subject when it also names a temperature", () => {
+test("a measurement-family claim keeps its own subject when it also names a temperature", () => {
   // The new head nouns must not steal the subject from the families that
   // already had one: "capacity" still decides this claim, not "temperature".
   const quote = "Engine oil capacity (with filter): 4.2 liters";
@@ -744,32 +970,91 @@ test("a symbol value inside an identifier is not read as a specification", () =>
 test("a hyphen before a symbol value keeps ranges and signed values checked", () => {
   // The identifier boundary deliberately does not refuse a preceding hyphen.
   // Hiding "16V" in "9-16V" or "9 V" in "-9 V" would leave nothing to check and
-  // let a fabricated value pass. Only the unit-bearing endpoint is read, and the
-  // sign is not kept -- both documented limits. "B-12V" still reads as "12 V"
-  // for the same reason: an extra rejection, never a false verification.
-  for (const [text, raw] of [
-    ["Charging voltage: 9-16V.", "16V"],
-    ["Charging voltage: 13.2-16.8V.", "16.8V"],
-    ["Reference is -9 V.", "9 V"],
+  // let a fabricated value pass. "B-12V" still reads as "12 V" for the same
+  // reason: an extra rejection, never a false verification. Both ends of a range
+  // are read now, and a leading minus is kept (1A-10); these used to be
+  // documented limits.
+  for (const [text, raws] of [
+    ["Charging voltage: 9-16V.", ["9V", "16V"]],
+    ["Charging voltage: 13.2-16.8V.", ["13.2V", "16.8V"]],
+    ["Reference is -9 V.", ["-9 V"]],
+    ["Connector B-12V is behind the dash.", ["12V"]],
   ]) {
     assert.deepEqual(
       extractSpecNumbers(text).map((spec) => spec.raw),
-      [raw],
+      raws,
       text
     );
   }
 
   for (const [claim, quote, unsupported] of [
-    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", "16V"],
-    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", "16.8V"],
-    ["Reference should be -9 V.", "Reference: -5 V", "9 V"],
+    ["Charging voltage should be 9-16V.", "Charging voltage: 9-14V", ["16V"]],
+    ["Charging voltage should be 13.2-16.8V.", "Charging voltage: 13.2-14.8V", ["16.8V"]],
+    ["Charging voltage should be 9-14V.", "Charging voltage: 11-14V", ["9V"]],
+    ["Reference should be -9 V.", "Reference: -5 V", ["-9 V"]],
+    ["Reference should be -5 V.", "Reference: 5 V", ["-5 V"]],
+    ["Reference should be 5 V.", "Reference: -5 V", ["5 V"]],
   ]) {
     assert.deepEqual(
       checkClaimNumbers(claim, quote),
-      { grounded: false, unsupported: [unsupported] },
+      { grounded: false, unsupported },
       claim
     );
   }
+});
+
+test("both ends of a range are specifications in the range's unit (1A-10)", () => {
+  // Only the number touching the unit used to be read, so a wrong lower bound
+  // passed and a correct one could never be verified.
+  for (const [text, values] of [
+    ["Standard voltage 10.5 to 14 V", [10.5, 14]],
+    ["Thermostat opening 80 to 84 °C (176 to 183 °F)", [80, 84, 176, 183]],
+    ["Fuel pressure 304 to 343 kPa", [304, 343]],
+    ["Gap 1.0–1.1 mm", [1, 1.1]],
+    ["Gap 1.0 ~ 1.1 mm", [1, 1.1]],
+    ["Fast idle 1,500-2,000 rpm", [1500, 2000]],
+    ["Hold between 80 and 84 °C", [80, 84]],
+    ["Ambient -40 to -10 °C", [-40, -10]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.value),
+      values,
+      text
+    );
+  }
+
+  // A dash used as punctuation, and an identifier, are not the low end of a range.
+  for (const [text, values] of [
+    ["Bolt 1 - 37 N*m", [37]],
+    ["Use an M10-1.25 mm bolt", [1.25]],
+  ]) {
+    assert.deepEqual(
+      extractSpecNumbers(text).map((spec) => spec.value),
+      values,
+      text
+    );
+  }
+
+  // Either printed end supports a claim stating that one value, and a claimed
+  // range needs both of its ends printed.
+  const quote = "Thermostat valve opening temperature 80 to 84 °C";
+
+  for (const [claim, grounded] of [
+    ["The thermostat opens at 80 °C.", true],
+    ["The thermostat is fully open at 84 °C.", true],
+    ["The thermostat opens between 80 and 84 °C.", true],
+    ["The thermostat opens at 80 to 84 °C.", true],
+    ["The thermostat opens at 76 to 84 °C.", false],
+    ["The thermostat opens at 80 to 88 °C.", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, claim);
+  }
+
+  // A redacted range loses both of its ends, not just the one touching the unit.
+  assert.equal(
+    redactSpecNumbers("The standard voltage is 10.5 to 14 V."),
+    "The standard voltage is [unverified value]."
+  );
 });
 
 test("a matching electrical-symbol claim is verified, not merely invisible", () => {
@@ -914,13 +1199,13 @@ test("the ASCII ohm spellings were already covered and still are", () => {
 
 // ---- N4: electrical values must equal the printed value ----
 //
-// Every other unit is compared within max(0.51 absolute, 2% relative). That
-// slack exists for torque tables that print one figure in three units, and it
-// is far too wide for electrical readings: it let 0.9 V pass against a printed
+// Electrical readings were the first family held to the printed value: the
+// max(0.51 absolute, 2% relative) tolerance let 0.9 V pass against a printed
 // 0.5 V, 12.4 V against a printed 12.6 V (a battery at 75% charge, not 100%),
 // and 12 Ω against a printed 12.4 Ω. Volts, millivolts, ohms, kilohms, amps,
-// and milliamps -- spelled out or as a symbol -- now need the printed number
-// itself. "Exact" is NUMERIC equality: 12.40 and 12.4 are the same number.
+// and milliamps -- spelled out or as a symbol -- need the printed number itself,
+// and since owner decision D1 every other unit does too. "Exact" is NUMERIC
+// equality: 12.40 and 12.4 are the same number.
 
 test("an electrical value near, but not equal to, the printed value is not grounded", () => {
   const cases = [
@@ -998,6 +1283,66 @@ test("exact means numeric equality, so formatting differences still match", () =
   }
 });
 
+test("a comma before three digits groups thousands; before one or two it is a decimal mark", () => {
+  // 3A-03: "12,6 V" above is the decimal 12.6, and it must stay one. But reading
+  // EVERY comma as a decimal point made "1,500 kPa" the number 1.5, so a wrong
+  // 1,000 kPa sat close to it and the correct "1500 kPa" was rejected (1A-02).
+  for (const [text, value] of [
+    ["Compression pressure 1,500 kPa", 1500],
+    ["Torque 103 N*m (1,050 kgf*cm, 76 ft-lbf)", 1050],
+    ["Fast idle speed 1,500 rpm", 1500],
+    ["Battery voltage 12,6 V", 12.6],
+    ["Battery voltage 12,60 V", 12.6],
+    ["Clearance 0,05 mm", 0.05],
+    ["Pressure 1,500.5 kPa", 1500.5],
+  ]) {
+    assert.ok(
+      extractSpecNumbers(text).some((spec) => spec.value === value),
+      `${text}: ${JSON.stringify(extractSpecNumbers(text))}`
+    );
+  }
+
+  // A run-on like "1,5000" is not a number these manuals print. It is not
+  // misread as 1.5 or as the 5000 behind the comma.
+  assert.deepEqual(extractSpecNumbers("Reading 1,5000 kPa"), []);
+
+  for (const [claim, quote, grounded] of [
+    ["The fast idle speed is 1500 rpm.", "Fast idle speed 1,500 rpm", true],
+    ["The fast idle speed is 1,500 rpm.", "Fast idle speed 1500 rpm", true],
+    ["The compression pressure is 1,000 kPa.", "Compression pressure: Standard 1,500 kPa", false],
+    ["The fast idle speed is 1,900 rpm.", "Fast idle speed 1,500 rpm", false],
+    ["The compression pressure is 1500 kPa.", "Compression pressure (kPa): 1,500", true],
+    ["The compression pressure is 1.5 kPa.", "Compression pressure (kPa): 1,500", false],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, grounded, `${claim} | ${quote}`);
+  }
+});
+
+test("the bare-number fallback needs a header unit in the claim's unit (1A-03)", () => {
+  // A quote with no unit-bearing figure used to ground any claim whose number
+  // appeared anywhere in it -- a step sequence verified a torque.
+  for (const [claim, quote] of [
+    ["Tighten the bolts to 10 N*m.", "Tighten the bolts in the sequence shown, from 1 to 10."],
+    ["Set the tire pressure to 37 psi.", "Torque (N·m): 37"],
+    ["The terminal voltage is 14 V.", "Terminal voltage V 11 to 14"],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  // A flattened table carries its units as column headers: spelled units may
+  // stand bare, a one-letter symbol only in brackets.
+  const torqueTable = "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27";
+
+  for (const [claim, quote] of [
+    ["The oil pan drain plug torque is 37 N·m.", torqueTable],
+    ["The oil pan drain plug torque is 27 ft-lbs.", torqueTable],
+    ["The mounting bolt torque is 37 N·m.", "Torque (N·m): mounting bolt 37"],
+    ["The terminal voltage is 14 V.", "Terminal voltage (V): 11 to 14"],
+  ]) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
+  }
+});
+
 test("a bare table number needs the exact value for an electrical claim", () => {
   // Some tables print the unit only in a column header, so the row holds a bare
   // number and the quote carries no unit-bearing specification at all. The
@@ -1015,11 +1360,12 @@ test("a bare table number needs the exact value for an electrical claim", () => 
   assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
 });
 
-test("every other unit keeps the existing tolerance", () => {
-  // Pinned so the electrical rule cannot leak into the families it does not
-  // cover. Each claim differs from its quote by an amount the shared
-  // max(0.51, 2%) tolerance has always accepted.
-  const cases = [
+test("every unit needs the printed value, not a near one (1A-01)", () => {
+  // Replaces "every other unit keeps the existing tolerance" (3A-01), which
+  // pinned these same pairs as grounded. The max(0.51, 2%) tolerance it
+  // protected accepted 0.5 mm against a printed 0.05 mm and 4.7 L against 4.2 L,
+  // so the electrical rule now covers every unit (owner decision D1).
+  const near = [
     ["Torque the drain plug to 37.5 Nm.", "Torque : 37 N·m"],
     ["The fuel pressure is 304 kPa.", "Fuel pressure: 300 kPa"],
     ["The engine oil capacity is 4.4 liters.", "Engine oil capacity: 4.2 liters"],
@@ -1027,14 +1373,30 @@ test("every other unit keeps the existing tolerance", () => {
     ["The thermostat opens at 83°C.", "Thermostat valve opening temperature: 84°C"],
     ["The idle speed is 710 rpm.", "Idle speed: 700 rpm"],
     ["The signal frequency is 50.5 Hz.", "Signal frequency: 50 Hz"],
+    ["The maximum disc runout is 0.5 mm.", "Disc runout: Maximum 0.05 mm"],
   ];
 
-  for (const [claim, quote] of cases) {
+  for (const [claim, quote] of near) {
+    assert.equal(checkClaimNumbers(claim, quote).grounded, false, `${claim} | ${quote}`);
+  }
+
+  // The printed number itself still matches, however it is formatted.
+  const printed = [
+    ["Torque the drain plug to 37.0 Nm.", "Torque : 37 N·m"],
+    ["The fuel pressure is 300 kPa.", "Fuel pressure: 300 kPa"],
+    ["The engine oil capacity is 4.20 liters.", "Engine oil capacity: 4.2 liters"],
+    ["The maximum disc runout is 0.050 mm.", "Disc runout: Maximum 0.05 mm"],
+    ["The thermostat opens at 84°C.", "Thermostat valve opening temperature: 84°C"],
+    ["The idle speed is 700 rpm.", "Idle speed: 700 rpm"],
+  ];
+
+  for (const [claim, quote] of printed) {
     assert.equal(checkClaimNumbers(claim, quote).grounded, true, `${claim} | ${quote}`);
   }
 
-  // The bare-number fallback keeps its tolerance for these units as well.
-  assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, true);
+  // The bare-number fallback is exact as well.
+  assert.equal(checkClaimNumbers("Torque to 37.4 Nm.", "Torque (N·m): 37").grounded, false);
+  assert.equal(checkClaimNumbers("Torque to 37 Nm.", "Torque (N·m): 37").grounded, true);
 });
 
 // ---- N4: current symbols ----
@@ -1089,9 +1451,11 @@ test("lowercase a, A/C and A/F, identifiers, and words starting with A are not r
     assert.deepEqual(extractSpecNumbers(text), [], text);
   }
 
+  // The quote names bank 1 itself: a "1" the quote did not print would now be
+  // rejected as an unrecognized figure, which is not what this test is about.
   const result = verifySingleClaim(
     "Inspect the bank 1 A/F sensor.",
-    "Inspect the air fuel ratio sensor. Standard voltage: 3.3 V"
+    "Inspect the bank 1 air fuel ratio sensor. Standard voltage: 3.3 V"
   );
 
   assert.equal(result.rejected.length, 0);
@@ -1172,7 +1536,7 @@ test("a current symbol in the quote leaves every other unit's check unchanged", 
   const voltageRow = "Terminal voltage (V): 11 to 14. EFI 15A";
 
   assert.equal(checkClaimNumbers("The mounting bolt torque is 37 N·m.", torqueRow).grounded, true);
-  assert.equal(checkClaimNumbers("The mounting bolt torque is 37.4 N·m.", torqueRow).grounded, true);
+  assert.equal(checkClaimNumbers("The mounting bolt torque is 37.4 N·m.", torqueRow).grounded, false);
   assert.equal(checkClaimNumbers("The mounting bolt torque is 39 N·m.", torqueRow).grounded, false);
   assert.equal(checkClaimNumbers("The terminal voltage is 14 V.", voltageRow).grounded, true);
   assert.equal(checkClaimNumbers("The terminal voltage is 13.6 V.", voltageRow).grounded, false);
@@ -1355,6 +1719,115 @@ test("the letter A gets the same word-order reading as any other letter", () => 
   }
 });
 
+// ---- Quote length (1A-11) ----
+
+test("a claim with no specification needs a quote of at least three words", () => {
+  const page = "Inspect the gasket. If it is OK, continue. Do not reuse a damaged gasket.";
+
+  for (const quote of ["OK", "If it", "the gasket."]) {
+    const result = verifyEvidence(
+      payload({
+        documentSupported: [{ claim: "Yes, it is OK to reuse the gasket.", sourceId: "S1", evidenceQuote: quote }],
+      }),
+      [chunk({ chunkText: page })]
+    );
+
+    assert.equal(result.documentSupported.length, 0, quote);
+    assert.equal(result.rejected[0].reason, "quote_too_short", quote);
+    assert.equal(deriveEvidenceStatus(result), "not_found", quote);
+  }
+
+  // Three words are enough, and a claim WITH a specification is anchored by the
+  // numeric check, so its figure alone may be the quote.
+  for (const [claim, quote] of [
+    ["Do not reuse a damaged gasket.", "Do not reuse a damaged gasket"],
+    ["Inspect the gasket first.", "Inspect the gasket"],
+    ["Use 37 Nm.", "37 Nm"],
+  ]) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.deepEqual(result.rejected, [], claim);
+    assert.equal(result.documentSupported.length, 1, claim);
+  }
+});
+
+// ---- The vocabulary boundary (1A-04): a figure nothing can read fails closed ----
+
+test("a figure in a unit the detector does not know must be printed in its quote", () => {
+  const airbag = "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal";
+
+  for (const [claim, quote, grounded] of [
+    ["Wait 30 seconds after disconnecting the battery.", airbag, false],
+    ["Wait 90 seconds after disconnecting the battery.", airbag, true],
+    ["Remove the 6 bolts.", "Remove the 4 bolts and the cover", false],
+    ["Remove the 4 bolts.", "Remove the 4 bolts and the cover", true],
+    // A step number the quote does not print is a figure like any other.
+    ["Step 3: remove the drain plug.", "Remove the drain plug", false],
+    ["Repeat for cylinders 1 and 4.", "Repeat for the No. 1 and No. 4 cylinders", true],
+    ["The sensor reads -5.", "Sensor output 5", false],
+    ["The thread is M10 x 1.25.", "Use an M10 bolt", false],
+  ]) {
+    assert.equal(checkUnrecognizedFigures(claim, quote).grounded, grounded, claim);
+  }
+
+  // Names are not figures: codes, pins, ordinals, part numbers, model years.
+  for (const claim of [
+    "On 2009 models the 2ZR-FE engine uses spark plug 90919-01253.",
+    "Check terminals B9-1 and B9-2 of connector A51 for code P0420.",
+    "Tighten in the 1st and 2nd passes.",
+    "Recharge with HFC-134a on 4WD and 2009-2013 models.",
+  ]) {
+    assert.deepEqual(checkUnrecognizedFigures(claim, "Inspect the part."), { grounded: true, unsupported: [] }, claim);
+  }
+
+  // A recognized specification is the numeric check's business, not this one's.
+  assert.equal(checkUnrecognizedFigures("Torque the bolt to 54 N*m.", "Torque 37 N*m").grounded, true);
+  assert.equal(checkUnrecognizedFigures("Use 0W-20 oil.", "Use 5W-30 oil").grounded, true);
+});
+
+test("an unreadable figure rejects the claim and is not reprinted in its gap", () => {
+  const result = verifySingleClaim(
+    "Wait 30 seconds after disconnecting the battery.",
+    "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal"
+  );
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "unrecognized_figure");
+  assert.deepEqual(result.rejected[0].unsupported, ["30"]);
+  assert.equal(deriveEvidenceStatus(result), "not_found");
+  assert.doesNotMatch(result.gaps.join(" "), /30/);
+  assert.match(result.gaps[0], /Wait \[unverified value\] seconds/);
+});
+
+test("a claim rejected for its source or quote never reprints an unreadable figure", () => {
+  // Found by the Stage 2 live eval: the reject-unrecognized-figure probe was
+  // rejected one step early, as quote_not_in_source, and that gap printed
+  // "999999 drain cycles" in full because only specifications were redacted.
+  const claim = "Replace the drain plug gasket every 999999 drain cycles.";
+
+  for (const [sourceId, quote, reason] of [
+    ["S9", "Clean and install the oil drain plug with a new gasket.", "unknown_source"],
+    ["S1", "A sentence that is not on the page at all.", "quote_not_in_source"],
+  ]) {
+    const result = verifyEvidence(payload({ documentSupported: [{ claim, sourceId, evidenceQuote: quote }] }), [
+      chunk(),
+    ]);
+
+    assert.equal(result.rejected[0].reason, reason);
+    assert.doesNotMatch(result.gaps.join(" "), /999999/, reason);
+    assert.match(result.gaps[0], /every \[unverified value\] drain cycles/, reason);
+  }
+
+  // A figure the cited quote really prints may stay; a name always stays.
+  const result = verifySingleClaim(
+    "On the 2009 model, torque the 4 drain plug bolts to 54 N*m.",
+    "On the 2009 model, torque the 4 drain plug bolts to 37 N*m."
+  );
+
+  assert.equal(result.rejected[0].reason, "numeric_anomaly");
+  assert.match(result.gaps[0], /2009 model, torque the 4 drain plug bolts to \[unverified value\]/);
+});
+
 test("an ungrounded torque value in general guidance surfaces as a gap, not text", () => {
   // The rule applies across ALL channels: an honest label does not license an
   // unsupported specification.
@@ -1400,6 +1873,32 @@ test("general guidance with only structural numbers is kept", () => {
   assert.equal(result.generalGuidance.length, 1);
 });
 
+// ---- Reply size (1A-14) ----
+
+test("claims past the 40th are counted, and the answer can no longer read as answered", () => {
+  const quote = "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)";
+  const claims = (count) =>
+    Array.from({ length: count }, () => ({
+      claim: "The oil drain plug torque is 37 Nm.",
+      sourceId: "S1",
+      evidenceQuote: quote,
+    }));
+
+  const exactlyForty = validateEvidencePayload(payload({ documentSupported: claims(40) }));
+
+  assert.equal(exactlyForty.value.droppedClaimCount, 0);
+  assert.equal(deriveEvidenceStatus(verifyEvidence(exactlyForty.value, [chunk()])), "answered");
+
+  const fortyTwo = validateEvidencePayload(payload({ documentSupported: claims(42) }));
+  const verified = verifyEvidence(fortyTwo.value, [chunk()]);
+
+  assert.equal(fortyTwo.value.documentSupported.length, 40);
+  assert.equal(fortyTwo.value.droppedClaimCount, 2);
+  assert.equal(verified.documentSupported.length, 40);
+  assert.equal(deriveEvidenceStatus(verified), "partial");
+  assert.match(verified.gaps.join(" "), /2 more claims were not checked/);
+});
+
 // ---- Derived status ----
 
 test("status is derived from what actually verified", () => {
@@ -1432,7 +1931,7 @@ test("the rendered answer keeps the two channels visibly distinct", () => {
 // declared, the sanitizer drops the entry and the telemetry silently loses a
 // rejection — so drive every path and check the declarations cover them.
 
-/** One payload that trips all six rejection paths at once. */
+/** One payload that trips every rejection path at once. */
 function everyRejection() {
   return verifyEvidence(
     payload({
@@ -1454,6 +1953,14 @@ function everyRejection() {
           claim: "Torque the oil filter cap to 37 Nm.",
           sourceId: "S1",
           evidenceQuote: "the oil drain plug with a new gasket. Torque : 37 Nm",
+        },
+        // quote_too_short -- a real one-word quote under a claim with no spec
+        { claim: "Reuse the old gasket.", sourceId: "S1", evidenceQuote: "gasket" },
+        // unrecognized_figure -- a figure in no detected unit, not printed
+        {
+          claim: "Replace the drain plug gasket every 3 oil changes.",
+          sourceId: "S1",
+          evidenceQuote: "Clean and install the oil drain plug with a new gasket.",
         },
       ],
       // unsourced_specification

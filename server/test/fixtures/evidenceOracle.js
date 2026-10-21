@@ -61,7 +61,6 @@ export const ASK_ORACLE = [
     claim: "The maximum disc runout is 0.5 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "0.5 mm is ten times the printed 0.05 mm limit.",
   },
   {
@@ -73,7 +72,6 @@ export const ASK_ORACLE = [
     claim: "The minimum brake pad thickness is 0.5 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "Half the printed minimum pad thickness.",
   },
   {
@@ -85,7 +83,6 @@ export const ASK_ORACLE = [
     claim: "The spark plug electrode gap is 1.6 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "1.6 mm is outside the printed 1.0 to 1.1 mm range.",
   },
   {
@@ -97,7 +94,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity is 4.7 liters.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "Half a litre over the printed capacity overfills the engine.",
   },
   {
@@ -109,7 +105,6 @@ export const ASK_ORACLE = [
     claim: "The intake valve clearance is 0.75 mm.",
     expect: "reject",
     finding: "1A-01",
-    todo: "1A-01",
     note: "0.75 mm is far outside the printed 0.19 to 0.29 mm range.",
   },
   {
@@ -134,7 +129,6 @@ export const ASK_ORACLE = [
     claim: "The compression pressure is 1,000 kPa.",
     expect: "reject",
     finding: "1A-02",
-    todo: "1A-02",
     note: "1,000 and 1,500 differ by a third; parsed as 1.0 and 1.5 they look close.",
   },
   {
@@ -146,7 +140,6 @@ export const ASK_ORACLE = [
     claim: "The fast idle speed is 1,900 rpm.",
     expect: "reject",
     finding: "1A-02",
-    todo: "1A-02",
     note: "1,900 rpm is not the printed 1,500 rpm.",
   },
   {
@@ -158,7 +151,6 @@ export const ASK_ORACLE = [
     claim: "The fast idle speed is 1500 rpm.",
     expect: "accept",
     finding: "1A-02",
-    todo: "1A-02",
     note: "False rejection: 1500 is the printed 1,500 written without a separator.",
   },
 
@@ -172,7 +164,6 @@ export const ASK_ORACLE = [
     claim: "Tighten the bolts to 10 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The 10 is a step number, not a torque.",
   },
   {
@@ -184,7 +175,6 @@ export const ASK_ORACLE = [
     claim: "The wheel lug nut torque is 10 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The quote stops inside 103, so it is not a quote of anything the page says.",
   },
   {
@@ -196,7 +186,6 @@ export const ASK_ORACLE = [
     claim: "The oil filter cap torque is 5 N*m.",
     expect: "reject",
     finding: "1A-03",
-    todo: "1A-03",
     note: "The quote starts inside 25.",
   },
 
@@ -210,7 +199,6 @@ export const ASK_ORACLE = [
     claim: "The front disc minimum thickness is 0.800 in.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "Inches are not detected, so 0.800 is never compared with 0.906.",
   },
   {
@@ -222,7 +210,6 @@ export const ASK_ORACLE = [
     claim: "The fuel pressure is 5.5 kgf/cm2.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "The trailing ASCII 2 defeats the unit's word boundary.",
   },
   {
@@ -234,7 +221,6 @@ export const ASK_ORACLE = [
     claim: "Replace the engine coolant every 30,000 miles.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "Miles are not detected, so 30,000 is never compared with 100,000.",
   },
   {
@@ -246,8 +232,66 @@ export const ASK_ORACLE = [
     claim: "Tighten the cylinder head bolts an additional 180°.",
     expect: "reject",
     finding: "1A-04",
-    todo: "1A-04",
     note: "An angle without C or F is not detected; 180° doubles the printed turn.",
+  },
+
+  // ---- 1A-04, the boundary itself: a figure in an unlisted unit fails closed ----
+  // Added with the fix (Stage 2). Whatever the vocabulary lists, the next unit it
+  // misses must not mean "nothing to check".
+  {
+    id: "E1-unlisted-unit-wait-time",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal.",
+    quote: "Wait at least 90 seconds after disconnecting the cable from the negative battery terminal",
+    claim: "Wait 30 seconds after disconnecting the negative battery cable.",
+    expect: "reject",
+    finding: "1A-04",
+    note: "Seconds are not a detected unit; 30 is not the printed 90, and the wait protects the airbag.",
+  },
+  {
+    id: "E2-unlisted-count",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Remove the 4 bolts and the cylinder head cover.",
+    quote: "Remove the 4 bolts and the cylinder head cover",
+    claim: "Remove the 6 bolts and the cylinder head cover.",
+    expect: "reject",
+    finding: "1A-04",
+    note: "A count is a figure the code cannot read; 6 is not printed.",
+  },
+  {
+    id: "control-count-printed",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Remove the 4 bolts and the cylinder head cover.",
+    quote: "Remove the 4 bolts and the cylinder head cover",
+    claim: "Remove the 4 bolts and the cylinder head cover.",
+    expect: "accept",
+    finding: "control",
+    note: "An unlisted figure the quote prints passes.",
+  },
+  {
+    id: "control-engine-designation-is-a-name",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Oil pan drain plug torque 37 N*m (377 kgf*cm, 27 ft.*lbf).",
+    quote: "Oil pan drain plug torque 37 N*m",
+    claim: "For the 2009 Corolla L4 1.8L 2ZR-FE, the oil pan drain plug torque is 37 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "The vehicle descriptor's 1.8L names the engine; it is not a 1.8-litre capacity.",
+  },
+  {
+    id: "control-identifiers-are-names",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Install spark plug 90919-01253 on the 2ZR-FE engine. Check terminals B9-1 and B9-2.",
+    quote: "Install spark plug 90919-01253 on the 2ZR-FE engine",
+    claim: "On the 2009 2ZR-FE engine, install spark plug 90919-01253.",
+    expect: "accept",
+    finding: "control",
+    note: "A model year, an engine code, and a part number name things; they are not figures.",
   },
 
   // ---- 3B-01: the commonest torque and capacity spellings are not detected ----
@@ -260,7 +304,6 @@ export const ASK_ORACLE = [
     claim: "The wheel lug nut torque is 50 ft-lbs.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "ft-lbs is not detected; 50 ft-lbs is about two thirds of the printed 76 ft-lbf.",
   },
   {
@@ -272,7 +315,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity with oil filter change is 5.5 L.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "A bare L is not detected; 5.5 L overfills the engine.",
   },
   {
@@ -284,7 +326,6 @@ export const ASK_ORACLE = [
     claim: "The engine oil capacity with oil filter change is 5.5 qts.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "qts is not detected; 5.5 qts is about 5.2 liters, not 4.2.",
   },
   {
@@ -296,7 +337,6 @@ export const ASK_ORACLE = [
     claim: "Refill with about 4.7 L of oil (5 qts).",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "General guidance cites nothing, so any specification in it must be removed.",
   },
   {
@@ -308,7 +348,6 @@ export const ASK_ORACLE = [
     claim: "Tighten the lug nuts to 76 ft lbs.",
     expect: "reject",
     finding: "3B-01",
-    todo: "3B-01",
     note: "An unsourced torque must not survive under the general-guidance heading.",
   },
 
@@ -322,7 +361,6 @@ export const ASK_ORACLE = [
     claim: "The standard voltage is 5 to 14 V.",
     expect: "reject",
     finding: "1A-10",
-    todo: "1A-10",
     note: "Only the number before the unit is checked, so the wrong 5 V lower bound passes.",
   },
   {
@@ -334,7 +372,6 @@ export const ASK_ORACLE = [
     claim: "The thermostat valve opening temperature is 80 °C.",
     expect: "accept",
     finding: "1A-10",
-    todo: "1A-10",
     note: "False rejection: 80 °C is the printed lower end of the range.",
   },
   {
@@ -346,7 +383,6 @@ export const ASK_ORACLE = [
     claim: "The sensor output voltage is -5 V.",
     expect: "reject",
     finding: "1A-10",
-    todo: "1A-10",
     note: "-5 V is not 5 V.",
   },
 
@@ -360,7 +396,6 @@ export const ASK_ORACLE = [
     claim: "Yes, it is OK to reuse the gasket.",
     expect: "reject",
     finding: "1A-11",
-    todo: "1A-11",
     note: "A one-word quote cannot support a sentence, least of all one the page contradicts.",
   },
   {
@@ -372,7 +407,6 @@ export const ASK_ORACLE = [
     claim: "Replace the timing chain.",
     expect: "reject",
     finding: "1A-11",
-    todo: "1A-11",
     note: "A single letter is not evidence for anything.",
   },
 
@@ -386,7 +420,6 @@ export const ASK_ORACLE = [
     claim: "The fuel pressure is 0.3 N*m.",
     expect: "reject",
     finding: "1A-13",
-    todo: "1A-13",
     note: "A pressure cannot ground a torque; 3.1 kgf/cm² is read as 3.1 kgf*cm = 0.3 N*m.",
   },
 
@@ -498,7 +531,6 @@ export const PLANNER_ORACLE = [
     task: "Check the charging voltage",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "The claim starts inside 13.2, turning the lower bound into 2 V.",
   },
   {
@@ -511,7 +543,6 @@ export const PLANNER_ORACLE = [
     task: "Install the wheels",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "The claim stops inside 103 and has no unit, so no number check runs.",
   },
   {

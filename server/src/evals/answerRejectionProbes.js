@@ -55,21 +55,38 @@ export const REJECTION_PROBE_FABRICATED_QUOTE =
   "Tighten the flux capacitor mounting bolt with the calibrated dilithium wrench.";
 
 /** A torque value as printed in these manuals ("37 Nm", "5.5 N*m", "27 N·m"). */
-const TORQUE_VALUE_PATTERN = /\d+(?:\.\d+)?\s*N\s*[*·.]?\s*m\b/i;
+// Never starts inside a number: "10 Nm" read out of "110 Nm" is not printed, so
+// the claim built from it would fail the numeric check before the subject one.
+const TORQUE_VALUE_PATTERN = /(?<![\d.,])\d+(?:\.\d+)?\s*N\s*[*·.]?\s*m\b/i;
 
 /** Longest verbatim slice we quote back. Bounded so a probe stays readable. */
 const QUOTE_LENGTH = 400;
 
 /**
- * A genuine substring of the retrieved chunk.
+ * A genuine quote of the retrieved chunk: its opening, up to QUOTE_LENGTH
+ * characters, ending on a whole word.
  *
  * This is what makes the numeric probe sharp rather than trivial: the quote
  * really is in the document, so the claim clears the source and quote checks and
  * can only fail on the number itself. A fabricated quote would be rejected one
  * step earlier as quote_not_in_source and would never reach the detector.
+ *
+ * Cut at a word boundary on purpose. Since Stage 2 (1A-03), text that stops
+ * inside a word or number is not a quote of the page, so a raw 400-character
+ * slice was rejected as quote_not_in_source in the live eval, and the probes
+ * stopped testing the checks they are named for.
  */
 function verbatimQuote(chunk) {
-  return String(chunk?.chunkText || "").slice(0, QUOTE_LENGTH);
+  const text = String(chunk?.chunkText || "");
+  const bounded = text.slice(0, QUOTE_LENGTH);
+
+  if (text.length <= QUOTE_LENGTH || /\s/.test(text[QUOTE_LENGTH])) {
+    return bounded.trimEnd();
+  }
+
+  const lastBreak = bounded.search(/\s\S*$/);
+
+  return lastBreak > 0 ? bounded.slice(0, lastBreak).trimEnd() : bounded;
 }
 
 /**
@@ -110,6 +127,61 @@ const PROBES = {
     generalGuidance: [],
     gaps: [],
   }),
+
+  /**
+   * A real source, a real verbatim quote, and an invented figure in a unit the
+   * specification detector does not know.
+   *
+   * The shape the vocabulary boundary exists for: "drain cycles" is no unit, so
+   * the numeric check sees nothing to compare. Before Stage 2 that meant the
+   * claim passed; now a figure nothing could read must be printed in its quote.
+   * The sentinel's digits stand alone so the probe cannot be confused with the
+   * unit-bearing sentinel the numeric_anomaly probe uses.
+   */
+  unrecognized_figure: (chunks) => ({
+    documentSupported: [
+      {
+        claim: "Replace the oil drain plug gasket every 999999 drain cycles.",
+        sourceId: "S1",
+        evidenceQuote: verbatimQuote(chunks[0]),
+      },
+    ],
+    generalGuidance: [],
+    gaps: [],
+  }),
+
+  /**
+   * A real source and a quote that really is in it -- one whole word -- under
+   * a claim that word cannot support.
+   *
+   * A claim with no specification is checked only through its quote, so a
+   * one-word quote would let any sentence through. The word is read out of the
+   * retrieved chunk at run time, so the quote check passes and only the length
+   * rule can stop it.
+   */
+  quote_too_short: (chunks) => {
+    const word = String(chunks[0]?.chunkText || "")
+      .split(/\s+/)
+      .find((piece) => /^[A-Za-z]{4,}$/.test(piece));
+
+    if (!word) {
+      // Loudly, for the same reason as subject_mismatch: a silent fallback
+      // would reject for some other reason and still go green.
+      throw new Error("quote_too_short probe: no plain word in the first retrieved chunk");
+    }
+
+    return {
+      documentSupported: [
+        {
+          claim: "It is safe to reuse the old oil drain plug gasket.",
+          sourceId: "S1",
+          evidenceQuote: word,
+        },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    };
+  },
 
   /**
    * An otherwise well-formed claim citing a label that was never issued.
