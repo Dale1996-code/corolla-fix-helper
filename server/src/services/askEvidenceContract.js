@@ -480,7 +480,7 @@ const ELECTRICAL_SYMBOL_REGEX = buildSpecRegex(
 // so that pattern, and the subject nouns ELECTRICAL_UNITS hands out, stay
 // exactly as they were. A step number before a flowchart branch label ("GO TO
 // STEP 10 A") still reads as a current: in a claim that is an extra rejection,
-// and in a quote it can only ever meet a current claim (see specIsPresent).
+// and in a quote it can only ever meet a current claim (see printedSpecFor).
 const CURRENT_SYMBOL_REGEX = buildSpecRegex(SYMBOL_VALUE_GUARD, "mA|A", "(?![A-Za-z0-9_/-])", "g");
 
 // An engine designation names an engine, not a capacity: "L4 1.8L 2ZR-FE",
@@ -573,10 +573,15 @@ function signedValue(sign, text) {
 /**
  * The specifications one buildSpecRegex match states: its value, and the low
  * end of its range when it has one, in the same unit.
+ *
+ * `raw` is the one value with its unit. For a range's low end that is put
+ * together ("80 °C" out of "80 to 84 °C"), so it is not always text the page
+ * prints; `printed` is: the whole match, verbatim, range and all.
  */
 function specsFromMatch(match) {
   const { groups } = match;
   const unit = groups.unit.trim();
+  const printed = match[0].trim();
   const specs = [];
   const lowText = groups.low ?? groups.betweenLow;
 
@@ -587,6 +592,7 @@ function specsFromMatch(match) {
       value: signedValue(lowSign, lowText),
       raw: `${lowSign || ""}${lowText}${groups.gap}${groups.unit}`.trim(),
       unit,
+      printed,
       index: match.index,
     });
   }
@@ -595,19 +601,15 @@ function specsFromMatch(match) {
     value: signedValue(groups.sign, groups.value),
     raw: `${groups.sign || ""}${groups.value}${groups.gap}${groups.unit}`.trim(),
     unit,
+    printed,
     index: match.index + (lowText === undefined ? 0 : 1),
   });
 
   return specs.filter((spec) => Number.isFinite(spec.value));
 }
 
-/**
- * Numeric specifications asserted by a piece of text, in the order they appear.
- *
- * @param {string} text
- * @returns {Array<{ value: number, raw: string, unit: string }>}
- */
-export function extractSpecNumbers(text) {
+/** Every specification in the text, in order, each with its verbatim `printed` text. */
+function readSpecs(text) {
   const source = String(text || "");
   const found = [];
 
@@ -618,12 +620,22 @@ export function extractSpecNumbers(text) {
   }
 
   for (const match of source.matchAll(VISCOSITY_REGEX)) {
-    found.push({ value: NaN, raw: match[0].trim(), unit: "viscosity", index: match.index });
+    const raw = match[0].trim();
+
+    found.push({ value: NaN, raw, unit: "viscosity", printed: raw, index: match.index });
   }
 
-  return found
-    .sort((left, right) => left.index - right.index)
-    .map(({ value, raw, unit }) => ({ value, raw, unit }));
+  return found.sort((left, right) => left.index - right.index);
+}
+
+/**
+ * Numeric specifications asserted by a piece of text, in the order they appear.
+ *
+ * @param {string} text
+ * @returns {Array<{ value: number, raw: string, unit: string }>}
+ */
+export function extractSpecNumbers(text) {
+  return readSpecs(text).map(({ value, raw, unit }) => ({ value, raw, unit }));
 }
 
 // The measurement units, grouped by family. Nothing converts between them
@@ -788,10 +800,17 @@ function sameUnit(left, right) {
   return sameLiteralUnit(left, right);
 }
 
-/** Is the claimed spec printed in the evidence: the same number, in the same unit? */
-function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
+/**
+ * Where the evidence prints the claimed spec -- the same number, in the same
+ * unit -- as the evidence's own verbatim text, or null when it does not.
+ *
+ * Returning the text rather than a yes/no is what lets the answer show the
+ * manual's figure beside the claim (owner decision D1) from the very comparison
+ * that verified it, so the figure shown can never be one this check did not use.
+ */
+function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   if (!Number.isFinite(spec.value)) {
-    return false;
+    return null;
   }
 
   // A current symbol in the evidence counts only for a current claim. Most
@@ -819,17 +838,16 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   // units. A matching numeral alone is not enough: "37 psi" must never be
   // grounded by an unrelated "37 N·m" torque passage, nor "27 ft-lbf" by the
   // "37 N·m" it might have been converted from.
-  if (
-    comparableSpecs.some(
-      (evidenceSpec) =>
-        evidenceSpec.value === spec.value && sameUnit(evidenceSpec.unit, spec.unit)
-    )
-  ) {
-    return true;
+  const match = comparableSpecs.find(
+    (evidenceSpec) => evidenceSpec.value === spec.value && sameUnit(evidenceSpec.unit, spec.unit)
+  );
+
+  if (match) {
+    return match.printed;
   }
 
   if (comparableSpecs.length) {
-    return false;
+    return null;
   }
 
   // Some extracted manual tables put units in a header and only numbers in the
@@ -839,10 +857,15 @@ function specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   // UNIT, and, like every other comparison, only for the printed number itself.
   // Without the header requirement any number at all would do: "from 1 to 10",
   // a step sequence, verified "tighten the bolts to 10 N*m" (1A-03).
-  return (
-    headerUnits.some((unit) => sameUnit(unit, spec.unit)) &&
-    evidenceNumbers.some((candidate) => candidate === spec.value)
-  );
+  // The printed figure is then the bare number: the page prints its unit only
+  // in the header.
+  if (!headerUnits.some((unit) => sameUnit(unit, spec.unit))) {
+    return null;
+  }
+
+  const number = evidenceNumbers.find((candidate) => candidate.value === spec.value);
+
+  return number ? number.raw : null;
 }
 
 // A unit standing alone in a quote, attached to no number: the column header of
@@ -870,9 +893,73 @@ function headerUnitsIn(text) {
 
 /** All numbers appearing anywhere in the evidence text, unit or not, signed. */
 function allNumbersIn(text) {
-  return signedNumbers(text)
-    .map((number) => number.value)
-    .filter(Number.isFinite);
+  return signedNumbers(text).filter((number) => Number.isFinite(number.value));
+}
+
+/** A viscosity grade as it is compared: no case, no spaces, no en dash. */
+function collapseGrade(text) {
+  return normalizeForMatch(text).replace(/[\s–]/g, "");
+}
+
+/**
+ * Match one claim's numeric specifications against its evidence: the claimed
+ * figures the evidence does not print, and, for those it does, the evidence's
+ * own text for each (deduplicated, in claim order -- both ends of a claimed
+ * range usually match one printed range).
+ *
+ * @returns {{ unsupported: string[], printedFigures: string[] }}
+ */
+function matchClaimNumbers(claimText, evidenceText) {
+  const specs = extractSpecNumbers(claimText);
+
+  if (!specs.length) {
+    return { unsupported: [], printedFigures: [] };
+  }
+
+  const evidenceNumbers = allNumbersIn(evidenceText);
+  const evidenceSpecs = readSpecs(evidenceText);
+  const headerUnits = headerUnitsIn(evidenceText);
+  const normalizedEvidence = normalizeForMatch(evidenceText);
+  const unsupported = [];
+  const printedFigures = [];
+
+  for (const spec of specs) {
+    let printed;
+
+    if (spec.unit === "viscosity") {
+      // Compared textually: "5W-30" must literally appear.
+      const grade = collapseGrade(spec.raw);
+
+      if (!normalizedEvidence.replace(/[\s–]/g, "").includes(grade)) {
+        unsupported.push(spec.raw);
+        continue;
+      }
+
+      // The printed grade the same substring test finds the claim's in. Kept
+      // the same test on purpose: if it ever accepts a grade inside a longer
+      // one, the figure shown beside the claim is the longer grade, so the
+      // owner can see the difference.
+      const evidenceGrade = evidenceSpecs.find(
+        (evidenceSpec) =>
+          evidenceSpec.unit === "viscosity" && collapseGrade(evidenceSpec.raw).includes(grade)
+      );
+
+      printed = evidenceGrade ? evidenceGrade.printed : null;
+    } else {
+      printed = printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits);
+
+      if (printed === null) {
+        unsupported.push(spec.raw);
+        continue;
+      }
+    }
+
+    if (printed && !printedFigures.includes(printed)) {
+      printedFigures.push(printed);
+    }
+  }
+
+  return { unsupported, printedFigures };
 }
 
 /**
@@ -881,35 +968,7 @@ function allNumbersIn(text) {
  * @returns {{ grounded: boolean, unsupported: string[] }}
  */
 export function checkClaimNumbers(claimText, evidenceText) {
-  const specs = extractSpecNumbers(claimText);
-
-  if (!specs.length) {
-    return { grounded: true, unsupported: [] };
-  }
-
-  const evidenceNumbers = allNumbersIn(evidenceText);
-  const evidenceSpecs = extractSpecNumbers(evidenceText);
-  const headerUnits = headerUnitsIn(evidenceText);
-  const normalizedEvidence = normalizeForMatch(evidenceText);
-  const unsupported = [];
-
-  for (const spec of specs) {
-    if (spec.unit === "viscosity") {
-      // Compared textually: "5W-30" must literally appear.
-      const grade = normalizeForMatch(spec.raw).replace(/[\s–]/g, "");
-      const evidenceCollapsed = normalizedEvidence.replace(/[\s–]/g, "");
-
-      if (!evidenceCollapsed.includes(grade)) {
-        unsupported.push(spec.raw);
-      }
-
-      continue;
-    }
-
-    if (!specIsPresent(spec, evidenceNumbers, evidenceSpecs, headerUnits)) {
-      unsupported.push(spec.raw);
-    }
-  }
+  const { unsupported } = matchClaimNumbers(claimText, evidenceText);
 
   return { grounded: unsupported.length === 0, unsupported };
 }
@@ -1587,9 +1646,9 @@ export function verifyEvidence(validated, chunks) {
     }
 
     // The quote is real; now the numbers in the CLAIM must be present in it.
-    const numeric = checkClaimNumbers(claim.claim, claim.evidenceQuote);
+    const numeric = matchClaimNumbers(claim.claim, claim.evidenceQuote);
 
-    if (!numeric.grounded) {
+    if (numeric.unsupported.length) {
       rejected.push({
         ...origin,
         claim: claim.claim,
@@ -1653,6 +1712,13 @@ export function verifyEvidence(validated, chunks) {
       }),
       claim: claim.claim,
       evidenceQuote: claim.evidenceQuote,
+      // The quote's own text for each figure the claim states, verbatim (owner
+      // decision D1), so the answer can show what the manual prints beside the
+      // claim: "76 ft.*lbf" for a claimed "76 ft-lbs", "80 to 84 °C" for a
+      // claimed "80 °C". Empty when the claim states no specification. Like the
+      // quote it comes from, it shows the owner what was compared; it does not
+      // make the claim correct.
+      printedFigures: numeric.printedFigures,
       documentId: mapped.chunk.documentId,
       documentTitle: mapped.chunk.documentTitle,
       originalFilename: mapped.chunk.originalFilename,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { SectionCard } from "../components/SectionCard";
@@ -479,6 +479,26 @@ function evidenceQuoteMatchesCitation(evidenceQuote, citation) {
   return normalizedQuote.length <= 220 && normalizedSnippet === normalizedQuote;
 }
 
+// The manual's own text for each figure a verified claim states (owner decision
+// D1), shown beside the claim as "Manual prints: ...". It is a display aid, so a
+// malformed list withholds the line instead of rejecting a claim that already
+// bound to its citation -- the full quote is still on screen. Every figure must
+// appear in the quote shown with it: the server copies them out of that quote,
+// so one that is not there is a figure from nowhere, and none are shown.
+function normalizePrintedFigures(value, evidenceQuote) {
+  if (
+    !Array.isArray(value) ||
+    !value.every((figure) => typeof figure === "string" && figure.trim())
+  ) {
+    return [];
+  }
+
+  const quote = evidenceQuote.replace(/\s+/g, " ");
+  const figures = value.map((figure) => figure.replace(/\s+/g, " ").trim());
+
+  return figures.every((figure) => quote.includes(figure)) ? figures : [];
+}
+
 function normalizeAskEvidence(value, citations) {
   if (value === undefined || value === null) {
     return { present: false, valid: true, evidence: null };
@@ -540,6 +560,7 @@ function normalizeAskEvidence(value, citations) {
       ...(evidenceId ? { evidenceId } : {}),
       claim,
       evidenceQuote,
+      printedFigures: normalizePrintedFigures(item.printedFigures, evidenceQuote),
       documentId: citation.documentId,
       documentTitle: citation.documentTitle,
       originalFilename: citation.originalFilename,
@@ -760,6 +781,23 @@ function AskEvidence({ evidence }) {
             {supported.map((item, index) => (
               <li key={`claim-${index}`}>
                 <p className="leading-6">{item.claim}</p>
+                {/* The manual's figure, verbatim, so a claim that respelled,
+                    rounded, or cut a range out of it shows the difference at a
+                    glance. Neutral wording and color on purpose: it reports
+                    what the page prints, not that the claim is right. Figures
+                    are joined with semicolons because the manual's own "1,050"
+                    carries a comma. */}
+                {Array.isArray(item.printedFigures) && item.printedFigures.length ? (
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    <span>Manual prints:</span>{" "}
+                    {item.printedFigures.map((figure, figureIndex) => (
+                      <Fragment key={`figure-${figureIndex}`}>
+                        {figureIndex ? "; " : null}
+                        <span className="font-medium text-slate-800">{figure}</span>
+                      </Fragment>
+                    ))}
+                  </p>
+                ) : null}
                 {/* The quote is the evidence, shown so the owner can check it
                     rather than trusting the claim. */}
                 <p className="mt-1 border-l-2 border-emerald-300 pl-3 text-xs italic text-slate-600">

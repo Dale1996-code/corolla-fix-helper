@@ -232,6 +232,7 @@ Response:
         "evidenceId": "ask_ev_v1_0123456789abcdef01234567",
         "claim": "The oil drain plug torque is 37 N·m (27 ft·lbf).",
         "evidenceQuote": "Install the oil drain plug with a new gasket. Torque: 37 N·m (27 ft·lbf).",
+        "printedFigures": ["37 N·m", "27 ft·lbf"],
         "documentId": 3,
         "documentTitle": "Engine Repair Manual",
         "originalFilename": "engine-repair.pdf",
@@ -325,7 +326,7 @@ render. The response gains an `evidence` object and `status` may additionally be
 
 | Field | Meaning |
 | --- | --- |
-| `evidence.documentSupported[]` | Claims that passed the checks below. Each carries `evidenceId`, `claim`, the verbatim `evidenceQuote`, and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
+| `evidence.documentSupported[]` | Claims that passed the checks below. Each carries `evidenceId`, `claim`, the verbatim `evidenceQuote`, `printedFigures` (see below), and the source (`documentId`, `documentTitle`, `originalFilename`, `pageNumber`, `chunkIndex`). |
 | `evidence.generalGuidance[]` | General mechanical advice explicitly NOT from the documents. Never contains a specification. |
 | `evidence.gaps[]` | What the documents do not answer, plus anything removed by verification. |
 
@@ -373,6 +374,22 @@ figure gets `partial` or `not_found` instead of `answered`; that refusal is
 intended. A figure in a unit the detector does not know is checked by its number
 alone, and the header-table fallback cannot tell which column a bare number came
 from.
+
+**`printedFigures`** (owner decision D1). Each verified claim lists, for every
+unit-bearing figure it states, the quote's own text for the figure that matched —
+verbatim, as the manual prints it, never the claim's spelling. A claimed
+`76 ft-lbs` lists `76 ft.*lbf`; a claimed `1500 rpm` lists `1,500 rpm`; a claimed
+`12.40 Ω` lists `12.4 Ω`. A figure printed as part of a range lists the whole
+printed range, so a claimed `80 °C` from `80 to 84 °C` lists `80 to 84 °C`, and a
+claim stating both ends lists that range once. A figure matched through the
+header-table fallback lists the bare printed number (`37`), because the page
+prints its unit only in the header. Entries are in claim order with duplicates
+removed, and every entry is a substring of `evidenceQuote`. The list is empty when
+the claim states no specification; numbers checked only by step 6 (counts, step
+numbers, unknown units) are not listed. It comes from the same comparison as step
+5, so it shows what was compared — like the quote, it does not make the claim
+correct. The field is optional in the response contract: a consumer reading an
+older response, or one without it, should show no figure rather than guess one.
 
 Setting `ASK_EVIDENCE_CONTRACT=false` is an explicit compatibility escape hatch.
 It changes a legacy successful reply to `status: "unverified"`, keeps the prose,

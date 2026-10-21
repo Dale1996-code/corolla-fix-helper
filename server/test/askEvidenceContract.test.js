@@ -1899,6 +1899,114 @@ test("claims past the 40th are counted, and the answer can no longer read as ans
   assert.match(verified.gaps.join(" "), /2 more claims were not checked/);
 });
 
+// ---- Printed figures (owner decision D1: show the manual's figure) ----
+//
+// Every quote here is a short synthetic line, not text from a real manual.
+
+/** Verify one claim against a chunk holding exactly its quote. */
+function verifyOne(claim, quote) {
+  return verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText: quote })]
+  );
+}
+
+test("a verified figure carries the quote's own printing of it, not the claim's", () => {
+  const hubNut = "Hub nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)";
+  const cases = [
+    // A respelled unit: the claim says ft-lbs, the quote prints ft.*lbf.
+    ["Tighten the hub nut to 76 ft-lbs.", hubNut, ["76 ft.*lbf"]],
+    // A thousands separator the claim left out.
+    ["Tighten the hub nut to 1050 kgf*cm.", hubNut, ["1,050 kgf*cm"]],
+    ["The fast idle speed is 1500 rpm.", "Fast idle speed 1,500 rpm", ["1,500 rpm"]],
+    // Electrical units respelled, and a trailing zero the quote does not print.
+    ["The battery voltage is 12.6 volts.", "Battery voltage 12.6 V", ["12.6 V"]],
+    [
+      `The heater resistance is 12.40 ${OMEGA}.`,
+      `Heater resistance 12.4 ${OMEGA}`,
+      [`12.4 ${OMEGA}`],
+    ],
+    // Two figures, in the order the claim states them.
+    ["The hub nut torque is 103 N·m (76 ft-lbf).", hubNut, ["103 N*m", "76 ft.*lbf"]],
+    ["Use 5W-30 oil.", "Recommended oil grade SAE 5W-30", ["5W-30"]],
+    // A claim spelling "liters" shows the bare litre symbol the quote prints
+    // (a volume claim, so that symbol counts), and nothing from the engine
+    // designation beside it.
+    [
+      "The engine oil capacity is 4.2 liters.",
+      "L4 1.8L 2ZR-FE engine oil capacity 4.2 L",
+      ["4.2 L"],
+    ],
+  ];
+
+  for (const [claim, quote, printedFigures] of cases) {
+    const result = verifyOne(claim, quote);
+
+    assert.equal(result.rejected.length, 0, `${claim}: ${JSON.stringify(result.rejected)}`);
+    assert.deepEqual(result.documentSupported[0].printedFigures, printedFigures, claim);
+  }
+});
+
+test("a figure printed as part of a range shows the whole printed range", () => {
+  const thermostat = "Thermostat opening temperature 80 to 84 °C";
+  const cases = [
+    // Both ends match the one printed range, so it is listed once.
+    ["The thermostat opening temperature is 80 to 84 °C.", thermostat, ["80 to 84 °C"]],
+    // A claim stating one end shows the range it came from, so the owner sees
+    // the manual printed a range rather than the single number claimed.
+    ["The thermostat opening temperature is 80 °C.", thermostat, ["80 to 84 °C"]],
+    ["The charging voltage is 9 to 14 V.", "Charging voltage: 9-14V", ["9-14V"]],
+  ];
+
+  for (const [claim, quote, printedFigures] of cases) {
+    const result = verifyOne(claim, quote);
+
+    assert.equal(result.rejected.length, 0, `${claim}: ${JSON.stringify(result.rejected)}`);
+    assert.deepEqual(result.documentSupported[0].printedFigures, printedFigures, claim);
+  }
+});
+
+test("a figure whose unit is printed only in a column header shows the bare printed number", () => {
+  const result = verifyOne("The mounting bolt torque is 37 N*m.", "Torque (N*m): mounting bolt 37");
+
+  assert.equal(result.rejected.length, 0, JSON.stringify(result.rejected));
+  assert.deepEqual(result.documentSupported[0].printedFigures, ["37"]);
+});
+
+test("a claim stating no specification carries an empty printedFigures list", () => {
+  const result = verifyOne(
+    "Replace the drain plug gasket with a new one.",
+    "Replace the drain plug gasket with a new one."
+  );
+
+  assert.equal(result.documentSupported.length, 1);
+  assert.deepEqual(result.documentSupported[0].printedFigures, []);
+});
+
+test("every printed figure is verbatim text from its own quote", () => {
+  const quotes = [
+    "Hub nut torque 103 N*m (1,050 kgf*cm, 76 ft.*lbf)",
+    "Thermostat opening temperature 80 to 84 °C",
+    "Torque (N*m): mounting bolt 37",
+  ];
+  const claims = [
+    "The hub nut torque is 103 N·m (1050 kgf-cm, 76 ft-lbs).",
+    "The thermostat opening temperature is 84 °C.",
+    "The mounting bolt torque is 37 Nm.",
+  ];
+
+  claims.forEach((claim, index) => {
+    const [item] = verifyOne(claim, quotes[index]).documentSupported;
+
+    assert.ok(item, claim);
+    assert.ok(item.printedFigures.length > 0, claim);
+
+    for (const figure of item.printedFigures) {
+      assert.ok(quotes[index].includes(figure), `${figure} is not in: ${quotes[index]}`);
+    }
+  });
+});
+
 // ---- Derived status ----
 
 test("status is derived from what actually verified", () => {
