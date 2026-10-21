@@ -3472,3 +3472,28 @@ All captured replies were replayed through main's verifier (`739ab2b`) and `f880
   passed live once each (J). Promoting them is the owner's call.
 
 Counts after this run: **46 cases, 14 verified, 32 templates.**
+
+### Stage 2 after its rebase onto `c71ae82` (2026-10-21)
+
+The branch was rebased onto `origin/main` at `c71ae82` (Stage 4-D1, PR #148) before its PR.
+`git range-diff` shows every commit unchanged in content, and `c71ae82` touches no file on the
+Ask path:
+
+- **Unchanged blobs:** `askEvidenceContract.js` `d31394b`, `aiAnswerService.js` `c838a4f`, cases
+  `b2663e2`, scoring `e2c9693`, and probes `bb653d2`.
+- **Files `c71ae82` changes:** `database.js`, `index.js`, `serverLifecycle.js`, the restore and
+  backup code, and `routes/settings.js`.
+
+Experiment I ran at `8ef79cf` and Experiment J at `f880c73`, and their results carry over. The
+SHAs these Stage 2 entries cite map as follows:
+
+| Before | After | Before | After |
+| --- | --- | --- | --- |
+| `5d6cfed` | `7baaeeb` | `3295534` | `b5af76e` |
+| `f393fef` | `d763e1b` | `8ef79cf` | `409f561` |
+| `6e65070` | `4bc4716` | `3e598f2` | `a0e97f0` |
+| `eac71b9` | `1015851` | `52ecd89` | `873e461` |
+| `ea123d5` | `62e2f35` | `13f2296` | `2793d21` |
+| `315bf82` | `9159395` | `f880c73` | `62246f8` |
+| `25d0cab` | `cd1b9db` | `75795e5` | `07b93fd` |
+| `c38d0b1` | `e2f43b1` | `d9157fa` | `e3a5304` |
