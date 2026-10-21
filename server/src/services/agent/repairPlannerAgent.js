@@ -53,6 +53,7 @@ const AGENT_INSTRUCTIONS = [
   "Your prose is NOT shown to the owner. The plan they read is rendered by the server from your validated claims, so anything you do not submit through finalize_repair_plan is discarded.",
   "Every claim must quote its source verbatim. The server checks that the quote appears in the retrieved text, that your claim appears word-for-word inside your own quote, and that every number in the claim is present in the quote. Paraphrased claims and unsupported numbers are dropped and reported as gaps.",
   "A numeric_spec or safety_instruction claim must be a whole sentence or clause of its quote, from one '.', ';' or ':' to the next. Never leave out a 'not', 'never', 'do not' or 'without' that comes before your claim in the source, and never start or end a claim inside a range such as '13.2 to 14.8 V'. Such claims are dropped.",
+  "A claim with a value must name the part it applies to: a bare '37 N*m' or 'Torque: 37 N*m' is dropped. A numeric_spec is kept only if the claim or its quote also names the part its task is about, so quote the line that names it (for the oil filter task, the oil filter line, not the drain plug line).",
   "Name required tools and parts as required_tool / required_part claims with an itemName, or state no_required_tools / no_required_parts when a cited procedure says none are needed. Readiness cannot credit tools or parts you do not ground this way.",
   "If nothing can be grounded, call finalize_repair_plan with an empty claims array. That is an honest result; inventing support is not.",
 ].join("\n");

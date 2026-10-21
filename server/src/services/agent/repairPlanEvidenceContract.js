@@ -407,21 +407,152 @@ function claimPlacementProblem(claim, evidenceText) {
   return firstProblem || "claim_not_in_quote";
 }
 
+// ---------------------------------------------------------------------------
+// Subject guard (1A-06 / 1B-01)
+// ---------------------------------------------------------------------------
+//
+// A bare "37 N*m" copied from the drain-plug line verified the oil-filter task,
+// and "torque: 107 Nm" verified a slide-pin task whose source says 34 Nm. Ask's
+// subject guard cannot catch this: it asks whether the claim's part appears in
+// its quote, and a planner claim is a verbatim fragment of its quote, so the
+// answer is always yes. The missing link is the TASK:
+//
+//   - Any claim carrying a figure, and every numeric_spec, must name what it is
+//     about: a word that is not a unit, a function word, a repair verb, a
+//     position, or "torque" (every fastener has a torque). So a bare value never
+//     counts toward coverage, under whatever kind it is filed.
+//   - A numeric_spec must also share a subject word with its task -- in the
+//     claim or in its quote. A compound task is matched against the clause the
+//     claim says it supports, falling back to the title when that clause names
+//     nothing.
+//
+// Lexical, not semantic: "caliper bolts" under "Replace brake pads" needs the
+// quote to say "brake" too. That rejects some honest claims; the model can quote
+// the line that names the part. A task with no subject word ("Check it") can
+// verify no specification at all -- fail closed.
+
+const FUNCTION_WORDS = [
+  "a", "about", "after", "again", "all", "also", "am", "an", "and", "another", "any", "are", "as",
+  "at", "be", "been", "before", "being", "both", "but", "by", "can", "could", "did", "do", "does",
+  "don", "down", "each", "either", "every", "for", "from", "had", "has", "have", "here", "how", "i",
+  "if", "in", "into", "is", "it", "its", "just", "less", "may", "me", "might", "more", "most",
+  "must", "my", "neither", "never", "no", "nor", "not", "of", "off", "on", "only", "onto", "or",
+  "other", "our", "out", "over", "per", "same", "should", "so", "some", "such", "than", "that",
+  "the", "their", "them", "then", "there", "these", "they", "this", "those", "to", "under",
+  "until", "up", "us", "very", "via", "was", "we", "were", "what", "when", "where", "which",
+  "while", "who", "why", "will", "with", "without", "would", "you", "your",
+];
+
+const UNIT_WORDS = [
+  "amp", "ampere", "amperes", "amps", "bar", "cc", "cm", "deg", "degree", "degrees", "feet", "foot",
+  "ft", "gal", "gallon", "gallons", "hour", "hours", "hr", "hrs", "hz", "imp", "inch", "inches",
+  "kg", "kgf", "khz", "km", "kmh", "kpa", "kv", "kω", "lb", "lbf", "lbs", "liter", "liters",
+  "litre", "litres", "ma", "min", "mins", "minute", "minutes", "ml", "mm", "mpa", "mph", "mv",
+  "nm", "ohm", "ohms", "oz", "pa", "percent", "pint", "pints", "psi", "pt", "qt", "qts", "quart",
+  "quarts", "rpm", "sec", "second", "seconds", "secs", "volt", "volts", "watt", "watts",
+];
+
+// Words every task title and every specification line share, so sharing one
+// is no evidence that a claim and a task are about the same part.
+const GENERIC_WORDS = [
+  "additional", "adjust", "adjustment", "apply", "approx", "approximately", "between", "bottom",
+  "change", "changing", "check", "checked", "checking", "clean", "component", "components",
+  "ensure", "final", "first", "front", "further", "inner", "inside", "inspect", "inspection",
+  "install", "installation", "installed", "installing", "item", "items", "left", "lh", "limit",
+  "loosen", "lower", "make", "max", "maximum", "measure", "measured", "measurement", "min",
+  "minimum", "need", "needed", "new", "old", "outer", "outside", "part", "parts", "perform",
+  "procedure", "range", "read", "reading", "reads", "rear", "reinstall", "remove", "removal",
+  "removed", "removing", "replace", "replaced", "replacement", "replacing", "require", "required",
+  "retighten", "rh", "right", "service", "servicing", "set", "setting", "side", "sides", "spec",
+  "specification", "specifications", "specified", "specs", "standard", "step", "steps", "sure",
+  "test", "testing", "third", "through", "thru", "tighten", "tightened", "tightening", "tool",
+  "tools", "top", "torque", "torqued", "torquing", "turn", "upper", "use", "using", "value",
+  "values", "verify",
+];
+
+const NON_SUBJECT_WORDS = new Set([...FUNCTION_WORDS, ...UNIT_WORDS, ...GENERIC_WORDS]);
+
+// Enough to make "pads" meet "pad" and "batteries" meet "battery"; applied to
+// both sides, so its mistakes cancel out.
+function stemWord(word) {
+  if (word.length > 4 && word.endsWith("ies")) {
+    return `${word.slice(0, -3)}y`;
+  }
+
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) {
+    return word.slice(0, -1);
+  }
+
+  return word;
+}
+
+/** The words of `text` that could name a part or a specification. */
+function subjectWords(text) {
+  const words = new Set();
+
+  for (const word of String(text || "").toLowerCase().match(/\p{L}+/gu) || []) {
+    const stem = stemWord(word);
+
+    if (word.length >= 2 && !NON_SUBJECT_WORDS.has(word) && !NON_SUBJECT_WORDS.has(stem)) {
+      words.add(stem);
+    }
+  }
+
+  return words;
+}
+
+function taskSubjectWords(task, clauseIndex) {
+  if (!task) {
+    return new Set();
+  }
+
+  const clause = task.compound && Number.isInteger(clauseIndex) ? task.clauses?.[clauseIndex] : null;
+  const fromClause = subjectWords(clause);
+
+  return fromClause.size ? fromClause : subjectWords(task.title);
+}
+
+/** @returns {string | null} "subject_missing", or null when the claim is anchored */
+function claimSubjectProblem(claim, task) {
+  const isSpec = claim.kind === "numeric_spec";
+
+  if (!isSpec && !DIGIT.test(claim.claim)) {
+    return null;
+  }
+
+  const named = subjectWords(claim.claim);
+
+  if (!named.size) {
+    return "subject_missing";
+  }
+
+  if (!isSpec) {
+    return null;
+  }
+
+  const taskWords = taskSubjectWords(task, claim.clauseIndex);
+  const evidenceWords = new Set([...named, ...subjectWords(claim.evidenceQuote)]);
+
+  return [...taskWords].some((word) => evidenceWords.has(word)) ? null : "subject_missing";
+}
+
 /**
  * Verifies each validated claim against the source it cites.
  *
  * Fails CLOSED: a claim whose quote is not in the source, whose text is not in
- * its own quote, which drops a negation or cuts a range or clause, or whose
- * numbers are not supported becomes a GAP rather than rendered content.
- * Rejected claims never disappear silently -- if they did, a model could submit
- * one easy claim, omit everything hard, and still look fully grounded.
+ * its own quote, which drops a negation or cuts a range or clause, whose
+ * numbers are not supported, or which does not name its part and its task
+ * becomes a GAP rather than rendered content. Rejected claims never disappear
+ * silently -- if they did, a model could submit one easy claim, omit
+ * everything hard, and still look fully grounded.
  *
  * @param {any[]} claims
- * @param {{ sourcesById: Map<string, any> }} context
+ * @param {{ sourcesById: Map<string, any>, tasks?: any[] }} context
  */
-export function verifyClaims(claims, { sourcesById }) {
+export function verifyClaims(claims, { sourcesById, tasks = [] }) {
   const accepted = [];
   const rejected = [];
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
 
   for (const claim of claims) {
     const source = sourcesById.get(claim.sourceId);
@@ -455,6 +586,13 @@ export function verifyClaims(claims, { sourcesById }) {
       continue;
     }
 
+    const subjectProblem = claimSubjectProblem(claim, tasksById.get(claim.taskId));
+
+    if (subjectProblem) {
+      rejected.push({ claim, reason: subjectProblem });
+      continue;
+    }
+
     if (ITEM_NAME_KINDS.has(claim.kind)) {
       const itemName = normalizeRequirementName(claim.itemName);
 
@@ -477,6 +615,7 @@ const REJECTION_TEXT = {
   range_cut: "the statement cut a range or a signed value out of the cited text",
   not_whole_clause: "a specification or safety statement must be a whole sentence or clause of its quote",
   unsupported_number: "a number in the statement was not present in the cited text",
+  subject_missing: "the statement did not name the part it applies to, or a part named by its task",
   item_not_in_claim: "the named item did not appear in the supporting statement",
 };
 
@@ -691,7 +830,7 @@ export function buildRepairPlanEvidence(payload, { tasks, sources, availableTool
     return { valid: false, errors: validation.errors };
   }
 
-  const { accepted, rejected } = verifyClaims(validation.claims, { sourcesById });
+  const { accepted, rejected } = verifyClaims(validation.claims, { sourcesById, tasks });
   const requirements = buildRequirementGroups({ accepted, availableTools, availableParts });
   const coverage = assessTaskCoverage({ tasks, accepted, rejected });
 

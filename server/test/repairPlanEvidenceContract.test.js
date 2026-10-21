@@ -40,13 +40,16 @@ const TASKS = [
   { id: 1, title: "Replace front brake pads", system: "Brakes", difficulty: "beginner", compound: false, clauses: [] },
 ];
 
+// The quote runs from the line's own label, so it names the task's part (brake
+// pads) as well as the claim's (caliper bolts) -- a specification must share a
+// part word with its task (1A-06).
 function claim(overrides = {}) {
   return {
     taskId: 1,
     kind: "numeric_spec",
     claim: "torque the caliper bolts to 25 ft-lb",
     sourceId: "S1",
-    evidenceQuote: "torque the caliper bolts to 25 ft-lb",
+    evidenceQuote: "Front brake pad replacement: torque the caliper bolts to 25 ft-lb",
     ...overrides,
   };
 }
@@ -319,6 +322,119 @@ test("a claim may not cut a range or drop a sign, even with a trimmed quote", ()
   assert.equal(whole.accepted.length, 1, "the whole range verifies");
 });
 
+// --- Subject guard (1A-06 / 1B-01) ------------------------------------------
+//
+// Planner claims are verbatim fragments, so "is the claim's part in its quote?"
+// (Ask's subject guard) is always yes. What can be wrong is the TASK: a value
+// copied from the drain-plug line and filed under "Replace the oil filter".
+
+const DRAIN_TEXT = "Oil pan drain plug 37 N*m. Oil filter cap 25 N*m.";
+
+test("a bare value never verifies, whatever kind it is filed under", () => {
+  for (const kind of ["numeric_spec", "vehicle_fact", "procedure"]) {
+    const { accepted, rejected } = verifyAgainst(
+      DRAIN_TEXT,
+      { kind, claim: "37 N*m", evidenceQuote: "37 N*m" },
+      "Replace the oil filter"
+    );
+
+    assert.equal(accepted.length, 0, kind);
+    assert.equal(rejected[0].reason, "subject_missing", kind);
+  }
+});
+
+test("'torque' alone names no part, because every fastener has one", () => {
+  const { rejected } = verifyAgainst(
+    "Caliper bracket bolt. Torque: 107 N*m.",
+    { claim: "Torque: 107 N*m", evidenceQuote: "Caliper bracket bolt. Torque: 107 N*m" },
+    "Tighten the caliper bracket bolts"
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("a spec must share a part word with the task it is filed under", () => {
+  const text = "Coolant drain cock 13 N*m. Oil pan drain plug 37 N*m.";
+
+  const other = verifyAgainst(
+    text,
+    { claim: "Coolant drain cock 13 N*m", evidenceQuote: "Coolant drain cock 13 N*m" },
+    "Replace the oil filter"
+  );
+  assert.equal(other.rejected[0]?.reason, "subject_missing");
+
+  const own = verifyAgainst(
+    text,
+    { claim: "Oil pan drain plug 37 N*m", evidenceQuote: "Oil pan drain plug 37 N*m" },
+    "Replace the oil drain plug gasket"
+  );
+  assert.equal(own.accepted.length, 1);
+});
+
+test("the task's part may be named by the quote rather than the claim, in any plural", () => {
+  const { accepted } = verifyAgainst(
+    "Brake pads: minimum thickness 1.0 mm.",
+    { claim: "minimum thickness 1.0 mm", evidenceQuote: "Brake pads: minimum thickness 1.0 mm" },
+    "Inspect the brake pad"
+  );
+
+  assert.equal(accepted.length, 1);
+});
+
+test("repair verbs and position words are not the part a task is about", () => {
+  // "Replace" and "front" are in both, but the hub nut is not the brake pads.
+  const { rejected } = verifyAgainst(
+    "Front axle hub nut: replace and torque to 216 N*m.",
+    { claim: "Front axle hub nut: replace and torque to 216 N*m", evidenceQuote: "Front axle hub nut: replace and torque to 216 N*m" },
+    "Replace front brake pads"
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("a compound task's spec must match the clause it says it supports", () => {
+  const text = "Brake pad minimum thickness 1.0 mm.";
+  const tasks = [
+    {
+      id: 1,
+      title: "Replace the brake pads and check the steering rack",
+      compound: true,
+      clauses: ["Replace the brake pads", "check the steering rack"],
+    },
+  ];
+  const verifyFor = (clauseIndex) =>
+    verifyClaims(
+      [claim({ clauseIndex, claim: "Brake pad minimum thickness 1.0 mm", evidenceQuote: "Brake pad minimum thickness 1.0 mm" })],
+      { sourcesById: new Map([["S1", makeSource("S1", text)]]), tasks }
+    );
+
+  assert.equal(verifyFor(0).accepted.length, 1);
+  assert.equal(verifyFor(1).rejected[0]?.reason, "subject_missing", "brake pads do not ground the steering clause");
+});
+
+test("a spec whose task is unknown is rejected rather than guessed", () => {
+  const { rejected } = verifyClaims(
+    [claim({ claim: "Oil pan drain plug 37 N*m", evidenceQuote: "Oil pan drain plug 37 N*m" })],
+    { sourcesById: new Map([["S1", makeSource("S1", DRAIN_TEXT)]]) }
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("statements without a value need no subject", () => {
+  const { accepted } = verifyAgainst(
+    "Do not open the radiator cap while the engine is hot.",
+    {
+      kind: "safety_instruction",
+      claim: "Do not open the radiator cap while the engine is hot",
+      evidenceQuote: "Do not open the radiator cap while the engine is hot",
+    },
+    "Replace front brake pads"
+  );
+
+  assert.equal(accepted.length, 1, "the task guard applies to specifications, not to every safety line");
+});
+
 // --- Status derivation -----------------------------------------------------
 
 test("an empty claims array can only ever be not_found", () => {
@@ -545,12 +661,13 @@ test("the planner rejects a near-miss electrical value before any tolerance appl
   // direction -- that an exact restatement, as printed, still verifies.
   const batteryText = "Charging check: the battery should read 12.6 V with the engine off.";
   const sourcesById = new Map([["S1", makeSource("S1", batteryText)]]);
+  const tasks = [{ id: 1, title: "Check the battery", compound: false, clauses: [] }];
   const { accepted, rejected } = verifyClaims(
     [
       claim({ claim: "the battery should read 12.4 V", evidenceQuote: "the battery should read 12.6 V" }),
       claim({ claim: "the battery should read 12.6 V", evidenceQuote: "the battery should read 12.6 V" }),
     ],
-    { sourcesById }
+    { sourcesById, tasks }
   );
 
   assert.equal(rejected.length, 1);
@@ -570,7 +687,10 @@ test("a current-symbol value verifies when restated and is redacted when rejecte
       claim({ claim: "the EFI fuse is 15A", sourceId: "S1", evidenceQuote: "the EFI fuse is 15A" }),
       claim({ claim: "the EFI fuse is 25A", sourceId: "S1", evidenceQuote: "the EFI fuse is 25A" }),
     ],
-    { sources: [makeSource("S1", fuseText)] }
+    {
+      sources: [makeSource("S1", fuseText)],
+      tasks: [{ id: 1, title: "Check the EFI fuse", compound: false, clauses: [] }],
+    }
   );
 
   assert.deepEqual(
