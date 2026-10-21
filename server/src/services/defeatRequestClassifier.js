@@ -91,6 +91,25 @@ const PERMANENCE_MARKERS = [
   /\b(?:don'?t|do not|never) have to (?:fix|repair|replac)\w*/,
 ];
 
+// A stated goal that the system stop working. Every permanence marker is one;
+// the rest are the plain purpose clauses an owner types instead ("so it doesn't
+// work", "stop it from working"). Used ONLY to void HOW_IT_WORKS below -- they
+// are deliberately not permanence markers, because "my airbag light doesn't
+// work anymore" describes a symptom and must not arm an ambiguous verb.
+const DEFEAT_GOAL_PHRASES = [
+  ...PERMANENCE_MARKERS,
+  /\bany ?more\b/,
+  /\bso (?:that )?(?:\w+ ){1,3}(?:doesn t|doesnt|does not|won t|wont|will not|can t|cant|cannot|can not|don t|dont|do not|never) (?:\w+ )?(?:work|function|deploy|activat|engag)\w*/,
+  /\b(?:stop|keep|prevent)(?:s|ped|ping|ing|ed)? (?:\w+ ){0,3}from (?:work|function|deploy|activat|engag)\w*/,
+  /\bmak(?:e|es|ing) (?:\w+ ){1,3}(?:not|stop|never) work\w*/,
+];
+
+// "How does the airbag work?" is this exemption's real purpose. But the same
+// words open "how do I bypass the airbag so it doesn't work", where "work" is
+// the defeat goal itself (audit 1A-18). So it excuses a clause only when that
+// clause states no DEFEAT_GOAL_PHRASES; see firstExemption.
+const HOW_IT_WORKS = /\bhow (?:does|do)\b[^]{0,40}\bwork\b/;
+
 // Named safety systems only. A bare "warning light" is deliberately NOT a target:
 // "permanently turn off the maintenance required light" is a legitimate reset
 // procedure, and a generic target would refuse it.
@@ -138,7 +157,7 @@ const LEGITIMATE_INTENT_MARKERS = [
   /\bwait(?:s|ed|ing)? (?:\d+|the required|the specified|at least)\b/,
   /\bsafely (?:service|work|handle|disable|disarm|remove)\b/,
   /\b(?:per|according to) the (?:manual|procedure|fsm)\b/,
-  /\bhow (?:does|do)\b[^]{0,40}\bwork\b/,
+  HOW_IT_WORKS,
 ];
 
 /**
@@ -180,7 +199,8 @@ function toClauses(text) {
 const NEGATED = /\b(?:never|no longer|not|cannot|can t|won t|don t|doesn t)\s+(?:\w+\s+){0,2}$/;
 
 /**
- * First legitimate-intent marker in a clause, ignoring negated ones.
+ * First legitimate-intent marker in a clause, ignoring negated ones and a
+ * how-it-works marker in a clause that states a defeat goal.
  *
  * @param {string} clause normalized clause text
  * @returns {string|null}
@@ -194,6 +214,10 @@ function firstExemption(clause) {
     }
 
     if (NEGATED.test(clause.slice(0, found.index))) {
+      continue;
+    }
+
+    if (pattern === HOW_IT_WORKS && firstMatch(DEFEAT_GOAL_PHRASES, clause)) {
       continue;
     }
 
@@ -302,6 +326,7 @@ export const DEFEAT_REQUEST_RULES = Object.freeze({
   DEFEAT_VERBS,
   AMBIGUOUS_VERBS,
   PERMANENCE_MARKERS,
+  DEFEAT_GOAL_PHRASES,
   SAFETY_SYSTEM_TARGETS,
   LEGITIMATE_INTENT_MARKERS,
 });
