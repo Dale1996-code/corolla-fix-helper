@@ -76,13 +76,87 @@ export const ORGANIZATIONAL_GUIDANCE = [
   "Confirm part numbers against the vehicle before buying.",
 ];
 
-/** Normalizes a requirement or inventory phrase for exact-phrase matching. */
+/**
+ * Normalizes a requirement name, a claim, or an owner inventory entry. Every
+ * item match runs BOTH sides through this one function (1A-07): an asymmetric
+ * pair once let punctuation that one side kept decide a match.
+ *
+ * Parenthetical asides drop out ("torque wrench (1/2 in drive)"), hyphens
+ * become spaces ("10-mm" is "10 mm"), "n't" becomes "not" so a negated entry
+ * stays recognizable, and "&" becomes "and".
+ */
 export function normalizeRequirementName(value) {
   return String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/n['’]t\b/g, " not")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function nameTokens(normalized) {
+  return normalized ? normalized.split(" ") : [];
+}
+
+/** Start indexes where `needle` occurs as a run of whole tokens of `haystack`. */
+function tokenRunStarts(haystack, needle) {
+  const starts = [];
+
+  if (!needle.length) {
+    return starts;
+  }
+
+  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
+    if (needle.every((token, offset) => haystack[at + offset] === token)) {
+      starts.push(at);
+    }
+  }
+
+  return starts;
+}
+
+// "e", "a", and "is" are whole words of "A torque wrench is required" and name
+// no tool. A real name is two words or one word of four letters or more.
+const MIN_SINGLE_WORD_ITEM_LENGTH = 4;
+
+function isUsableItemName(normalized) {
+  return nameTokens(normalized).length >= 2 || normalized.length >= MIN_SINGLE_WORD_ITEM_LENGTH;
+}
+
+// An inventory entry naming the item after one of these says the owner does
+// NOT have it: "no torque wrench", "do not have a jack", "need brake pads".
+const INVENTORY_ABSENCE_WORDS = new Set([
+  "no", "not", "never", "without", "none", "cannot", "need", "needs", "missing",
+]);
+
+// Words that may follow an item inside one entry without making it a longer
+// name: "jack and jack stands" owns a jack; "jack stands" does not.
+const INVENTORY_LIST_JOINERS = new Set(["and", "or", "plus", "with", "but"]);
+
+/**
+ * Does one owner inventory entry say the owner has `item`?
+ *
+ * The item's words must appear whole and END a name: words in front describe it
+ * ("3-ton floor jack" owns a jack) but a word after it makes a different thing
+ * ("jack stands" are not a jack, "110 mm wrench" is not a "10 mm wrench"). And
+ * no absence word may come before it ("no torque wrench"); "no" before a digit
+ * is the size abbreviation in "No. 2 Phillips screwdriver", not a negation.
+ */
+function inventoryEntryHas(entry, item) {
+  const tokens = nameTokens(normalizeRequirementName(entry));
+  const itemTokens = nameTokens(item);
+  const isAbsenceWord = (token, index) =>
+    INVENTORY_ABSENCE_WORDS.has(token) && !(token === "no" && /^\d/.test(tokens[index + 1] || ""));
+
+  return tokenRunStarts(tokens, itemTokens).some((at) => {
+    const next = tokens[at + itemTokens.length];
+    const endsName = next === undefined || INVENTORY_LIST_JOINERS.has(next);
+    const negated = tokens.slice(0, at).some(isAbsenceWord);
+
+    return endsName && !negated;
+  });
 }
 
 /**
@@ -596,7 +670,14 @@ export function verifyClaims(claims, { sourcesById, tasks = [] }) {
     if (ITEM_NAME_KINDS.has(claim.kind)) {
       const itemName = normalizeRequirementName(claim.itemName);
 
-      if (!itemName || !normalizeRequirementName(claim.claim).includes(itemName)) {
+      if (!isUsableItemName(itemName)) {
+        rejected.push({ claim, reason: "item_name_too_short" });
+        continue;
+      }
+
+      const claimTokens = nameTokens(normalizeRequirementName(claim.claim));
+
+      if (!tokenRunStarts(claimTokens, nameTokens(itemName)).length) {
         rejected.push({ claim, reason: "item_not_in_claim" });
         continue;
       }
@@ -616,6 +697,7 @@ const REJECTION_TEXT = {
   not_whole_clause: "a specification or safety statement must be a whole sentence or clause of its quote",
   unsupported_number: "a number in the statement was not present in the cited text",
   subject_missing: "the statement did not name the part it applies to, or a part named by its task",
+  item_name_too_short: "the named item was too short to identify a tool or part",
   item_not_in_claim: "the named item did not appear in the supporting statement",
 };
 
@@ -695,9 +777,13 @@ export function deriveEvidenceStatus({ coverage, accepted, requirements }) {
 /**
  * Groups accepted requirement claims and matches them against trusted inventory.
  *
- * Matching is exact-phrase on normalized text. No fuzzy or embedding guesses:
- * an uncertain match here becomes readiness points, and a wrongly-awarded point
- * tells an owner they are ready for a brake job they cannot finish.
+ * Matching is whole-word on text both sides normalize the same way: an entry
+ * owns an item when the item's words END a name in it and nothing before them
+ * negates it (see inventoryEntryHas). No fuzzy or embedding guesses: an
+ * uncertain match here becomes readiness points, and a wrongly-awarded point
+ * tells an owner they are ready for a brake job they cannot finish. Until
+ * 1A-07 this was a raw substring test, so "no torque wrench" satisfied
+ * "torque wrench" and "jack stands" satisfied "jack".
  */
 export function buildRequirementGroups({ accepted, availableTools, availableParts }) {
   const group = (itemKind, negativeKind, inventory) => {
@@ -724,7 +810,7 @@ export function buildRequirementGroups({ accepted, availableTools, availablePart
     const missing = [];
 
     for (const item of required) {
-      const owned = inventory.some((entry) => entry.includes(item));
+      const owned = inventory.some((entry) => inventoryEntryHas(entry, item));
       (owned ? satisfied : missing).push(item);
     }
 

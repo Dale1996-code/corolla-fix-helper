@@ -642,7 +642,6 @@ export const PLANNER_ORACLE = [
     itemName: "e",
     expect: "reject",
     finding: "1A-07",
-    todo: "1A-07",
     note: "'e' is a letter of the claim, not the name of a tool.",
   },
 

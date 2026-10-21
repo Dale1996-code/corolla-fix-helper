@@ -912,7 +912,7 @@ export const repairToolSchemas = [
               },
               itemName: {
                 type: "string",
-                description: "Required for required_tool and required_part: the item's name.",
+                description: "Required for required_tool and required_part: the item's full name, as whole words of the claim (at least two words or four letters).",
               },
             },
             required: ["taskId", "kind", "claim", "sourceId", "evidenceQuote"],

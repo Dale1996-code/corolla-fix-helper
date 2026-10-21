@@ -532,30 +532,80 @@ test("a grounded no_required_tools claim satisfies that group", () => {
   assert.equal(groups.parts.status, "unknown", "silence about parts is still not evidence");
 });
 
-test("inventory satisfies a requirement only on a complete phrase match", () => {
-  const accepted = [
-    { kind: "required_tool", itemName: "torque wrench" },
-    { kind: "required_tool", itemName: "10 mm wrench" },
-  ];
+// Rewritten for 1A-07 (audit 3A-06). The old version pinned a raw substring
+// test as correct: its only positive was "a good torque wrench", and nothing
+// checked a negated entry, a longer name containing the item, or a number
+// containing another. Readiness points ride on this match, so an owner told
+// "no torque wrench" counts as owning one is told they are ready for a job they
+// cannot finish.
 
-  const partial = buildRequirementGroups({
-    accepted,
-    // "wrench" alone must not satisfy "torque wrench" -- no fuzzy matching.
-    availableTools: ["wrench"],
+function toolsOwned(required, availableTools) {
+  return buildRequirementGroups({
+    accepted: required.map((itemName) => ({ kind: "required_tool", itemName })),
+    availableTools,
     availableParts: [],
-  });
+  }).tools;
+}
 
-  assert.equal(partial.tools.status, "unmet");
-  assert.equal(partial.tools.missing.length, 2);
+test("inventory owns an item only as whole words naming that item", () => {
+  // A longer name that merely CONTAINS the item is a different thing.
+  assert.deepEqual(toolsOwned(["jack"], ["jack stands"]).missing, ["jack"]);
+  assert.deepEqual(toolsOwned(["10 mm wrench"], ["110 mm wrench"]).missing, ["10 mm wrench"]);
+  assert.deepEqual(toolsOwned(["torque wrench"], ["wrench"]).missing, ["torque wrench"], "no fuzzy matching");
 
-  const full = buildRequirementGroups({
-    accepted,
-    availableTools: ["a good torque wrench", "10 mm wrench"],
-    availableParts: [],
-  });
+  // Words in front describe the item; the item is still what the entry ends with.
+  assert.equal(toolsOwned(["torque wrench"], ["a good torque wrench"]).status, "satisfied");
+  assert.equal(toolsOwned(["jack"], ["3-ton floor jack"]).status, "satisfied");
+  assert.equal(toolsOwned(["jack", "jack stands"], ["jack and jack stands"]).status, "satisfied");
+  assert.equal(toolsOwned(["torque wrench"], ["torque wrench (1/2 in drive)"]).status, "satisfied");
+});
 
-  assert.equal(full.tools.status, "satisfied");
-  assert.deepEqual(full.tools.missing, []);
+test("a negated inventory entry counts as absent", () => {
+  for (const entry of ["no torque wrench", "don't have a torque wrench", "need a torque wrench", "without torque wrench"]) {
+    assert.deepEqual(toolsOwned(["torque wrench"], [entry]).missing, ["torque wrench"], entry);
+  }
+
+  // The negation reaches only what follows it.
+  assert.deepEqual(toolsOwned(["jack", "jack stands"], ["jack but no jack stands"]).missing, ["jack stands"]);
+  // "No. 2" is a size, not a negation.
+  assert.equal(toolsOwned(["phillips screwdriver"], ["No. 2 Phillips screwdriver"]).status, "satisfied");
+});
+
+test("inventory and requirement names go through one normalizer", () => {
+  // Owner text arrives through parseInventory (lowercased, trimmed) and names
+  // from the model through normalizeRequirementName; punctuation one side
+  // keeps must not decide the match.
+  assert.equal(toolsOwned(["10-mm wrench"], ["10 MM Wrench!"]).status, "satisfied");
+  assert.equal(toolsOwned(["torque wrench"], ["Torque-wrench & sockets"]).status, "satisfied");
+  assert.equal(toolsOwned(["socket set"], ["Socket Set & torque wrench"]).status, "satisfied");
+});
+
+test("an itemName must be a real name: at least two words or four letters", () => {
+  const text = "A torque wrench is required.";
+  const verifyItem = (itemName) =>
+    verifyAgainst(text, {
+      kind: "required_tool",
+      claim: "A torque wrench is required",
+      evidenceQuote: "A torque wrench is required",
+      itemName,
+    });
+
+  // "a" and "is" are whole words of the claim, and still name no tool.
+  for (const itemName of ["e", "a", "is"]) {
+    assert.equal(verifyItem(itemName).rejected[0]?.reason, "item_name_too_short", itemName);
+  }
+
+  assert.equal(verifyItem("torque wrench").accepted.length, 1);
+  assert.equal(verifyItem("wrench").accepted.length, 1, "a single four-letter word is enough");
+});
+
+test("an itemName must appear in its claim as whole words", () => {
+  const verifyItem = (text, itemName) =>
+    verifyAgainst(text, { kind: "required_tool", claim: text.replace(/\.$/, ""), evidenceQuote: text.replace(/\.$/, ""), itemName });
+
+  assert.equal(verifyItem("Use a 110 mm wrench.", "10 mm wrench").rejected[0]?.reason, "item_not_in_claim");
+  assert.equal(verifyItem("Use a ratcheting wrench.", "ratchet").rejected[0]?.reason, "item_not_in_claim");
+  assert.equal(verifyItem("Use a 10 mm wrench.", "10 mm wrench").accepted.length, 1);
 });
 
 test("unsupported required tools produce no satisfied group", () => {
@@ -605,6 +655,8 @@ test("a task with no accepted claim says so in the plan", () => {
 test("requirement names normalize punctuation and spacing", () => {
   assert.equal(normalizeRequirementName("  10mm  Wrench!! "), "10mm wrench");
   assert.equal(normalizeRequirementName(null), "");
+  assert.equal(normalizeRequirementName("10-mm Wrench (metric)"), "10 mm wrench", "hyphens and asides fold away");
+  assert.equal(normalizeRequirementName("Don't have jack & stands"), "do not have jack and stands");
 });
 
 test("deriveEvidenceStatus never returns verified without technical claims", () => {
