@@ -178,6 +178,147 @@ test("a claim may cite a source that was retrieved for another task", () => {
   assert.equal(result.verifiedClaims.length, 2);
 });
 
+// --- Claim placement (1A-05) -----------------------------------------------
+//
+// A claim is a span of its quote, and its quote is a span of the source. Where
+// the claim sits decides what it means: "apply grease to the pads" is the
+// opposite instruction when the source says "Do not" right before it.
+
+function verifyAgainst(text, overrides, taskTitle = "Replace front brake pads") {
+  return verifyClaims([claim(overrides)], {
+    sourcesById: new Map([["S1", makeSource("S1", text)]]),
+    tasks: [{ id: 1, title: taskTitle, compound: false, clauses: [] }],
+  });
+}
+
+const GREASE_TEXT = "Do not apply grease to the friction surface of the brake pads.";
+
+test("a claim that leaves out a leading 'Do not' is rejected as a dropped negation", () => {
+  const { accepted, rejected } = verifyAgainst(GREASE_TEXT, {
+    kind: "safety_instruction",
+    claim: "apply grease to the friction surface of the brake pads",
+    evidenceQuote: "Do not apply grease to the friction surface of the brake pads",
+  });
+
+  assert.equal(accepted.length, 0);
+  assert.equal(rejected[0].reason, "negation_dropped");
+});
+
+test("trimming the negation off the quote as well does not launder it", () => {
+  // The quote really is in the source and the claim is all of it, but the
+  // source says "Do not" right before both. The negation check reads the
+  // source the model was shown, not the quote the model chose.
+  for (const kind of ["safety_instruction", "procedure", "vehicle_fact", "numeric_spec"]) {
+    const { accepted, rejected } = verifyAgainst(GREASE_TEXT, {
+      kind,
+      claim: "apply grease to the friction surface of the brake pads",
+      evidenceQuote: "apply grease to the friction surface of the brake pads",
+    });
+
+    assert.equal(accepted.length, 0, kind);
+    assert.equal(rejected[0].reason, "negation_dropped", kind);
+  }
+});
+
+test("never, don't, and without in the three words before a claim all count as negation", () => {
+  const cases = [
+    ["Never reuse the drain plug gasket.", "reuse the drain plug gasket"],
+    ["Don't open the radiator cap while the engine is hot.", "open the radiator cap while the engine is hot"],
+    ["Install the bolt without applying thread locker.", "applying thread locker"],
+  ];
+
+  for (const [text, statement] of cases) {
+    const { rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(rejected[0]?.reason, "negation_dropped", statement);
+  }
+});
+
+test("a negation in an earlier sentence does not block the next one", () => {
+  const { accepted } = verifyAgainst("Do not reuse the gasket. Replace the gasket with a new one.", {
+    kind: "procedure",
+    claim: "Replace the gasket with a new one",
+    evidenceQuote: "Replace the gasket with a new one",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("an un-negated occurrence is found even when a negated one comes first", () => {
+  const { accepted } = verifyAgainst("Do not tighten the bolt yet. Tighten the bolt after the hose is connected.", {
+    kind: "procedure",
+    claim: "Tighten the bolt",
+    evidenceQuote: "Tighten the bolt",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("a specification must be a whole clause of its quote", () => {
+  const text = "Caliper slide pin bolt torque: 34 N*m. Caliper bracket bolt torque: 107 N*m.";
+  const quote = "Caliper slide pin bolt torque: 34 N*m. Caliper bracket bolt torque: 107 N*m";
+  const task = "Tighten the caliper slide pin bolts";
+
+  // Starting at "torque" drops the part the 107 belongs to; filed under the
+  // slide-pin task it would read as the slide pins' torque (the source says 34).
+  const cut = verifyAgainst(text, { claim: "torque: 107 N*m", evidenceQuote: quote }, task);
+  assert.equal(cut.accepted.length, 0);
+  assert.equal(cut.rejected[0].reason, "not_whole_clause");
+
+  // The whole second sentence names its own part and may be shown.
+  const whole = verifyAgainst(text, { claim: "Caliper bracket bolt torque: 107 N*m", evidenceQuote: quote }, task);
+  assert.equal(whole.accepted.length, 1);
+});
+
+test("a safety instruction may not stop short of the end of its clause", () => {
+  const text = "Do not open the radiator cap while the engine is hot; wait until it cools.";
+  const quote = "Do not open the radiator cap while the engine is hot; wait until it cools";
+
+  const short = verifyAgainst(text, { kind: "safety_instruction", claim: "Do not open the radiator cap", evidenceQuote: quote });
+  assert.equal(short.rejected[0]?.reason, "not_whole_clause");
+
+  const whole = verifyAgainst(text, {
+    kind: "safety_instruction",
+    claim: "Do not open the radiator cap while the engine is hot",
+    evidenceQuote: quote,
+  });
+  assert.equal(whole.accepted.length, 1, "a clause ending at ';' is whole");
+});
+
+test("a statement of another kind may be any un-negated part of its quote", () => {
+  const { accepted } = verifyAgainst("Remove the two caliper bolts and lift the caliper off the bracket.", {
+    kind: "procedure",
+    claim: "lift the caliper off the bracket",
+    evidenceQuote: "Remove the two caliper bolts and lift the caliper off the bracket",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("a claim may not cut a range or drop a sign, even with a trimmed quote", () => {
+  const text = "Alternator output: 13.2 to 14.8 V. Regulated output 13.2-14.8 V. Freeze protection down to -37 °C.";
+  const cases = [
+    "14.8 V", // upper bound of "13.2 to 14.8 V"
+    "Alternator output: 13.2", // lower bound, range end dropped
+    "37 °C", // "-37 °C" with the minus sign dropped
+  ];
+
+  for (const statement of cases) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "vehicle_fact", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 0, statement);
+    assert.equal(rejected[0].reason, "range_cut", statement);
+  }
+
+  const dashed = verifyAgainst("Regulated output 13.2-14.8 V.", { kind: "vehicle_fact", claim: "14.8 V", evidenceQuote: "14.8 V" });
+  assert.equal(dashed.rejected[0]?.reason, "range_cut", "a dashed range is a range too");
+
+  const whole = verifyAgainst(text, {
+    kind: "vehicle_fact",
+    claim: "Alternator output: 13.2 to 14.8 V",
+    evidenceQuote: "Alternator output: 13.2 to 14.8 V",
+  });
+  assert.equal(whole.accepted.length, 1, "the whole range verifies");
+});
+
 // --- Status derivation -----------------------------------------------------
 
 test("an empty claims array can only ever be not_found", () => {

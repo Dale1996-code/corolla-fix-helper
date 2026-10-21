@@ -903,7 +903,7 @@ export const repairToolSchemas = [
               claim: {
                 type: "string",
                 description:
-                  "The technical statement, copied from the quote below. Do not paraphrase — it must appear word-for-word inside evidenceQuote.",
+                  "The technical statement, copied from the quote below. Do not paraphrase — it must appear word-for-word inside evidenceQuote. A numeric_spec or safety_instruction must be a whole sentence or clause of the quote, and no claim may drop a 'not' or 'never' before it or cut a range.",
               },
               sourceId: { type: "string", description: "Source id from search_repair_docs, e.g. S1." },
               evidenceQuote: {

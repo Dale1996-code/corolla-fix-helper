@@ -180,14 +180,241 @@ export function validateFinalizerPayload(payload, { tasks = [], sourceIds = new 
   return { valid: errors.length === 0, errors, claims };
 }
 
+// ---------------------------------------------------------------------------
+// Claim placement (1A-05)
+// ---------------------------------------------------------------------------
+//
+// The claim is a span of its quote, which is a span of the source. Containment
+// alone let a claim be ANY substring: "apply grease to the friction surface of
+// the brake pads" verified from "Do not apply grease...", and that inverted
+// instruction was written into the saved checklist. Where the claim sits is
+// part of what it says, so three placement rules apply (owner decision D2):
+//
+//   - No negator in the three words before the claim, read in the SOURCE, not
+//     the quote: otherwise trimming "Do not" off the quote as well launders it.
+//     The window stops at a clause boundary, so "Do not reuse the gasket.
+//     Replace the gasket..." does not block the second sentence.
+//   - No cut through a range or a signed number, also read in the source:
+//     "14.8 V" from "13.2 to 14.8 V" and "37 °C" from "-37 °C" change the value.
+//   - numeric_spec and safety_instruction claims must be a whole clause of
+//     their quote, running from a clause boundary (. ; : ! ? or a | table cell)
+//     to the next. Other kinds may be any part of the quote that passes the two
+//     rules above.
+//
+// What this does not do: the whole-clause rule is measured against the quote,
+// so a quote that itself stops mid-sentence can still leave out a trailing
+// qualifier ("at 2,000 rpm"). And a comma is not a boundary, so a later stage
+// ("30 N*m, then a further 90°") is not tied to the first.
+
+const WHOLE_CLAUSE_KINDS = new Set(["numeric_spec", "safety_instruction"]);
+
+const NEGATORS = new Set(["not", "no", "never", "without", "cannot", "nor", "none", "neither"]);
+
+// "dont"/"cant": PDF text and model quotes both drop apostrophes.
+const NEGATED_CONTRACTION = /n't$|^(?:dont|doesnt|didnt|cant|wont|isnt|arent|shouldnt|mustnt)$/;
+
+const NEGATION_WINDOW = 3;
+
+// Mirrors quoteAppearsInChunk in askEvidenceContract.js, whose normalizer and
+// boundary helpers are private to that module. Kept local so this change does
+// not touch the shared module. Every claim reaching these helpers has already
+// passed quoteAppearsInChunk twice, so if the two copies ever drift apart the
+// only possible effect is a rejection, never an acceptance.
+const LETTER = /\p{L}/u;
+const DIGIT = /\d/;
+const DECIMAL_MARK = /[.,]/;
+
+function normalizeForPlacement(text) {
+  return String(text || "")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function startsOnTokenBoundary(haystack, at, needle) {
+  const previous = haystack[at - 1] || "";
+  const beforePrevious = haystack[at - 2] || "";
+  const startsNumber =
+    DIGIT.test(needle[0]) || (DECIMAL_MARK.test(needle[0]) && DIGIT.test(needle[1] || ""));
+
+  if (LETTER.test(needle[0]) && LETTER.test(previous)) {
+    return false;
+  }
+
+  return !(
+    startsNumber &&
+    (DIGIT.test(previous) || (DECIMAL_MARK.test(previous) && DIGIT.test(beforePrevious)))
+  );
+}
+
+function endsOnTokenBoundary(haystack, end, needle) {
+  const last = needle[needle.length - 1];
+  const beforeLast = needle[needle.length - 2] || "";
+  const next = haystack[end] || "";
+  const afterNext = haystack[end + 1] || "";
+
+  if (LETTER.test(last) && LETTER.test(next)) {
+    return false;
+  }
+
+  if (DIGIT.test(last) && (DIGIT.test(next) || (DECIMAL_MARK.test(next) && DIGIT.test(afterNext)))) {
+    return false;
+  }
+
+  return !(DECIMAL_MARK.test(last) && DIGIT.test(beforeLast) && DIGIT.test(next));
+}
+
+/** Every start index where `needle` sits in `haystack` on token boundaries. */
+function tokenBoundedOccurrences(needle, haystack) {
+  const starts = [];
+
+  if (!needle || !haystack) {
+    return starts;
+  }
+
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (
+      startsOnTokenBoundary(haystack, at, needle) &&
+      endsOnTokenBoundary(haystack, at + needle.length, needle)
+    ) {
+      starts.push(at);
+    }
+  }
+
+  return starts;
+}
+
+const WRAPPING_PUNCTUATION = /["'()[\]]/;
+
+// "." and ":" end a clause only before a space, a bracket, or the end of the
+// text: never inside "1.5", "ft.*lbf", or "12:30".
+function isClauseMark(text, index) {
+  const char = text[index];
+
+  if (";!?|".includes(char)) {
+    return true;
+  }
+
+  if (char !== "." && char !== ":") {
+    return false;
+  }
+
+  const next = text[index + 1];
+  return next === undefined || next === " " || WRAPPING_PUNCTUATION.test(next);
+}
+
+function startsClause(text, start) {
+  let index = start - 1;
+
+  while (index >= 0 && (text[index] === " " || WRAPPING_PUNCTUATION.test(text[index]))) {
+    index -= 1;
+  }
+
+  return index < 0 || isClauseMark(text, index);
+}
+
+function endsClause(text, end) {
+  let index = end;
+
+  while (index < text.length && (text[index] === " " || WRAPPING_PUNCTUATION.test(text[index]))) {
+    index += 1;
+  }
+
+  return index >= text.length || isClauseMark(text, index);
+}
+
+function isNegator(word) {
+  return NEGATORS.has(word) || NEGATED_CONTRACTION.test(word);
+}
+
+/** A negator among the last few words of the claim's own clause in the source. */
+function dropsNegation(text, start) {
+  let clauseStart = 0;
+
+  for (let index = start - 1; index >= 0; index -= 1) {
+    if (isClauseMark(text, index)) {
+      clauseStart = index + 1;
+      break;
+    }
+  }
+
+  const words = text.slice(clauseStart, start).match(/[\p{L}\p{N}']+/gu) || [];
+  return words.slice(-NEGATION_WINDOW).some(isNegator);
+}
+
+// A number immediately after a sign, or after "<number> to|through|-|±" (a
+// range or a tolerance), is not the whole value.
+const SIGN_BEFORE = /[-−–—+±~]$/;
+const RANGE_BEFORE = /\d\s*(?:[-−–—~±]|\b(?:to|through|thru|and|or)\b)\s*$/;
+const RANGE_AFTER = /^\s*(?:[-−–—~±]|(?:to|through|thru)\b)\s*[-−+]?\d/;
+// The claim ends on a number, optionally followed by one short unit token.
+const ENDS_ON_VALUE = /\d(?:[.,]\d+)?(?:\s*[^\s\d]{1,8})?$/;
+
+function cutsRange(text, start, end, statement) {
+  const before = text.slice(0, start);
+
+  if (DIGIT.test(statement[0]) && (SIGN_BEFORE.test(before) || RANGE_BEFORE.test(before))) {
+    return true;
+  }
+
+  return ENDS_ON_VALUE.test(statement) && RANGE_AFTER.test(text.slice(end));
+}
+
+/**
+ * Checks where a claim sits, not just that it is contained. Every placement of
+ * the quote in the source and of the claim in the quote is tried; one clean
+ * placement verifies, otherwise the first problem found is the reason.
+ *
+ * @returns {string | null} rejection reason, or null when a clean placement exists
+ */
+function claimPlacementProblem(claim, evidenceText) {
+  const text = normalizeForPlacement(evidenceText);
+  const quote = normalizeForPlacement(claim.evidenceQuote);
+  const statement = normalizeForPlacement(claim.claim);
+  const wholeClause = WHOLE_CLAUSE_KINDS.has(claim.kind);
+  let firstProblem = null;
+
+  for (const quoteAt of tokenBoundedOccurrences(quote, text)) {
+    for (const offset of tokenBoundedOccurrences(statement, quote)) {
+      const start = quoteAt + offset;
+      const end = start + statement.length;
+      let problem = null;
+
+      if (cutsRange(text, start, end, statement)) {
+        problem = "range_cut";
+      } else if (dropsNegation(text, start)) {
+        problem = "negation_dropped";
+      } else if (
+        wholeClause &&
+        !(startsClause(quote, offset) && endsClause(quote, offset + statement.length))
+      ) {
+        problem = "not_whole_clause";
+      }
+
+      if (!problem) {
+        return null;
+      }
+
+      if (!firstProblem) {
+        firstProblem = problem;
+      }
+    }
+  }
+
+  // No placement at all means the local copy disagreed with quoteAppearsInChunk.
+  return firstProblem || "claim_not_in_quote";
+}
+
 /**
  * Verifies each validated claim against the source it cites.
  *
  * Fails CLOSED: a claim whose quote is not in the source, whose text is not in
- * its own quote, or whose numbers are not supported becomes a GAP rather than
- * rendered content. Rejected claims never disappear silently -- if they did, a
- * model could submit one easy claim, omit everything hard, and still look
- * fully grounded.
+ * its own quote, which drops a negation or cuts a range or clause, or whose
+ * numbers are not supported becomes a GAP rather than rendered content.
+ * Rejected claims never disappear silently -- if they did, a model could submit
+ * one easy claim, omit everything hard, and still look fully grounded.
  *
  * @param {any[]} claims
  * @param {{ sourcesById: Map<string, any> }} context
@@ -211,6 +438,13 @@ export function verifyClaims(claims, { sourcesById }) {
       // Paraphrase. The quote may be real while the sentence built from it is
       // not, which is exactly how an invented spec acquires a citation.
       rejected.push({ claim, reason: "claim_not_in_quote" });
+      continue;
+    }
+
+    const placementProblem = claimPlacementProblem(claim, evidenceText);
+
+    if (placementProblem) {
+      rejected.push({ claim, reason: placementProblem });
       continue;
     }
 
@@ -239,6 +473,9 @@ export function verifyClaims(claims, { sourcesById }) {
 const REJECTION_TEXT = {
   quote_not_in_source: "the quoted text was not found in the cited document",
   claim_not_in_quote: "the statement was not supported word-for-word by its quote",
+  negation_dropped: 'the statement left out a "not", "no", or "never" that comes right before it in the cited text',
+  range_cut: "the statement cut a range or a signed value out of the cited text",
+  not_whole_clause: "a specification or safety statement must be a whole sentence or clause of its quote",
   unsupported_number: "a number in the statement was not present in the cited text",
   item_not_in_claim: "the named item did not appear in the supporting statement",
 };

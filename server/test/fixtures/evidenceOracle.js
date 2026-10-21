@@ -505,7 +505,6 @@ export const PLANNER_ORACLE = [
     task: "Replace the front brake pads",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "Dropping 'Do not' inverts a safety instruction.",
   },
   {
@@ -518,7 +517,6 @@ export const PLANNER_ORACLE = [
     task: "Change the engine oil",
     expect: "reject",
     finding: "1A-05",
-    todo: "1A-05",
     note: "Dropping 'Never' inverts the step.",
   },
   {
@@ -581,8 +579,7 @@ export const PLANNER_ORACLE = [
     task: "Replace the oil filter",
     expect: "reject",
     finding: "1A-06",
-    todo: "1A-06",
-    note: "A bare value names no part; 37 N*m is the drain plug's, the filter cap's is 25.",
+    note: "A bare value names no part; 37 N*m is the drain plug's, the filter cap's is 25. Closed first by the D2 whole-clause rule: the quote names the plug and the claim drops it.",
   },
 
   // ---- 1A-07: raw-substring itemName ----

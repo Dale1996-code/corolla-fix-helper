@@ -53,7 +53,7 @@ const VERIFIED = {
   kind: "numeric_spec",
   claim: "torque caliper bolts to 25 ft-lb",
   sourceId: "S1",
-  evidenceQuote: "torque caliper bolts to 25 ft-lb and bleed the system",
+  evidenceQuote: "Front brake pad replacement: torque caliper bolts to 25 ft-lb",
 };
 
 function scriptedTurns() {
