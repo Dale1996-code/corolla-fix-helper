@@ -19,6 +19,13 @@
 //
 // Pure leaf: imports only the chunk geometry leaf.
 
+import {
+  CHUNK_WORD_SIZE,
+  CHUNK_WORD_STEP,
+  chunkStartWordIndex,
+  normalizeChunkWords,
+} from "./chunkGeometry.js";
+
 /** Bump when a rule changes, so persisted scopes (P2) can be recomputed. */
 export const APPLICABILITY_SCOPE_VERSION = "scope-v1";
 
@@ -40,7 +47,20 @@ export const PLANT_VALUES = Object.freeze(["TMC", "NUMMI", "TMMC", "TMMT"]);
 /**
  * @typedef {"article_title"|"diagram_title"|"inline_for"|"row_label"|"link"|"legend"|"column_header"|"unknown_code"} MarkerKind
  * @typedef {{ axis: "engine"|"plant", kind: MarkerKind, value: string|null, exclude: boolean, start: number, end: number }} ScopeMarker
+ * @typedef {null | { value: string, exclude: boolean, kind: MarkerKind } | { unresolved: true, kind: MarkerKind }} AxisScope
+ * @typedef {{ engine: AxisScope, plant: AxisScope }} Scope
+ * @typedef {{ start: number, end: number, scope: Scope }} ScopeSegment
  */
+
+/** @type {Readonly<Scope>} */
+export const EMPTY_SCOPE = Object.freeze({ engine: null, plant: null });
+
+const AXES = /** @type {const} */ (["engine", "plant"]);
+const BASE_KINDS = new Set(["article_title", "diagram_title"]);
+const OVERLAY_KINDS = new Set(["inline_for", "row_label"]);
+const UNRESOLVED_KINDS = new Set(["legend", "column_header", "unknown_code"]);
+// "6. INSTALL ..." -- a new numbered step ends the step-local (for X) scope.
+const NUMBERED_STEP = /(?:^|\s)\d{1,3}\.\s+[A-Z]{2,}/g;
 
 const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/g;
 const ENGINE_TOKEN = /\b([1-9][A-Z]{2})\s?-?\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
@@ -193,4 +213,180 @@ export function findScopeMarkers(text) {
   });
 
   return [...engineMarkers, ...plantMarkers].sort((left, right) => left.start - right.start);
+}
+
+/**
+ * Split text into segments of constant scope.
+ *
+ * Per axis, three layers apply, strongest first:
+ *   1. UNRESOLVED -- from a legend, a column header, or an unknown code to the
+ *      end of the text. Nothing can be paired with a variant there.
+ *   2. OVERLAY -- a (for X) block or a row label, until the next one on the same
+ *      axis, a diagram or article title, a numbered step, or the end of the text.
+ *   3. BASE -- an article title or a diagram title, until the next one. Only
+ *      this layer is handed to the next page (`carryOut`); an article line
+ *      resets it even when its title names no variant.
+ *
+ * @param {string} text
+ * @param {{ carryIn?: Scope }} [options]
+ * @returns {{ segments: ScopeSegment[], carryOut: Scope, markers: ScopeMarker[] }}
+ */
+export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
+  const source = String(text || "");
+  const blanked = blankAccountHeader(source);
+  const markers = findScopeMarkers(source);
+
+  /** @type {Array<{ at: number, apply: (state: any) => void }>} */
+  const events = [];
+  for (const span of articleSpans(blanked)) {
+    events.push({
+      at: span.start,
+      apply: (state) => {
+        for (const axis of AXES) {
+          state[axis].base = null;
+          state[axis].overlay = null;
+        }
+      },
+    });
+  }
+  for (const match of blanked.matchAll(NUMBERED_STEP)) {
+    events.push({
+      at: match.index,
+      apply: (state) => {
+        for (const axis of AXES) {
+          state[axis].overlay = null;
+        }
+      },
+    });
+  }
+  for (const marker of markers) {
+    events.push({
+      at: marker.start,
+      apply: (state) => {
+        const layer = state[marker.axis];
+        if (UNRESOLVED_KINDS.has(marker.kind)) {
+          layer.unresolved = layer.unresolved || { unresolved: true, kind: marker.kind };
+        } else if (BASE_KINDS.has(marker.kind)) {
+          layer.base = { value: /** @type {string} */ (marker.value), exclude: marker.exclude, kind: marker.kind };
+          layer.overlay = null;
+        } else if (OVERLAY_KINDS.has(marker.kind)) {
+          layer.overlay = { value: /** @type {string} */ (marker.value), exclude: marker.exclude, kind: marker.kind };
+        }
+        // Links never scope the text around them.
+      },
+    });
+  }
+  // Stable order: at one offset, an article reset runs before the title marker
+  // inside it, because spans start at "Vehicle >" which precedes the title.
+  events.sort((left, right) => left.at - right.at);
+
+  const readCarry = (axisScope) =>
+    axisScope && "value" in axisScope && BASE_KINDS.has(axisScope.kind) ? axisScope : null;
+  const state = {
+    engine: { base: readCarry(carryIn.engine), overlay: null, unresolved: null },
+    plant: { base: readCarry(carryIn.plant), overlay: null, unresolved: null },
+  };
+  /** @returns {Scope} */
+  const current = () => ({
+    engine: state.engine.unresolved || state.engine.overlay || state.engine.base,
+    plant: state.plant.unresolved || state.plant.overlay || state.plant.base,
+  });
+
+  /** @type {ScopeSegment[]} */
+  const segments = [];
+  let segmentStart = 0;
+  let index = 0;
+  while (index < events.length) {
+    const at = events[index].at;
+    if (at > segmentStart) {
+      segments.push({ start: segmentStart, end: at, scope: current() });
+      segmentStart = at;
+    }
+    while (index < events.length && events[index].at === at) {
+      events[index].apply(state);
+      index += 1;
+    }
+  }
+  if (source.length > segmentStart || segments.length === 0) {
+    segments.push({ start: segmentStart, end: source.length, scope: current() });
+  }
+
+  return {
+    segments,
+    carryOut: { engine: state.engine.base, plant: state.plant.base },
+    markers,
+  };
+}
+
+/**
+ * The scope in effect at a character offset. An offset at or past the end
+ * reads the last segment.
+ *
+ * @param {ScopeSegment[]} segments
+ * @param {number} offset
+ * @returns {Scope}
+ */
+export function scopeAt(segments, offset) {
+  if (!segments.length) {
+    return EMPTY_SCOPE;
+  }
+
+  const found = segments.find((segment) => offset >= segment.start && offset < segment.end);
+  return found ? found.scope : segments[segments.length - 1].scope;
+}
+
+/** Character offset of each word in a single-space-joined word list. */
+function wordOffsets(words) {
+  const offsets = [];
+  let at = 0;
+  for (const word of words) {
+    offsets.push(at);
+    at += word.length + 1;
+  }
+  return offsets;
+}
+
+/**
+ * Scope every page of one document, and every stored chunk on it.
+ *
+ * Page text is normalized exactly as the chunker normalizes it, so chunk `i`
+ * of a page starts at word `chunkStartWordIndex(i)` of `text`. A chunk's
+ * `entryScope` is the scope in effect at its first word -- which is how a chunk
+ * that names no engine itself still knows it sits inside a 2AZ-FE block.
+ *
+ * @param {Array<{ pageNumber: number, text: string }>} pages
+ */
+export function computeDocumentScopes(pages) {
+  const ordered = [...(pages || [])].sort((left, right) => left.pageNumber - right.pageNumber);
+  /** @type {Scope} */
+  let carry = EMPTY_SCOPE;
+
+  return ordered.map(({ pageNumber, text: rawText }) => {
+    const words = normalizeChunkWords(rawText);
+    const text = words.join(" ");
+    const { segments, carryOut, markers } = resolveSegments(text, { carryIn: carry });
+    carry = carryOut;
+
+    const offsets = wordOffsets(words);
+    const chunks = [];
+    // Same loop shape as chunkPageText, so the chunk count matches storage.
+    for (let chunkIndex = 0; chunkIndex * CHUNK_WORD_STEP < words.length; chunkIndex += 1) {
+      const startWord = chunkStartWordIndex(chunkIndex);
+      const endWord = Math.min(startWord + CHUNK_WORD_SIZE, words.length);
+      const startChar = offsets[startWord];
+      const endChar = endWord < words.length ? offsets[endWord] : text.length;
+
+      chunks.push({
+        chunkIndex,
+        entryScope: scopeAt(segments, startChar),
+        ownMarkers: markers.filter((marker) => marker.start >= startChar && marker.start < endChar),
+      });
+
+      if (startWord + CHUNK_WORD_SIZE >= words.length) {
+        break;
+      }
+    }
+
+    return { pageNumber, text, segments, chunks };
+  });
 }

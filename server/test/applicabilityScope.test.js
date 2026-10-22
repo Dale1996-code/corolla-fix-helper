@@ -6,10 +6,14 @@ import test from "node:test";
 // manual text may appear in a test.
 import {
   APPLICABILITY_SCOPE_VERSION,
+  EMPTY_SCOPE,
   KNOWN_ENGINE_CODES,
   PLANT_VALUES,
   blankAccountHeader,
+  computeDocumentScopes,
   findScopeMarkers,
+  resolveSegments,
+  scopeAt,
 } from "../src/services/applicabilityScope.js";
 
 /** The marker fields a test cares about, in order. */
@@ -156,4 +160,154 @@ test("gear names, part numbers, trouble codes and engine sizes are not markers",
   assert.deepEqual(shape("2ND-GEAR 4WD-FOUR 1ST-GEAR"), []);
   assert.deepEqual(shape("Part 90919-01253 DTC P0301 transaxle U341E or C59 engine 1.8L and 2.4L"), []);
   assert.deepEqual(shape("w/ VSC and w/o VSC"), []);
+});
+
+// ---- segments: what scope is in effect at a character offset ----
+
+/** Scope in effect at the `occurrence`-th match of `needle` in `text`. */
+function scopeOf(text, needle, { occurrence = 1, carryIn } = {}) {
+  let at = -1;
+  for (let seen = 0; seen < occurrence; seen += 1) {
+    at = text.indexOf(needle, at + 1);
+    assert.ok(at !== -1, `"${needle}" #${occurrence} not found`);
+  }
+  return scopeAt(resolveSegments(text, { carryIn }).segments, at);
+}
+
+test("a (for X) block lasts until the next one on the same axis", () => {
+  const text = "COMPRESSOR (for 2AZ-FE) Bolt 25 N*m COMPRESSOR (for 2ZR-FE) Bolt 26 N*m";
+
+  assert.equal(scopeOf(text, "25 N*m").engine.value, "2AZ-FE");
+  assert.equal(scopeOf(text, "26 N*m").engine.value, "2ZR-FE");
+  assert.equal(scopeOf(text, "COMPRESSOR").engine, null, "text before the first marker is unscoped");
+});
+
+test("a numbered step ends an inline scope", () => {
+  const text = "5. REMOVE ECM (for 2AZ-FE) torque 9 N*m 6. INSTALL BRACKET torque 12 N*m";
+
+  assert.equal(scopeOf(text, "9 N*m").engine.value, "2AZ-FE");
+  assert.equal(scopeOf(text, "12 N*m").engine, null);
+});
+
+test("row labels scope the figures that follow them", () => {
+  const text = "except TMC Made 2ZR-FE 92 mm 80 mm 2AZ-FE 96 mm 81 mm";
+
+  assert.equal(scopeOf(text, "92 mm").engine.value, "2ZR-FE");
+  assert.equal(scopeOf(text, "96 mm").engine.value, "2AZ-FE");
+  assert.deepEqual(scopeOf(text, "96 mm").plant, { value: "TMC", exclude: true, kind: "row_label" });
+});
+
+test("a legend or a column header leaves the rest of the page unresolved", () => {
+  assert.deepEqual(scopeOf("Wire color * 2: 2AZ-FE * 3: 2ZR-FE output 5 V", "5 V").engine, {
+    unresolved: true,
+    kind: "legend",
+  });
+  assert.equal(scopeOf("Item 2ZR-FE 2AZ-FE Height 92 96", "92").engine.unresolved, true);
+  assert.equal(scopeOf("Sensor (for 2ZA-FE) 12 V", "12 V").engine.unresolved, true);
+});
+
+test("unresolved beats an inline scope; inline beats a diagram title", () => {
+  const diagram = "Engine Control <2AZ-FE , Except TMC Made> (for 2ZR-FE) 5 V 7. CHECK harness 8 V";
+  assert.equal(scopeOf(diagram, "5 V").engine.value, "2ZR-FE", "inline beats the diagram");
+  assert.equal(scopeOf(diagram, "8 V").engine.value, "2AZ-FE", "after the step, the diagram is back");
+
+  const legend = "(for 2ZR-FE) * 2: 2AZ-FE wire 5 V";
+  assert.equal(scopeOf(legend, "5 V").engine.unresolved, true);
+});
+
+test("a link never scopes the text around it", () => {
+  const text = "INSPECT DRIVE BELT See Procedure 2AZ-FE [ 2AZ-FE ENGINE MECHANICAL: DRIVE BELT+ ] tension 7 mm";
+
+  assert.equal(scopeOf(text, "7 mm").engine, null);
+});
+
+test("an article line resets scope even when its title names no engine", () => {
+  const text = "(for 2AZ-FE) torque 9 N*m Vehicle > Brakes > Pad Replacement HINT: torque 30 N*m";
+
+  assert.equal(scopeOf(text, "9 N*m").engine.value, "2AZ-FE");
+  assert.equal(scopeOf(text, "30 N*m").engine, null);
+});
+
+test("a carried-in scope is only ever an article or a diagram scope", () => {
+  const carried = { engine: { value: "2AZ-FE", exclude: false, kind: "article_title" }, plant: null };
+  assert.equal(scopeOf("Bolt 40 N*m", "40 N*m", { carryIn: carried }).engine.value, "2AZ-FE");
+
+  const notCarried = { engine: { value: "2AZ-FE", exclude: false, kind: "inline_for" }, plant: null };
+  assert.equal(scopeOf("Bolt 40 N*m", "40 N*m", { carryIn: notCarried }).engine, null);
+});
+
+test("scopeAt on empty text is the empty scope", () => {
+  assert.deepEqual(scopeAt(resolveSegments("").segments, 0), EMPTY_SCOPE);
+});
+
+// ---- documents: entry scope of every stored chunk ----
+
+test("an article title scopes later pages; an inline block does not", () => {
+  const withArticle = computeDocumentScopes([
+    { pageNumber: 1, text: "Vehicle > Engine > Torque Specifications (2AZ-FE) NOTICE: (for 2ZR-FE) 30 N*m" },
+    { pageNumber: 2, text: "Bolt 40 N*m" },
+  ]);
+  assert.deepEqual(withArticle[1].chunks[0].entryScope.engine, {
+    value: "2AZ-FE",
+    exclude: false,
+    kind: "article_title",
+  });
+
+  const inlineOnly = computeDocumentScopes([
+    { pageNumber: 1, text: "(for 2AZ-FE) Bolt 30 N*m" },
+    { pageNumber: 2, text: "Bolt 40 N*m" },
+  ]);
+  assert.equal(inlineOnly[1].chunks[0].entryScope.engine, null);
+});
+
+test("an unresolved region does not reach the next page", () => {
+  const pages = computeDocumentScopes([
+    { pageNumber: 1, text: "Wire color * 2: 2AZ-FE output 5 V" },
+    { pageNumber: 2, text: "Sensor output 5 V" },
+  ]);
+
+  assert.equal(pages[1].chunks[0].entryScope.engine, null);
+});
+
+test("a later chunk of a page inherits the scope it starts inside", () => {
+  const words = Array.from({ length: 450 }, (_, index) => `w${index + 1}`);
+  words.splice(9, 1, "(for", "2AZ-FE)");
+  const [page] = computeDocumentScopes([{ pageNumber: 1, text: words.join(" ") }]);
+
+  assert.equal(page.chunks.length, 3);
+  assert.equal(page.chunks[0].entryScope.engine, null, "chunk 0 starts before the marker");
+  assert.equal(page.chunks[2].entryScope.engine.value, "2AZ-FE");
+  assert.equal(page.chunks[2].ownMarkers.length, 0, "chunk 2 names no engine itself");
+  assert.equal(page.chunks[0].ownMarkers[0].value, "2AZ-FE");
+});
+
+test("a page holding only the account header is unscoped everywhere", () => {
+  const [page] = computeDocumentScopes([
+    {
+      pageNumber: 1,
+      text: "ALLDATA DIY article export 2009 Toyota Corolla L4-1.8L (2ZR-FE) Vehicle > Brakes > Front Pad Replacement HINT: torque 107 N*m",
+    },
+  ]);
+
+  for (const chunk of page.chunks) {
+    assert.deepEqual(chunk.entryScope, EMPTY_SCOPE);
+  }
+  assert.deepEqual(scopeAt(page.segments, page.text.indexOf("107")), EMPTY_SCOPE);
+});
+
+test("empty documents and empty pages are handled", () => {
+  assert.deepEqual(computeDocumentScopes([]), []);
+  const [page] = computeDocumentScopes([{ pageNumber: 4, text: "" }]);
+  assert.equal(page.pageNumber, 4);
+  assert.deepEqual(page.chunks, []);
+});
+
+test("pages are processed in page order whatever order they arrive in", () => {
+  const pages = computeDocumentScopes([
+    { pageNumber: 2, text: "Bolt 40 N*m" },
+    { pageNumber: 1, text: "Vehicle > Engine > Specs (2AZ-FE) NOTICE: x" },
+  ]);
+
+  assert.deepEqual(pages.map((page) => page.pageNumber), [1, 2]);
+  assert.equal(pages[1].chunks[0].entryScope.engine.value, "2AZ-FE");
 });
