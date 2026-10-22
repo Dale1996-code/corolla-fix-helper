@@ -172,7 +172,7 @@ cd client; npx vitest run src/pages/NotesPage.test.jsx
 
 All tests run **without an OpenAI key** — every AI-touching module accepts an injected mock (see the dependency-injection convention in [docs/architecture.md](docs/architecture.md)). After code changes, also walk [QA_CHECKLIST.md](QA_CHECKLIST.md) for manual verification, and use [docs/quality-testing.md](docs/quality-testing.md) to check answer quality.
 
-CI (`.github/workflows/ci.yml`) runs `install:all`, `lint`, `typecheck`, `test`, `build`, and the production `smoke` test on every push and pull request with Node 24.
+CI (`.github/workflows/ci.yml`) installs with `npm ci` (root, server, client), then runs `lint`, `typecheck`, `test`, `backup:drill`, `build`, and the production `smoke` test on every push and pull request with Node 24.
 
 ## Basic Troubleshooting
 

@@ -4,21 +4,52 @@ on:
   push:
   pull_request:
 
+# Read-only token: nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
+# One run per branch or pull request. A newer push supersedes an older run,
+# except on main, where every commit keeps a complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
+      # Actions are pinned to full commit SHAs: a tag can be moved to other
+      # code, a SHA cannot. To update one, take the commit SHA of the new
+      # release tag (`git ls-remote --tags https://github.com/actions/<name>`,
+      # the `^{}` line for an annotated tag) and change the version comment
+      # with it.
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
+          # Caches npm's download cache (~/.npm), not node_modules: npm ci
+          # always installs exactly what the lockfiles say.
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
 
-      - name: Install dependencies
-        run: npm run install:all
+      # npm ci, not npm install: it fails if a lockfile disagrees with its
+      # package.json instead of quietly rewriting the lockfile.
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install server dependencies
+        run: npm ci --prefix server
+
+      - name: Install client dependencies
+        run: npm ci --prefix client
 
       - name: Lint
         run: npm run lint
