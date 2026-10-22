@@ -79,7 +79,12 @@ test("the answer call caps output tokens", async () => {
 });
 
 test("reserveAiCall enforces a daily ceiling and resets the next day", () => {
-  const day1 = Date.UTC(2026, 6, 24, 10, 0, 0);
+  // The day boundary is LOCAL midnight, so build both instants in local time.
+  // As UTC instants, 10:00 and the next day's 09:00 fall on the same local
+  // date at UTC-10 and UTC+14 (Honolulu, Kiritimati), and the test failed
+  // there. They are 23 hours apart, so a reset proves the rollover follows the
+  // calendar day, not 24 elapsed hours.
+  const day1 = new Date(2026, 6, 24, 10, 0, 0).getTime();
 
   // Third call in the same day trips the limit=2 ceiling.
   reserveAiCall({ now: day1, limit: 2 });
@@ -94,7 +99,7 @@ test("reserveAiCall enforces a daily ceiling and resets the next day", () => {
   );
 
   // A new calendar day resets the counter.
-  const day2 = Date.UTC(2026, 6, 25, 9, 0, 0);
+  const day2 = new Date(2026, 6, 25, 9, 0, 0).getTime();
   assert.doesNotThrow(() => reserveAiCall({ now: day2, limit: 2 }));
 });
 
