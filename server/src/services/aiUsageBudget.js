@@ -3,9 +3,11 @@
 //
 // This is accidental-spend insurance for a single-user, local-first app — a
 // backstop against a runaway agent loop or a stuck retry burning credit, NOT an
-// abuse/authentication control. It counts actual Responses API calls (the
-// choke points postToOpenAiResponses and streamResponsesTurn), resets each
-// local day, and stops *enforcing* when config.openAiDailyCallLimit <= 0.
+// abuse/authentication control. It counts actual provider requests at three
+// choke points -- postToOpenAiResponses, streamResponsesTurn, and
+// createOpenAiEmbeddings (owner decision D4: an embedding request is a provider
+// request like any other) -- resets each local day, and stops *enforcing* when
+// config.openAiDailyCallLimit <= 0.
 //
 // Counting and enforcing are deliberately separate. Counting always happens, so
 // "AI calls today" stays truthful for the owner who disables the ceiling with

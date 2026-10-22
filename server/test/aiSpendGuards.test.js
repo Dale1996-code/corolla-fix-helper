@@ -17,8 +17,14 @@ const { createApp } = await import("../src/app.js");
 const { postToOpenAiResponses, generateAnswerTextFromOpenAi } = await import(
   "../src/services/aiAnswerService.js"
 );
-const { reserveAiCall, resetAiUsageBudgetForTests, AI_DAILY_LIMIT_MESSAGE } =
-  await import("../src/services/aiUsageBudget.js");
+const {
+  reserveAiCall,
+  resetAiUsageBudgetForTests,
+  getAiUsageSnapshot,
+  AI_DAILY_LIMIT_MESSAGE,
+} = await import("../src/services/aiUsageBudget.js");
+const { createOpenAiEmbeddings, createOpenAiEmbedding, OPENAI_EMBEDDING_TIMEOUT_MESSAGE } =
+  await import("../src/services/chunkEmbeddingService.js");
 const { streamResponsesTurn, OPENAI_STREAM_IDLE_MESSAGE } = await import(
   "../src/services/agent/openAiResponsesClient.js"
 );
@@ -191,6 +197,104 @@ test("streamResponsesTurn aborts a stalled stream with a clear idle-timeout erro
     },
     (error) => {
       assert.equal(error.message, OPENAI_STREAM_IDLE_MESSAGE);
+      return true;
+    }
+  );
+});
+
+// --- Embedding requests (owner decision D4) --------------------------------
+
+function embeddingFetch(calls) {
+  return async (_url, options) => {
+    calls.push(options);
+    const { input } = JSON.parse(options.body);
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: input.map((_text, index) => ({
+            index,
+            embedding: new Array(config.openAiEmbeddingDimensions).fill(0.5),
+          })),
+        };
+      },
+      async text() {
+        return "";
+      },
+    };
+  };
+}
+
+test("an embedding request counts as one provider request, however many texts it carries", async () => {
+  const calls = [];
+
+  await createOpenAiEmbedding("caliper bolt torque", { fetchImpl: embeddingFetch(calls) });
+  assert.equal(getAiUsageSnapshot().callsToday, 1);
+
+  // A backfill batch is one request.
+  const vectors = await createOpenAiEmbeddings(["a", "b", "c"], { fetchImpl: embeddingFetch(calls) });
+  assert.equal(vectors.length, 3);
+  assert.equal(getAiUsageSnapshot().callsToday, 2);
+  assert.equal(calls.length, 2);
+
+  // No input means no provider request, so nothing is counted.
+  assert.deepEqual(await createOpenAiEmbeddings([], { fetchImpl: embeddingFetch(calls) }), []);
+  assert.equal(getAiUsageSnapshot().callsToday, 2);
+});
+
+test("the daily ceiling refuses an embedding request before it is sent", async () => {
+  const calls = [];
+  const reserveCall = () => reserveAiCall({ limit: 1 });
+
+  await createOpenAiEmbedding("first", { fetchImpl: embeddingFetch(calls), reserveCall });
+
+  await assert.rejects(
+    createOpenAiEmbedding("second", { fetchImpl: embeddingFetch(calls), reserveCall }),
+    (error) => {
+      assert.equal(error.message, AI_DAILY_LIMIT_MESSAGE);
+      assert.equal(error.status, 429, "Ask answers a refused embedding with 429, not 500");
+      return true;
+    }
+  );
+  assert.equal(calls.length, 1, "the refused request never reached the network");
+  assert.equal(getAiUsageSnapshot().callsToday, 1, "a refused request is not counted");
+});
+
+test("a stalled embedding request is cancelled with a fixed message", async () => {
+  // Never answers: only the request's own signal can end it.
+  const hangingFetch = (_url, options) =>
+    new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(options.signal.reason));
+    });
+
+  await assert.rejects(
+    createOpenAiEmbedding("caliper", { fetchImpl: hangingFetch, timeoutMs: 15 }),
+    (error) => {
+      assert.equal(error.message, OPENAI_EMBEDDING_TIMEOUT_MESSAGE);
+      // Not an AbortError: the planner reads that name as "the client left".
+      assert.notEqual(error.name, "AbortError");
+      return true;
+    }
+  );
+});
+
+test("the embedding timeout also bounds a body that stalls after the headers", async () => {
+  const stalledBodyFetch = async (_url, options) => ({
+    ok: true,
+    json: () =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason));
+      }),
+    async text() {
+      return "";
+    },
+  });
+
+  await assert.rejects(
+    createOpenAiEmbedding("caliper", { fetchImpl: stalledBodyFetch, timeoutMs: 15 }),
+    (error) => {
+      assert.equal(error.message, OPENAI_EMBEDDING_TIMEOUT_MESSAGE);
       return true;
     }
   );
