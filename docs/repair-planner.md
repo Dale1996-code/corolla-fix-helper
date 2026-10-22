@@ -48,7 +48,7 @@ artifacts the UI renders never depend on model randomness.
 | Tool | What it does |
 | --- | --- |
 | `extract_repair_tasks` | Returns the canonical, server-derived task list. Takes **no arguments** |
-| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`). Requires a canonical `taskId`. `limit` defaults to 4 and the schema declares it 1–8 (`MAX_SEARCH_RESULTS`) |
+| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`). Requires a canonical `taskId`. `limit` defaults to 4 and is 1–8 (`MAX_SEARCH_RESULTS`): declared in the schema, and clamped in code by `clampSearchLimit` whatever the model sends |
 | `check_repair_readiness` | Skill and safety picture for the canonical tasks. Takes **no arguments** |
 | `build_owner_checklist` | Produces a prioritized checklist with DIY vs professional-shop assignment. Takes **no arguments** |
 | `draft_handoff_notes` | Drafts channel-specific copy: a parts shopping list, a mechanic handoff, and a maintenance-log entry |

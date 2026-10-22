@@ -383,6 +383,25 @@ export const EVIDENCE_CONTEXT_CHAR_LIMIT = 1500;
 export const MAX_SEARCH_RESULTS = 8;
 export const DEFAULT_SEARCH_RESULTS = 4;
 
+/**
+ * The schema's bound, enforced (2B-03). A schema is advice to the model, not a
+ * check, and the retriever reads any limit it is handed: 500 used to fetch 500
+ * chunks, and 0 fell through to the retriever's own default of 8. Anything
+ * that is not a whole number of at least 1 gets the default.
+ *
+ * @param {unknown} limit
+ * @returns {number}
+ */
+export function clampSearchLimit(limit) {
+  const requested = Math.trunc(Number(limit));
+
+  if (!Number.isFinite(requested) || requested < 1) {
+    return DEFAULT_SEARCH_RESULTS;
+  }
+
+  return Math.min(requested, MAX_SEARCH_RESULTS);
+}
+
 function buildEvidenceText(text) {
   const normalized = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
 
@@ -454,7 +473,7 @@ export async function searchRepairDocs(
     return { query: "", taskId, citations: [], context: "" };
   }
 
-  const rawChunks = await retrieve(normalizedQuery, { limit });
+  const rawChunks = await retrieve(normalizedQuery, { limit: clampSearchLimit(limit) });
   const chunks = Array.isArray(rawChunks) ? rawChunks : [];
   const registry = sources || createSourceRegistry();
   const registered = chunks.map((chunk) => registry.register(chunk));
