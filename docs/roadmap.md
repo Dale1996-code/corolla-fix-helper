@@ -267,6 +267,19 @@ invariant and its two existing consumers untouched, because it classifies *task 
 this classifies *request intent* — a different question.
 *Stop condition:* if deterministic rules cannot separate permanent defeat from legitimate
 temporary service, stop and report rather than reaching for a model.
+*Boundaries found since (audit 2026-10-18, Stage 6):* the gate is lexical and per clause,
+and its "how does … work" exemption was broader than intended. It pardoned *How do I bypass
+the airbag so it doesn't work anymore?* (1A-18) and a bypass joined to a how-it-works
+question by a comma or "and". Both now refuse: the exemption covers a defeat word only
+inside a question about how a *system* works, never "how do I …". *How do I make the ABS
+stop working?* had no defeat verb at all; the causative form now refuses when the owner is
+the one causing the failure and the safety system is the thing made to stop, so *why did my
+ABS stop working?* and *will disconnecting the battery make the airbag stop working?* stay
+answerable. Known boundaries that remain: a defeat clause that names its system only by
+pronoun (*disable it*); defeat wording credited to someone else (*my mechanic can make the
+ABS stop working*); and two over-refusals, a detection question that uses "trick" or "fool"
+(*can a seat cover fool the airbag sensor?*, refused before Stage 6 too) and a passenger
+airbag question phrased as *keep it from working* for a child seat.
 *Position of N3 is unchanged.* N2.5 is a small insert, not a re-prioritization: **N3 remains
 the next major product initiative** once this lands.
 

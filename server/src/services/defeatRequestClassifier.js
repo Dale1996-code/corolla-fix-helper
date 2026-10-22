@@ -91,6 +91,60 @@ const PERMANENCE_MARKERS = [
   /\b(?:don'?t|do not|never) have to (?:fix|repair|replac)\w*/,
 ];
 
+// "Make the ABS stop working" states the system's failure as the owner's own
+// goal, with no defeat verb and no permanence marker. "Stop working" alone stays
+// an ambiguous verb, because "my ABS stopped working" is a symptom, so this
+// counts only when
+//   - the owner does the causing: "how do I make", "I want to get", "a way to
+//     stop", or a bare imperative. "Why does the switch make the ABS stop
+//     working?" and "will disconnecting the battery make the airbag stop
+//     working?" name a part as the cause, and are questions about symptoms; and
+//   - the safety system is the thing made to stop: see causedFailure. In "the
+//     ABS makes the brakes stop working" it is the brakes.
+// "make sure" is a precaution, never a goal. Deploying is deliberately absent:
+// keeping an airbag from deploying is the whole point of the SRS service steps.
+// Between the owner and the verb only helper words and "-ly" adverbs may sit,
+// so "I don't want to make ..." never qualifies. Group 1 is the wording
+// reported as the verb; group 2 is the thing made to stop.
+const OWNER_AGENT =
+  "(?:^|\\b(?:i|we|you|one|me|us)(?: (?:want|need|d|would|like|to|can|could|should|will|ll|try|trying|going|help|just|also|\\w+ly))* |\\bhow to |\\bways? (?:to|of) )";
+const CAUSED_FAILURE = [
+  new RegExp(
+    `${OWNER_AGENT}((?:make|making|get|getting)\\b(?! (?:sure|certain)\\b)((?: \\w+){1,4}?) (?:(?:to )?(?:stop|quit) (?:working|functioning|operating)|(?:not|never) (?:work|function|operate))\\b)`
+  ),
+  new RegExp(
+    `${OWNER_AGENT}((?:stop|stopping|keep|keeping|prevent|preventing)((?: \\w+){1,4}?) from (?:working|functioning|operating)\\b)`
+  ),
+];
+
+// A stated goal that the system stop working. Every permanence marker is one,
+// and so is every CAUSED_FAILURE; the rest are the plain purpose clauses an
+// owner types instead ("so it doesn't work", "stop it from working"). Used ONLY
+// to void HOW_IT_WORKS below -- they are deliberately not permanence markers,
+// because "my airbag light doesn't work anymore" describes a symptom and must
+// not arm an ambiguous verb.
+const DEFEAT_GOAL_PHRASES = [
+  ...PERMANENCE_MARKERS,
+  ...CAUSED_FAILURE,
+  /\bany ?more\b/,
+  /\bso (?:that )?(?:\w+ ){1,3}(?:doesn t|doesnt|does not|won t|wont|will not|can t|cant|cannot|can not|don t|dont|do not|never) (?:\w+ )?(?:work|function|deploy|activat|engag)\w*/,
+  /\b(?:stop|keep|prevent)(?:s|ped|ping|ing|ed)? (?:\w+ ){0,3}from (?:work|function|deploy|activat|engag)\w*/,
+  /\bmak(?:e|es|ing) (?:\w+ ){1,3}(?:not|stop|never) work\w*/,
+];
+
+// "How does the airbag work?" is this exemption's real purpose. But the same
+// words open "how do I bypass the airbag so it doesn't work", where "work" is
+// the defeat goal itself (audit 1A-18). And a clause runs on to the next
+// sentence stop, so "How do I bypass the airbag, and how does the system work?"
+// put a how-it-works question beside a bypass it never asked about. Hence:
+//   - the subject is a system, never the asker: "how do I/you/we/one ..." asks
+//     for instructions, not how something works;
+//   - it is one question: no second "how" inside it;
+//   - it excuses a clause only when the clause states no DEFEAT_GOAL_PHRASES
+//     and every defeat verb in it sits INSIDE such a question, as "bypass" does
+//     in "how does the ABS bypass valve work". See howItWorksExcuses.
+const HOW_IT_WORKS = /\bhow (?:does|do)\b(?! (?:i|you|we|one)\b)(?:(?!\bhow\b)[^]){0,40}\bwork\b/;
+
 // Named safety systems only. A bare "warning light" is deliberately NOT a target:
 // "permanently turn off the maintenance required light" is a legitimate reset
 // procedure, and a generic target would refuse it.
@@ -123,7 +177,9 @@ const SAFETY_SYSTEM_TARGETS = [
 const LEGITIMATE_INTENT_MARKERS = [
   /\btemporar(?:y|ily)\b/,
   /\bbefore (?:working|servicing|service|removing|replacing|starting|you work|any work|disassembl\w*)\b/,
-  /\bwhile (?:servicing|working|testing|diagnosing)\b/,
+  // "while servicing", and the "while I replace ..." an owner types for the same
+  // service window that "before replacing" already names.
+  /\bwhile (?:(?:i|you|we) (?:m |am |re |are )?)?(?:servic|work|test|diagnos|repair|replac|remov|install|bleed)\w*/,
   /\bduring (?:service|servicing|repair|diagnosis|testing)\b/,
   /\bfor (?:diagnosis|testing|troubleshooting)\b/,
   /\bto (?:diagnose|test|troubleshoot|check|inspect)\b/,
@@ -138,7 +194,7 @@ const LEGITIMATE_INTENT_MARKERS = [
   /\bwait(?:s|ed|ing)? (?:\d+|the required|the specified|at least)\b/,
   /\bsafely (?:service|work|handle|disable|disarm|remove)\b/,
   /\b(?:per|according to) the (?:manual|procedure|fsm)\b/,
-  /\bhow (?:does|do)\b[^]{0,40}\bwork\b/,
+  HOW_IT_WORKS,
 ];
 
 /**
@@ -180,7 +236,8 @@ function toClauses(text) {
 const NEGATED = /\b(?:never|no longer|not|cannot|can t|won t|don t|doesn t)\s+(?:\w+\s+){0,2}$/;
 
 /**
- * First legitimate-intent marker in a clause, ignoring negated ones.
+ * First legitimate-intent marker in a clause, ignoring negated ones and a
+ * how-it-works marker in a clause that states a defeat goal.
  *
  * @param {string} clause normalized clause text
  * @returns {string|null}
@@ -197,7 +254,64 @@ function firstExemption(clause) {
       continue;
     }
 
+    if (pattern === HOW_IT_WORKS && !howItWorksExcuses(clause)) {
+      continue;
+    }
+
     return found[0].trim();
+  }
+
+  return null;
+}
+
+/**
+ * Whether the clause's how-it-works question is what its defeat verbs belong to.
+ *
+ * A defeat verb outside every such question belongs to something else the
+ * clause asks -- "how do I bypass the airbag, and how does the system work?" --
+ * and the question has no standing to pardon it.
+ *
+ * @param {string} clause normalized clause text
+ * @returns {boolean}
+ */
+function howItWorksExcuses(clause) {
+  if (firstMatch(DEFEAT_GOAL_PHRASES, clause)) {
+    return false;
+  }
+
+  const questions = spansOf(HOW_IT_WORKS, clause);
+
+  return DEFEAT_VERBS.every((pattern) =>
+    spansOf(pattern, clause).every(([start, end]) =>
+      questions.some(([questionStart, questionEnd]) => start >= questionStart && end <= questionEnd)
+    )
+  );
+}
+
+/** @param {RegExp} pattern @param {string} text @returns {Array<[number, number]>} */
+function spansOf(pattern, text) {
+  return [...text.matchAll(new RegExp(pattern.source, "g"))].map(
+    (found) => /** @type {[number, number]} */ ([found.index, found.index + found[0].length])
+  );
+}
+
+/**
+ * The owner's stated goal that a named safety system stop working, if any.
+ *
+ * The safety system must be the thing made to stop, not merely named somewhere
+ * in the clause; see CAUSED_FAILURE.
+ *
+ * @param {string} clause normalized clause text
+ * @returns {{ wording: string, target: string } | null}
+ */
+function causedFailure(clause) {
+  for (const pattern of CAUSED_FAILURE) {
+    const found = clause.match(pattern);
+    const target = found ? firstMatch(SAFETY_SYSTEM_TARGETS, found[2]) : null;
+
+    if (found && target) {
+      return { wording: found[1].trim(), target };
+    }
   }
 
   return null;
@@ -258,10 +372,11 @@ export function classifyDefeatRequest(text) {
     }
 
     const defeatVerb = firstMatch(DEFEAT_VERBS, clause);
+    const failureGoal = causedFailure(clause);
     const ambiguousVerb = firstMatch(AMBIGUOUS_VERBS, clause);
     const permanence = ambiguousVerb ? firstMatch(PERMANENCE_MARKERS, clause) : null;
 
-    if (!defeatVerb && !(ambiguousVerb && permanence)) {
+    if (!defeatVerb && !failureGoal && !(ambiguousVerb && permanence)) {
       continue;
     }
 
@@ -270,8 +385,8 @@ export function classifyDefeatRequest(text) {
     const allowedBy = firstExemption(clause);
     const verdict = {
       refuse: !allowedBy,
-      verb: defeatVerb || ambiguousVerb,
-      target,
+      verb: defeatVerb || failureGoal?.wording || ambiguousVerb,
+      target: failureGoal?.target || target,
       permanence,
       allowedBy,
     };
@@ -302,6 +417,8 @@ export const DEFEAT_REQUEST_RULES = Object.freeze({
   DEFEAT_VERBS,
   AMBIGUOUS_VERBS,
   PERMANENCE_MARKERS,
+  CAUSED_FAILURE,
+  DEFEAT_GOAL_PHRASES,
   SAFETY_SYSTEM_TARGETS,
   LEGITIMATE_INTENT_MARKERS,
 });

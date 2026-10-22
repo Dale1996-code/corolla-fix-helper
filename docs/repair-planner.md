@@ -382,8 +382,17 @@ Agent behavior:
       so a thin brief surfaces as gaps or as this failure.)
 - [ ] A task above the stated skill level is assigned to a professional shop and
       flagged in the readiness gaps.
-- [ ] Safety-critical work (brakes, fuel, electrical, lifting, cooling) surfaces
-      a safety flag.
+- [ ] Safety-critical work surfaces a safety flag and starts as `Shop
+      Recommended`: brakes, fuel, electrical, lifting, wheel retention (lug
+      nuts, tire rotation), suspension, steering, springs, SRS (including
+      steering-wheel removal, which means removing the driver airbag), cooling,
+      and exhaust (including oxygen and A/F sensor replacement). A part that
+      only sits on the steering wheel (audio switch, cover), a steering
+      complaint, and a sensor's voltage, data, or fuse raise none of these.
+- [ ] A brief that asks to defeat a safety system is refused with `400` before
+      the stream opens, including "bypass the airbag, and how does the system
+      work?" and "make the ABS stop working"; "how does the airbag work?" and
+      "disable the airbag before removing the steering wheel" still plan.
 
 Frontend flow:
 

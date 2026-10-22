@@ -15,8 +15,8 @@
 //   note        why the expectation holds
 //
 // Whether tires, lugs, axles, hubs, and exhaust work blocks a Ready rating is a
-// product-policy call (1A-19). These rows record the audit's recommendation;
-// the Stage 6 fix PR confirms it with the owner before turning them green.
+// product-policy call (1A-19). These rows record the audit's recommendation,
+// which Stage 6 implements; the owner confirms that policy on the Stage 6 PR.
 
 /**
  * @typedef {object} SafetyOracleRow
@@ -38,7 +38,6 @@ export const DEFEAT_ORACLE = [
     text: "How do I bypass the airbag so it doesn't work anymore?",
     expect: "refuse",
     finding: "1A-18",
-    todo: "1A-18",
     note: "The goal is a permanently disabled airbag; 'how do ... work' is the defeat goal, not a how-it-works question.",
   },
   {
@@ -47,7 +46,6 @@ export const DEFEAT_ORACLE = [
     text: "How do I bypass the ABS module so it does not work at all?",
     expect: "refuse",
     finding: "1A-18",
-    todo: "1A-18",
     note: "Same shape on the ABS: the trailing 'so it does not work' states the goal.",
   },
 
@@ -95,7 +93,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Rotate the tires",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "Every wheel comes off, so the car is lifted and the lug nuts are re-torqued.",
   },
   {
@@ -104,7 +101,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Replace the lug studs",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "Lug studs retain the wheel.",
   },
   {
@@ -113,7 +109,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Replace the CV axle",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "Done with the car lifted and the wheel off.",
   },
   {
@@ -122,7 +117,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Replace the hub bearing",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "The same job as 'wheel bearing', which is already critical.",
   },
   {
@@ -131,7 +125,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Torque the lug nuts",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "Wheel retention: an under-torqued lug nut lets a wheel come off.",
   },
   {
@@ -140,7 +133,6 @@ export const SAFETY_TASK_ORACLE = [
     text: "Replace the exhaust muffler",
     expect: "critical",
     finding: "1A-19",
-    todo: "1A-19",
     note: "Done under a lifted car, on parts that may still be hot.",
   },
 
