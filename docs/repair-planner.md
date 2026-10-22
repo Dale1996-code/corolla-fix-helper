@@ -48,7 +48,7 @@ artifacts the UI renders never depend on model randomness.
 | Tool | What it does |
 | --- | --- |
 | `extract_repair_tasks` | Returns the canonical, server-derived task list. Takes **no arguments** |
-| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`). Requires a canonical `taskId` |
+| `search_repair_docs` | Retrieves relevant chunks from uploaded PDFs (reuses `chunkRetrievalService`). Requires a canonical `taskId`. `limit` defaults to 4 and is 1–8 (`MAX_SEARCH_RESULTS`): declared in the schema, and clamped in code by `clampSearchLimit` whatever the model sends |
 | `check_repair_readiness` | Skill and safety picture for the canonical tasks. Takes **no arguments** |
 | `build_owner_checklist` | Produces a prioritized checklist with DIY vs professional-shop assignment. Takes **no arguments** |
 | `draft_handoff_notes` | Drafts channel-specific copy: a parts shopping list, a mechanic handoff, and a maintenance-log entry |
@@ -259,7 +259,7 @@ one `data: <json>\n\n` frame. Event types:
 | `type` | Meaning |
 | --- | --- |
 | `status` | Human-readable progress message |
-| `tool_call` | The model asked to run a tool (`name`, `arguments`) |
+| `tool_call` | The model asked to run a tool (`name`, `turn`, and `taskId` / `claimCount` where they apply — never its arguments) |
 | `tool_result` | A tool finished (`name`, `summary`) |
 | `trace` | A finished tracing span (observability) |
 | `ai_not_configured` | No `OPENAI_API_KEY` is set; the run stops gracefully |
@@ -271,6 +271,36 @@ emits it**. Model prose is discarded, including prose emitted before a tool
 call: the plan the owner reads is rendered by the server from validated claims.
 `status`, `tool_call`, `tool_result`, and `trace` still stream, so a run is not
 silent.
+
+### What a tool frame may carry
+
+**No frame carries a model argument.** `tool_call` used to forward the model's
+raw `arguments`, so every claim submitted to `finalize_repair_plan` — including
+the ones the evidence contract then rejected — reached the activity log looking
+like part of the plan (audit 1A-15). The frame is now built from an allow-list
+in `describeToolCall`:
+
+```jsonc
+{ "type": "tool_call", "name": "search_repair_docs", "turn": 1, "taskId": 1 }
+{ "type": "tool_call", "name": "finalize_repair_plan", "turn": 2, "claimCount": 5 }
+```
+
+- `name` is one of the tools in `repairToolSchemas`. A function name the
+  planner never offered is model text too, so it arrives as `unknown_tool`.
+- `turn` is the 1-based model turn, counted by the server.
+- `taskId` appears on a search only when it names a canonical task; an
+  invented id is dropped, not coerced.
+- `claimCount` appears on the finalizer: how many claims were submitted, before
+  verification. The verified count is in `done.artifacts.evidence`.
+
+The same rule covers the other frames. A search's `tool_result` summary names
+the canonical task (`Retrieved 3 passages for "Replace the front brake pads".`)
+rather than the model's query, error summaries never echo the value that was
+rejected, and trace spans carry the same sanitized tool name. The
+model still receives its full arguments and tool outputs; only the browser
+copy is narrowed. `server/test/plannerSseLeak.test.js` asserts that a rejected
+claim's value, and a marker planted in a query, an invalid task id, and an
+invented tool name, appear in no frame at all.
 
 Request body: `{ brief, skillLevel, availableTools, availableParts, constraints }`.
 Only `brief` is required.
@@ -286,7 +316,67 @@ the in-flight OpenAI request the instant streaming begins and surface a spurious
 `error` frame reading "This operation was aborted". A genuine disconnect aborts
 the OpenAI `fetch`; the resulting `AbortError` is treated as a quiet end (no
 `error` frame), since there is no client left to receive one. Real model/network
-failures (4xx/5xx, stream-parse errors) still surface verbatim through `error`.
+failures (4xx/5xx, a `response.failed` or `error` stream event) still surface
+through `error`, but with a fixed message, never the provider's text.
+
+### Provider errors are redacted
+
+The streaming client used to throw `OpenAI request failed (<status>): <body>`,
+and the agent emits a thrown message as the `error` frame — so the provider's
+response body reached the browser (audit 1A-16). A 401 body names the owner's
+key by its last characters ("Incorrect API key provided: sk-proj-****abcd"),
+and other bodies can echo the brief or the retrieved manual text. Now:
+
+- A non-2xx response throws `createRedactedOpenAiHttpError` (the helper Ask
+  and the embedding call already use): the message is the fixed "The AI
+  service rejected the request. Please try again.", and the status sits on
+  `error.failure`.
+- A `response.failed` or `error` stream event throws the fixed
+  `OPENAI_STREAM_FAILED_MESSAGE`; the provider's message is dropped.
+- The body survives only as `error.failure.diagnostic`: at most 200
+  characters, never sent to the client, never logged, and with every whole or
+  masked API key (`sk-…`, or any run of three or more `*`) replaced by
+  `[redacted key]` before it is kept. That scrub lives in the shared
+  `openAiResponsePayload.js`, so Ask's and the embedding call's diagnostics get
+  it too.
+
+`server/test/plannerProviderErrors.test.js` drives the real client through the
+agent and asserts the key suffix and an echoed brief reach no SSE frame and no
+`console` call.
+
+### Cost bounds
+
+Every bound below is a fixed number, not a function of the brief, so one run's
+spend has a ceiling however many tasks the brief yields:
+
+| Bound | Value | What happens at the bound |
+| --- | --- | --- |
+| Model turns (`maxTurns`) | 8 | The run fails with `turn_limit` |
+| Finalizer corrections (`MAX_FINALIZER_CORRECTIONS`) | 2 | The run fails with `invalid_final_contract` |
+| Tool calls run per turn (`MAX_TOOL_CALLS_PER_TURN`, audit 2B-04) | 8 | Calls past the eighth are not run. Each still gets a `function_call_output` saying so, so the model can ask again next turn; no `tool_call` frame is emitted for it, and the turn's trace span records `skippedToolCalls` |
+| Chunks per search (`MAX_SEARCH_RESULTS`, audit 1A-20 / 2B-03) | 8 | `limit` is declared 1–8 in the schema and clamped by `clampSearchLimit`; an unusable value gets the default of 4 |
+| Evidence text per chunk (`EVIDENCE_CONTEXT_CHAR_LIMIT`) | 1,500 characters | The model sees, and quotes are checked against, the first 1,500 characters |
+
+So one run makes at most 8 Responses calls and at most 64 document searches.
+Each search can make one embedding request, which counts toward
+`AI_DAILY_CALL_LIMIT` like the model turns do (owner decision D4), and each
+turn's tool output carries at most 8 × 8 chunks of evidence text. Live runs
+make about four searches per run (`docs/evals/ask-rag-iteration-log.md`, Stage
+5-E2), far inside these bounds.
+
+### Refused briefs
+
+A brief, or any optional field, that asks to defeat a vehicle safety system is
+refused twice over (audit 1B-17). The route refuses it with a JSON `400`
+before the stream opens. `runRepairPlannerAgent` runs the same classifier on
+the same text — `buildPlannerGateText` joins the brief and the three optional
+fields, one clause block each — so a caller that reaches the planner without
+the route (an eval or replay script, a test harness, a future endpoint) gets
+one `error` frame with `code: "planner_refused"`, `reason: "defeat_request"`,
+and the refusal text as its `message`. The core check runs before the
+AI-configured check, as Ask's does: the refusal is policy, so it does not
+depend on a key, and it costs no model turn, tool call, retrieval, or
+embedding.
 
 ### Incomplete runs
 
@@ -393,6 +483,9 @@ Agent behavior:
       the stream opens, including "bypass the airbag, and how does the system
       work?" and "make the ABS stop working"; "how does the airbag work?" and
       "disable the airbag before removing the steering wheel" still plan.
+      `runRepairPlannerAgent` runs the same gate on the same text
+      (`buildPlannerGateText`), so a caller that skips the route gets one
+      `error` frame (`planner_refused` / `defeat_request`) and no model turn.
 
 Frontend flow:
 

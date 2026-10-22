@@ -376,6 +376,32 @@ function buildSnippet(text) {
 // procedure longer than two sentences, which is most of them.
 export const EVIDENCE_CONTEXT_CHAR_LIMIT = 1500;
 
+// How many chunks one search may return. The model chooses `limit`, so this is
+// what bounds how much one tool call pulls into the next turn's input: each
+// chunk goes back to the model as up to EVIDENCE_CONTEXT_CHAR_LIMIT characters.
+// 8 is Ask's own retrieval default.
+export const MAX_SEARCH_RESULTS = 8;
+export const DEFAULT_SEARCH_RESULTS = 4;
+
+/**
+ * The schema's bound, enforced (2B-03). A schema is advice to the model, not a
+ * check, and the retriever reads any limit it is handed: 500 used to fetch 500
+ * chunks, and 0 fell through to the retriever's own default of 8. Anything
+ * that is not a whole number of at least 1 gets the default.
+ *
+ * @param {unknown} limit
+ * @returns {number}
+ */
+export function clampSearchLimit(limit) {
+  const requested = Math.trunc(Number(limit));
+
+  if (!Number.isFinite(requested) || requested < 1) {
+    return DEFAULT_SEARCH_RESULTS;
+  }
+
+  return Math.min(requested, MAX_SEARCH_RESULTS);
+}
+
 function buildEvidenceText(text) {
   const normalized = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
 
@@ -438,7 +464,7 @@ export function createSourceRegistry() {
  * @param {{ retrieve?: typeof retrieveRelevantChunks, sources?: any }} [deps]
  */
 export async function searchRepairDocs(
-  { query, limit = 4, taskId } = {},
+  { query, limit = DEFAULT_SEARCH_RESULTS, taskId } = {},
   { retrieve = retrieveRelevantChunks, sources = null } = {}
 ) {
   const normalizedQuery = normalizeText(query);
@@ -447,7 +473,7 @@ export async function searchRepairDocs(
     return { query: "", taskId, citations: [], context: "" };
   }
 
-  const rawChunks = await retrieve(normalizedQuery, { limit });
+  const rawChunks = await retrieve(normalizedQuery, { limit: clampSearchLimit(limit) });
   const chunks = Array.isArray(rawChunks) ? rawChunks : [];
   const registry = sources || createSourceRegistry();
   const registered = chunks.map((chunk) => registry.register(chunk));
@@ -848,7 +874,13 @@ export const repairToolSchemas = [
           description: "The id of the canonical task from extract_repair_tasks that this search supports.",
         },
         query: { type: "string", description: "Keywords describing what to look up." },
-        limit: { type: "integer", description: "Maximum chunks to return (default 4)." },
+        // Declared so the model is told the bound before it asks (1A-20).
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_SEARCH_RESULTS,
+          description: `Maximum chunks to return (default ${DEFAULT_SEARCH_RESULTS}, at most ${MAX_SEARCH_RESULTS}).`,
+        },
       },
       required: ["taskId", "query"],
       additionalProperties: false,
@@ -969,9 +1001,11 @@ export function createToolRegistry({
       // trustworthy rather than letting the model invent one.
       const taskId = Number(args?.taskId);
 
+      // The rejected value is not echoed: this string is also the owner's
+      // activity-log line, and the model knows what it sent.
       if (!validTaskIds.has(taskId)) {
         return Promise.resolve({
-          error: `Unknown taskId ${args?.taskId}. Call extract_repair_tasks and use one of: ${
+          error: `Unknown taskId. Call extract_repair_tasks and use one of: ${
             [...validTaskIds].join(", ") || "(no tasks)"
           }.`,
         });

@@ -1,9 +1,15 @@
 import { config } from "../../config.js";
 import { buildModelTuning } from "../openAiModelCapabilities.js";
 import { reserveAiCall } from "../aiUsageBudget.js";
+import { createRedactedOpenAiHttpError } from "../openAiResponsePayload.js";
 
 export const OPENAI_STREAM_IDLE_MESSAGE =
   "The AI model stopped responding and the request was cancelled. Please try again.";
+
+// Fixed text for a stream the provider failed mid-way. The provider's own
+// message is not used: it can name the account, the model, or the request.
+export const OPENAI_STREAM_FAILED_MESSAGE =
+  "The AI model reported an error before the plan was finished. Please try again.";
 
 /**
  * A provider-side failure the planner can classify rather than guess at.
@@ -146,8 +152,13 @@ export async function* streamResponsesTurn({
     });
 
     if (!response.ok || !response.body) {
+      // Redacted (1A-16). The body used to go into the message, and the agent
+      // emits that message as the browser's `error` frame. A 401 body names the
+      // owner's key by its last characters; other bodies can echo the brief and
+      // the retrieved manual text. The message is now fixed, and the body is
+      // kept only as a bounded, key-scrubbed diagnostic that nothing reads.
       const errorText = response.body ? await response.text() : "";
-      throw new Error(`OpenAI request failed (${response.status}): ${errorText}`);
+      throw createRedactedOpenAiHttpError(response.status, errorText);
     }
 
     const reader = response.body.getReader();
@@ -224,7 +235,9 @@ export async function* streamResponsesTurn({
           }
 
           if (event.type === "response.failed" || event.type === "error") {
-            throw new Error(event.response?.error?.message || event.message || "OpenAI stream failed.");
+            // Same channel as the HTTP body above, so the same rule: the
+            // provider's message never becomes the error the browser sees.
+            throw new Error(OPENAI_STREAM_FAILED_MESSAGE);
           }
         }
       }

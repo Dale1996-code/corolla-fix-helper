@@ -120,10 +120,10 @@ export function getAiSettings() {
     apiKeyConfigured: Boolean(config.openAiApiKey),
     model: config.openAiAnswerModel,
     callsToday,
-    // One user request can make several provider requests (Ask can rewrite the
-    // question, rerank, then answer; a planner run streams one turn per agent
-    // step), so label what is actually counted instead of implying it is a
-    // count of user actions.
+    // One user request can make several provider requests (Ask can embed and
+    // rewrite the question, rerank, then answer; a planner run streams one
+    // turn per agent step and embeds each search), so label what is actually
+    // counted instead of implying it is a count of user actions.
     countingBasis: "provider requests",
     dayBoundary: AI_USAGE_DAY_BOUNDARY,
     // 0 means the ceiling is disabled; the count is still tracked.

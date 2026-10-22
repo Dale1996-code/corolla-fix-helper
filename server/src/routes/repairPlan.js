@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { runRepairPlannerAgent, SKILL_LEVELS } from "../services/agent/repairPlannerAgent.js";
+import {
+  buildPlannerGateText,
+  runRepairPlannerAgent,
+  SKILL_LEVELS,
+} from "../services/agent/repairPlannerAgent.js";
 import { planRunStore } from "../services/agent/planRunStore.js";
 import { buildOwnerChecklist, checkRepairReadiness } from "../services/agent/repairTools.js";
 import {
@@ -79,7 +83,8 @@ export function createRepairPlanRouter({
 
     // T4 policy gate (roadmap N2.5). Last check before the stream opens, so a
     // defeat request never starts the agent loop, never calls a tool, and never
-    // reaches the model.
+    // reaches the model. The agent runs the same gate on the same text
+    // (buildPlannerGateText) for callers that skip this route (1B-17).
     //
     // The optional free-text fields are checked too, each as its own clause block
     // (joined with newlines, which the classifier treats as a clause break) so a
@@ -90,16 +95,7 @@ export function createRepairPlanRouter({
     // above, which RepairPlannerPage already renders -- no new event type and no
     // UI change. This runs before writeHead, so the response is still ordinary
     // JSON rather than a half-opened SSE stream.
-    const plannerText = [
-      brief,
-      request.body?.constraints,
-      request.body?.availableTools,
-      request.body?.availableParts,
-    ]
-      .filter((field) => typeof field === "string" && field.trim())
-      .join("\n");
-
-    if (isSafetySystemDefeatRequest(plannerText)) {
+    if (isSafetySystemDefeatRequest(buildPlannerGateText({ ...request.body, brief }))) {
       response.status(400).json({ error: DEFEAT_REFUSAL_MESSAGE });
       return;
     }
@@ -149,7 +145,8 @@ export function createRepairPlanRouter({
       // A genuine client disconnect aborts the in-flight request; there is no
       // longer anyone to receive a frame, so end quietly instead of writing a
       // user-facing error to a dead socket. Real model/network failures still
-      // surface verbatim.
+      // surface, but never with the provider's own text: the streaming client
+      // throws a fixed message for an HTTP error or a failed stream (1A-16).
       // Typed planner failures keep their code/reason so the browser can tell
       // an incomplete run from a completed one. `send` serializes the whole
       // event, so agent-emitted frames already carry these through untouched.

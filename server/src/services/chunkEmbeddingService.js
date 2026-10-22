@@ -1,6 +1,14 @@
 import { config } from "../config.js";
+import { reserveAiCall } from "./aiUsageBudget.js";
 import { createRedactedOpenAiHttpError } from "./openAiResponsePayload.js";
 import { db } from "../database.js";
+
+// Same bound as the Responses calls in aiAnswerService. Ask embeds the question
+// before it can retrieve anything, so a stalled embedding request used to hold
+// the whole Ask (and a planner search) open with no limit at all.
+export const OPENAI_EMBEDDING_TIMEOUT_MS = 30_000;
+export const OPENAI_EMBEDDING_TIMEOUT_MESSAGE =
+  "The document search took too long and was cancelled. Please try again.";
 
 let chunkEmbeddingCache = null;
 
@@ -131,7 +139,18 @@ export function loadChunkEmbeddingCache() {
   return chunkEmbeddingCache.rows;
 }
 
-export async function createOpenAiEmbeddings(texts, { fetchImpl = fetch } = {}) {
+/**
+ * @param {unknown[]} texts Each is normalized with String(), so SQLite values are fine.
+ * @param {{
+ *   fetchImpl?: typeof fetch,
+ *   timeoutMs?: number,
+ *   reserveCall?: () => void,
+ * }} [options]
+ */
+export async function createOpenAiEmbeddings(
+  texts,
+  { fetchImpl = fetch, timeoutMs = OPENAI_EMBEDDING_TIMEOUT_MS, reserveCall = reserveAiCall } = {}
+) {
   const input = Array.isArray(texts) ? texts.map(normalizeInputText) : [];
 
   if (!input.length) {
@@ -142,29 +161,52 @@ export async function createOpenAiEmbeddings(texts, { fetchImpl = fetch } = {}) 
     throw new Error("OPENAI_API_KEY is required to create embeddings.");
   }
 
-  const response = await fetchImpl("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openAiApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.openAiEmbeddingModel,
-      input,
-      dimensions: config.openAiEmbeddingDimensions,
-      encoding_format: "float",
-    }),
-  });
+  // One embedding request is one provider request, so it counts against the
+  // daily ceiling like any Responses call (owner decision D4). Reserved before
+  // spending; a call the ceiling refuses throws a 429 and is not counted. A
+  // backfill batch is one request however many chunks it carries.
+  reserveCall();
 
-  if (!response.ok) {
-    // Redacted. This runs on the Ask request path (chunkRetrievalService embeds
-    // the question) and the throw propagates uncaught to ask.js, so a raw body
-    // here would reach the browser. The embedding input is the question text and
-    // chunk text, which is exactly what must not be echoed back.
-    throw createRedactedOpenAiHttpError(response.status, await response.text());
+  let payload;
+
+  try {
+    const response = await fetchImpl("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        Authorization: `Bearer ${config.openAiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.openAiEmbeddingModel,
+        input,
+        dimensions: config.openAiEmbeddingDimensions,
+        encoding_format: "float",
+      }),
+    });
+
+    if (!response.ok) {
+      // Redacted. This runs on the Ask request path (chunkRetrievalService embeds
+      // the question) and the throw propagates uncaught to ask.js, so a raw body
+      // here would reach the browser. The embedding input is the question text and
+      // chunk text, which is exactly what must not be echoed back.
+      throw createRedactedOpenAiHttpError(response.status, await response.text());
+    }
+
+    // Read inside the try: the timeout signal covers the body as well as the
+    // headers, so a response that stalls mid-body is bounded too.
+    payload = await response.json();
+  } catch (error) {
+    // AbortSignal.timeout rejects with a TimeoutError. Rethrown as a plain
+    // Error with a fixed message, so the planner never mistakes a stalled
+    // embedding for the client disconnecting (its AbortError path).
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(OPENAI_EMBEDDING_TIMEOUT_MESSAGE, { cause: error });
+    }
+
+    throw error;
   }
 
-  const payload = await response.json();
   const data = Array.isArray(payload?.data) ? payload.data : [];
 
   if (data.length !== input.length) {

@@ -1,6 +1,10 @@
 import { config } from "../../config.js";
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import {
+  DEFEAT_REFUSAL_MESSAGE,
+  isSafetySystemDefeatRequest,
+} from "../defeatRequestClassifier.js";
+import {
   buildOwnerChecklist,
   checkRepairReadiness,
   createSourceRegistry,
@@ -26,6 +30,22 @@ export const SKILL_LEVELS = ["beginner", "intermediate", "advanced"];
 // runaway model spend.
 export const MAX_FINALIZER_CORRECTIONS = 2;
 
+// Most tool calls run per model turn (2B-04). maxTurns bounds the turns, but
+// nothing bounded the calls inside one: a single reply could ask for dozens of
+// searches, each a retrieval, an embedding request, and up to eight chunks of
+// evidence text in the next turn's input. Live runs make about four searches
+// per RUN, so eight per turn leaves room for one search per task of a long
+// brief plus the readiness and handoff calls.
+export const MAX_TOOL_CALLS_PER_TURN = 8;
+export const TOOL_CALL_CAP_MESSAGE =
+  `Not run: at most ${MAX_TOOL_CALLS_PER_TURN} tool calls run per turn. ` +
+  "Call it again next turn if you still need it.";
+
+// Tool names the browser may see. A function name is model output too, so one
+// outside this set is reported as `unknown_tool` rather than echoed.
+const KNOWN_TOOL_NAMES = new Set(repairToolSchemas.map((schema) => schema.name));
+const UNKNOWN_TOOL_NAME = "unknown_tool";
+
 // Fixed, safe user-facing text. A failure never echoes model output back to the
 // owner, so nothing unvalidated can reach the page through an error frame.
 export const PLANNER_FAILURE_MESSAGES = {
@@ -39,7 +59,26 @@ export const PLANNER_FAILURE_MESSAGES = {
   provider_incomplete: "The AI model stopped early and the plan is incomplete. Please try again.",
   missing_terminal_event: "The AI model's response ended unexpectedly. Please try again.",
   malformed_tool_arguments: "The AI model sent an unreadable tool request. Please try again.",
+  defeat_request: DEFEAT_REFUSAL_MESSAGE,
 };
+
+/**
+ * The text the T4 defeat gate reads for one planner request: the brief and
+ * each optional free-text field, joined with newlines. The classifier treats a
+ * newline as a clause break, so a defeat verb in `constraints` cannot pair with
+ * a safety system named in the brief and manufacture a false positive across
+ * fields.
+ *
+ * Shared by the route and the agent so both judge exactly the same words.
+ *
+ * @param {{ brief?: unknown, constraints?: unknown, availableTools?: unknown, availableParts?: unknown }} request
+ * @returns {string}
+ */
+export function buildPlannerGateText(request) {
+  return [request?.brief, request?.constraints, request?.availableTools, request?.availableParts]
+    .filter((field) => typeof field === "string" && field.trim())
+    .join("\n");
+}
 
 const AGENT_INSTRUCTIONS = [
   "You are the Repair Planner agent for a 2009 Toyota Corolla LE 1.8L repair workspace.",
@@ -129,7 +168,7 @@ function buildTrustedContext(request, { brief, vehicle, tasks }) {
  *
  * Emits ordered events via `emit(event)`:
  *   { type: "status", message }
- *   { type: "tool_call", name, arguments }
+ *   { type: "tool_call", name, turn, taskId?, claimCount? }
  *   { type: "tool_result", name, summary }
  *   { type: "trace", span }
  *   { type: "done", status, evidenceStatus, text, artifacts }
@@ -171,6 +210,17 @@ export async function runRepairPlannerAgent(request, options = {}) {
     return { status: "error", text: "", artifacts: {} };
   }
 
+  // T4 policy gate, in the core as well as the route (1B-17). The route refuses
+  // first, with a JSON 400 before the stream opens; this copy covers every
+  // caller that reaches the planner without the route -- an eval or replay
+  // script, a test harness, a future endpoint. Placed before the AI-configured
+  // check, like Ask's: refusing to help defeat a safety system is policy, so it
+  // must not depend on whether a key is set, and it must cost nothing -- no
+  // model turn, no tool, no retrieval, no embedding.
+  if (isSafetySystemDefeatRequest(buildPlannerGateText({ ...request, brief }))) {
+    return failRun("planner_refused", "defeat_request");
+  }
+
   if (!isAiConfigured) {
     emit({ type: "ai_not_configured", message: AI_NOT_CONFIGURED_MESSAGE });
     emit({ type: "done", status: "ai_not_configured", text: "", artifacts: {} });
@@ -198,6 +248,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
   // cited for the front brakes is the same evidence for the rear brakes.
   const sources = createSourceRegistry();
   const registry = createToolRegistry({ retrieve, trusted, sources });
+  const validTaskIds = new Set(trusted.tasks.map((task) => task.id));
 
   const artifacts = {
     // Canonical from the start: the UI shows the server's task list whether or
@@ -242,7 +293,14 @@ export async function runRepairPlannerAgent(request, options = {}) {
         }
       }
 
-      turnSpan.end({ toolCalls: pendingToolCalls.length });
+      // Calls past the cap are not run. They are not dropped silently either:
+      // each one still gets an output below, so the model learns why and can
+      // ask again next turn, and every function_call in the input keeps its
+      // matching function_call_output.
+      const runnableCalls = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_TURN);
+      const skippedCalls = pendingToolCalls.slice(MAX_TOOL_CALLS_PER_TURN);
+
+      turnSpan.end({ toolCalls: pendingToolCalls.length, skippedToolCalls: skippedCalls.length });
 
       if (!pendingToolCalls.length) {
         // The model stopped calling tools without submitting a finalizer.
@@ -250,11 +308,14 @@ export async function runRepairPlannerAgent(request, options = {}) {
         break;
       }
 
-      for (const toolCall of pendingToolCalls) {
-        const executor = registry[toolCall.name];
-        emit({ type: "tool_call", name: toolCall.name, arguments: toolCall.arguments });
+      for (const toolCall of runnableCalls) {
+        const toolName = KNOWN_TOOL_NAMES.has(toolCall.name) ? toolCall.name : UNKNOWN_TOOL_NAME;
+        // Own properties only, so a model-chosen name like "constructor" cannot
+        // reach an inherited Object method.
+        const executor = Object.hasOwn(registry, toolCall.name) ? registry[toolCall.name] : undefined;
+        emit(describeToolCall(toolCall, { name: toolName, turn: turn + 1, validTaskIds }));
 
-        const toolSpan = tracer.startSpan("tool_call", { tool: toolCall.name });
+        const toolSpan = tracer.startSpan("tool_call", { tool: toolName });
         let result;
 
         if (toolCall.name === "finalize_repair_plan") {
@@ -284,7 +345,8 @@ export async function runRepairPlannerAgent(request, options = {}) {
             };
           }
         } else if (!executor) {
-          result = { error: `Unknown tool: ${toolCall.name}` };
+          // Not echoed: this string is also the owner's activity-log line.
+          result = { error: `Unknown tool. Use one of: ${[...KNOWN_TOOL_NAMES].join(", ")}.` };
         } else {
           try {
             result = await executor(toolCall.arguments || {});
@@ -303,8 +365,8 @@ export async function runRepairPlannerAgent(request, options = {}) {
         toolSpan.end();
         emit({
           type: "tool_result",
-          name: toolCall.name,
-          summary: summarizeToolResult(toolCall.name, result),
+          name: toolName,
+          summary: summarizeToolResult(toolName, result, trusted.tasks),
         });
 
         inputItems = inputItems.concat(
@@ -318,6 +380,22 @@ export async function runRepairPlannerAgent(request, options = {}) {
             type: "function_call_output",
             call_id: toolCall.callId,
             output: JSON.stringify(result),
+          }
+        );
+      }
+
+      for (const toolCall of skippedCalls) {
+        inputItems = inputItems.concat(
+          {
+            type: "function_call",
+            call_id: toolCall.callId,
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.arguments || {}),
+          },
+          {
+            type: "function_call_output",
+            call_id: toolCall.callId,
+            output: JSON.stringify({ error: TOOL_CALL_CAP_MESSAGE }),
           }
         );
       }
@@ -438,6 +516,36 @@ export async function runRepairPlannerAgent(request, options = {}) {
   }
 }
 
+/**
+ * The `tool_call` frame the browser receives.
+ *
+ * Built from an allow-list, never from the model's arguments. Those used to
+ * ride out verbatim, so every claim submitted to finalize_repair_plan --
+ * including the ones the evidence contract then rejected -- reached the
+ * activity log as if it were part of the plan (1A-15). Only ids and counts the
+ * server has checked leave now: the turn, the canonical task a search is for
+ * (only when it names a real task), and how many claims were submitted.
+ */
+function describeToolCall(toolCall, { name, turn, validTaskIds }) {
+  const args = toolCall.arguments || {};
+  /** @type {{ type: string, name: string, turn: number, taskId?: number, claimCount?: number }} */
+  const frame = { type: "tool_call", name, turn };
+
+  if (name === "search_repair_docs") {
+    const taskId = Number(args.taskId);
+
+    if (validTaskIds.has(taskId)) {
+      frame.taskId = taskId;
+    }
+  }
+
+  if (name === "finalize_repair_plan") {
+    frame.claimCount = Array.isArray(args.claims) ? args.claims.length : 0;
+  }
+
+  return frame;
+}
+
 // The readiness level as the owner reads it in the browser. The wire value
 // (`ready` / `almost_ready` / `not_ready`) is unchanged; only this activity-log
 // line, which used to print the raw enum, is humanized.
@@ -453,7 +561,8 @@ function pluralize(count, singular, plural) {
 
 // These strings stream to the Repair Planner's activity log, so they are user
 // copy, not logs: real plurals rather than "(s)", and no internal vocabulary.
-function summarizeToolResult(name, result) {
+// They carry no model text either -- an error string never echoes an argument.
+function summarizeToolResult(name, result, tasks) {
   if (result?.error) {
     return result.error;
   }
@@ -461,11 +570,16 @@ function summarizeToolResult(name, result) {
     return `Found ${pluralize(result.tasks?.length || 0, "task", "tasks")}.`;
   }
   if (name === "search_repair_docs") {
+    // Named by the canonical task the owner's brief produced, not by the
+    // search query: the query is the model's own words, and it can carry a
+    // value the evidence contract later rejects.
+    const task = tasks.find((candidate) => candidate.id === result.taskId);
+
     return `Retrieved ${pluralize(
       result.citations?.length || 0,
       "passage",
       "passages"
-    )} for "${result.query || ""}".`;
+    )} for ${task ? `"${task.title}"` : "this plan"}.`;
   }
   if (name === "check_repair_readiness") {
     const level = READINESS_LEVEL_LABELS[result.level] || "Unknown";
