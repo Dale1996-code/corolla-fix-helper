@@ -376,6 +376,13 @@ function buildSnippet(text) {
 // procedure longer than two sentences, which is most of them.
 export const EVIDENCE_CONTEXT_CHAR_LIMIT = 1500;
 
+// How many chunks one search may return. The model chooses `limit`, so this is
+// what bounds how much one tool call pulls into the next turn's input: each
+// chunk goes back to the model as up to EVIDENCE_CONTEXT_CHAR_LIMIT characters.
+// 8 is Ask's own retrieval default.
+export const MAX_SEARCH_RESULTS = 8;
+export const DEFAULT_SEARCH_RESULTS = 4;
+
 function buildEvidenceText(text) {
   const normalized = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
 
@@ -438,7 +445,7 @@ export function createSourceRegistry() {
  * @param {{ retrieve?: typeof retrieveRelevantChunks, sources?: any }} [deps]
  */
 export async function searchRepairDocs(
-  { query, limit = 4, taskId } = {},
+  { query, limit = DEFAULT_SEARCH_RESULTS, taskId } = {},
   { retrieve = retrieveRelevantChunks, sources = null } = {}
 ) {
   const normalizedQuery = normalizeText(query);
@@ -848,7 +855,13 @@ export const repairToolSchemas = [
           description: "The id of the canonical task from extract_repair_tasks that this search supports.",
         },
         query: { type: "string", description: "Keywords describing what to look up." },
-        limit: { type: "integer", description: "Maximum chunks to return (default 4)." },
+        // Declared so the model is told the bound before it asks (1A-20).
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_SEARCH_RESULTS,
+          description: `Maximum chunks to return (default ${DEFAULT_SEARCH_RESULTS}, at most ${MAX_SEARCH_RESULTS}).`,
+        },
       },
       required: ["taskId", "query"],
       additionalProperties: false,
