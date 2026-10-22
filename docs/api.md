@@ -832,7 +832,10 @@ curl.exe -X POST http://localhost:4000/api/attachments `
 
 ```json
 {
-  "vehicle": { "id": 1, "year": 2009, "make": "Toyota", "model": "Corolla", "trim": "LE", "engine": "1.8L" },
+  "vehicle": {
+    "id": 1, "year": 2009, "make": "Toyota", "model": "Corolla", "trim": "LE", "engine": "1.8L",
+    "applicability": { "engineCode": "2ZR-FE", "buildPlant": null, "transmissionCode": null, "hasVsc": null, "hasSmartKey": null }
+  },
   "runtime": { "databaseFile": "...", "uploadsDir": "...", "maxUploadSizeMb": 20, "port": 4000, "clientPort": 5173, "pathsEditable": false },
   "documentDefaults": { "commonSystems": [...], "documentTypes": [...] },
   "backupExport": {
@@ -872,7 +875,27 @@ curl.exe -X POST http://localhost:4000/api/attachments `
 
 ### `PUT /api/settings/vehicle`
 
-Body: `year` (integer 1900–2100), `make` (required), `model` (required), `trim`, `engine`.
+Body: `year` (integer 1900–2100), `make` (required), `model` (required), `trim`, `engine`, and
+optionally `applicability` — the vehicle's **variant details** used by N5 to tell which row of a
+multi-variant table belongs to this car:
+
+| Field | Accepts | Stored as |
+| --- | --- | --- |
+| `engineCode` | e.g. `"2ZR-FE"`; case and a missing hyphen are normalized (`"2zr fe"` → `"2ZR-FE"`) | text or `null` |
+| `buildPlant` | `"TMC"`, `"NUMMI"`, `"TMMC"` (any case) | text or `null` |
+| `transmissionCode` | e.g. `"U341E"`, `"C59"` | text or `null` |
+| `hasVsc`, `hasSmartKey` | `true`, `false`, `"yes"`, `"no"` | boolean or `null` |
+
+An empty string, `null`, `"unknown"`, or an absent field means **unknown**, which the app treats as
+"cannot be confirmed", never as a match. When the body has an `applicability` key, all five values are
+replaced, so a field left out becomes unknown. When it has no `applicability` key, the saved values are
+left alone. A refused value is a `400` that writes nothing, with one of these errors:
+"Engine code must look like 2ZR-FE (a digit, two letters, a hyphen, letters).",
+"Build plant must be TMC, NUMMI, TMMC, or unknown.",
+"Transmission code must look like U341E or C59.",
+"VSC must be yes, no, or unknown.", "Smart Key must be yes, no, or unknown.", or
+"Variant details must be an object.". The response is `{ message, vehicle }`, with `vehicle` in the
+`GET` shape above.
 
 ### `PUT /api/settings/document-defaults`
 

@@ -14,6 +14,11 @@ import { getAiUsageSnapshot, AI_USAGE_DAY_BOUNDARY } from "../services/aiUsageBu
 import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import { getVehicle } from "../services/vehicleService.js";
+import {
+  normalizeApplicabilityProfile,
+  profileFromVehicleRow,
+  profileToColumns,
+} from "../services/vehicleApplicabilityProfile.js";
 import { normalizeText } from "../utils/text.js";
 import {
   hasForwardingHeaders,
@@ -59,6 +64,7 @@ function mapVehicleRow(row) {
     model: row.model,
     trim: row.trim || "",
     engine: row.engine || "",
+    applicability: profileFromVehicleRow(row),
   };
 }
 
@@ -395,6 +401,16 @@ settingsRouter.put("/vehicle", (request, response) => {
       return;
     }
 
+    // Variant details are optional on this route: a client that does not send
+    // them (an older page, a script) leaves the saved ones alone. When they ARE
+    // sent, all five are replaced, so a field the page left out is unknown
+    // rather than silently keeping a stale value. Validated before the UPDATE,
+    // so a refused value writes nothing at all.
+    const profileColumns =
+      request.body && "applicability" in request.body
+        ? profileToColumns(normalizeApplicabilityProfile(request.body.applicability))
+        : profileToColumns(profileFromVehicleRow(existingVehicle));
+
     db.prepare(`
       UPDATE vehicles
       SET
@@ -402,9 +418,26 @@ settingsRouter.put("/vehicle", (request, response) => {
         make = ?,
         model = ?,
         trim = ?,
-        engine = ?
+        engine = ?,
+        engine_code = ?,
+        build_plant = ?,
+        transmission_code = ?,
+        has_vsc = ?,
+        has_smart_key = ?
       WHERE id = ?
-    `).run(year, make, model, trim, engine, existingVehicle.id);
+    `).run(
+      year,
+      make,
+      model,
+      trim,
+      engine,
+      profileColumns.engine_code,
+      profileColumns.build_plant,
+      profileColumns.transmission_code,
+      profileColumns.has_vsc,
+      profileColumns.has_smart_key,
+      existingVehicle.id
+    );
 
     const updatedVehicle = mapVehicleRow(getVehicle());
 
