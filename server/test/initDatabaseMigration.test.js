@@ -82,6 +82,42 @@ test("initializeDatabase creates the attachments table and its entity index", ()
   );
 });
 
+test("migration 006 adds the variant details as unknown and leaves the vehicle alone", () => {
+  initializeDatabase();
+
+  const row = db.prepare("SELECT * FROM vehicles ORDER BY id LIMIT 1").get();
+  for (const column of [
+    "engine_code",
+    "build_plant",
+    "transmission_code",
+    "has_vsc",
+    "has_smart_key",
+  ]) {
+    assert.ok(column in row, `${column} is missing from vehicles`);
+    assert.equal(row[column], null, `${column} must start unknown, never seeded`);
+  }
+  assert.equal(row.engine, "1.8L");
+  assert.ok(
+    db
+      .prepare("SELECT 1 FROM schema_migrations WHERE name = '006_vehicle_applicability_profile'")
+      .get()
+  );
+
+  assert.doesNotThrow(() => initializeDatabase());
+  assert.throws(
+    () => db.prepare("UPDATE vehicles SET build_plant = 'XYZ'").run(),
+    /CHECK constraint failed/
+  );
+  assert.throws(
+    () => db.prepare("UPDATE vehicles SET has_vsc = 2").run(),
+    /CHECK constraint failed/
+  );
+  assert.throws(
+    () => db.prepare("UPDATE vehicles SET has_smart_key = -1").run(),
+    /CHECK constraint failed/
+  );
+});
+
 test("migration 003 adds the reverse-link and sort indexes with the right columns", () => {
   initializeDatabase();
 

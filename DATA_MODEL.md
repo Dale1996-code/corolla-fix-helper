@@ -31,8 +31,14 @@ Important fields:
 - `make`
 - `model`
 - `trim`
-- `engine`
+- `engine` — free text shown in Settings ("1.8L"); not used to judge applicability
 - `created_at`
+- `engine_code`, `build_plant`, `transmission_code`, `has_vsc`, `has_smart_key` — the owner's
+  **variant details** (migration `006`), used by N5 to tell which row of a multi-variant table is this
+  car's. All five are nullable, and `NULL` means **unknown**, which the applicability check reads as
+  "cannot be confirmed", never as a match. `build_plant` is `TMC`, `NUMMI`, or `TMMC`, and the two flags
+  are `0`/`1`; both are enforced by CHECK constraints that mirror
+  `services/vehicleApplicabilityProfile.js`. Nothing seeds them: only the owner sets them, in Settings.
 
 ### `app_settings`
 
@@ -444,6 +450,11 @@ Applied migrations:
 - `003_link_and_sort_indexes` — adds `idx_documents_created_at` plus reverse-link indexes on `symptom_documents.document_id`, `procedure_documents.document_id`, and `symptom_procedures.procedure_id`, and adds `idx_repair_checklists_vehicle_updated` and `idx_repair_checklist_items_order` for checklist sorting. Index-only: no new tables or columns.
 - `004_repair_history` — adds the `repair_history` and `repair_history_documents` tables and their indexes. Purely additive: no existing table is altered, and in particular `vehicles` gains no odometer column.
 - `005_repair_checklist_provenance` — adds the `repair_checklist_documents` table and its indexes, plus the partial unique index `idx_repair_history_checklist_unique` on the existing `repair_history` table. Additive: no existing table is altered and no column is added or changed. The migration refuses to apply if a checklist is already linked to more than one `repair_history` row, so the "one checklist is one repair" rule fails with a sentence naming the offending checklist rather than a bare constraint error at startup.
+- `006_vehicle_applicability_profile` — adds the five nullable variant-detail columns to `vehicles`
+  (see above). Purely additive: no row is changed and nothing is seeded, so every existing install
+  reads as "unknown" until the owner fills in Settings. A failure partway through rolls back every
+  column it added (`migration006Rollback.test.js`), and older code ignores the new columns, so
+  reverting the code needs no schema change.
 
 ## Not In The Current Schema
 
