@@ -88,6 +88,42 @@ const EXHAUST_PART =
   "systems?|pipes?|manifolds?|leaks?|hangers?|gaskets?|flanges?|clamps?|heat shields?|resonators?|tips?|fumes|work|repairs?";
 const ENGINE_EXHAUST_WORD = "cam\\w*|valves?|vvt\\w*|ports?|strokes?|gas|side";
 
+// Oxygen and A/F sensors screw into the exhaust manifold or pipe, so taking one
+// out is hot exhaust work -- the downstream one from under the car. Same shape
+// as TIRE_SERVICE_CUE: a removal verb with only determiners before the sensor,
+// or a removal noun after it. Reading a sensor's voltage or data is diagnosis,
+// and its fuse, relay, or connector is wiring work, so neither counts.
+const EXHAUST_SENSOR = "(?:oxygen|h?o2|a ?\\/ ?f(?: ratio)?|air[ -]fuel(?: ratio)?) sensors?";
+const EXHAUST_SENSOR_VERB =
+  "replace|replacing|remove|removing|install|installing|swap|swapping|change|changing|unscrew|unscrewing|take out|taking out";
+const EXHAUST_SENSOR_DETERMINER =
+  "the|my|a|an|both|old|new|front|rear|upstream|downstream|primary|secondary|heated|bank [12]|sensor [12]";
+const EXHAUST_SENSOR_WIRING =
+  "fuses?|relays?|connectors?|harness(?:es)?|wir(?:e|es|ing)|circuits?|heaters?|codes?|data|signals?|voltage";
+
+const EXHAUST_SENSOR_CUE = [
+  `\\b(?:${EXHAUST_SENSOR_VERB})\\s+(?:(?:${EXHAUST_SENSOR_DETERMINER})\\s+)*${EXHAUST_SENSOR}\\b(?!\\s+(?:${EXHAUST_SENSOR_WIRING})\\b)`,
+  `\\b${EXHAUST_SENSOR}\\s+(?:removal|replacement|installation|swap)\\b`,
+].join("|");
+
+// Taking the steering wheel off means taking the driver airbag off first. A
+// removal verb with only determiners before "steering wheel", a removal noun
+// after it, or "take ... off". A part that merely sits ON the wheel ("steering
+// wheel audio switch", "steering wheel cover") is excluded, and so is a
+// steering complaint: "pulls the steering wheel" and "steering wheel is off
+// center" carry no removal verb.
+const STEERING_WHEEL = "steering[ -]wheel";
+const STEERING_WHEEL_VERB =
+  "remov(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|(?:re)?install(?:s|ed|ing)?|disassembl(?:e|es|ed|ing)";
+const STEERING_WHEEL_DETERMINER = "the|my|a|an|old|new|original|driver'?s";
+const STEERING_WHEEL_PART = "audio|switch(?:es)?|controls?|buttons?|covers?|trim|emblem|badge|wrap|heater";
+
+const STEERING_WHEEL_REMOVAL_CUE = [
+  `\\b(?:${STEERING_WHEEL_VERB})\\s+(?:(?:${STEERING_WHEEL_DETERMINER})\\s+)*${STEERING_WHEEL}\\b(?![ -](?:${STEERING_WHEEL_PART})\\b)`,
+  `\\b${STEERING_WHEEL}[ -](?:removal|replacement|installation|puller)\\b`,
+  `\\b(?:take|takes|taking|took|pull|pulls|pulling|pulled|get|getting) (?:(?:the|my) )?${STEERING_WHEEL} off\\b(?![ -]cent)`,
+].join("|");
+
 /**
  * Every rule currently blocks readiness: on a single-owner DIY car, each of
  * these hazards can injure the owner or someone on the road. `blocksReadiness`
@@ -162,13 +198,13 @@ export const SAFETY_RULES = [
         "\\bjack stands?\\b",
         "\\b(lift|lifting|raise|raising|support|supporting)( the)? (vehicle|car)\\b",
         "\\bunder the (vehicle|car)\\b",
-        "\\b(?<!steering )wheels?\\b",
-        "(?<!steering )\\bwheel (bearing|hub)\\b",
+        "\\b(?<!steering[ -])wheels?\\b",
+        "(?<!steering[ -])\\bwheel (bearing|hub)\\b",
         TIRE_SERVICE_CUE,
         "\\baxles?\\b",
         "\\bcv[ -]?(?:joints?|boots?)\\b",
         "\\b(?:drive|half)[ -]?shafts?\\b",
-        "(?<!steering wheel )\\bhub (?:bearings?|assembl(?:y|ies)|units?|nuts?)\\b",
+        "(?<!steering[ -]wheel )\\bhub (?:bearings?|assembl(?:y|ies)|units?|nuts?)\\b",
         "\\b(?:axle|front|rear) hubs?\\b(?![ -]?caps?)",
       ].join("|")
     ),
@@ -190,8 +226,8 @@ export const SAFETY_RULES = [
     pattern: new RegExp(
       [
         "\\blug (?:nuts?|studs?|bolts?)\\b",
-        "(?<!steering )\\bwheel (?:nuts?|studs?|bolts?|locks?)\\b",
-        "(?<!steering )\\bwheel (?:rotation|removal|swap|change)\\b",
+        "(?<!steering[ -])\\bwheel (?:nuts?|studs?|bolts?|locks?)\\b",
+        "(?<!steering[ -])\\bwheel (?:rotation|removal|swap|change)\\b",
         "\\brotat(?:e|es|ed|ing) (?:(?:the|all|four|my) )*wheels\\b",
         TIRE_SERVICE_CUE,
       ].join("|")
@@ -219,10 +255,12 @@ export const SAFETY_RULES = [
     id: "steering",
     system: "Suspension",
     hazard: "steering and wheel-locating joints",
-    // \bsteering\b(?! wheel) so "steering wheel audio switch" is ordinary trim
-    // work, while "steering rack" / "steering column" remain critical.
+    // \bsteering\b(?![ -]wheel) so "steering wheel audio switch" is ordinary trim
+    // work, while "steering rack" / "steering column" remain critical. The
+    // hyphen counts as the space does here and in every steering-wheel guard
+    // above: "steering-wheel" is the same part.
     pattern:
-      /\bsteering (rack|gear|column|linkage|knuckle)\b|\btie rods?\b|\btie rod ends?\b|\bball joints?\b|\bsteering\b(?! wheel)/,
+      /\bsteering (rack|gear|column|linkage|knuckle)\b|\btie rods?\b|\btie rod ends?\b|\bball joints?\b|\bsteering\b(?![ -]wheel)/,
     blocksReadiness: true,
     flag:
       "Steering components and the joints that locate a wheel carry vehicle-control loads; failure means loss of control. Torque to spec, fit new cotter pins or lock nuts, and have the alignment checked before driving. This is why the task cannot be marked Ready without acknowledging the risk.",
@@ -242,7 +280,19 @@ export const SAFETY_RULES = [
     id: "srs",
     system: "Restraints",
     hazard: "SRS/airbag",
-    pattern: /\bair ?bags?\b|\bsrs\b|\bpretensioners?\b|\bclock ?spring\b|\binflators?\b/,
+    // The driver airbag lives in the steering wheel, so removing the wheel is
+    // airbag work even when the task never says "airbag"; see
+    // STEERING_WHEEL_REMOVAL_CUE.
+    pattern: new RegExp(
+      [
+        "\\bair ?bags?\\b",
+        "\\bsrs\\b",
+        "\\bpretensioners?\\b",
+        "\\bclock ?spring\\b",
+        "\\binflators?\\b",
+        STEERING_WHEEL_REMOVAL_CUE,
+      ].join("|")
+    ),
     blocksReadiness: true,
     flag:
       "SRS/airbag components can deploy unexpectedly and cause serious injury. Disconnect the battery and wait at least 90 seconds before working near them, and never strike or apply power to an inflator. This is why the task cannot be marked Ready without acknowledging the risk.",
@@ -266,7 +316,8 @@ export const SAFETY_RULES = [
     // Parts of the exhaust system only; see EXHAUST_PART. "the exhaust" alone
     // counts unless an engine-internal word follows it, and "exhausted" never
     // matches \bexhaust\b. A resonator needs the word "exhaust" in front of it:
-    // this engine's air intake has one too.
+    // this engine's air intake has one too. Taking out an oxygen or A/F sensor
+    // counts too; see EXHAUST_SENSOR_CUE.
     pattern: new RegExp(
       [
         `\\bexhaust (?:${EXHAUST_PART})\\b`,
@@ -274,6 +325,7 @@ export const SAFETY_RULES = [
         "\\bmufflers?\\b",
         "\\b(?:catalytic|cat) converters?\\b",
         "\\btail ?pipes?\\b",
+        EXHAUST_SENSOR_CUE,
       ].join("|")
     ),
     blocksReadiness: true,

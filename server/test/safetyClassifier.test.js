@@ -178,19 +178,86 @@ test("the wheel-retention and exhaust warnings name their own hazard", () => {
 });
 
 test("near-misses are not read as road-wheel, hub, or exhaust work", () => {
-  // Rule ids rather than the whole verdict: removing a steering wheel is real
-  // SRS-adjacent work, so pinning it as "not critical" would be wrong. What
-  // must hold is that it is never mistaken for taking a ROAD wheel off.
+  // Rule ids rather than the whole verdict: removing a steering wheel is
+  // airbag work, which the SRS rule catches (below), so pinning it as "not
+  // critical" would be wrong. What must hold is that it is never mistaken for
+  // taking a ROAD wheel off.
   /** @type {Array<[string, string[]]>} */
   const nearMisses = [
     ["remove the steering wheel", ["lifting", "wheel-retention"]],
     ["steering wheel removal", ["lifting", "wheel-retention"]],
     ["tighten the steering wheel nut", ["lifting", "wheel-retention"]],
     ["the steering wheel hub nut", ["lifting", "wheel-retention"]],
+    // The hyphenated spelling once slipped past every one of these guards, and
+    // past the steering rule's too.
+    ["remove the steering-wheel", ["lifting", "wheel-retention", "steering"]],
+    ["tighten the steering-wheel nut", ["lifting", "wheel-retention", "steering"]],
+    ["the steering-wheel hub nut", ["lifting", "wheel-retention", "steering"]],
+    ["replace the steering-wheel audio switch", ["lifting", "wheel-retention", "steering"]],
     ["replace the battery terminal lug", ["wheel-retention"]],
     ["replace the exhaust camshaft", ["exhaust"]],
     ["inspect the intake and exhaust valves", ["exhaust"]],
     ["the battery is exhausted", ["exhaust"]],
+  ];
+
+  for (const [phrase, forbidden] of nearMisses) {
+    const ids = matchedSafetyRuleIds(phrase);
+
+    for (const ruleId of forbidden) {
+      assert.ok(!ids.includes(ruleId), `"${phrase}" matched ${ruleId}: ${JSON.stringify(ids)}`);
+    }
+  }
+});
+
+// ---- Steering-wheel removal and oxygen sensors ----
+//
+// Taking the steering wheel off means taking the driver airbag off first, yet
+// it matched no rule: the SRS rule needed the word "airbag". An oxygen or A/F
+// sensor screws into the exhaust manifold or pipe, so replacing one is hot
+// exhaust work, and the downstream sensor is reached from under the car.
+
+/** @type {Array<[string, string[]]>} */
+const AIRBAG_AND_EXHAUST_SENSOR_JOBS = [
+  ["Remove the steering wheel", ["srs"]],
+  ["Steering wheel removal", ["srs"]],
+  ["Replace the steering wheel", ["srs"]],
+  ["Install the steering-wheel assembly", ["srs"]],
+  ["Take the steering wheel off", ["srs"]],
+  ["Replace the oxygen sensor", ["exhaust"]],
+  ["Replace the downstream O2 sensor", ["exhaust"]],
+  ["Replace the bank 1 sensor 2 heated oxygen sensor", ["exhaust"]],
+  ["Replace the A/F sensor", ["exhaust"]],
+  ["Oxygen sensor replacement", ["exhaust"]],
+];
+
+for (const [phrase, expectedRuleIds] of AIRBAG_AND_EXHAUST_SENSOR_JOBS) {
+  test(`critical: "${phrase}" matches ${expectedRuleIds.join(" + ")}`, () => {
+    assert.deepEqual(matchedSafetyRuleIds(phrase), expectedRuleIds);
+    assert.equal(isSafetyCriticalTask({ title: phrase }), true, `"${phrase}" should block Ready`);
+  });
+}
+
+test("an air-fuel ratio sensor job is exhaust work too", () => {
+  // Only the exhaust rule is asserted: the word "fuel" also matches the fuel
+  // rule, which is a separate, older over-match this change does not touch.
+  assert.ok(matchedSafetyRuleIds("Remove the upstream air-fuel ratio sensor").includes("exhaust"));
+});
+
+test("near-misses are not read as airbag or exhaust-sensor work", () => {
+  // Rule ids rather than the whole verdict, as for the wheel near-misses above:
+  // what must hold is that a part ON the wheel, a steering complaint, or work
+  // on a sensor's signal or fuse is not taken for removing the airbag or
+  // unscrewing a sensor from a hot pipe.
+  /** @type {Array<[string, string[]]>} */
+  const nearMisses = [
+    ["replace the steering wheel audio switch", ["srs"]],
+    ["replace the steering wheel cover", ["srs"]],
+    ["the car pulls the steering wheel to the right", ["srs"]],
+    ["steering wheel is off center after the alignment", ["srs"]],
+    ["check the O2 sensor voltage", ["exhaust"]],
+    ["diagnose the A/F sensor heater circuit", ["exhaust"]],
+    ["replace the O2 sensor fuse", ["exhaust"]],
+    ["read the oxygen sensor data", ["exhaust"]],
   ];
 
   for (const [phrase, forbidden] of nearMisses) {
