@@ -3,7 +3,22 @@ import test from "node:test";
 
 // Scoring for the blind applicability label check (N5 P1). Pure: the real
 // labels and the manual text they point at stay in a gitignored folder.
-import { locateFigure, scoreLabels } from "../src/scripts/checkApplicabilityLabels.js";
+import {
+  candidateFigures,
+  locateFigure,
+  scoreLabels,
+} from "../src/scripts/checkApplicabilityLabels.js";
+
+test("the account header's engine size is never sampled as a figure", () => {
+  const page =
+    "ALLDATA DIY article export 2009 Toyota Corolla L4-1.8L (2ZR-FE) Vehicle > Engine > Specs HINT: bolt 25 N*m, oil 4.2 L";
+
+  assert.deepEqual(
+    candidateFigures(page).map((match) => match[0]),
+    ["25 N*m", "4.2 L"]
+  );
+  assert.equal(candidateFigures(page)[0].index, page.indexOf("25 N*m"), "offsets point into the real page");
+});
 
 test("a 2AZ-FE figure the tagger calls 'applies' is the failure that matters", () => {
   const score = scoreLabels([

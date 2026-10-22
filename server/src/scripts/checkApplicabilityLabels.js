@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "../config.js";
 import {
   KNOWN_ENGINE_CODES,
+  blankAccountHeader,
   classifyScope,
   computeDocumentScopes,
   scopeAt,
@@ -89,6 +90,17 @@ export function scoreLabels(rows) {
     falseOtherRate: ownerRows ? falseOther / ownerRows : 0,
     matrix,
   };
+}
+
+/**
+ * Unit-bearing figures on a page, skipping the ALLDATA account header: its
+ * "1.8L" is the account's vehicle, not a specification (the first sample
+ * drew 100 of 233 figures from it). Offsets point into the real page text.
+ *
+ * @param {string} pageText
+ */
+export function candidateFigures(pageText) {
+  return [...blankAccountHeader(pageText).matchAll(FIGURE)];
 }
 
 /**
@@ -186,7 +198,7 @@ export function sampleCandidates(db) {
         const values = knownEngineValues(chunk.ownMarkers);
         const startChar = wordStartChar(page.text, chunkStartWordIndex(chunk.chunkIndex));
         const endChar = startChar + storedChunk.text.length;
-        const figures = [...page.text.matchAll(FIGURE)].filter(
+        const figures = candidateFigures(page.text).filter(
           (match) => match.index >= startChar && match.index < endChar
         );
         if (!figures.length) {
