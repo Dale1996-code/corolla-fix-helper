@@ -61,6 +61,14 @@ const OVERLAY_KINDS = new Set(["inline_for", "row_label"]);
 const UNRESOLVED_KINDS = new Set(["legend", "column_header", "unknown_code"]);
 // "6. INSTALL ..." -- a new numbered step ends the step-local (for X) scope.
 const NUMBERED_STEP = /(?:^|\s)\d{1,3}\.\s+[A-Z]{2,}/g;
+// "... 81 mm* * for vehicle height for Mexico, add 15 mm" -- a standalone
+// asterisk opening a sentence is a table footnote. It speaks for the whole
+// table, not for the row printed just above it, so it ends that row's scope.
+// A value's own asterisk ("81 mm*") and a legend key ("* 2: 2AZ-FE") are not
+// footnotes. Found by the blind label check, where the 2AZ-FE row's scope ran
+// on into a footnote that covers both engines. Two lowercase words are
+// required, because OCR'd diagrams scatter asterisks before junk like "oo Plat".
+const TABLE_FOOTNOTE = /(?:^|\s)\*+\s+[a-z]{2,}\s+[a-z]{2,}/g;
 
 const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/g;
 const ENGINE_TOKEN = /\b([1-9][A-Z]{2})\s?-?\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
@@ -269,7 +277,7 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
       },
     });
   }
-  for (const match of blanked.matchAll(NUMBERED_STEP)) {
+  for (const match of [...blanked.matchAll(NUMBERED_STEP), ...blanked.matchAll(TABLE_FOOTNOTE)]) {
     events.push({
       at: match.index,
       apply: (state) => {

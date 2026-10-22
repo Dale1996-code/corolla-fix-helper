@@ -430,3 +430,23 @@ test("(for X) inside an article title scopes the whole article", () => {
   ]);
   assert.equal(pages[1].chunks[0].entryScope.engine.value, "2AZ-FE");
 });
+
+// ---- blind-label finding: table footnotes ----
+
+test("a table footnote ends the row scope above it; legends and titles are unaffected", () => {
+  const table =
+    "except TMC Made 2ZR-FE 92 mm 80 mm* 2AZ-FE 96 mm 81 mm* * for vehicle height for Mexico, add 15 mm";
+
+  assert.equal(scopeOf(table, "96 mm").engine.value, "2AZ-FE");
+  assert.equal(scopeOf(table, "15 mm").engine, null, "the footnote applies to the whole table");
+  assert.equal(scopeOf(table, "81 mm").engine.value, "2AZ-FE", "a value's own asterisk is not a footnote");
+
+  assert.equal(scopeOf("* 2: 2AZ-FE wire 5 V", "5 V").engine.unresolved, true, "a legend is still a legend");
+  assert.equal(
+    scopeOf("Engine Control (2AZ-FE) 12 10 * oo Plat wt * ig Fa 3 L", "3 L").engine.value,
+    "2AZ-FE",
+    "OCR noise after an asterisk is not a footnote"
+  );
+  const diagram = "Engine Control <2AZ-FE> (IG) * check harness first 5 V";
+  assert.equal(scopeOf(diagram, "5 V").engine.value, "2AZ-FE", "a footnote never ends a title scope");
+});
