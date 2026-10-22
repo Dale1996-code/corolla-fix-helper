@@ -25,7 +25,9 @@ const {
   repairToolSchemas,
   searchRepairDocs,
 } = await import("../src/services/agent/repairTools.js");
-const { runRepairPlannerAgent } = await import("../src/services/agent/repairPlannerAgent.js");
+const { MAX_TOOL_CALLS_PER_TURN, TOOL_CALL_CAP_MESSAGE, runRepairPlannerAgent } = await import(
+  "../src/services/agent/repairPlannerAgent.js"
+);
 
 after(() => {
   if (typeof db.close === "function") {
@@ -127,4 +129,81 @@ test("a planner run never retrieves more than the bound per search", async () =>
 
   assert.equal(result.status, "completed");
   assert.deepEqual(seen, [MAX_SEARCH_RESULTS]);
+});
+
+test("at most MAX_TOOL_CALLS_PER_TURN tool calls run in one turn (2B-04)", async () => {
+  const REQUESTED = 12;
+  const retrieved = [];
+  const events = [];
+  let secondTurnInput = null;
+  let turn = 0;
+
+  async function* streamTurn({ input }) {
+    turn += 1;
+
+    if (turn === 1) {
+      for (let index = 1; index <= REQUESTED; index += 1) {
+        yield {
+          type: "function_call",
+          callId: `search_${index}`,
+          name: "search_repair_docs",
+          arguments: { taskId: 1, query: `front brake pads ${index}` },
+        };
+      }
+      return;
+    }
+
+    secondTurnInput = input;
+    yield {
+      type: "function_call",
+      callId: "finalize",
+      name: "finalize_repair_plan",
+      arguments: { claims: [] },
+    };
+  }
+
+  const result = await runRepairPlannerAgent(
+    { brief: "Replace the front brake pads." },
+    {
+      emit: (event) => events.push(event),
+      streamTurn,
+      retrieve: async (query) => {
+        retrieved.push(query);
+        return [];
+      },
+      isAiConfigured: true,
+    }
+  );
+
+  assert.equal(MAX_TOOL_CALLS_PER_TURN, 8);
+  assert.equal(result.status, "completed", "a capped turn does not fail the run");
+  assert.equal(retrieved.length, MAX_TOOL_CALLS_PER_TURN, "calls past the cap never retrieve");
+  assert.equal(
+    events.filter((event) => event.type === "tool_call").length,
+    MAX_TOOL_CALLS_PER_TURN + 1,
+    "the browser hears only about calls that ran (eight searches, then the finalizer)"
+  );
+
+  // Every call the model made still has exactly one output, and the ones past
+  // the cap tell the model why they did not run.
+  const calls = secondTurnInput.filter((item) => item.type === "function_call");
+  const outputs = secondTurnInput.filter((item) => item.type === "function_call_output");
+  assert.equal(calls.length, REQUESTED);
+  assert.deepEqual(
+    outputs.map((item) => item.call_id),
+    calls.map((item) => item.call_id)
+  );
+
+  const capped = outputs.filter((item) => JSON.parse(item.output).error === TOOL_CALL_CAP_MESSAGE);
+  assert.deepEqual(
+    capped.map((item) => item.call_id),
+    ["search_9", "search_10", "search_11", "search_12"]
+  );
+
+  const turnSpan = events.find(
+    (event) =>
+      event.type === "trace" && event.span.name === "model_turn" && event.span.attributes.turn === 1
+  );
+  assert.equal(turnSpan.span.attributes.toolCalls, REQUESTED);
+  assert.equal(turnSpan.span.attributes.skippedToolCalls, REQUESTED - MAX_TOOL_CALLS_PER_TURN);
 });

@@ -26,6 +26,17 @@ export const SKILL_LEVELS = ["beginner", "intermediate", "advanced"];
 // runaway model spend.
 export const MAX_FINALIZER_CORRECTIONS = 2;
 
+// Most tool calls run per model turn (2B-04). maxTurns bounds the turns, but
+// nothing bounded the calls inside one: a single reply could ask for dozens of
+// searches, each a retrieval, an embedding request, and up to eight chunks of
+// evidence text in the next turn's input. Live runs make about four searches
+// per RUN, so eight per turn leaves room for one search per task of a long
+// brief plus the readiness and handoff calls.
+export const MAX_TOOL_CALLS_PER_TURN = 8;
+export const TOOL_CALL_CAP_MESSAGE =
+  `Not run: at most ${MAX_TOOL_CALLS_PER_TURN} tool calls run per turn. ` +
+  "Call it again next turn if you still need it.";
+
 // Tool names the browser may see. A function name is model output too, so one
 // outside this set is reported as `unknown_tool` rather than echoed.
 const KNOWN_TOOL_NAMES = new Set(repairToolSchemas.map((schema) => schema.name));
@@ -248,7 +259,14 @@ export async function runRepairPlannerAgent(request, options = {}) {
         }
       }
 
-      turnSpan.end({ toolCalls: pendingToolCalls.length });
+      // Calls past the cap are not run. They are not dropped silently either:
+      // each one still gets an output below, so the model learns why and can
+      // ask again next turn, and every function_call in the input keeps its
+      // matching function_call_output.
+      const runnableCalls = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_TURN);
+      const skippedCalls = pendingToolCalls.slice(MAX_TOOL_CALLS_PER_TURN);
+
+      turnSpan.end({ toolCalls: pendingToolCalls.length, skippedToolCalls: skippedCalls.length });
 
       if (!pendingToolCalls.length) {
         // The model stopped calling tools without submitting a finalizer.
@@ -256,7 +274,7 @@ export async function runRepairPlannerAgent(request, options = {}) {
         break;
       }
 
-      for (const toolCall of pendingToolCalls) {
+      for (const toolCall of runnableCalls) {
         const toolName = KNOWN_TOOL_NAMES.has(toolCall.name) ? toolCall.name : UNKNOWN_TOOL_NAME;
         // Own properties only, so a model-chosen name like "constructor" cannot
         // reach an inherited Object method.
@@ -328,6 +346,22 @@ export async function runRepairPlannerAgent(request, options = {}) {
             type: "function_call_output",
             call_id: toolCall.callId,
             output: JSON.stringify(result),
+          }
+        );
+      }
+
+      for (const toolCall of skippedCalls) {
+        inputItems = inputItems.concat(
+          {
+            type: "function_call",
+            call_id: toolCall.callId,
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.arguments || {}),
+          },
+          {
+            type: "function_call_output",
+            call_id: toolCall.callId,
+            output: JSON.stringify({ error: TOOL_CALL_CAP_MESSAGE }),
           }
         );
       }

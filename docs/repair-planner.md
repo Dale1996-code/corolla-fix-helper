@@ -344,6 +344,26 @@ and other bodies can echo the brief or the retrieved manual text. Now:
 agent and asserts the key suffix and an echoed brief reach no SSE frame and no
 `console` call.
 
+### Cost bounds
+
+Every bound below is a fixed number, not a function of the brief, so one run's
+spend has a ceiling however many tasks the brief yields:
+
+| Bound | Value | What happens at the bound |
+| --- | --- | --- |
+| Model turns (`maxTurns`) | 8 | The run fails with `turn_limit` |
+| Finalizer corrections (`MAX_FINALIZER_CORRECTIONS`) | 2 | The run fails with `invalid_final_contract` |
+| Tool calls run per turn (`MAX_TOOL_CALLS_PER_TURN`, audit 2B-04) | 8 | Calls past the eighth are not run. Each still gets a `function_call_output` saying so, so the model can ask again next turn; no `tool_call` frame is emitted for it, and the turn's trace span records `skippedToolCalls` |
+| Chunks per search (`MAX_SEARCH_RESULTS`, audit 1A-20 / 2B-03) | 8 | `limit` is declared 1–8 in the schema and clamped by `clampSearchLimit`; an unusable value gets the default of 4 |
+| Evidence text per chunk (`EVIDENCE_CONTEXT_CHAR_LIMIT`) | 1,500 characters | The model sees, and quotes are checked against, the first 1,500 characters |
+
+So one run makes at most 8 Responses calls and at most 64 document searches.
+Each search can make one embedding request, which counts toward
+`AI_DAILY_CALL_LIMIT` like the model turns do (owner decision D4), and each
+turn's tool output carries at most 8 × 8 chunks of evidence text. Live runs
+make about four searches per run (`docs/evals/ask-rag-iteration-log.md`, Stage
+5-E2), far inside these bounds.
+
 ### Incomplete runs
 
 An incomplete run is a **failure**, not a success with less content. It emits an
