@@ -15,6 +15,10 @@ npm -v
 
 If `node -v` starts with `v24.`, you are in the expected range.
 
+The repo root has an `.nvmrc` that says `24`. If your Node version manager reads that file
+(`nvm use` or `fnm use`, run from the repo folder), it switches to the right major version.
+CI reads the same file.
+
 ## 2. Open The Repo
 
 ```powershell
