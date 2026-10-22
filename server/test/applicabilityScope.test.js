@@ -382,3 +382,51 @@ test("classifyScope reports a verdict per checked axis", () => {
   assert.deepEqual(result, { verdict: "applies", byAxis: { engine: "applies", plant: "applies" } });
   assert.deepEqual(classifyScope(EMPTY_SCOPE, OWNER).byAxis, { engine: "not_stated" });
 });
+
+// ---- independent-oracle findings (fail-closed rulings) ----
+
+test("a diagram title naming two engines is unresolved, in either print order", () => {
+  for (const title of ["<2AZ-FE / 2ZR-FE>", "<2ZR-FE / 2AZ-FE>", "<2ZR-FE and 2AZ-FE , Except TMC Made>"]) {
+    const text = `Ignition System ${title} (IG) Coil terminal 9 to 14 V`;
+    assert.equal(scopeOf(text, "9 to 14 V").engine.unresolved, true, title);
+  }
+});
+
+test("an OCR misread with a digit inside the code is unknown, so it closes the open block", () => {
+  assert.deepEqual(shape("(for 2A2-FE) bolt"), [engine("unknown_code", "2A2-FE")]);
+  const text = "Idler pulley (for 2ZR-FE) Pulley bolt 39 N*m (for 2A2-FE) Pulley bolt 43 N*m";
+  assert.equal(scopeOf(text, "39 N*m").engine.value, "2ZR-FE");
+  assert.equal(scopeOf(text, "43 N*m").engine.unresolved, true);
+});
+
+test("an unknown code in a diagram title ends the previous diagram and carries as unresolved", () => {
+  const pages = computeDocumentScopes([
+    { pageNumber: 1, text: "Engine Control <2ZR-FE , Except TMC Made> (IG) VC - E2 4.8 to 5.2 V" },
+    { pageNumber: 2, text: "Engine Control <2ZA-FE , Except TMC Made> (IG) B1 - E1 4.6 to 5.4 V" },
+    { pageNumber: 3, text: "Engine Control Terminal THW - E2 0.2 to 1.0 V" },
+  ]);
+
+  assert.equal(pages[2].chunks[0].entryScope.engine.unresolved, true);
+  const next = computeDocumentScopes([
+    { pageNumber: 1, text: "Engine Control <2ZA-FE> (IG) 5 V" },
+    { pageNumber: 2, text: "Engine Control <2ZR-FE> (IG) 5 V" },
+  ]);
+  assert.equal(
+    next[1].chunks[0].entryScope.engine.unresolved,
+    true,
+    "page 2 starts inside page 1's misread diagram, before its own title"
+  );
+  assert.equal(scopeAt(next[1].segments, next[1].text.indexOf("5 V")).engine.value, "2ZR-FE");
+});
+
+test("(for X) inside an article title scopes the whole article", () => {
+  const pages = computeDocumentScopes([
+    { pageNumber: 1, text: "Vehicle > Engine > Drive Belt > Inspection (for 2AZ-FE) HINT: Deflection 9.5 mm" },
+    { pageNumber: 2, text: "Tension with new belt 650 to 750 N" },
+  ]);
+
+  assert.deepEqual(shape("Vehicle > Engine > Drive Belt > Inspection (for 2AZ-FE) HINT: x"), [
+    engine("article_title", "2AZ-FE"),
+  ]);
+  assert.equal(pages[1].chunks[0].entryScope.engine.value, "2AZ-FE");
+});

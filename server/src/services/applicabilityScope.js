@@ -64,6 +64,9 @@ const NUMBERED_STEP = /(?:^|\s)\d{1,3}\.\s+[A-Z]{2,}/g;
 
 const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/g;
 const ENGINE_TOKEN = /\b([1-9][A-Z]{2})\s?-?\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
+// OCR swaps letters and digits ("2A2-FE"). With the hyphen required, a code-
+// shaped token the strict pattern cannot read is still seen -- as unknown.
+const OCR_ENGINE_TOKEN = /\b([0-9][A-Z0-9]{2})\s?-\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
 const EXCEPT_PLANT_TOKEN = /\bExcept[\s_]+TMC[\s_]+Made\b/gi;
 const PLANT_TOKEN = /\b(TMC|TMMT|NUMMI|TMMC)[\s_]+Made\b/gi;
 const ARTICLE_START = /\bVehicle\s*>/g;
@@ -145,13 +148,23 @@ export function findScopeMarkers(text) {
   const diagrams = rangesOf(DIAGRAM_GROUP, blanked);
   const brackets = rangesOf(BRACKET_GROUP, blanked);
 
+  const strictTokens = [...blanked.matchAll(ENGINE_TOKEN)];
+  const ocrTokens = [...blanked.matchAll(OCR_ENGINE_TOKEN)].filter(
+    (ocr) =>
+      !strictTokens.some(
+        (strict) => ocr.index < strict.index + strict[0].length && strict.index < ocr.index + ocr[0].length
+      )
+  );
+  const engineTokens = [...strictTokens, ...ocrTokens].sort((left, right) => left.index - right.index);
+
   /** @type {ScopeMarker[]} */
-  const engineMarkers = [...blanked.matchAll(ENGINE_TOKEN)].map((match) => {
+  const engineMarkers = engineTokens.map((match) => {
     const value = `${match[1]}-${match[2]}`;
     const start = match.index;
     const end = start + match[0].length;
     const before = blanked.slice(Math.max(0, start - 12), start);
     const after = blanked.slice(end, end + 4);
+    const inlineFor = /\(\s*for\s+$/i.test(before) && /^\s*\)/.test(after);
 
     /** @type {MarkerKind} */
     let kind = "row_label";
@@ -159,9 +172,10 @@ export function findScopeMarkers(text) {
       kind = "unknown_code";
     } else if (within(diagrams, start, end)) {
       kind = "diagram_title";
-    } else if (within(articles, start, end) && isParenthesized(blanked, start, end)) {
+    } else if (within(articles, start, end) && (isParenthesized(blanked, start, end) || inlineFor)) {
+      // "Inspection (for 2AZ-FE)" in a title line scopes the whole article.
       kind = "article_title";
-    } else if (/\(\s*for\s+$/i.test(before) && /^\s*\)/.test(after)) {
+    } else if (inlineFor) {
       kind = "inline_for";
     } else if (/\*\s*\d+\s*:\s*$/.test(before)) {
       kind = "legend";
@@ -195,9 +209,15 @@ export function findScopeMarkers(text) {
   const plantMarkers = plantTokens(blanked).map((token) => {
     /** @type {MarkerKind} */
     let kind = "row_label";
+    const plantInlineFor =
+      /\(\s*for\s+$/i.test(blanked.slice(Math.max(0, token.start - 8), token.start)) &&
+      /^\s*\)/.test(blanked.slice(token.end, token.end + 3));
     if (within(diagrams, token.start, token.end)) {
       kind = "diagram_title";
-    } else if (within(articles, token.start, token.end) && isParenthesized(blanked, token.start, token.end)) {
+    } else if (
+      within(articles, token.start, token.end) &&
+      (isParenthesized(blanked, token.start, token.end) || plantInlineFor)
+    ) {
       kind = "article_title";
     } else if (within(brackets, token.start, token.end)) {
       kind = "link";
@@ -259,7 +279,50 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
       },
     });
   }
+  // A diagram title or an article title is judged as a WHOLE: one clear variant
+  // scopes it; two different variants, or a code nobody can read, make it an
+  // unresolved base that carries on like any title. Otherwise the print order of
+  // "<2AZ-FE / 2ZR-FE>" would decide, and a misread "<2ZA-FE>" would leave the
+  // previous diagram's engine in force on the pages that follow it.
+  const titleGroups = [
+    ...rangesOf(DIAGRAM_GROUP, blanked).map((range) => ({ ...range, kind: "diagram_title" })),
+    ...articleSpans(blanked).map((range) => ({ ...range, kind: "article_title" })),
+  ];
+  const groupOf = (marker) =>
+    titleGroups.find(
+      (group) =>
+        marker.start >= group.start &&
+        marker.end <= group.end &&
+        (marker.kind === group.kind || marker.kind === "unknown_code")
+    );
+  const grouped = new Set();
+  for (const group of titleGroups) {
+    for (const axis of AXES) {
+      const members = markers.filter((marker) => marker.axis === axis && groupOf(marker) === group);
+      if (!members.length) {
+        continue;
+      }
+      members.forEach((marker) => grouped.add(marker));
+      const variants = new Set(members.map((marker) => `${marker.value}|${marker.exclude}`));
+      const readable = members.every((marker) => marker.kind !== "unknown_code");
+      const base =
+        readable && variants.size === 1
+          ? { value: /** @type {string} */ (members[0].value), exclude: members[0].exclude, kind: group.kind }
+          : { unresolved: /** @type {true} */ (true), kind: group.kind };
+      events.push({
+        at: members[0].start,
+        apply: (state) => {
+          state[axis].base = base;
+          state[axis].overlay = null;
+        },
+      });
+    }
+  }
+
   for (const marker of markers) {
+    if (grouped.has(marker)) {
+      continue;
+    }
     events.push({
       at: marker.start,
       apply: (state) => {
@@ -280,8 +343,8 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
   // inside it, because spans start at "Vehicle >" which precedes the title.
   events.sort((left, right) => left.at - right.at);
 
-  const readCarry = (axisScope) =>
-    axisScope && "value" in axisScope && BASE_KINDS.has(axisScope.kind) ? axisScope : null;
+  // Only a title's scope crosses a page -- including an unresolved title.
+  const readCarry = (axisScope) => (axisScope && BASE_KINDS.has(axisScope.kind) ? axisScope : null);
   const state = {
     engine: { base: readCarry(carryIn.engine), overlay: null, unresolved: null },
     plant: { base: readCarry(carryIn.plant), overlay: null, unresolved: null },
