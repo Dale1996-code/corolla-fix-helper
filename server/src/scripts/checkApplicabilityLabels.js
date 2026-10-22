@@ -46,6 +46,11 @@ const ARTICLE_LINE = /Vehicle\s*>[^]{0,200}/;
 const FIGURE = /\d+(?:[.,]\d+)?\s*(?:N\*m|N·m|Nm|kgf\*cm|ft\.\*lbf|in\.\*lbf|mm|kPa|V\b|Ω|°C|L\b)/g;
 const HEADER_ONLY_SAMPLE = 40;
 const INHERITED_SAMPLE = 30;
+const APPLIES_SAMPLE = 60;
+const INDEPENDENT_SAMPLE = 60;
+// Text that suggests the 2.4L engine, read without the tagger: a pool chosen by
+// the tagger's own markers cannot reveal what the tagger fails to read.
+const INDEPENDENT_PATTERN = /2\s*A\s*Z|2\.4\s*L|XRS/i;
 const CONTEXT_BEFORE = 300;
 const CONTEXT_AFTER = 120;
 const VERDICTS = ["applies", "other_variant", "unresolved", "not_stated", "unlocated"];
@@ -101,6 +106,44 @@ export function scoreLabels(rows) {
  */
 export function candidateFigures(pageText) {
   return [...blankAccountHeader(pageText).matchAll(FIGURE)];
+}
+
+const CONTEXT_WORDS_BEFORE = 6;
+const CONTEXT_WORDS_AFTER = 4;
+
+/**
+ * A figure's context identity: the words around it, case- and space-folded. The
+ * merged manual repeats the single-article PDFs, so the same table row appears
+ * up to four times; counting rows would count one context several times.
+ *
+ * @param {{ contextBefore: string, figure: string, contextAfter: string }} row
+ */
+export function contextKey(row) {
+  const words = (text) => String(text || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return [
+    words(row.contextBefore).slice(-CONTEXT_WORDS_BEFORE).join(" "),
+    words(row.figure).join(" "),
+    words(row.contextAfter).slice(0, CONTEXT_WORDS_AFTER).join(" "),
+  ].join(" | ");
+}
+
+/**
+ * Keep the first row of each context, in order.
+ *
+ * @template {{ contextBefore: string, figure: string, contextAfter: string }} T
+ * @param {T[]} rows
+ * @returns {T[]}
+ */
+export function dedupeByContext(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = contextKey(row);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -177,7 +220,7 @@ function everyNth(items, count) {
 /** @param {DatabaseSync} db */
 export function sampleCandidates(db) {
   const documents = db.prepare("SELECT id, original_filename FROM documents ORDER BY id").all();
-  const pools = { A: [], B: [], C: [] };
+  const pools = { A: [], B: [], C: [], D: [], E: [] };
 
   for (const document of documents) {
     const { byPage, scoped } = loadDocument(db, document.id);
@@ -203,6 +246,49 @@ export function sampleCandidates(db) {
         );
         if (!figures.length) {
           continue;
+        }
+
+        const makeRow = (source, match) => {
+          const figure = match[0];
+          let occurrence = 0;
+          let at = startChar - 1;
+          do {
+            at = page.text.indexOf(figure, at + 1);
+            occurrence += 1;
+          } while (at !== -1 && at < match.index);
+
+          return {
+            id: `${document.id}:${page.pageNumber}:${chunk.chunkIndex}:${figure}:${occurrence}`,
+            chunkId: storedChunk.id,
+            source,
+            documentId: document.id,
+            filename: document.original_filename,
+            pageNumber: page.pageNumber,
+            chunkIndex: chunk.chunkIndex,
+            figure,
+            occurrence,
+            articleTitle: articleLine,
+            contextBefore: page.text.slice(Math.max(0, match.index - CONTEXT_BEFORE), match.index),
+            contextAfter: page.text.slice(match.index + figure.length, match.index + figure.length + CONTEXT_AFTER),
+            expected: null,
+            note: "",
+          };
+        };
+
+        // Pool D: a figure the tagger says APPLIES to the owner's engine -- the
+        // only place a false "applies" can be seen. The verdict is never written.
+        const applying = figures.find(
+          (match) => classifyScope(scopeAt(page.segments, match.index), OWNER_PROFILE).verdict === "applies"
+        );
+        if (applying) {
+          pools.D.push(makeRow("D", applying));
+        }
+        // Pool E: chosen WITHOUT the tagger, by text that suggests the other
+        // engine, so the sample is not shaped by the markers being tested.
+        const independentHit = storedChunk.text.search(INDEPENDENT_PATTERN);
+        if (independentHit !== -1) {
+          const hitAt = startChar + independentHit;
+          pools.E.push(makeRow("E", figures.find((match) => match.index > hitAt) || figures[0]));
         }
 
         let source = null;
@@ -234,30 +320,7 @@ export function sampleCandidates(db) {
         }
 
         for (const match of picked) {
-          const figure = match[0];
-          let occurrence = 0;
-          let at = startChar - 1;
-          do {
-            at = page.text.indexOf(figure, at + 1);
-            occurrence += 1;
-          } while (at !== -1 && at < match.index);
-
-          pools[source].push({
-            id: `${document.id}:${page.pageNumber}:${chunk.chunkIndex}:${figure}:${occurrence}`,
-            chunkId: storedChunk.id,
-            source,
-            documentId: document.id,
-            filename: document.original_filename,
-            pageNumber: page.pageNumber,
-            chunkIndex: chunk.chunkIndex,
-            figure,
-            occurrence,
-            articleTitle: articleLine,
-            contextBefore: page.text.slice(Math.max(0, match.index - CONTEXT_BEFORE), match.index),
-            contextAfter: page.text.slice(match.index + figure.length, match.index + figure.length + CONTEXT_AFTER),
-            expected: null,
-            note: "",
-          });
+          pools[source].push(makeRow(source, match));
         }
       }
     }
@@ -270,11 +333,23 @@ export function sampleCandidates(db) {
     return rows.filter((row) => keep.has(row.chunkId));
   };
 
-  return [
+  // One row per id (a figure can qualify for several pools), then one row per
+  // context, so totals count distinct contexts rather than document copies.
+  const seenIds = new Set();
+  const unique = [
     ...pools.A.sort(byChunkId),
     ...pickChunks(pools.B, HEADER_ONLY_SAMPLE),
     ...pickChunks(pools.C, INHERITED_SAMPLE),
-  ];
+    ...pickChunks(dedupeByContext(pools.D.sort(byChunkId)), APPLIES_SAMPLE),
+    ...pickChunks(dedupeByContext(pools.E.sort(byChunkId)), INDEPENDENT_SAMPLE),
+  ].filter((row) => {
+    if (seenIds.has(row.id)) {
+      return false;
+    }
+    seenIds.add(row.id);
+    return true;
+  });
+  return dedupeByContext(unique);
 }
 
 /**

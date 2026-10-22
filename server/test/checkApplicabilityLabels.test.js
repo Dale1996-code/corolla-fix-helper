@@ -5,9 +5,23 @@ import test from "node:test";
 // labels and the manual text they point at stay in a gitignored folder.
 import {
   candidateFigures,
+  contextKey,
+  dedupeByContext,
   locateFigure,
   scoreLabels,
 } from "../src/scripts/checkApplicabilityLabels.js";
+
+test("copies of one context collapse to a single row, so counts are distinct contexts", () => {
+  const row = (id, before, figure, after) => ({ id, contextBefore: before, figure, contextAfter: after });
+  const rows = [
+    row("735:1", "x ".repeat(100) + "Front vehicle height at  curb, 2AZ-FE ", "96 mm", " (3.78 in.) rear wheel x"),
+    row("740:1", "y ".repeat(100) + "Front vehicle  height at curb, 2AZ-FE ", "96 mm", " (3.78 in.)  rear wheel y"),
+    row("109:2", "z Front Height 2ZR-FE ", "92 mm", " (3.62 in.) rear"),
+  ];
+
+  assert.equal(contextKey(rows[0]), contextKey(rows[1]), "whitespace and distant text do not split a context");
+  assert.deepEqual(dedupeByContext(rows).map((kept) => kept.id), ["735:1", "109:2"]);
+});
 
 test("the account header's engine size is never sampled as a figure", () => {
   const page =
