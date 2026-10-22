@@ -19,13 +19,13 @@ import { pathToFileURL } from "node:url";
 import { config } from "../config.js";
 import {
   KNOWN_ENGINE_CODES,
+  hasAccountHeader,
   computeDocumentScopes,
   findScopeMarkers,
 } from "../services/applicabilityScope.js";
 import { reconstructPageWords } from "../services/chunkGeometry.js";
 import { normalizeApplicabilityProfile } from "../services/vehicleApplicabilityProfile.js";
 
-const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/;
 // A unit-bearing figure: the chunks worth checking for a wrong-engine spec.
 const SPEC_FIGURE = /\d\s*(N\*m|N·m|Nm|kgf\*cm|ft\.\*lbf|in\.\*lbf|mm|kPa|V\b|Ω|°C|L\b)/;
 const CSV_COLUMNS = [
@@ -158,7 +158,7 @@ export function buildApplicabilityReport(db, { ownerEngine, limit }) {
       const pageClass = classOf(values, ownerEngine);
       report.pageClasses[pageClass] += 1;
       documentClassCounts[pageClass] += 1;
-      if (ACCOUNT_HEADER.test(page.text)) {
+      if (hasAccountHeader(page.text)) {
         hasHeader = true;
         report.accountHeader.pages += 1;
       }

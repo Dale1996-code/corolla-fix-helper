@@ -245,7 +245,7 @@ test("scopeAt on empty text is the empty scope", () => {
 
 test("an article title scopes later pages; an inline block does not", () => {
   const withArticle = computeDocumentScopes([
-    { pageNumber: 1, text: "Vehicle > Engine > Torque Specifications (2AZ-FE) NOTICE: (for 2ZR-FE) 30 N*m" },
+    { pageNumber: 1, text: "Vehicle > Engine > Torque Specifications (2AZ-FE) NOTICE: bolt 30 N*m" },
     { pageNumber: 2, text: "Bolt 40 N*m" },
   ]);
   assert.deepEqual(withArticle[1].chunks[0].entryScope.engine, {
@@ -450,3 +450,102 @@ test("a table footnote ends the row scope above it; legends and titles are unaff
   const diagram = "Engine Control <2AZ-FE> (IG) * check harness first 5 V";
   assert.equal(scopeOf(diagram, "5 V").engine.value, "2AZ-FE", "a footnote never ends a title scope");
 });
+
+// ---- final review: fail-open paths (C1, C2, I1, I2, I3, I5) ----
+
+const EN_DASH = String.fromCharCode(0x2013);
+const NB_HYPHEN = String.fromCharCode(0x2011);
+
+test("C1: every account-header spelling is blanked and never becomes 2ZR-FE evidence", () => {
+  const headers = [
+    "Corolla L4 - 1.8L (2ZR-FE)",
+    "Corolla L4-1.8 L (2ZR-FE)",
+    "Corolla L4-1.8L (2ZR- FE)",
+    "Corolla L4-1.8L (2ZRFE)",
+    "COROLLA L4-1.8L (2ZR-FE)",
+    "Corolla L4-1,8L (2ZR-FE)",
+    `Corolla L4${EN_DASH}1.8L (2ZR${EN_DASH}FE)`,
+    "Corolla L4-1.8L (2ZR-FE",
+  ];
+  for (const header of headers) {
+    assert.deepEqual(shape(`2009 Toyota ${header} Vehicle body`), [], header);
+    const pages = computeDocumentScopes([
+      { pageNumber: 1, text: "Engine Control <2AZ-FE , Except TMC Made> (IG) 5 V" },
+      { pageNumber: 2, text: `2009 Toyota ${header} Terminal VC 4.8 to 5.2 V` },
+    ]);
+    const at = pages[1].text.indexOf("4.8 to 5.2 V");
+    assert.equal(scopeAt(pages[1].segments, at).engine.value, "2AZ-FE", header);
+  }
+});
+
+test("C2: (for X) promotes to the article only inside a title the text closes", () => {
+  const unclosed = computeDocumentScopes([
+    {
+      pageNumber: 1,
+      text: `Vehicle > Engine > Specs Compressor bolt (for 2ZR-FE) 25 N*m ${"filler word ".repeat(30)}Bracket bolt (for 2AZ-FE) 30 N*m`,
+    },
+    { pageNumber: 2, text: "Bracket nut 12 N*m" },
+  ]);
+  assert.notEqual(
+    classifyScope(unclosed[1].chunks[0].entryScope, OWNER).verdict,
+    "applies",
+    "a body row inside an unterminated span must not become the document's engine"
+  );
+});
+
+test("C2: a page that opens another engine's block cannot hand the owner's engine to the next page", () => {
+  const pages = computeDocumentScopes([
+    { pageNumber: 1, text: "Vehicle > Engine > Specs (2ZR-FE) HINT: idle 650 rpm (for 2AZ-FE) idler 43 N*m" },
+    { pageNumber: 2, text: "pulley 39 N*m" },
+  ]);
+  assert.notEqual(classifyScope(pages[1].chunks[0].entryScope, OWNER).verdict, "applies");
+});
+
+test("I1: other-engine spellings the strict pattern cannot read still close an owner block", () => {
+  for (const spelling of [
+    "(for2AZ-FE)",
+    `(for 2AZ${EN_DASH}FE)`,
+    `(for 2AZ${NB_HYPHEN}FE)`,
+    "(for 2az-fe)",
+    "(for 2 AZ-FE)",
+    "(for ZAZ-FE)",
+    "(for 2AZ  -FE)",
+    "(for 2AZ-F E)",
+  ]) {
+    const text = `Idler (for 2ZR-FE) bolt 39 N*m ${spelling} bolt 43 N*m`;
+    assert.notEqual(classifyScope(scopeOf(text, "43 N*m"), OWNER).verdict, "applies", spelling);
+    assert.equal(classifyScope(scopeOf(text, "39 N*m"), OWNER).verdict, "applies", spelling);
+  }
+});
+
+test("I2: two engines' blocks with no figure between them are a header row", () => {
+  for (const text of [
+    "Item (for 2AZ-FE) (for 2ZR-FE) Height 96 mm 92 mm",
+    "Item 2AZ-FE Engine 2ZR-FE Engine Height 96 mm 92 mm",
+  ]) {
+    assert.equal(scopeOf(text, "96 mm").engine.unresolved, true, text);
+  }
+  const blocks = "COMPRESSOR (for 2AZ-FE) bolt 25 N*m COMPRESSOR (for 2ZR-FE) bolt 26 N*m";
+  assert.equal(scopeOf(blocks, "26 N*m").engine.value, "2ZR-FE", "blocks with figures between stay blocks");
+});
+
+test("I3: 'except', 'w/o' and 'without' before an engine code exclude it", () => {
+  for (const phrase of ["(except 2ZR-FE)", "Except 2ZR-FE models", "w/o 2ZR-FE", "without 2ZR-FE"]) {
+    const text = `Bracket ${phrase} bolt 30 N*m`;
+    assert.equal(classifyScope(scopeOf(text, "30 N*m"), OWNER).verdict, "other_variant", phrase);
+  }
+});
+
+for (const [label, title] of [
+  ["its model-year tag", "HEATING: COMPRESSOR (for 2ZR-FE): INSTALLATION; 2009 MY Corolla [12/2007 - ] Adjust the oil level"],
+  ["its first numbered step", "HEATING: COMPRESSOR (for 2ZR-FE): INSTALLATION 1. ADJUST OIL LEVEL"],
+]) {
+  test(`C2: an ALLDATA title closed by ${label} still scopes the article`, () => {
+    const pages = computeDocumentScopes([
+      { pageNumber: 1, text: `Vehicle > Heating > Compressor > Removal and Replacement ${title} bolt 9.8 Nm` },
+      { pageNumber: 2, text: "Install the hose with the bolt. Torque : 9.8 Nm" },
+    ]);
+    assert.equal(pages[1].chunks[0].entryScope.engine?.value, "2ZR-FE");
+    assert.equal(pages[1].chunks[0].entryScope.engine?.kind, "article_title");
+  });
+}

@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "../config.js";
 import {
   KNOWN_ENGINE_CODES,
+  hasAccountHeader,
   blankAccountHeader,
   classifyScope,
   computeDocumentScopes,
@@ -41,7 +42,6 @@ const OWNER_PROFILE = {
   hasSmartKey: null,
 };
 const LABELS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "data", "applicability-labels");
-const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/;
 const ARTICLE_LINE = /Vehicle\s*>[^]{0,200}/;
 const FIGURE = /\d+(?:[.,]\d+)?\s*(?:N\*m|N·m|Nm|kgf\*cm|ft\.\*lbf|in\.\*lbf|mm|kPa|V\b|Ω|°C|L\b)/g;
 const HEADER_ONLY_SAMPLE = 40;
@@ -222,7 +222,7 @@ export function sampleCandidates(db) {
             picked.push(last);
           }
           picked = picked.slice(0, 3);
-        } else if (!values.size && ACCOUNT_HEADER.test(storedChunk.text)) {
+        } else if (!values.size && hasAccountHeader(storedChunk.text)) {
           source = "B";
           picked = [figures[0]];
         } else if (!values.size && titledByEngine) {

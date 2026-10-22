@@ -70,29 +70,63 @@ const NUMBERED_STEP = /(?:^|\s)\d{1,3}\.\s+[A-Z]{2,}/g;
 // required, because OCR'd diagrams scatter asterisks before junk like "oo Plat".
 const TABLE_FOOTNOTE = /(?:^|\s)\*+\s+[a-z]{2,}\s+[a-z]{2,}/g;
 
-const ACCOUNT_HEADER = /Corolla\s+L4[-\s]?1\.8L\s*\(\s*2ZR-FE\s*\)/g;
+// Unicode hyphens and dashes read as "-". One character each, so offsets survive.
+const DASHES = /[‐‑‒–—−]/g;
+/**
+ * The ALLDATA account header, in any spelling seen or plausible: spacing, case,
+ * "1,8L", a dash or none, a missing ")". Matched AFTER dash normalization. It
+ * names the account's vehicle, never what the article covers (final review C1:
+ * an exact-spelling pattern let a variant header count as 2ZR-FE evidence).
+ */
+export const ACCOUNT_HEADER_PATTERN =
+  /Corolla\s+L4\s*-?\s*1\s*[.,]\s*8\s*L\s*\(\s*2\s*Z\s*R\s*-?\s*F\s*E\s*\)?/gi;
+// Backstop for an engine designation outside a full header: "1.8L (2ZR-FE)" names
+// the vehicle, so a code right after "1.8L (" is never evidence.
+const DESIGNATION_PREFIX = /1\s*[.,]\s*8\s*L\s*\(?\s*$/i;
 const ENGINE_TOKEN = /\b([1-9][A-Z]{2})\s?-?\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
 // OCR swaps letters and digits ("2A2-FE"). With the hyphen required, a code-
 // shaped token the strict pattern cannot read is still seen -- as unknown.
 const OCR_ENGINE_TOKEN = /\b([0-9][A-Z0-9]{2})\s?-\s?(FE|FXE|FAE|FSE|FKS|GE|GZE)\b/g;
+// Anything else code-shaped -- lowercase, spaced, glued to "for", a Z read for a 2
+// -- is a SUSPECT code: it closes the block before it and resolves to nothing
+// (final review I1: unread spellings let a 2ZR-FE block run on into 2AZ-FE text).
+// It may not start inside a word ("MX2ZR-FE" is a part label), except right after
+// "for" ("(for2AZ-FE)").
+const SUSPECT_ENGINE_TOKEN =
+  /(?:(?<![A-Za-z0-9])|(?<=for))([0-9]\s?[A-Z0-9]{2}|Z[A-Z][A-Z0-9])\s*-?\s*F\s?E\b/gi;
+// "except 2ZR-FE", "w/o 2ZR-FE", "without 2ZR-FE": the code is EXCLUDED (review I3).
+const ENGINE_EXCLUSION_PREFIX = /\b(?:except|w\/o|without|other\s+than)\s*(?:for\s+)?\(?\s*$/i;
+// Two engines' labels with no figure between them, this close, are a header row.
+const COLUMN_HEADER_MAX_GAP = 40;
 const EXCEPT_PLANT_TOKEN = /\bExcept[\s_]+TMC[\s_]+Made\b/gi;
 const PLANT_TOKEN = /\b(TMC|TMMT|NUMMI|TMMC)[\s_]+Made\b/gi;
 const ARTICLE_START = /\bVehicle\s*>/g;
 const ARTICLE_TERMINATORS = ["Locations:", " NOTICE", " CAUTION", " HINT"];
 const ARTICLE_MAX_LENGTH = 250;
+const ARTICLE_MODEL_YEAR_TAG = /\b\d{4}\s+MY\s+Corolla\b/;
 const DIAGRAM_GROUP = /<[^<>]{1,80}>/g;
 const BRACKET_GROUP = /\[[^[\]]{0,200}\]/g;
 
+function normalizeDashes(text) {
+  return String(text || "").replace(DASHES, "-");
+}
+
 /**
- * Replace the ALLDATA account header with spaces of the same length, so every
- * offset into the text still points at the same character.
+ * Normalize dashes and replace every ALLDATA account header with spaces of the
+ * same length, so every offset still points at the same character.
  *
  * @param {string} text
  * @returns {string}
  */
 export function blankAccountHeader(text) {
-  return String(text || "").replace(ACCOUNT_HEADER, (match) => " ".repeat(match.length));
+  return normalizeDashes(text).replace(ACCOUNT_HEADER_PATTERN, (match) => " ".repeat(match.length));
 }
+
+/** Whether a text carries the account header, in any spelling. */
+export function hasAccountHeader(text) {
+  return new RegExp(ACCOUNT_HEADER_PATTERN.source, "i").test(normalizeDashes(text));
+}
+
 
 function rangesOf(pattern, text) {
   return [...text.matchAll(pattern)].map((match) => ({
@@ -105,20 +139,34 @@ function articleSpans(text) {
   return [...text.matchAll(ARTICLE_START)].map((match) => {
     const start = match.index;
     let end = Math.min(text.length, start + ARTICLE_MAX_LENGTH);
+    let closed = false;
 
     for (const terminator of ARTICLE_TERMINATORS) {
       const at = text.indexOf(terminator, start);
       if (at !== -1 && at < end) {
         end = at;
+        closed = true;
+      }
+    }
+    // ALLDATA titles end at their model-year tag ("; 2009 MY Corolla [12/2007 - ]")
+    // or, at the latest, where the first numbered step begins the body.
+    const window = text.slice(start, end);
+    for (const pattern of [ARTICLE_MODEL_YEAR_TAG, NUMBERED_STEP]) {
+      const found = new RegExp(pattern.source).exec(window);
+      if (found && found.index > 0 && start + found.index < end) {
+        end = start + found.index;
+        closed = true;
       }
     }
 
-    return { start, end };
+    return { start, end, closed };
   });
 }
 
 const within = (ranges, start, end) =>
   ranges.some((range) => start >= range.start && end <= range.end);
+const containing = (ranges, start, end) =>
+  ranges.find((range) => start >= range.start && end <= range.end);
 
 function isParenthesized(text, start, end) {
   return /\(\s*$/.test(text.slice(Math.max(0, start - 3), start)) && /^\s*\)/.test(text.slice(end, end + 3));
@@ -156,32 +204,48 @@ export function findScopeMarkers(text) {
   const diagrams = rangesOf(DIAGRAM_GROUP, blanked);
   const brackets = rangesOf(BRACKET_GROUP, blanked);
 
+  const overlaps = (left, right) =>
+    left.index < right.index + right[0].length && right.index < left.index + left[0].length;
   const strictTokens = [...blanked.matchAll(ENGINE_TOKEN)];
   const ocrTokens = [...blanked.matchAll(OCR_ENGINE_TOKEN)].filter(
-    (ocr) =>
-      !strictTokens.some(
-        (strict) => ocr.index < strict.index + strict[0].length && strict.index < ocr.index + ocr[0].length
-      )
+    (ocr) => !strictTokens.some((strict) => overlaps(ocr, strict))
   );
-  const engineTokens = [...strictTokens, ...ocrTokens].sort((left, right) => left.index - right.index);
+  const readTokens = [...strictTokens, ...ocrTokens];
+  const suspectTokens = [...blanked.matchAll(SUSPECT_ENGINE_TOKEN)]
+    .filter((suspect) => !readTokens.some((read) => overlaps(suspect, read)))
+    .map((suspect) => ({ suspect, value: `${suspect[1].replace(/\s+/g, "").toUpperCase()}-FE` }));
+  const engineTokens = [
+    ...readTokens.map((match) => ({ match, value: `${match[1]}-${match[2]}`, suspect: false })),
+    ...suspectTokens.map(({ suspect, value }) => ({ match: suspect, value, suspect: true })),
+  ]
+    // "...1.8L (2ZR-FE)" outside a full header still names the vehicle.
+    .filter(({ match }) => !DESIGNATION_PREFIX.test(blanked.slice(Math.max(0, match.index - 14), match.index)))
+    .sort((left, right) => left.match.index - right.match.index);
 
   /** @type {ScopeMarker[]} */
-  const engineMarkers = engineTokens.map((match) => {
-    const value = `${match[1]}-${match[2]}`;
+  const engineMarkers = engineTokens.map(({ match, value, suspect }) => {
     const start = match.index;
     const end = start + match[0].length;
-    const before = blanked.slice(Math.max(0, start - 12), start);
+    const before = blanked.slice(Math.max(0, start - 20), start);
     const after = blanked.slice(end, end + 4);
-    const inlineFor = /\(\s*for\s+$/i.test(before) && /^\s*\)/.test(after);
+    const inlineFor = /\(\s*for\s*$/i.test(before) && /^\s*\)/.test(after);
+    const exclude = ENGINE_EXCLUSION_PREFIX.test(before);
+    const article = containing(articles, start, end);
 
     /** @type {MarkerKind} */
     let kind = "row_label";
-    if (!KNOWN_ENGINE_CODES.includes(value)) {
+    if (suspect || !KNOWN_ENGINE_CODES.includes(value)) {
       kind = "unknown_code";
     } else if (within(diagrams, start, end)) {
       kind = "diagram_title";
-    } else if (within(articles, start, end) && (isParenthesized(blanked, start, end) || inlineFor)) {
-      // "Inspection (for 2AZ-FE)" in a title line scopes the whole article.
+    } else if (
+      article &&
+      (isParenthesized(blanked, start, end) || (inlineFor && article.closed))
+    ) {
+      // "Inspection (for 2AZ-FE) HINT:" scopes the whole article -- but only when
+      // the title visibly ends; in an unterminated span a (for X) may be body
+      // text, and promoting it would carry one block's engine to every later
+      // page (final review C2).
       kind = "article_title";
     } else if (inlineFor) {
       kind = "inline_for";
@@ -191,21 +255,23 @@ export function findScopeMarkers(text) {
       kind = "link";
     }
 
-    return { axis: "engine", kind, value, exclude: false, start, end };
+    return { axis: "engine", kind, value, exclude, start, end };
   });
 
-  // Two different codes with nothing but a few non-digit characters between
-  // them are column headers: the values below cannot be paired with either.
+  // Two different engines' labels or blocks with no figure between them are a
+  // header row: the values that follow cannot be paired with either (final
+  // review I2 widened this from adjacent row labels).
+  const pairable = new Set(["row_label", "inline_for", "column_header"]);
   for (let index = 0; index + 1 < engineMarkers.length; index += 1) {
     const left = engineMarkers[index];
     const right = engineMarkers[index + 1];
     const gap = blanked.slice(left.end, right.start);
 
     if (
-      left.kind === "row_label" &&
-      right.kind === "row_label" &&
-      left.value !== right.value &&
-      gap.length <= 3 &&
+      pairable.has(left.kind) &&
+      pairable.has(right.kind) &&
+      `${left.value}|${left.exclude}` !== `${right.value}|${right.exclude}` &&
+      gap.length <= COLUMN_HEADER_MAX_GAP &&
       !/\d/.test(gap)
     ) {
       left.kind = "column_header";
@@ -266,13 +332,14 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
 
   /** @type {Array<{ at: number, apply: (state: any) => void }>} */
   const events = [];
-  for (const span of articleSpans(blanked)) {
+  for (const at of articleSpans(blanked).map((span) => span.start)) {
     events.push({
-      at: span.start,
+      at,
       apply: (state) => {
         for (const axis of AXES) {
           state[axis].base = null;
           state[axis].overlay = null;
+          state[axis].mixed = false;
         }
       },
     });
@@ -322,6 +389,7 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
         apply: (state) => {
           state[axis].base = base;
           state[axis].overlay = null;
+          state[axis].mixed = false;
         },
       });
     }
@@ -335,6 +403,14 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
       at: marker.start,
       apply: (state) => {
         const layer = state[marker.axis];
+        const differsFromBase =
+          layer.base &&
+          "value" in layer.base &&
+          (UNRESOLVED_KINDS.has(marker.kind) ||
+            `${marker.value}|${marker.exclude}` !== `${layer.base.value}|${layer.base.exclude}`);
+        if ((UNRESOLVED_KINDS.has(marker.kind) || OVERLAY_KINDS.has(marker.kind)) && differsFromBase) {
+          layer.mixed = true;
+        }
         if (UNRESOLVED_KINDS.has(marker.kind)) {
           layer.unresolved = layer.unresolved || { unresolved: true, kind: marker.kind };
         } else if (BASE_KINDS.has(marker.kind)) {
@@ -354,8 +430,8 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
   // Only a title's scope crosses a page -- including an unresolved title.
   const readCarry = (axisScope) => (axisScope && BASE_KINDS.has(axisScope.kind) ? axisScope : null);
   const state = {
-    engine: { base: readCarry(carryIn.engine), overlay: null, unresolved: null },
-    plant: { base: readCarry(carryIn.plant), overlay: null, unresolved: null },
+    engine: { base: readCarry(carryIn.engine), overlay: null, unresolved: null, mixed: false },
+    plant: { base: readCarry(carryIn.plant), overlay: null, unresolved: null, mixed: false },
   };
   /** @returns {Scope} */
   const current = () => ({
@@ -384,9 +460,26 @@ export function resolveSegments(text, { carryIn = EMPTY_SCOPE } = {}) {
 
   return {
     segments,
-    carryOut: { engine: state.engine.base, plant: state.plant.base },
+    carryOut: { engine: carryBase(state.engine), plant: carryBase(state.plant) },
     markers,
   };
+}
+
+/**
+ * What a page hands the next one on an axis: its title scope -- unless, after
+ * that title, the page opened a block for a different variant or something
+ * unreadable. The next page may continue that block with no marker of its own,
+ * so it starts unresolved rather than inheriting the title's engine (final
+ * review C2: a 2ZR-FE title carried onto a page that continued a 2AZ-FE block).
+ *
+ * @param {{ base: AxisScope, mixed: boolean }} layer
+ * @returns {AxisScope}
+ */
+function carryBase(layer) {
+  if (layer.mixed && layer.base && "value" in layer.base) {
+    return { unresolved: true, kind: layer.base.kind };
+  }
+  return layer.base;
 }
 
 /**
