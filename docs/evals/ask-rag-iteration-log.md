@@ -3666,3 +3666,82 @@ oil filter".
   Retrieval found no pad-replacement, wheel-bearing, or coolant-replacement procedure. Garbled
   extracts defeat verbatim quotes. Every run is therefore `partial`, and readiness never
   exceeded 50.
+
+## N5 P1 — applicability tagger, measured offline (2026-10-22)
+
+**A deterministic tagger now says which engine (and build plant) each stretch of a manual page
+is scoped to. It classifies only: nothing in Ask, the planner, or retrieval uses it yet, and
+`applicabilityNotEnforced.test.js` fails if something starts to. On a blind, independently
+labeled sample of 173 real figures it judged no 2AZ-FE figure to apply to the owner's 2ZR-FE,
+and judged none of the owner's 47 figures to belong to another engine.** No model or embedding
+call was made at any step.
+
+Design: [`docs/n5-applicability-design.md`](../n5-applicability-design.md). Plan:
+`docs/n5-p0-p1-implementation-plan.md`. Branch `claude/n5-p1-applicability-tagger`, stacked on
+P0 (`claude/n5-p0-vehicle-profile`); not pushed.
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Data | A `VACUUM INTO` snapshot of the live database (opened `readOnly`; the live `.db` and `-wal` kept their size and timestamps). 1,443 documents, 15,244 pages with chunks, 20,447 chunks |
+| Report | `DATABASE_FILE=<snapshot> npm run diagnose:applicability -- --engine 2ZR-FE`, 5 s |
+| Label check | `check:applicability-labels -- --sample`, then labels written blind by agents that never saw the tagger's code or verdicts, then `--labels`. Candidates, labels, and results stay in the gitignored `server/data/applicability-labels/` because they quote manual text |
+| Spend | $0 |
+
+### Corpus report (owner engine 2ZR-FE; the ALLDATA account header excluded)
+
+| | Documents | Pages |
+| --- | --- | --- |
+| Name no engine | 1,030 | 12,857 |
+| Name only 2ZR-FE | 315 | 1,991 |
+| Name both engines | 81 | 290 |
+| Name only another engine | 17 | 106 |
+
+The account header ("…Corolla L4-1.8L (2ZR-FE)") appears on 1,153 documents and 3,207 pages,
+and for 782 documents it is the only mention of 2ZR-FE. 187 pages carry both engines' `(for X)`
+blocks; 83 spec-bearing chunks name both engines and 48 name only another. Every difference from
+the design's earlier regex measurement is explained: 3 pages read an OCR misread (`2ZA-FE`) as
+unknown instead of another engine, 6 pages gain an OCR-split `2ZR- FE`, and 3 documents name an
+engine only in their filename, which the report does not read.
+
+### Independent verification
+
+1. **Synthetic oracle (110 rows).** Written from the plan's rules alone by an author who never saw
+   the code: mixed-engine tables, unknown applicability, false-positive engine matches, the plant
+   axis, scope extent. First run 106/110. All four misses were in the unsafe direction and all
+   four had been flagged by the author as ambiguous rules; each was ruled fail-closed and fixed
+   (`71c2a69`). Now 110/110, committed as a test.
+2. **Blind real-corpus labels.** First sample 233 figures: 0 false applies, but 21/47 owner figures
+   judged another engine's. All 21 were one footnote (Mexico vehicle height) following the 2AZ-FE
+   row of the alignment table, in four copies of that document; the footnote covers both engines.
+   A table footnote now ends the row scope above it (`ca6eb54`). Corpus impact, old rule vs new over
+   all 20,333 unit-bearing figures: exactly 27 change, all `other_variant` → `not_stated`, all that
+   footnote (a looser first version also touched one OCR-noise figure in a 2AZ-FE wiring diagram
+   and was tightened). The same sample also drew 100 figures from the header's "1.8L"; the sampler
+   now skips the header (`c6f4592`), and 40 replacement figures were labeled blind.
+
+### Result (173 labeled figures, owner profile 2ZR-FE, engine axis)
+
+| Label → tagger | applies | other_variant | unresolved | not_stated |
+| --- | --- | --- | --- | --- |
+| 2AZ-FE (20) | **0** | 20 | 0 | 0 |
+| 2ZR-FE (26) | 14 | **0** | 0 | 12 |
+| both (21) | 0 | **0** | 0 | 21 |
+| none (106) | 0 | 0 | 0 | 106 |
+
+Acceptance (plan Task 10): false applies **0** (must be 0); owner figures judged another engine's
+**0/47** (must be ≤ 5%). Passed.
+
+### What this does not show
+
+- **12 owner figures read "not stated"**, all in the merged manual, whose articles are headed
+  "2ZR-FE ENGINE CONTROL: …" rather than the "Vehicle > … (2ZR-FE)" title the tagger reads. That
+  under-claims (the safe direction) and is a candidate for a later rule.
+- **The sample is duplicate-heavy.** The merged manual repeats the single-article PDFs, so 173 rows
+  cover roughly 60 distinct contexts.
+- **The unit pattern over-reads.** It took "91V", a tire speed index, as volts. Those rows were
+  labeled "none" and never count against the tagger, but a later enforcement phase must not trust
+  the sampler's unit detection.
+- **Plant, VSC, transmission, and Smart Key are not judged here.** Plant markers are detected and
+  reported; nothing is enforced on any axis until P3/P4.
