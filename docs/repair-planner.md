@@ -316,7 +316,33 @@ the in-flight OpenAI request the instant streaming begins and surface a spurious
 `error` frame reading "This operation was aborted". A genuine disconnect aborts
 the OpenAI `fetch`; the resulting `AbortError` is treated as a quiet end (no
 `error` frame), since there is no client left to receive one. Real model/network
-failures (4xx/5xx, stream-parse errors) still surface verbatim through `error`.
+failures (4xx/5xx, a `response.failed` or `error` stream event) still surface
+through `error`, but with a fixed message, never the provider's text.
+
+### Provider errors are redacted
+
+The streaming client used to throw `OpenAI request failed (<status>): <body>`,
+and the agent emits a thrown message as the `error` frame — so the provider's
+response body reached the browser (audit 1A-16). A 401 body names the owner's
+key by its last characters ("Incorrect API key provided: sk-proj-****abcd"),
+and other bodies can echo the brief or the retrieved manual text. Now:
+
+- A non-2xx response throws `createRedactedOpenAiHttpError` (the helper Ask
+  and the embedding call already use): the message is the fixed "The AI
+  service rejected the request. Please try again.", and the status sits on
+  `error.failure`.
+- A `response.failed` or `error` stream event throws the fixed
+  `OPENAI_STREAM_FAILED_MESSAGE`; the provider's message is dropped.
+- The body survives only as `error.failure.diagnostic`: at most 200
+  characters, never sent to the client, never logged, and with every whole or
+  masked API key (`sk-…`, or any run of three or more `*`) replaced by
+  `[redacted key]` before it is kept. That scrub lives in the shared
+  `openAiResponsePayload.js`, so Ask's and the embedding call's diagnostics get
+  it too.
+
+`server/test/plannerProviderErrors.test.js` drives the real client through the
+agent and asserts the key suffix and an echoed brief reach no SSE frame and no
+`console` call.
 
 ### Incomplete runs
 

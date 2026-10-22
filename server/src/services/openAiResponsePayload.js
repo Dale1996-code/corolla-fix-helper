@@ -73,8 +73,20 @@ export function createRedactedOpenAiHttpError(status, body) {
   return error;
 }
 
+// API-key material a provider error can echo. A 401 reads "Incorrect API key
+// provided: sk-proj-****abcd", which names the owner's key by its last
+// characters. A whole or masked key is replaced BEFORE anything is retained, so
+// a diagnostic that someone later prints by accident holds no part of the key.
+// Any run of three or more asterisks counts as masking, with or without the
+// `sk-` prefix. The lookbehind starts a masked match only at the start of a
+// token: without it the pattern backtracks quadratically over one long word,
+// and the body is provider-sized before it is capped.
+const API_KEY_PATTERN = /\bsk-[\w*-]+|(?<![\w-])[\w-]*\*{3,}[\w-]*/g;
+export const REDACTED_KEY_PLACEHOLDER = "[redacted key]";
+
 function truncateDiagnostic(value) {
-  const text = typeof value === "string" ? value.trim() : "";
+  const text =
+    typeof value === "string" ? value.replace(API_KEY_PATTERN, REDACTED_KEY_PLACEHOLDER).trim() : "";
 
   if (!text) {
     return "";

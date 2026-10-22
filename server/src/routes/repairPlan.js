@@ -149,7 +149,8 @@ export function createRepairPlanRouter({
       // A genuine client disconnect aborts the in-flight request; there is no
       // longer anyone to receive a frame, so end quietly instead of writing a
       // user-facing error to a dead socket. Real model/network failures still
-      // surface verbatim.
+      // surface, but never with the provider's own text: the streaming client
+      // throws a fixed message for an HTTP error or a failed stream (1A-16).
       // Typed planner failures keep their code/reason so the browser can tell
       // an incomplete run from a completed one. `send` serializes the whole
       // event, so agent-emitted frames already carry these through untouched.

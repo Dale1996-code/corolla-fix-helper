@@ -477,3 +477,18 @@ test("a redacted HTTP error diagnostic is length-capped", () => {
 
   assert.ok(error.failure.diagnostic.length <= 210);
 });
+
+test("a redacted diagnostic holds no part of an API key, masked or whole (1A-16)", () => {
+  const bodies = [
+    "Incorrect API key provided: sk-proj-********************************Qz7w.",
+    "Incorrect API key provided: sk-abc123XYZ456. You can find your API key at ...",
+    "Incorrect API key provided: ***************Qz7w.",
+  ];
+
+  for (const body of bodies) {
+    const error = /** @type {any} */ (createRedactedOpenAiHttpError(401, body));
+
+    assert.doesNotMatch(error.failure.diagnostic, /sk-|Qz7w|abc123/, error.failure.diagnostic);
+    assert.match(error.failure.diagnostic, /Incorrect API key provided: \[redacted key\]/);
+  }
+});
