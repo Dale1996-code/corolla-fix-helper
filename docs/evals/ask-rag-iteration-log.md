@@ -3611,3 +3611,58 @@ characters).
   reproduced.
 - Status `partial` in all four runs comes mainly from unestablished tool requirements, not from
   the claim checks.
+
+### Run 5 — the follow-up at `01de922`, 2026-10-22
+
+**A fifth run, the last that D3 allows, was approved separately by the owner to test `94cd259`
+live. The brief was "Replace the front brake pads and change the engine oil." (two tasks). It came
+back `partial`, with 13 of 16 claims kept and no `not_whole_clause` rejection. 7 Responses
+calls; 57,874 input tokens (39,936 cached) and 1,635 output: about $0.16. The five runs together
+cost about $0.86.**
+
+Same harness, model, and settings as runs 1–4. A fresh copy of the same database (`.db` MD5
+`c1c5f794…`, WAL `dd999735…`). Inventory: tools "floor jack, jack stands, torque wrench,
+socket set, C-clamp, drain pan, no oil filter wrench"; parts "front brake pads, 5W-30 engine oil,
+oil filter".
+
+| | Runs 1–4 (`a552c6d`) | Run 5 (`01de922`) |
+| --- | --- | --- |
+| Claims kept | 42 / 59 (50 / 59 in the `94cd259` replay) | 13 / 16 |
+| `not_whole_clause` | 14 (9 whole sentences, 5 table rows) | 0 |
+| Negation dropped in a saved note | 0 | 0 (no negated line was submitted) |
+| Kept specs under the wrong task | 0 | 0 |
+| Tool requirement established | 0 of 4 runs | no |
+| Status | 4 × `partial` | `partial` |
+
+- **The table-row instruction took effect.** Both oil-capacity rows were quoted as their own
+  row and kept, under "change the engine oil": 4.2 liters with a filter change, 3.9 without.
+  In run 2 the same row was quoted with its table header and rejected. One run cannot separate
+  the instruction from model variance.
+- **The period fix was not exercised.** This time the model quoted each brake-bleeding safety
+  sentence on its own, and all four were kept. Replaying run 5 at `a552c6d` and at `01de922`
+  gives identical verdicts. `94cd259` therefore rests on its unit tests, its oracle control
+  row, and the runs 1–4 replay.
+- **The three rejections were each correct under the rules.**
+  - A safety sentence whose quote "tidied" a garbled extract, in which the sentence repeats
+    itself mid-way, so the quote was not verbatim (`quote_not_in_source`).
+  - "Torque : 37 Nm (…)" claimed alone, with the drain-plug step only in its quote
+    (`subject_missing`). The value is the right one, but on its own the claim names no
+    fastener: the 1A-06 rule at work. Run 2 kept the same value by claiming both sentences.
+    That costs this plan its drain-plug torque.
+  - A bare "5W-30" (`subject_missing`).
+- **Inventory.**
+  - "5W-30 engine oil" owned `engine oil`.
+  - `new gasket` was correctly missing.
+  - The negated "no oil filter wrench" was not exercised, because no tool requirement verified.
+
+### Readiness of Stage 5-E2, after five runs
+
+- **No false acceptance in five live runs.** No saved note inverted a negation. No bare value
+  was kept, and every kept specification was right for its task: 37 N·m drain plug, 25 N·m
+  filter cap, 4.2 L and 3.9 L capacity.
+- **One verifier defect found live, and fixed** (`94cd259`).
+- **The plans are thin, for reasons outside the verifier.** No run established its tools: the
+  model rarely submits a tool requirement, and Toyota's bare "SST" is refused as too short.
+  Retrieval found no pad-replacement, wheel-bearing, or coolant-replacement procedure. Garbled
+  extracts defeat verbatim quotes. Every run is therefore `partial`, and readiness never
+  exceeded 50.
