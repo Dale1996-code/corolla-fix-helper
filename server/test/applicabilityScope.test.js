@@ -10,6 +10,7 @@ import {
   KNOWN_ENGINE_CODES,
   PLANT_VALUES,
   blankAccountHeader,
+  classifyScope,
   computeDocumentScopes,
   findScopeMarkers,
   resolveSegments,
@@ -310,4 +311,74 @@ test("pages are processed in page order whatever order they arrive in", () => {
 
   assert.deepEqual(pages.map((page) => page.pageNumber), [1, 2]);
   assert.equal(pages[1].chunks[0].entryScope.engine.value, "2AZ-FE");
+});
+
+// ---- classifyScope: a scope against the owner's vehicle profile ----
+
+const OWNER = {
+  engineCode: "2ZR-FE",
+  buildPlant: "NUMMI",
+  transmissionCode: null,
+  hasVsc: null,
+  hasSmartKey: null,
+};
+const ENGINE_2AZ = { value: "2AZ-FE", exclude: false, kind: "row_label" };
+const ENGINE_2ZR = { value: "2ZR-FE", exclude: false, kind: "inline_for" };
+const EXCEPT_TMC = { value: "TMC", exclude: true, kind: "diagram_title" };
+const UNRESOLVED = { unresolved: true, kind: "legend" };
+const BOTH_AXES = { axes: ["engine", "plant"] };
+
+for (const [label, scope, profile, options, expected] of [
+  ["another engine", { engine: ENGINE_2AZ, plant: null }, OWNER, undefined, "other_variant"],
+  ["the owner's engine", { engine: ENGINE_2ZR, plant: null }, OWNER, undefined, "applies"],
+  ["no variant named", EMPTY_SCOPE, OWNER, undefined, "not_stated"],
+  ["an unresolved region", { engine: UNRESOLVED, plant: null }, OWNER, undefined, "unresolved"],
+  [
+    "the owner's engine code left blank (Review Focus 3)",
+    { engine: ENGINE_2ZR, plant: null },
+    { ...OWNER, engineCode: null },
+    undefined,
+    "unresolved",
+  ],
+  ["'Except TMC' for a NUMMI car", { engine: null, plant: EXCEPT_TMC }, OWNER, BOTH_AXES, "applies"],
+  [
+    "'Except TMC' for a TMC car",
+    { engine: null, plant: EXCEPT_TMC },
+    { ...OWNER, buildPlant: "TMC" },
+    BOTH_AXES,
+    "other_variant",
+  ],
+  [
+    "'for TMMT made' for a NUMMI car",
+    { engine: null, plant: { value: "TMMT", exclude: false, kind: "row_label" } },
+    OWNER,
+    BOTH_AXES,
+    "other_variant",
+  ],
+  [
+    "a plant scope with the owner's plant unknown",
+    { engine: ENGINE_2ZR, plant: EXCEPT_TMC },
+    { ...OWNER, buildPlant: null },
+    BOTH_AXES,
+    "unresolved",
+  ],
+  ["a plant scope while only the engine axis is checked", { engine: null, plant: EXCEPT_TMC }, OWNER, undefined, "not_stated"],
+  [
+    "another engine beats an unresolved plant",
+    { engine: ENGINE_2AZ, plant: { unresolved: true, kind: "unknown_code" } },
+    OWNER,
+    BOTH_AXES,
+    "other_variant",
+  ],
+]) {
+  test(`classifyScope: ${label} -> ${expected}`, () => {
+    assert.equal(classifyScope(scope, profile, options).verdict, expected);
+  });
+}
+
+test("classifyScope reports a verdict per checked axis", () => {
+  const result = classifyScope({ engine: ENGINE_2ZR, plant: EXCEPT_TMC }, OWNER, BOTH_AXES);
+
+  assert.deepEqual(result, { verdict: "applies", byAxis: { engine: "applies", plant: "applies" } });
+  assert.deepEqual(classifyScope(EMPTY_SCOPE, OWNER).byAxis, { engine: "not_stated" });
 });

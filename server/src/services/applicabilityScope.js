@@ -390,3 +390,66 @@ export function computeDocumentScopes(pages) {
     return { pageNumber, text, segments, chunks };
   });
 }
+
+/**
+ * @typedef {"applies"|"other_variant"|"unresolved"|"not_stated"} ApplicabilityVerdict
+ */
+
+const PROFILE_FIELD_BY_AXIS = { engine: "engineCode", plant: "buildPlant" };
+
+/**
+ * Judge one axis. Unknown is never a match: a scoped axis whose owner value is
+ * not set is `unresolved`.
+ *
+ * @param {AxisScope} axisScope
+ * @param {string | null} ownerValue
+ * @returns {ApplicabilityVerdict}
+ */
+function classifyAxis(axisScope, ownerValue) {
+  if (!axisScope) {
+    return "not_stated";
+  }
+  if ("unresolved" in axisScope) {
+    return "unresolved";
+  }
+  if (!ownerValue) {
+    return "unresolved";
+  }
+
+  const matches = axisScope.value === ownerValue;
+  return matches !== axisScope.exclude ? "applies" : "other_variant";
+}
+
+/**
+ * Classify a scope against the owner's vehicle profile. By default only the
+ * engine axis is checked (N5 decision #9); pass `axes` to add the plant.
+ *
+ * Combination is fail-closed: any axis naming another variant makes the whole
+ * verdict `other_variant`; otherwise any unresolved axis makes it `unresolved`;
+ * `applies` needs at least one axis to apply and none to object.
+ *
+ * @param {Scope} scope
+ * @param {import("./vehicleApplicabilityProfile.js").ApplicabilityProfile} profile
+ * @param {{ axes?: Array<"engine" | "plant"> }} [options]
+ * @returns {{ verdict: ApplicabilityVerdict, byAxis: Partial<Record<"engine" | "plant", ApplicabilityVerdict>> }}
+ */
+export function classifyScope(scope, profile, { axes = ["engine"] } = {}) {
+  /** @type {Partial<Record<"engine" | "plant", ApplicabilityVerdict>>} */
+  const byAxis = {};
+  for (const axis of axes) {
+    byAxis[axis] = classifyAxis(scope[axis], profile[PROFILE_FIELD_BY_AXIS[axis]]);
+  }
+
+  const verdicts = Object.values(byAxis);
+  /** @type {ApplicabilityVerdict} */
+  let verdict = "not_stated";
+  if (verdicts.includes("other_variant")) {
+    verdict = "other_variant";
+  } else if (verdicts.includes("unresolved")) {
+    verdict = "unresolved";
+  } else if (verdicts.includes("applies")) {
+    verdict = "applies";
+  }
+
+  return { verdict, byAxis };
+}
