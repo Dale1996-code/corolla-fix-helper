@@ -389,7 +389,22 @@ function startsClause(text, start) {
   return index < 0 || isClauseMark(text, index);
 }
 
-function endsClause(text, end) {
+function endsClause(text, start, end) {
+  // A claim that ends with its own mark ("...before bleeding the brakes .")
+  // already ends its clause, even when the quote runs on into the next
+  // sentence. Live planner runs rejected whole safety sentences until this.
+  // The look-back stays inside the claim, so a claim of bare punctuation
+  // cannot borrow the period of the sentence before it.
+  let back = end - 1;
+
+  while (back >= start && (text[back] === " " || WRAPPING_PUNCTUATION.test(text[back]))) {
+    back -= 1;
+  }
+
+  if (back >= start && isClauseMark(text, back)) {
+    return true;
+  }
+
   let index = end;
 
   while (index < text.length && (text[index] === " " || WRAPPING_PUNCTUATION.test(text[index]))) {
@@ -462,7 +477,7 @@ function claimPlacementProblem(claim, evidenceText) {
         problem = "negation_dropped";
       } else if (
         wholeClause &&
-        !(startsClause(quote, offset) && endsClause(quote, offset + statement.length))
+        !(startsClause(quote, offset) && endsClause(quote, offset, offset + statement.length))
       ) {
         problem = "not_whole_clause";
       }

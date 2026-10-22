@@ -659,6 +659,18 @@ export const PLANNER_ORACLE = [
     note: "The whole instruction, negation included.",
   },
   {
+    id: "control-planner-sentence-own-period",
+    verifier: "planner",
+    channel: "safety_instruction",
+    chunkText: "NOTICE: Do not reuse the caliper bolts. Install new bolts and torque them in two passes.",
+    quote: "NOTICE: Do not reuse the caliper bolts. Install new bolts and torque them in two passes",
+    claim: "Do not reuse the caliper bolts.",
+    task: "Replace the front brake pads",
+    expect: "accept",
+    finding: "control",
+    note: "A whole sentence, its own period included, inside a quote that runs on to the next sentence. Live runs showed the whole-clause rule rejecting exactly this shape.",
+  },
+  {
     id: "control-planner-full-range",
     verifier: "planner",
     channel: "numeric_spec",

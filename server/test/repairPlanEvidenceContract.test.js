@@ -287,6 +287,41 @@ test("a safety instruction may not stop short of the end of its clause", () => {
   assert.equal(whole.accepted.length, 1, "a clause ending at ';' is whole");
 });
 
+test("a whole sentence that ends with its own period is a whole clause though its quote goes on", () => {
+  // Found by the live planner runs: a model quotes a few sentences and claims
+  // one of them, period included. The clause ends at that period; the text
+  // after it in the quote is the next sentence, not a part the claim cut off.
+  // PDF extraction often leaves a space before the period, and list items run
+  // "a. ... b. ...".
+  const text = "CAUTION: Set the parking brake before raising the vehicle . a. Check the hoses. b. Check that the clamps are tight. c. Start the engine.";
+  const quote = "CAUTION: Set the parking brake before raising the vehicle . a. Check the hoses. b. Check that the clamps are tight. c. Start the engine";
+
+  for (const statement of [
+    "Set the parking brake before raising the vehicle .",
+    "Check that the clamps are tight.",
+  ]) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "safety_instruction", claim: statement, evidenceQuote: quote });
+    assert.equal(accepted.length, 1, `${statement} -> ${rejected[0]?.reason}`);
+  }
+
+  // Without its period the same words still stop where the sentence does.
+  const bare = verifyAgainst(text, { kind: "safety_instruction", claim: "Check that the clamps are tight", evidenceQuote: quote });
+  assert.equal(bare.accepted.length, 1);
+
+  // But a period does not make a cut clause whole: this claim starts mid-sentence.
+  const cut = verifyAgainst(text, { kind: "safety_instruction", claim: "the clamps are tight.", evidenceQuote: quote });
+  assert.equal(cut.rejected[0]?.reason, "not_whole_clause");
+
+  // And the look-back stays inside the claim: bare punctuation cannot borrow
+  // the period of the sentence before it.
+  const borrowed = verifyAgainst("Wear gloves. (See the note.)", {
+    kind: "safety_instruction",
+    claim: "(",
+    evidenceQuote: "Wear gloves. (See the note.)",
+  });
+  assert.equal(borrowed.accepted.length, 0);
+});
+
 test("a statement of another kind may be any un-negated part of its quote", () => {
   const { accepted } = verifyAgainst("Remove the two caliper bolts and lift the caliper off the bracket.", {
     kind: "procedure",

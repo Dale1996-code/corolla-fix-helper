@@ -205,7 +205,9 @@ negation, and part survived the copy. They do **not** prove it is the whole
 step or the right one: the whole-clause rule is measured against the quote, so
 a quote that itself stops mid-sentence can leave out a trailing qualifier ("at
 2,000 rpm"); a comma is not a boundary, so a later stage ("then a further 90°")
-is not tied to the first; and part matching is lexical, so it can reject an
+is not tied to the first; extracted tables carry no separators between rows, so
+a table value is a whole clause only when its quote is that one row (the model
+is told to quote it that way); and part matching is lexical, so it can reject an
 honest claim whose quote does not repeat the task's wording, and cannot tell
 two parts apart when both share a word with the task.
 
