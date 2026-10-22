@@ -969,9 +969,11 @@ export function createToolRegistry({
       // trustworthy rather than letting the model invent one.
       const taskId = Number(args?.taskId);
 
+      // The rejected value is not echoed: this string is also the owner's
+      // activity-log line, and the model knows what it sent.
       if (!validTaskIds.has(taskId)) {
         return Promise.resolve({
-          error: `Unknown taskId ${args?.taskId}. Call extract_repair_tasks and use one of: ${
+          error: `Unknown taskId. Call extract_repair_tasks and use one of: ${
             [...validTaskIds].join(", ") || "(no tasks)"
           }.`,
         });

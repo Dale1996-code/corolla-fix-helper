@@ -5,9 +5,10 @@ import path from "node:path";
 import test, { after } from "node:test";
 
 // A planner claim the evidence contract REJECTS must never reach the browser.
-// Today the raw finalize_repair_plan arguments ride out on the tool_call frame,
-// so the rejected value is visible in the activity log (1A-15). Kept as a todo
-// test until the frame carries tool name, ids, and counts only.
+// The raw finalize_repair_plan arguments used to ride out on the tool_call
+// frame, so the rejected value was visible in the activity log (1A-15). The
+// frame now carries the tool name, ids, and counts only, and no other frame
+// echoes a model argument either.
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-sse-leak-"));
 
 process.env.DATABASE_FILE = path.join(tempRoot, "sse-leak.db");
@@ -95,7 +96,7 @@ test("the planner run completes with the rejected claim dropped", async () => {
   assert.ok(result.text.includes("25 ft-lb"), "the verified claim is missing from the plan");
 });
 
-test("a rejected planner claim's value appears in no SSE frame", { todo: "1A-15" }, async () => {
+test("a rejected planner claim's value appears in no SSE frame", async () => {
   const events = [];
   await runRepairPlannerAgent(
     { brief: "Front brakes squeak. Replace pads." },
@@ -108,4 +109,87 @@ test("a rejected planner claim's value appears in no SSE frame", { todo: "1A-15"
     [],
     "the rejected value reached the browser via: " + JSON.stringify(leaking).slice(0, 300)
   );
+});
+
+test("tool_call frames carry the tool name, ids, and counts only", async () => {
+  const events = [];
+  await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    { emit: (event) => events.push(event), streamTurn: scriptedTurns(), retrieve, isAiConfigured: true }
+  );
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool_call"),
+    [
+      { type: "tool_call", name: "search_repair_docs", turn: 1, taskId: 1 },
+      { type: "tool_call", name: "finalize_repair_plan", turn: 2, claimCount: 2 },
+    ]
+  );
+});
+
+// Every other argument channel: a search query, a task id that names no task,
+// and a function name the planner never offered. Each holds the marker, and the
+// marker must reach no frame -- not the tool_call, the tool_result summary, nor
+// a trace span.
+test("model text in any tool argument reaches no SSE frame", async () => {
+  const MARKER = "77 Nm";
+  let turn = 0;
+
+  async function* streamTurn() {
+    turn += 1;
+
+    if (turn === 1) {
+      yield {
+        type: "function_call",
+        callId: "c1",
+        name: "search_repair_docs",
+        arguments: { taskId: 1, query: `caliper bolts ${MARKER}` },
+      };
+      yield {
+        type: "function_call",
+        callId: "c2",
+        name: "search_repair_docs",
+        arguments: { taskId: `bolts ${MARKER}`, query: "caliper" },
+      };
+      yield {
+        type: "function_call",
+        callId: "c3",
+        name: `torque_${MARKER}`,
+        arguments: { value: MARKER },
+      };
+      return;
+    }
+
+    yield {
+      type: "function_call",
+      callId: "c4",
+      name: "finalize_repair_plan",
+      arguments: { claims: [VERIFIED] },
+    };
+  }
+
+  const events = [];
+  const result = await runRepairPlannerAgent(
+    { brief: "Front brakes squeak. Replace pads." },
+    { emit: (event) => events.push(event), streamTurn, retrieve, isAiConfigured: true }
+  );
+
+  assert.equal(result.status, "completed");
+
+  const leaking = events.filter((event) => JSON.stringify(event).includes(MARKER));
+  assert.deepEqual(
+    leaking.map((event) => event.type),
+    [],
+    "a model argument reached the browser via: " + JSON.stringify(leaking).slice(0, 300)
+  );
+
+  const calls = events.filter((event) => event.type === "tool_call");
+  assert.deepEqual(
+    calls.map((event) => event.name),
+    ["search_repair_docs", "search_repair_docs", "unknown_tool", "finalize_repair_plan"]
+  );
+  assert.equal(calls[1].taskId, undefined, "an invalid task id is dropped, not coerced");
+
+  const summaries = events.filter((event) => event.type === "tool_result").map((event) => event.summary);
+  assert.match(summaries[0], /^Retrieved 1 passage for "/, "a search is named by its canonical task");
 });

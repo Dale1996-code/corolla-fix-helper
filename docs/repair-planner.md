@@ -259,7 +259,7 @@ one `data: <json>\n\n` frame. Event types:
 | `type` | Meaning |
 | --- | --- |
 | `status` | Human-readable progress message |
-| `tool_call` | The model asked to run a tool (`name`, `arguments`) |
+| `tool_call` | The model asked to run a tool (`name`, `turn`, and `taskId` / `claimCount` where they apply — never its arguments) |
 | `tool_result` | A tool finished (`name`, `summary`) |
 | `trace` | A finished tracing span (observability) |
 | `ai_not_configured` | No `OPENAI_API_KEY` is set; the run stops gracefully |
@@ -271,6 +271,36 @@ emits it**. Model prose is discarded, including prose emitted before a tool
 call: the plan the owner reads is rendered by the server from validated claims.
 `status`, `tool_call`, `tool_result`, and `trace` still stream, so a run is not
 silent.
+
+### What a tool frame may carry
+
+**No frame carries a model argument.** `tool_call` used to forward the model's
+raw `arguments`, so every claim submitted to `finalize_repair_plan` — including
+the ones the evidence contract then rejected — reached the activity log looking
+like part of the plan (audit 1A-15). The frame is now built from an allow-list
+in `describeToolCall`:
+
+```jsonc
+{ "type": "tool_call", "name": "search_repair_docs", "turn": 1, "taskId": 1 }
+{ "type": "tool_call", "name": "finalize_repair_plan", "turn": 2, "claimCount": 5 }
+```
+
+- `name` is one of the tools in `repairToolSchemas`. A function name the
+  planner never offered is model text too, so it arrives as `unknown_tool`.
+- `turn` is the 1-based model turn, counted by the server.
+- `taskId` appears on a search only when it names a canonical task; an
+  invented id is dropped, not coerced.
+- `claimCount` appears on the finalizer: how many claims were submitted, before
+  verification. The verified count is in `done.artifacts.evidence`.
+
+The same rule covers the other frames. A search's `tool_result` summary names
+the canonical task (`Retrieved 3 passages for "Replace the front brake pads".`)
+rather than the model's query, error summaries never echo the value that was
+rejected, and trace spans carry the same sanitized tool name. The
+model still receives its full arguments and tool outputs; only the browser
+copy is narrowed. `server/test/plannerSseLeak.test.js` asserts that a rejected
+claim's value, and a marker planted in a query, an invalid task id, and an
+invented tool name, appear in no frame at all.
 
 Request body: `{ brief, skillLevel, availableTools, availableParts, constraints }`.
 Only `brief` is required.
