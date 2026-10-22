@@ -104,6 +104,37 @@ a baseline and cannot reproduce.
   demoted on 2026-08-22 — its expectations were never weakened, it simply varied at the product
   level, and a gate that flickers is worse than no gate.
 
+### The automated tests never read your `server/.env`
+
+Your `server/.env` holds your real `OPENAI_API_KEY` and `NETWORK_MODE=1`. `npm run test` must
+use neither of them. A test that reached the real key could spend real money, and a test that
+saw `NETWORK_MODE=1` would check the phone-access binding instead of the safe default.
+
+So the server's config loader skips `.env` completely whenever Node's test runner started the
+process. The runner marks every test file it runs with an environment variable,
+`NODE_TEST_CONTEXT`, and the loader checks for it. That covers `npm run test`,
+`npm run test:server`, and a single file run with `cd server; node --test test/app.test.js`.
+Everything else (`npm start`, `npm run dev`, the evals) still reads `.env` as before.
+
+`server/test/envIsolation.test.js` guards this. It fails when:
+
+- the test runner stops setting `NODE_TEST_CONTEXT`. Node does not document this variable, so
+  an upgrade could rename it.
+- any OpenAI key is visible to a test. That includes a key set in your terminal session, which
+  skipping `.env` cannot block. If it fails for that reason, clear the key for the session
+  (`Remove-Item Env:OPENAI_API_KEY`) and run the tests again.
+- a `.env` planted next to a test probe gets read under the runner.
+
+Two ways of running a test file skip the marker, so don't use them: `node test/x.test.js`
+without `--test`, and `node --test --test-isolation=none`.
+
+The check lives in the config loader rather than in a setup file attached to `npm test`, for
+two reasons. A setup file would protect only that one npm script, not the single-file command
+above. That command is what you use while writing a new test, which is exactly when a test is
+most likely to be missing its own safety line. A setup file would also clear only the settings
+it lists by name. Skipping `.env` keeps every setting in it away from the tests, including ones
+like `RERANK_ENABLED`, `ASK_EVIDENCE_CONTRACT`, and `AI_DAILY_CALL_LIMIT`.
+
 ## 3. Relevance-floor calibration (only when tuning `ASK_RELEVANCE_FLOOR`)
 
 ```powershell

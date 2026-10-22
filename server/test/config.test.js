@@ -18,6 +18,8 @@ test("openAiVisionModel defaults to the answer model when OPENAI_VISION_MODEL is
 test("binds to loopback by default when NETWORK_MODE is unset", () => {
   // NETWORK_MODE is not set in this process, so the app must default to the
   // safe loopback binding rather than exposing itself on all interfaces.
+  // config.js skips server/.env under the test runner, so a local .env that
+  // says NETWORK_MODE=1 cannot change this (envIsolation.test.js).
   assert.equal(config.networkMode, false);
   assert.equal(config.host, "127.0.0.1");
 });

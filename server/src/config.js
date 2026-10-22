@@ -6,7 +6,17 @@ import dotenv from "dotenv";
 // nothing, so this cannot cycle back into config.
 import { DEFAULT_MAX_CHUNKS_PER_SOURCE } from "./services/retrievalDiversity.js";
 
-dotenv.config();
+// Never read .env inside a test. The owner's server/.env holds the real
+// OPENAI_API_KEY and NETWORK_MODE=1, so a suite that forgot to blank them would
+// spend real money and test the wrong binding. `node --test` sets
+// NODE_TEST_CONTEXT on every test-file process it spawns, and children those
+// suites spawn inherit it, so this covers `npm test`, a single
+// `node --test test/x.test.js`, and --watch alike. It is an undocumented Node
+// variable, which is why test/envIsolation.test.js fails if the runner ever
+// stops setting it.
+if (!process.env.NODE_TEST_CONTEXT) {
+  dotenv.config();
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
