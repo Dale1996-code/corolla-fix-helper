@@ -681,6 +681,10 @@ test("RepairPlannerPage renders each evidence status with honest wording", async
   expect(await screen.findByText("Verified against your documents")).toBeInTheDocument();
   // "Verified" must not read as a promise about the manuals themselves.
   expect(screen.getByText(/not a promise that your manuals cover the whole repair/i)).toBeInTheDocument();
+  // Nor as a promise about each statement: the check shows where a statement
+  // came from, not that it is the whole, correct step (3B-07).
+  expect(screen.queryByText(/word-for-word/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/not that it is the complete or correct step/i)).toBeInTheDocument();
 });
 
 test("RepairPlannerPage shows the partial banner and its gaps", async () => {
@@ -777,6 +781,7 @@ test("the save panel previews the exact title and items, and states what is not 
   expect(within(panel).getByText(/placeholder steps/i)).toBeInTheDocument();
   expect(within(panel).getByText(/handoff drafts/i)).toBeInTheDocument();
   expect(within(panel).getByText(/readiness score/i)).toBeInTheDocument();
+  expect(within(panel).queryByText(/word-for-word/i)).not.toBeInTheDocument();
 });
 
 test("saving sends the draft id and nothing else", async () => {

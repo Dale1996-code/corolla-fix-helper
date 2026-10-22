@@ -68,7 +68,7 @@ const REQUIREMENTS_ONLY_NOTICE =
   "The only statements verified for this plan were the tool and part requirements listed below. No procedure, specification, or safety instruction could be verified for the tasks themselves, so read the cited documents in full before starting.";
 
 const PROVENANCE_NOTE =
-  "Saved from a Repair Planner run. The statements below were matched word-for-word to a page of your uploaded documents at the time the plan was built. They are reference material, not step-by-step repair instructions: open each cited page and read the full procedure before working on the vehicle.";
+  "Saved from a Repair Planner run. The statements below were copied from a page of your uploaded documents at the time the plan was built. That shows where each statement came from, not that it is the complete or correct step. They are reference material, not step-by-step repair instructions: open each cited page and read the full procedure before working on the vehicle.";
 
 function truncate(value, limit) {
   const text = String(value || "").replace(/\s+/g, " ").trim();

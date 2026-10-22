@@ -108,16 +108,19 @@ function NarrativePanel({ narrative }) {
 
 // What each status means, in the owner's terms.
 //
-// "Verified" describes THIS RUN, not the manuals: every statement shown passed
-// an exact quote-and-number check against the uploaded PDFs. It does not mean
-// the PDFs cover the whole repair, and the wording has to say so -- otherwise
-// the badge reads as an assurance the app cannot give.
+// "Verified" describes THIS RUN, not the manuals: every statement shown was
+// copied from a cited page of the uploaded PDFs, with its numbers as printed
+// there, a part named, and no "not" or range cut off. Those checks prove where
+// a statement came from. They do not prove it is the whole step (a sentence
+// can be quoted short), that it applies to this car's job, or that the PDFs
+// cover the whole repair, and the wording has to say so -- otherwise the badge
+// reads as an assurance the app cannot give.
 const EVIDENCE_STATUS = {
   verified: {
     label: "Verified against your documents",
     className: "bg-emerald-100 text-emerald-800",
     detail:
-      "Every statement below was matched word-for-word to a cited page of your uploaded manuals. That is a check on this plan, not a promise that your manuals cover the whole repair.",
+      "Every statement below was copied from a cited page of your uploaded manuals, with its numbers as printed there. That shows where each statement came from, not that it is the complete or correct step, so read the cited page. It is also not a promise that your manuals cover the whole repair.",
   },
   partial: {
     label: "Partly verified",
@@ -537,7 +540,7 @@ function HandoffPanel({ handoffNotes }) {
 // not be surprised by what is missing, and should never assume the placeholder
 // steps or the unverified gaps came along.
 const CHECKLIST_EXCLUSIONS = [
-  "The AI's own wording — every statement saved was copied word-for-word from a cited page.",
+  "The AI's own wording — every statement saved is text copied from a cited page; open that page for the full step.",
   "The gaps list, which describes what could not be verified.",
   "The placeholder steps from the owner checklist above; they are not real repair instructions.",
   "The handoff drafts (parts list, mechanic summary, log entry).",

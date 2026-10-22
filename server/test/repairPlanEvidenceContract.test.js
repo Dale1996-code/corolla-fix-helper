@@ -40,13 +40,16 @@ const TASKS = [
   { id: 1, title: "Replace front brake pads", system: "Brakes", difficulty: "beginner", compound: false, clauses: [] },
 ];
 
+// The quote runs from the line's own label, so it names the task's part (brake
+// pads) as well as the claim's (caliper bolts) -- a specification must share a
+// part word with its task (1A-06).
 function claim(overrides = {}) {
   return {
     taskId: 1,
     kind: "numeric_spec",
     claim: "torque the caliper bolts to 25 ft-lb",
     sourceId: "S1",
-    evidenceQuote: "torque the caliper bolts to 25 ft-lb",
+    evidenceQuote: "Front brake pad replacement: torque the caliper bolts to 25 ft-lb",
     ...overrides,
   };
 }
@@ -178,6 +181,295 @@ test("a claim may cite a source that was retrieved for another task", () => {
   assert.equal(result.verifiedClaims.length, 2);
 });
 
+// --- Claim placement (1A-05) -----------------------------------------------
+//
+// A claim is a span of its quote, and its quote is a span of the source. Where
+// the claim sits decides what it means: "apply grease to the pads" is the
+// opposite instruction when the source says "Do not" right before it.
+
+function verifyAgainst(text, overrides, taskTitle = "Replace front brake pads") {
+  return verifyClaims([claim(overrides)], {
+    sourcesById: new Map([["S1", makeSource("S1", text)]]),
+    tasks: [{ id: 1, title: taskTitle, compound: false, clauses: [] }],
+  });
+}
+
+const GREASE_TEXT = "Do not apply grease to the friction surface of the brake pads.";
+
+test("a claim that leaves out a leading 'Do not' is rejected as a dropped negation", () => {
+  const { accepted, rejected } = verifyAgainst(GREASE_TEXT, {
+    kind: "safety_instruction",
+    claim: "apply grease to the friction surface of the brake pads",
+    evidenceQuote: "Do not apply grease to the friction surface of the brake pads",
+  });
+
+  assert.equal(accepted.length, 0);
+  assert.equal(rejected[0].reason, "negation_dropped");
+});
+
+test("trimming the negation off the quote as well does not launder it", () => {
+  // The quote really is in the source and the claim is all of it, but the
+  // source says "Do not" right before both. The negation check reads the
+  // source the model was shown, not the quote the model chose.
+  for (const kind of ["safety_instruction", "procedure", "vehicle_fact", "numeric_spec"]) {
+    const { accepted, rejected } = verifyAgainst(GREASE_TEXT, {
+      kind,
+      claim: "apply grease to the friction surface of the brake pads",
+      evidenceQuote: "apply grease to the friction surface of the brake pads",
+    });
+
+    assert.equal(accepted.length, 0, kind);
+    assert.equal(rejected[0].reason, "negation_dropped", kind);
+  }
+});
+
+test("never, don't, and without in the three words before a claim all count as negation", () => {
+  const cases = [
+    ["Never reuse the drain plug gasket.", "reuse the drain plug gasket"],
+    ["Don't open the radiator cap while the engine is hot.", "open the radiator cap while the engine is hot"],
+    ["Install the bolt without applying thread locker.", "applying thread locker"],
+  ];
+
+  for (const [text, statement] of cases) {
+    const { rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(rejected[0]?.reason, "negation_dropped", statement);
+  }
+});
+
+test("a negation in an earlier sentence does not block the next one", () => {
+  const { accepted } = verifyAgainst("Do not reuse the gasket. Replace the gasket with a new one.", {
+    kind: "procedure",
+    claim: "Replace the gasket with a new one",
+    evidenceQuote: "Replace the gasket with a new one",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("an un-negated occurrence is found even when a negated one comes first", () => {
+  const { accepted } = verifyAgainst("Do not tighten the bolt yet. Tighten the bolt after the hose is connected.", {
+    kind: "procedure",
+    claim: "Tighten the bolt",
+    evidenceQuote: "Tighten the bolt",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("a specification must be a whole clause of its quote", () => {
+  const text = "Caliper slide pin bolt torque: 34 N*m. Caliper bracket bolt torque: 107 N*m.";
+  const quote = "Caliper slide pin bolt torque: 34 N*m. Caliper bracket bolt torque: 107 N*m";
+  const task = "Tighten the caliper slide pin bolts";
+
+  // Starting at "torque" drops the part the 107 belongs to; filed under the
+  // slide-pin task it would read as the slide pins' torque (the source says 34).
+  const cut = verifyAgainst(text, { claim: "torque: 107 N*m", evidenceQuote: quote }, task);
+  assert.equal(cut.accepted.length, 0);
+  assert.equal(cut.rejected[0].reason, "not_whole_clause");
+
+  // The whole second sentence names its own part and may be shown.
+  const whole = verifyAgainst(text, { claim: "Caliper bracket bolt torque: 107 N*m", evidenceQuote: quote }, task);
+  assert.equal(whole.accepted.length, 1);
+});
+
+test("a safety instruction may not stop short of the end of its clause", () => {
+  const text = "Do not open the radiator cap while the engine is hot; wait until it cools.";
+  const quote = "Do not open the radiator cap while the engine is hot; wait until it cools";
+
+  const short = verifyAgainst(text, { kind: "safety_instruction", claim: "Do not open the radiator cap", evidenceQuote: quote });
+  assert.equal(short.rejected[0]?.reason, "not_whole_clause");
+
+  const whole = verifyAgainst(text, {
+    kind: "safety_instruction",
+    claim: "Do not open the radiator cap while the engine is hot",
+    evidenceQuote: quote,
+  });
+  assert.equal(whole.accepted.length, 1, "a clause ending at ';' is whole");
+});
+
+test("a whole sentence that ends with its own period is a whole clause though its quote goes on", () => {
+  // Found by the live planner runs: a model quotes a few sentences and claims
+  // one of them, period included. The clause ends at that period; the text
+  // after it in the quote is the next sentence, not a part the claim cut off.
+  // PDF extraction often leaves a space before the period, and list items run
+  // "a. ... b. ...".
+  const text = "CAUTION: Set the parking brake before raising the vehicle . a. Check the hoses. b. Check that the clamps are tight. c. Start the engine.";
+  const quote = "CAUTION: Set the parking brake before raising the vehicle . a. Check the hoses. b. Check that the clamps are tight. c. Start the engine";
+
+  for (const statement of [
+    "Set the parking brake before raising the vehicle .",
+    "Check that the clamps are tight.",
+  ]) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "safety_instruction", claim: statement, evidenceQuote: quote });
+    assert.equal(accepted.length, 1, `${statement} -> ${rejected[0]?.reason}`);
+  }
+
+  // Without its period the same words still stop where the sentence does.
+  const bare = verifyAgainst(text, { kind: "safety_instruction", claim: "Check that the clamps are tight", evidenceQuote: quote });
+  assert.equal(bare.accepted.length, 1);
+
+  // But a period does not make a cut clause whole: this claim starts mid-sentence.
+  const cut = verifyAgainst(text, { kind: "safety_instruction", claim: "the clamps are tight.", evidenceQuote: quote });
+  assert.equal(cut.rejected[0]?.reason, "not_whole_clause");
+
+  // And the look-back stays inside the claim: bare punctuation cannot borrow
+  // the period of the sentence before it.
+  const borrowed = verifyAgainst("Wear gloves. (See the note.)", {
+    kind: "safety_instruction",
+    claim: "(",
+    evidenceQuote: "Wear gloves. (See the note.)",
+  });
+  assert.equal(borrowed.accepted.length, 0);
+});
+
+test("a statement of another kind may be any un-negated part of its quote", () => {
+  const { accepted } = verifyAgainst("Remove the two caliper bolts and lift the caliper off the bracket.", {
+    kind: "procedure",
+    claim: "lift the caliper off the bracket",
+    evidenceQuote: "Remove the two caliper bolts and lift the caliper off the bracket",
+  });
+
+  assert.equal(accepted.length, 1);
+});
+
+test("a claim may not cut a range or drop a sign, even with a trimmed quote", () => {
+  const text = "Alternator output: 13.2 to 14.8 V. Regulated output 13.2-14.8 V. Freeze protection down to -37 °C.";
+  const cases = [
+    "14.8 V", // upper bound of "13.2 to 14.8 V"
+    "Alternator output: 13.2", // lower bound, range end dropped
+    "37 °C", // "-37 °C" with the minus sign dropped
+  ];
+
+  for (const statement of cases) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "vehicle_fact", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 0, statement);
+    assert.equal(rejected[0].reason, "range_cut", statement);
+  }
+
+  const dashed = verifyAgainst("Regulated output 13.2-14.8 V.", { kind: "vehicle_fact", claim: "14.8 V", evidenceQuote: "14.8 V" });
+  assert.equal(dashed.rejected[0]?.reason, "range_cut", "a dashed range is a range too");
+
+  const whole = verifyAgainst(text, {
+    kind: "vehicle_fact",
+    claim: "Alternator output: 13.2 to 14.8 V",
+    evidenceQuote: "Alternator output: 13.2 to 14.8 V",
+  });
+  assert.equal(whole.accepted.length, 1, "the whole range verifies");
+});
+
+// --- Subject guard (1A-06 / 1B-01) ------------------------------------------
+//
+// Planner claims are verbatim fragments, so "is the claim's part in its quote?"
+// (Ask's subject guard) is always yes. What can be wrong is the TASK: a value
+// copied from the drain-plug line and filed under "Replace the oil filter".
+
+const DRAIN_TEXT = "Oil pan drain plug 37 N*m. Oil filter cap 25 N*m.";
+
+test("a bare value never verifies, whatever kind it is filed under", () => {
+  for (const kind of ["numeric_spec", "vehicle_fact", "procedure"]) {
+    const { accepted, rejected } = verifyAgainst(
+      DRAIN_TEXT,
+      { kind, claim: "37 N*m", evidenceQuote: "37 N*m" },
+      "Replace the oil filter"
+    );
+
+    assert.equal(accepted.length, 0, kind);
+    assert.equal(rejected[0].reason, "subject_missing", kind);
+  }
+});
+
+test("'torque' alone names no part, because every fastener has one", () => {
+  const { rejected } = verifyAgainst(
+    "Caliper bracket bolt. Torque: 107 N*m.",
+    { claim: "Torque: 107 N*m", evidenceQuote: "Caliper bracket bolt. Torque: 107 N*m" },
+    "Tighten the caliper bracket bolts"
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("a spec must share a part word with the task it is filed under", () => {
+  const text = "Coolant drain cock 13 N*m. Oil pan drain plug 37 N*m.";
+
+  const other = verifyAgainst(
+    text,
+    { claim: "Coolant drain cock 13 N*m", evidenceQuote: "Coolant drain cock 13 N*m" },
+    "Replace the oil filter"
+  );
+  assert.equal(other.rejected[0]?.reason, "subject_missing");
+
+  const own = verifyAgainst(
+    text,
+    { claim: "Oil pan drain plug 37 N*m", evidenceQuote: "Oil pan drain plug 37 N*m" },
+    "Replace the oil drain plug gasket"
+  );
+  assert.equal(own.accepted.length, 1);
+});
+
+test("the task's part may be named by the quote rather than the claim, in any plural", () => {
+  const { accepted } = verifyAgainst(
+    "Brake pads: minimum thickness 1.0 mm.",
+    { claim: "minimum thickness 1.0 mm", evidenceQuote: "Brake pads: minimum thickness 1.0 mm" },
+    "Inspect the brake pad"
+  );
+
+  assert.equal(accepted.length, 1);
+});
+
+test("repair verbs and position words are not the part a task is about", () => {
+  // "Replace" and "front" are in both, but the hub nut is not the brake pads.
+  const { rejected } = verifyAgainst(
+    "Front axle hub nut: replace and torque to 216 N*m.",
+    { claim: "Front axle hub nut: replace and torque to 216 N*m", evidenceQuote: "Front axle hub nut: replace and torque to 216 N*m" },
+    "Replace front brake pads"
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("a compound task's spec must match the clause it says it supports", () => {
+  const text = "Brake pad minimum thickness 1.0 mm.";
+  const tasks = [
+    {
+      id: 1,
+      title: "Replace the brake pads and check the steering rack",
+      compound: true,
+      clauses: ["Replace the brake pads", "check the steering rack"],
+    },
+  ];
+  const verifyFor = (clauseIndex) =>
+    verifyClaims(
+      [claim({ clauseIndex, claim: "Brake pad minimum thickness 1.0 mm", evidenceQuote: "Brake pad minimum thickness 1.0 mm" })],
+      { sourcesById: new Map([["S1", makeSource("S1", text)]]), tasks }
+    );
+
+  assert.equal(verifyFor(0).accepted.length, 1);
+  assert.equal(verifyFor(1).rejected[0]?.reason, "subject_missing", "brake pads do not ground the steering clause");
+});
+
+test("a spec whose task is unknown is rejected rather than guessed", () => {
+  const { rejected } = verifyClaims(
+    [claim({ claim: "Oil pan drain plug 37 N*m", evidenceQuote: "Oil pan drain plug 37 N*m" })],
+    { sourcesById: new Map([["S1", makeSource("S1", DRAIN_TEXT)]]) }
+  );
+
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("statements without a value need no subject", () => {
+  const { accepted } = verifyAgainst(
+    "Do not open the radiator cap while the engine is hot.",
+    {
+      kind: "safety_instruction",
+      claim: "Do not open the radiator cap while the engine is hot",
+      evidenceQuote: "Do not open the radiator cap while the engine is hot",
+    },
+    "Replace front brake pads"
+  );
+
+  assert.equal(accepted.length, 1, "the task guard applies to specifications, not to every safety line");
+});
+
 // --- Status derivation -----------------------------------------------------
 
 test("an empty claims array can only ever be not_found", () => {
@@ -275,30 +567,80 @@ test("a grounded no_required_tools claim satisfies that group", () => {
   assert.equal(groups.parts.status, "unknown", "silence about parts is still not evidence");
 });
 
-test("inventory satisfies a requirement only on a complete phrase match", () => {
-  const accepted = [
-    { kind: "required_tool", itemName: "torque wrench" },
-    { kind: "required_tool", itemName: "10 mm wrench" },
-  ];
+// Rewritten for 1A-07 (audit 3A-06). The old version pinned a raw substring
+// test as correct: its only positive was "a good torque wrench", and nothing
+// checked a negated entry, a longer name containing the item, or a number
+// containing another. Readiness points ride on this match, so an owner told
+// "no torque wrench" counts as owning one is told they are ready for a job they
+// cannot finish.
 
-  const partial = buildRequirementGroups({
-    accepted,
-    // "wrench" alone must not satisfy "torque wrench" -- no fuzzy matching.
-    availableTools: ["wrench"],
+function toolsOwned(required, availableTools) {
+  return buildRequirementGroups({
+    accepted: required.map((itemName) => ({ kind: "required_tool", itemName })),
+    availableTools,
     availableParts: [],
-  });
+  }).tools;
+}
 
-  assert.equal(partial.tools.status, "unmet");
-  assert.equal(partial.tools.missing.length, 2);
+test("inventory owns an item only as whole words naming that item", () => {
+  // A longer name that merely CONTAINS the item is a different thing.
+  assert.deepEqual(toolsOwned(["jack"], ["jack stands"]).missing, ["jack"]);
+  assert.deepEqual(toolsOwned(["10 mm wrench"], ["110 mm wrench"]).missing, ["10 mm wrench"]);
+  assert.deepEqual(toolsOwned(["torque wrench"], ["wrench"]).missing, ["torque wrench"], "no fuzzy matching");
 
-  const full = buildRequirementGroups({
-    accepted,
-    availableTools: ["a good torque wrench", "10 mm wrench"],
-    availableParts: [],
-  });
+  // Words in front describe the item; the item is still what the entry ends with.
+  assert.equal(toolsOwned(["torque wrench"], ["a good torque wrench"]).status, "satisfied");
+  assert.equal(toolsOwned(["jack"], ["3-ton floor jack"]).status, "satisfied");
+  assert.equal(toolsOwned(["jack", "jack stands"], ["jack and jack stands"]).status, "satisfied");
+  assert.equal(toolsOwned(["torque wrench"], ["torque wrench (1/2 in drive)"]).status, "satisfied");
+});
 
-  assert.equal(full.tools.status, "satisfied");
-  assert.deepEqual(full.tools.missing, []);
+test("a negated inventory entry counts as absent", () => {
+  for (const entry of ["no torque wrench", "don't have a torque wrench", "need a torque wrench", "without torque wrench"]) {
+    assert.deepEqual(toolsOwned(["torque wrench"], [entry]).missing, ["torque wrench"], entry);
+  }
+
+  // The negation reaches only what follows it.
+  assert.deepEqual(toolsOwned(["jack", "jack stands"], ["jack but no jack stands"]).missing, ["jack stands"]);
+  // "No. 2" is a size, not a negation.
+  assert.equal(toolsOwned(["phillips screwdriver"], ["No. 2 Phillips screwdriver"]).status, "satisfied");
+});
+
+test("inventory and requirement names go through one normalizer", () => {
+  // Owner text arrives through parseInventory (lowercased, trimmed) and names
+  // from the model through normalizeRequirementName; punctuation one side
+  // keeps must not decide the match.
+  assert.equal(toolsOwned(["10-mm wrench"], ["10 MM Wrench!"]).status, "satisfied");
+  assert.equal(toolsOwned(["torque wrench"], ["Torque-wrench & sockets"]).status, "satisfied");
+  assert.equal(toolsOwned(["socket set"], ["Socket Set & torque wrench"]).status, "satisfied");
+});
+
+test("an itemName must be a real name: at least two words or four letters", () => {
+  const text = "A torque wrench is required.";
+  const verifyItem = (itemName) =>
+    verifyAgainst(text, {
+      kind: "required_tool",
+      claim: "A torque wrench is required",
+      evidenceQuote: "A torque wrench is required",
+      itemName,
+    });
+
+  // "a" and "is" are whole words of the claim, and still name no tool.
+  for (const itemName of ["e", "a", "is"]) {
+    assert.equal(verifyItem(itemName).rejected[0]?.reason, "item_name_too_short", itemName);
+  }
+
+  assert.equal(verifyItem("torque wrench").accepted.length, 1);
+  assert.equal(verifyItem("wrench").accepted.length, 1, "a single four-letter word is enough");
+});
+
+test("an itemName must appear in its claim as whole words", () => {
+  const verifyItem = (text, itemName) =>
+    verifyAgainst(text, { kind: "required_tool", claim: text.replace(/\.$/, ""), evidenceQuote: text.replace(/\.$/, ""), itemName });
+
+  assert.equal(verifyItem("Use a 110 mm wrench.", "10 mm wrench").rejected[0]?.reason, "item_not_in_claim");
+  assert.equal(verifyItem("Use a ratcheting wrench.", "ratchet").rejected[0]?.reason, "item_not_in_claim");
+  assert.equal(verifyItem("Use a 10 mm wrench.", "10 mm wrench").accepted.length, 1);
 });
 
 test("unsupported required tools produce no satisfied group", () => {
@@ -348,6 +690,8 @@ test("a task with no accepted claim says so in the plan", () => {
 test("requirement names normalize punctuation and spacing", () => {
   assert.equal(normalizeRequirementName("  10mm  Wrench!! "), "10mm wrench");
   assert.equal(normalizeRequirementName(null), "");
+  assert.equal(normalizeRequirementName("10-mm Wrench (metric)"), "10 mm wrench", "hyphens and asides fold away");
+  assert.equal(normalizeRequirementName("Don't have jack & stands"), "do not have jack and stands");
 });
 
 test("deriveEvidenceStatus never returns verified without technical claims", () => {
@@ -404,12 +748,13 @@ test("the planner rejects a near-miss electrical value before any tolerance appl
   // direction -- that an exact restatement, as printed, still verifies.
   const batteryText = "Charging check: the battery should read 12.6 V with the engine off.";
   const sourcesById = new Map([["S1", makeSource("S1", batteryText)]]);
+  const tasks = [{ id: 1, title: "Check the battery", compound: false, clauses: [] }];
   const { accepted, rejected } = verifyClaims(
     [
       claim({ claim: "the battery should read 12.4 V", evidenceQuote: "the battery should read 12.6 V" }),
       claim({ claim: "the battery should read 12.6 V", evidenceQuote: "the battery should read 12.6 V" }),
     ],
-    { sourcesById }
+    { sourcesById, tasks }
   );
 
   assert.equal(rejected.length, 1);
@@ -429,7 +774,10 @@ test("a current-symbol value verifies when restated and is redacted when rejecte
       claim({ claim: "the EFI fuse is 15A", sourceId: "S1", evidenceQuote: "the EFI fuse is 15A" }),
       claim({ claim: "the EFI fuse is 25A", sourceId: "S1", evidenceQuote: "the EFI fuse is 25A" }),
     ],
-    { sources: [makeSource("S1", fuseText)] }
+    {
+      sources: [makeSource("S1", fuseText)],
+      tasks: [{ id: 1, title: "Check the EFI fuse", compound: false, clauses: [] }],
+    }
   );
 
   assert.deepEqual(

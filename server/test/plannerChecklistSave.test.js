@@ -61,9 +61,9 @@ const mockRetrieve = async () => [
 const TORQUE_CLAIM = {
   taskId: 1,
   kind: "numeric_spec",
-  claim: "torque caliper bolts to 25 ft-lb",
+  claim: "Front brake pad replacement: use a torque wrench to torque caliper bolts to 25 ft-lb",
   sourceId: "S1",
-  evidenceQuote: "use a torque wrench to torque caliper bolts to 25 ft-lb",
+  evidenceQuote: "Front brake pad replacement: use a torque wrench to torque caliper bolts to 25 ft-lb",
 };
 
 const TOOL_CLAIM = {
@@ -189,6 +189,12 @@ test("a verified run keeps its accepted statements, sources, requirements, and s
   // And the safety warning for brake work.
   assert.match(checklist.notes, /Safety warnings/);
   assert.match(checklist.notes, /Brake work affects stopping safety/);
+
+  // The provenance note says what the check shows -- where each statement came
+  // from -- and not more (3B-07): "matched word-for-word" read as a promise
+  // that the statement is the whole, correct step.
+  assert.doesNotMatch(checklist.notes, /word-for-word/i);
+  assert.match(checklist.notes, /not that it is the complete or correct step/);
 });
 
 test("a partial run saves every task but only the statements that verified", async () => {

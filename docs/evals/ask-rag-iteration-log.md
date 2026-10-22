@@ -3497,3 +3497,172 @@ SHAs these Stage 2 entries cite map as follows:
 | `315bf82` | `9159395` | `f880c73` | `62246f8` |
 | `25d0cab` | `cd1b9db` | `75795e5` | `07b93fd` |
 | `c38d0b1` | `e2f43b1` | `d9157fa` | `e3a5304` |
+
+## Stage 5-E2 — live Repair Planner runs, 2026-10-22
+
+**Four real planner runs (audit decision D3, approved by the owner in the Stage 5-E2 session) on
+`a552c6d`, Stage 5-E2 rebased onto `f63fae5`. All four were `partial`. No saved checklist note
+dropped a negation, and every kept specification sat under the task its part belongs to. The
+runs found one defect in the new whole-clause rule. It was fixed in `94cd259` and checked by an
+offline replay, not by a second live run. Spend: about $0.70.**
+
+The Repair Planner has **no answer-eval suite**: `eval:answers` covers Ask only. These runs were
+reviewed by hand and are the only live check of Stage 5-E2.
+
+### What is under test
+
+| Commit | Finding | Change |
+| --- | --- | --- |
+| `366a257` | 1A-05 | Claim placement: negation window and range cut read in the source; whole clause for `numeric_spec` / `safety_instruction` |
+| `543405e` | 1A-06, 1B-01 | `subject_missing`: a figure must name a part, and a spec must share a part word with its task |
+| `e895b26` | 1A-07 | Whole-word tool and part matching, one normalizer, negated inventory entries absent |
+| `a552c6d` | 3B-07 | Owner-facing copy no longer says "word-for-word" |
+
+### Reproducibility
+
+| | |
+| --- | --- |
+| Harness | A scratch script (not committed) that runs `createApp()` in-process through supertest: `POST /api/repair-plan`, then `POST /api/repair-checklists/from-planner` with the run's draft id. No listening server, no `server/.env`, `NETWORK_MODE=0`. Usage is read from each `response.completed` event; a run stops at 350,000 input tokens (none came close) |
+| Revision | Worktree HEAD `a552c6d`, clean, not pushed |
+| Data | A copy of the live database taken with the app stopped. Live `.db` MD5 `c1c5f794…`, WAL `dd999735…`, the same files as Experiments I and J. Uploads pointed at an empty scratch folder |
+| Model and settings | `gpt-5.5-2026-04-23`, effort `low`, `max_output_tokens` 2048, skill `intermediate` |
+| Provider requests | **28 Responses calls** (6 + 8 + 7 + 7), all completed, 0 error frames. **226,463 input tokens, of which 138,752 cached; 6,353 output, of which 227 reasoning.** 15 embedding calls, 301 tokens |
+| Cost | **≈ $0.70** at $5 per million input, $0.50 per million cached input, and $30 per million output (secondary-source list prices); the embeddings round to $0 |
+
+### Result
+
+| Brief | Status | Claims kept / submitted | Rejected | Requirements | Readiness |
+| --- | --- | --- | --- | --- | --- |
+| "Replace the front brake pads." | partial | 2 / 6 | 4 `not_whole_clause` | tools unknown, parts unknown | 30 |
+| "Change the engine oil and replace the oil filter." (2 tasks) | partial | 19 / 24 | 2 `not_whole_clause`, 2 `item_name_too_short`, 1 `claim_not_in_quote` | tools unknown; parts unmet (`new gasket`, `oil filter element` missing; `engine oil` owned) | 50 |
+| "Drain and refill the engine coolant." (compound, 2 clauses) | partial | 6 / 7 | 1 `not_whole_clause` | tools unknown, parts unknown | 30 |
+| "Replace the front wheel bearing." | partial | 15 / 22 | 7 `not_whole_clause` | tools unknown, parts unknown | 30 |
+
+Every checklist saved with HTTP 201, and each saved note matched its run's kept claims.
+
+### By-hand review
+
+- **Negations: none dropped.** Every kept safety line that carries "Do not", "Never", or "does
+  not" kept it, in the plan and in the saved note.
+- **Specifications sat under the right task (1A-06).**
+  - The drain plug's 37 N·m was kept under "Change the engine oil", with the drain-plug sentence
+    as the claim.
+  - The filter cap's 25 N·m was kept under "replace the oil filter".
+  - The audit's original failure, a bare 37 N·m under the filter task, did not recur.
+- **Inventory (1A-07).**
+  - The owner's "5W-30 engine oil" owned `engine oil`.
+  - "oil filter" did not own `oil filter element`. That is the strict rule failing closed.
+  - The oil run's "no torque wrench" entry never came into play, because no tool requirement
+    verified.
+- **No run established its tools.**
+  - The only tool claims named Toyota's "SST", which the two-words-or-four-letters rule refuses
+    (`item_name_too_short`).
+  - Naming it with its number ("SST 09228-06501") would pass.
+  - This is the first observed cost of that rule.
+- **Value of what was kept.**
+  - Coolant and wheel-bearing kept mostly section headings, quoted verbatim from other procedures
+    (engine removal and installation).
+  - They are safe, but thin.
+  - Retrieval found no dedicated coolant-replacement or wheel-bearing procedure, so these runs
+    say more about the corpus than about the verifier.
+
+### The defect, and its fix (`94cd259`)
+
+**9 of the 14 `not_whole_clause` rejections were complete sentences carrying their own period,
+inside a quote that ran on into the next sentence.**
+
+- Examples include the wheel bearing's "Do not punch the marks." and three brake-bleeding
+  sentences.
+- `endsClause` looked only at the text after a claim, so a claim's own final period never
+  counted.
+- `94cd259` accepts a claim that ends with its own clause mark. The look-back stays inside the
+  claim.
+
+**The replay.** All 59 submitted claims were re-verified offline. Each claim's source text was
+rebuilt from the database copy as the planner builds it (whitespace collapsed, capped at 1,500
+characters).
+
+- At `a552c6d` the replay reproduced every live verdict: 42 kept, and 17 rejected for the same
+  reasons.
+- At `94cd259` it kept 50, for the brakes, oil, coolant, and wheel-bearing runs respectively
+  6/6, 19/24, 6/7, and 19/22:
+  - **8 of the 9 sentences are now kept.**
+  - **The ninth stays rejected,** because in its extract the sentence runs straight on from a
+    garbled repeat of itself, with no boundary.
+  - **No kept claim was lost.**
+- Every run would still be `partial`, because no run established its tools.
+
+**The other 5 `not_whole_clause` rejections were rows of flattened tables.**
+
+- Extracted tables carry no separator between rows.
+- The model is now told to quote a table value as that one row.
+- Offline, with each row as its own quote:
+  - the oil-capacity row is kept;
+  - the four others are then refused by the task guard, because a shock-absorber, brake-hose,
+    tie-rod, or drain-cock torque shares no part word with "front wheel bearing" or "Drain".
+
+### Limits, stated plainly
+
+- **n = 1 per brief, and no run after `94cd259`.** The fix and the table-row instruction are
+  checked by replay only, and the replay holds the model's replies fixed. A fifth run (D3 allows
+  up to five) would test both live.
+- The replay rebuilds sources by finding the first chunk containing each quote. Duplicate
+  documents could give a slightly different context than the run saw, but every live verdict
+  reproduced.
+- Status `partial` in all four runs comes mainly from unestablished tool requirements, not from
+  the claim checks.
+
+### Run 5 — the follow-up at `01de922`, 2026-10-22
+
+**A fifth run, the last that D3 allows, was approved separately by the owner to test `94cd259`
+live. The brief was "Replace the front brake pads and change the engine oil." (two tasks). It came
+back `partial`, with 13 of 16 claims kept and no `not_whole_clause` rejection. 7 Responses
+calls; 57,874 input tokens (39,936 cached) and 1,635 output: about $0.16. The five runs together
+cost about $0.86.**
+
+Same harness, model, and settings as runs 1–4. A fresh copy of the same database (`.db` MD5
+`c1c5f794…`, WAL `dd999735…`). Inventory: tools "floor jack, jack stands, torque wrench,
+socket set, C-clamp, drain pan, no oil filter wrench"; parts "front brake pads, 5W-30 engine oil,
+oil filter".
+
+| | Runs 1–4 (`a552c6d`) | Run 5 (`01de922`) |
+| --- | --- | --- |
+| Claims kept | 42 / 59 (50 / 59 in the `94cd259` replay) | 13 / 16 |
+| `not_whole_clause` | 14 (9 whole sentences, 5 table rows) | 0 |
+| Negation dropped in a saved note | 0 | 0 (no negated line was submitted) |
+| Kept specs under the wrong task | 0 | 0 |
+| Tool requirement established | 0 of 4 runs | no |
+| Status | 4 × `partial` | `partial` |
+
+- **The table-row instruction took effect.** Both oil-capacity rows were quoted as their own
+  row and kept, under "change the engine oil": 4.2 liters with a filter change, 3.9 without.
+  In run 2 the same row was quoted with its table header and rejected. One run cannot separate
+  the instruction from model variance.
+- **The period fix was not exercised.** This time the model quoted each brake-bleeding safety
+  sentence on its own, and all four were kept. Replaying run 5 at `a552c6d` and at `01de922`
+  gives identical verdicts. `94cd259` therefore rests on its unit tests, its oracle control
+  row, and the runs 1–4 replay.
+- **The three rejections were each correct under the rules.**
+  - A safety sentence whose quote "tidied" a garbled extract, in which the sentence repeats
+    itself mid-way, so the quote was not verbatim (`quote_not_in_source`).
+  - "Torque : 37 Nm (…)" claimed alone, with the drain-plug step only in its quote
+    (`subject_missing`). The value is the right one, but on its own the claim names no
+    fastener: the 1A-06 rule at work. Run 2 kept the same value by claiming both sentences.
+    That costs this plan its drain-plug torque.
+  - A bare "5W-30" (`subject_missing`).
+- **Inventory.**
+  - "5W-30 engine oil" owned `engine oil`.
+  - `new gasket` was correctly missing.
+  - The negated "no oil filter wrench" was not exercised, because no tool requirement verified.
+
+### Readiness of Stage 5-E2, after five runs
+
+- **No false acceptance in five live runs.** No saved note inverted a negation. No bare value
+  was kept, and every kept specification was right for its task: 37 N·m drain plug, 25 N·m
+  filter cap, 4.2 L and 3.9 L capacity.
+- **One verifier defect found live, and fixed** (`94cd259`).
+- **The plans are thin, for reasons outside the verifier.** No run established its tools: the
+  model rarely submits a tool requirement, and Toyota's bare "SST" is refused as too short.
+  Retrieval found no pad-replacement, wheel-bearing, or coolant-replacement procedure. Garbled
+  extracts defeat verbatim quotes. Every run is therefore `partial`, and readiness never
+  exceeded 50.

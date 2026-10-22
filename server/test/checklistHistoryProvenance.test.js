@@ -111,9 +111,9 @@ function createMockRetrieve(documentId, documentTitle) {
 const TORQUE_CLAIM = {
   taskId: 1,
   kind: "numeric_spec",
-  claim: "torque caliper bolts to 25 ft-lb",
+  claim: "Front brake pad replacement: use a torque wrench to torque caliper bolts to 25 ft-lb",
   sourceId: "S1",
-  evidenceQuote: "use a torque wrench to torque caliper bolts to 25 ft-lb",
+  evidenceQuote: "Front brake pad replacement: use a torque wrench to torque caliper bolts to 25 ft-lb",
 };
 
 const TOOL_CLAIM = {
