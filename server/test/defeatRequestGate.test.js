@@ -28,6 +28,9 @@ const { createAskRouter } = await import("../src/routes/ask.js");
 const { createRepairPlanRouter } = await import("../src/routes/repairPlan.js");
 const { askQuestionUsingDocuments } = await import("../src/services/aiAnswerService.js");
 const { DEFEAT_REFUSAL_MESSAGE } = await import("../src/services/defeatRequestClassifier.js");
+const { buildPlannerGateText, runRepairPlannerAgent } = await import(
+  "../src/services/agent/repairPlannerAgent.js"
+);
 
 initializeDatabase();
 
@@ -238,4 +241,94 @@ test("the planner refusal is JSON, not a half-opened event stream", async () => 
 
   assert.match(response.headers["content-type"], /application\/json/);
   assert.ok(!response.text.includes("data:"), "no SSE frame should be written");
+});
+
+// --- The planner core, which callers can reach without the route (1B-17) -----
+
+/** A model client that records each turn and asks for nothing. */
+function spyStreamTurn() {
+  const calls = [];
+  // eslint-disable-next-line require-yield -- records the turn; the model asks for nothing
+  async function* streamTurn(options) {
+    calls.push(options);
+  }
+  streamTurn.calls = calls;
+  return streamTurn;
+}
+
+async function runCore(request, options = {}) {
+  const events = [];
+  const streamTurn = spyStreamTurn();
+  const retrieve = spy([]);
+  const result = await runRepairPlannerAgent(request, {
+    emit: (event) => events.push(event),
+    streamTurn,
+    retrieve,
+    isAiConfigured: true,
+    ...options,
+  });
+
+  return { events, result, streamTurn, retrieve };
+}
+
+test("the planner core refuses a T4 brief without a model turn or retrieval", async () => {
+  const { events, result, streamTurn, retrieve } = await runCore({ brief: T4_BRIEF });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.code, "planner_refused");
+  assert.equal(result.reason, "defeat_request");
+  assert.deepEqual(events, [
+    { type: "error", code: "planner_refused", reason: "defeat_request", message: DEFEAT_REFUSAL_MESSAGE },
+  ]);
+  assert.equal(streamTurn.calls.length, 0, "no model turn");
+  assert.equal(retrieve.calls.length, 0, "no retrieval or embedding");
+});
+
+test("the planner core refuses a T4 brief even with no API key configured", async () => {
+  const { events, result } = await runCore({ brief: T4_BRIEF }, { isAiConfigured: false });
+
+  assert.equal(result.reason, "defeat_request", "policy, not a capability question");
+  assert.ok(!events.some((event) => event.type === "ai_not_configured"));
+});
+
+test("the planner core refuses when the defeat intent hides in an optional field", async () => {
+  const { result, streamTurn } = await runCore({
+    brief: "Front brake service",
+    constraints: "I want to permanently disable the ABS so it never comes back.",
+  });
+
+  assert.equal(result.reason, "defeat_request");
+  assert.equal(streamTurn.calls.length, 0);
+});
+
+test("the planner core does not pair a verb in one field with a system in another", async () => {
+  const { result, streamTurn } = await runCore({
+    brief: "Replace the airbag control module",
+    constraints: "I need to bypass the heater hose while I work",
+  });
+
+  assert.notEqual(result.reason, "defeat_request");
+  assert.equal(streamTurn.calls.length, 1, "the agent loop starts normally");
+});
+
+test("the planner core still plans a legitimate safety-critical brief", async () => {
+  const { result, streamTurn } = await runCore({
+    brief: "Replace the front brake pads and bleed the brakes",
+  });
+
+  assert.notEqual(result.reason, "defeat_request");
+  assert.equal(streamTurn.calls.length, 1);
+});
+
+test("the route and the core judge the same text", () => {
+  assert.equal(
+    buildPlannerGateText({
+      brief: "Replace the airbag control module",
+      constraints: "  ",
+      availableTools: "socket set",
+      availableParts: 42,
+    }),
+    "Replace the airbag control module\nsocket set",
+    "blank and non-string fields are skipped; each field is its own clause block"
+  );
 });

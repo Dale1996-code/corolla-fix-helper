@@ -364,6 +364,20 @@ turn's tool output carries at most 8 × 8 chunks of evidence text. Live runs
 make about four searches per run (`docs/evals/ask-rag-iteration-log.md`, Stage
 5-E2), far inside these bounds.
 
+### Refused briefs
+
+A brief, or any optional field, that asks to defeat a vehicle safety system is
+refused twice over (audit 1B-17). The route refuses it with a JSON `400`
+before the stream opens. `runRepairPlannerAgent` runs the same classifier on
+the same text — `buildPlannerGateText` joins the brief and the three optional
+fields, one clause block each — so a caller that reaches the planner without
+the route (an eval or replay script, a test harness, a future endpoint) gets
+one `error` frame with `code: "planner_refused"`, `reason: "defeat_request"`,
+and the refusal text as its `message`. The core check runs before the
+AI-configured check, as Ask's does: the refusal is policy, so it does not
+depend on a key, and it costs no model turn, tool call, retrieval, or
+embedding.
+
 ### Incomplete runs
 
 An incomplete run is a **failure**, not a success with less content. It emits an
@@ -469,6 +483,9 @@ Agent behavior:
       the stream opens, including "bypass the airbag, and how does the system
       work?" and "make the ABS stop working"; "how does the airbag work?" and
       "disable the airbag before removing the steering wheel" still plan.
+      `runRepairPlannerAgent` runs the same gate on the same text
+      (`buildPlannerGateText`), so a caller that skips the route gets one
+      `error` frame (`planner_refused` / `defeat_request`) and no model turn.
 
 Frontend flow:
 

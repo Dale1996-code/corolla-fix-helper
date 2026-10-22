@@ -1,6 +1,10 @@
 import { config } from "../../config.js";
 import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import {
+  DEFEAT_REFUSAL_MESSAGE,
+  isSafetySystemDefeatRequest,
+} from "../defeatRequestClassifier.js";
+import {
   buildOwnerChecklist,
   checkRepairReadiness,
   createSourceRegistry,
@@ -55,7 +59,26 @@ export const PLANNER_FAILURE_MESSAGES = {
   provider_incomplete: "The AI model stopped early and the plan is incomplete. Please try again.",
   missing_terminal_event: "The AI model's response ended unexpectedly. Please try again.",
   malformed_tool_arguments: "The AI model sent an unreadable tool request. Please try again.",
+  defeat_request: DEFEAT_REFUSAL_MESSAGE,
 };
+
+/**
+ * The text the T4 defeat gate reads for one planner request: the brief and
+ * each optional free-text field, joined with newlines. The classifier treats a
+ * newline as a clause break, so a defeat verb in `constraints` cannot pair with
+ * a safety system named in the brief and manufacture a false positive across
+ * fields.
+ *
+ * Shared by the route and the agent so both judge exactly the same words.
+ *
+ * @param {{ brief?: unknown, constraints?: unknown, availableTools?: unknown, availableParts?: unknown }} request
+ * @returns {string}
+ */
+export function buildPlannerGateText(request) {
+  return [request?.brief, request?.constraints, request?.availableTools, request?.availableParts]
+    .filter((field) => typeof field === "string" && field.trim())
+    .join("\n");
+}
 
 const AGENT_INSTRUCTIONS = [
   "You are the Repair Planner agent for a 2009 Toyota Corolla LE 1.8L repair workspace.",
@@ -185,6 +208,17 @@ export async function runRepairPlannerAgent(request, options = {}) {
   if (!brief) {
     emit({ type: "error", message: "A repair brief is required." });
     return { status: "error", text: "", artifacts: {} };
+  }
+
+  // T4 policy gate, in the core as well as the route (1B-17). The route refuses
+  // first, with a JSON 400 before the stream opens; this copy covers every
+  // caller that reaches the planner without the route -- an eval or replay
+  // script, a test harness, a future endpoint. Placed before the AI-configured
+  // check, like Ask's: refusing to help defeat a safety system is policy, so it
+  // must not depend on whether a key is set, and it must cost nothing -- no
+  // model turn, no tool, no retrieval, no embedding.
+  if (isSafetySystemDefeatRequest(buildPlannerGateText({ ...request, brief }))) {
+    return failRun("planner_refused", "defeat_request");
   }
 
   if (!isAiConfigured) {

@@ -61,6 +61,8 @@ Both stay grounded in uploaded PDFs and degrade gracefully to an "AI not configu
 
 2. **Repair Planner** (`POST /api/repair-plan`, SSE streaming): a hand-rolled tool-calling agent loop in `server/src/services/agent/` (`repairPlannerAgent.js` loop, `repairTools.js` deterministic tools + JSON schemas, `openAiResponsesClient.js` streaming client, `tracing.js`). Events stream to `RepairPlannerPage.jsx` as `data: <json>` frames (`status`, `tool_call`, `tool_result`, `trace`, `error`, `done`; `text_delta` is no longer emitted). **No frame carries a model argument** (audit 1A-15): `tool_call` is built from an allow-list — a known tool `name` (else `unknown_tool`), the server's `turn`, a `taskId` only when it names a canonical task, and a finalizer `claimCount` — and `tool_result` summaries name the canonical task, never the model's query. The raw arguments once carried every rejected claim into the activity log. `docs/repair-planner.md` documents the event protocol, readiness rubric, and how to add tools.
 
+Both features refuse a request to defeat a vehicle safety system (`defeatRequestClassifier.js`, the T4 gate) in their **core** as well as their route — `askQuestionUsingDocuments` and `runRepairPlannerAgent` (audit 1B-17, via `buildPlannerGateText`, the same text the route judges) — before any model call, so a script that calls the core directly cannot skip the gate.
+
 Ask can optionally attach **one already-saved image** by `attachmentId` (`OPENAI_VISION_MODEL`, falls back to `OPENAI_ANSWER_MODEL`). Retrieval still runs on the text question only, and repair facts must stay grounded in cited PDF chunks — the image is context, not a source.
 
 ### Evidence contracts (read before touching either AI feature)
