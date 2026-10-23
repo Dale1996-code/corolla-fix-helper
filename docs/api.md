@@ -18,7 +18,7 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
   ```
 
   `400` invalid input or malformed JSON · `403` cross-site request, or a backup export from anywhere but the host machine · `404` not found, including any `/api` path no route matches · `413` body too large · `415` body not JSON (or, on attachments, not a JPEG/PNG/WebP) · `421` `Host` not on the allow-list · `429` rate limited · `500` server failure, with a generic message (the detail goes to the server console only).
-- **Rate limits:** `POST /api/ask`, `POST /api/repair-plan` and `GET /api/symptoms/:id/suggested-procedures` share **one** 20-requests-per-minute window (in-house limiter, `server/src/middleware/rateLimit.js`) — not one window each. A request the gate refuses never counts against it. Everything else is unlimited, including `POST /api/repair-plan/:runId/safety-acknowledgment`, which makes no model call.
+- **Rate limits:** `POST /api/ask`, `POST /api/repair-plan` and `GET /api/symptoms/:id/suggested-procedures` share **one** limiter — one 20-requests-per-minute window per client address, not one window each (in-house limiter, `server/src/middleware/rateLimit.js`; the key is the connecting socket address, since the app does not trust proxy headers, so devices relayed through `tailscale serve` all arrive from the loopback address and share one window). A request the gate refuses never counts against it. Everything else is unlimited, including `POST /api/repair-plan/:runId/safety-acknowledgment`, which makes no model call.
 - **PowerShell examples:** plain `GET`/download requests use `curl.exe` (the real curl, not the PowerShell alias). Requests with a **JSON body** use `Invoke-RestMethod` instead. This is deliberate: passing inline JSON to `curl.exe` is mangled by Windows PowerShell 5.1's parser — it strips the double quotes before curl ever sees them (a literal, a `$variable`, and `ConvertTo-Json` output all break the same way), so the server receives invalid JSON and returns `400`. `Invoke-RestMethod` hands its `-Body` to the request in-process, so the JSON survives intact in both Windows PowerShell 5.1 and PowerShell 7. Multipart uploads (`-F`) still use `curl.exe`; if a field value contains spaces, run those from PowerShell 7 or a POSIX shell to avoid the same 5.1 quoting issue.
 
 ## Quick Endpoint List
@@ -258,26 +258,36 @@ Response:
 
 `status` values:
 
-- `answered` — answer generated from retrieved chunks, with citations
-- `partial` — at least one claim verified, but one or more requested facts were not verified
+- `answered` — every claim verified, with citations (see `evidence` below for what "verified" covers)
+- `partial` — at least one claim verified, but something was not: a claim the checks removed, or a fact the model reported the documents do not answer
 - `unverified` — legacy compatibility mode produced prose that was not checked claim by claim; `citations` is always empty
-- `not_found` — the uploaded documents don't contain enough matching information ("not in documents"); this is deliberate refusal, not an error
-- `ai_not_configured` — matching chunks exist but no `OPENAI_API_KEY` is set
+- `not_found` — the answer was not established from your documents. This is deliberate refusal, not an error, and it has three causes (below)
+- `ai_not_configured` — no `OPENAI_API_KEY` is set. This is decided **before** retrieval, so it says nothing about whether the documents match the question
+
+##### Why a reply is `not_found`
+
+| Cause | `answer` | `retrievedContext` | `evidence` | What it does *not* mean |
+| --- | --- | --- | --- | --- |
+| **Retrieval found nothing usable.** No chunk came back, or the best chunk is too weak a match, so no answer is attempted | `not in documents` | present only if some weak chunks were retrieved | absent | — |
+| **No claim passed verification.** Retrieval found passages, but every claim the model proposed failed the checks listed under `evidence` below, or it proposed none | `not in documents` | present — the passages that were retrieved | present, with `gaps` describing what was removed (figures redacted) | That the PDFs lack the fact. The specification may be on a retrieved page that the model paraphrased, converted to another unit, or cited from the wrong passage. Read `retrievedContext`. With `ASK_DEBUG_METRICS`, a non-empty `metrics.rejected[]` shows claims were rejected rather than never proposed |
+| **Defeat refusal.** The question asks to disable, bypass, or defeat a vehicle safety system. A deterministic rule refuses it before any search or model call, with or without an API key | the refusal message, not `not in documents` | absent | absent | That the manuals were searched and are silent on it |
+
+Treat `not_found` as "nothing here is safe to rely on", not as "the documents do not say".
 
 #### `retrievedContext` (not-found and unverified replies only)
 
 A `not_found` reply always returns `citations: []`. When retrieval *did* find
-passages that simply were not good enough to answer from, those passages are
-additionally returned as `retrievedContext` so a refusal is not a dead end. It is
-**omitted entirely** when it would be empty:
+passages that were too weak to answer from, or that the model's claims could not be
+verified against, those passages are additionally returned as `retrievedContext` so
+a refusal is not a dead end. It is **omitted entirely** when it would be empty:
 
 | Case | `citations` | `retrievedContext` |
 | --- | --- | --- |
 | `answered` / `partial` | only passages that backed verified claims | absent (the answer already cites its sources) |
 | `unverified` | `[]` | present when passages were retrieved; they are not proof of the prose |
-| `not_found`, passages retrieved | `[]` | present, non-empty |
-| `not_found`, nothing retrieved | `[]` | absent |
-| `ai_not_configured` | `[]` | absent |
+| `not_found`, passages retrieved (weak, or every claim failed verification) | `[]` | present, non-empty |
+| `not_found`, nothing retrieved, or the defeat refusal | `[]` | absent |
+| `ai_not_configured` | `[]` | absent (retrieval never ran) |
 
 Entries use the same shape as `citations`. These passages were **not** used to
 answer and are not endorsed as correct — the UI labels them "Retrieved context
