@@ -4,7 +4,7 @@
 > Anything else that looks like a roadmap lives in [`docs/archive/`](archive/) and is history, not a plan.
 >
 > - **Covers:** August 2026 → August 2027
-> - **Last reviewed:** 10 August 2026
+> - **Last reviewed:** 23 October 2026
 > - **Supersedes:** [`docs/archive/roadmap-v1.md`](archive/roadmap-v1.md) and the strategy review in [`docs/archive/strategy-review-2026-08.pdf`](archive/strategy-review-2026-08.pdf)
 
 **Naming rule so this never gets confusing again:** the current roadmap is always this
@@ -45,8 +45,8 @@ state a plan imagined.
   engine speed, and temperature. For the claim shapes the parser recognizes, a matching
   number cannot certify a component the quote does not name — which is narrower than
   proving the number belongs to that component when one quote names several parts.
-  Unparsed claim shapes, compound claims, and the Repair Planner are outside even that
-  (see below).
+  Unparsed claim shapes and compound claims are outside even that, and the Repair Planner
+  does not use this guard: it has its own, task-based check (see below).
 - Backups snapshot a live database correctly, restore validates and rolls back, and a drill
   proves the round trip.
 - CI runs lint, typecheck, both test suites, the production build, and a smoke test.
@@ -62,6 +62,13 @@ state a plan imagined.
   renamed, the checklist is edited, or the document is deleted — see **N3**, which is
   complete. Recording a repair stays a deliberate act: `status = 'done'` on a checklist is
   an organizational state and still records nothing.
+- **Most of the 2026-10-18 full review is acted on.** Eleven PRs merged between 19 and 23
+  October: the Ask verifier fails closed instead of accepting a near-miss number, a planner
+  claim can no longer drop the "Do not" in front of it, a request gate stands in for the
+  login the app does not have, a restore no longer deletes live files on its way to failing,
+  the safety gates refuse the defeat requests the review reproduced, a document's text and
+  chunks now save together, and a verifier change can be judged for free by replaying
+  captured answers. See the [audit record](#the-2026-10-18-full-review) in section 4.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
@@ -72,8 +79,13 @@ state a plan imagined.
   authority. N1 raised the suite to 14 verified of 43, then back to 13 when
   `applicability-engine-mount-build-variant` was demoted for varying at the product level.
   A September slice took it to 14 of 44 with the first verified table-derived value
-  (`spark-plug-gap`). Almost every remaining idea in this roadmap is a change whose value can
-  only be judged by that suite.
+  (`spark-plug-gap`). Stage 2 of the 2026-10-18 audit added two rejection probes as
+  templates, so it is 14 verified of 46. Almost every remaining idea in this roadmap is a
+  change whose value can only be judged by that suite.
+- **The Repair Planner has no eval suite at all.** `eval:answers` covers Ask only. Five
+  hand-reviewed live runs during Stage 5-E2 are the planner's only live check: all five came
+  back `partial`, mainly because no run established its tools, and readiness never went
+  above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)).
 - **Four pages still download the whole document library.** Documents, Symptoms,
   Procedures, and Notes each fetch every record with no limit. Ask AI's document card was
   fixed; these were not.
@@ -110,15 +122,43 @@ state a plan imagined.
   no 3. But "50 N" passes against "490 N (50 kgf)": the number is printed, the unit is not
   compared. The bare-number table fallback, now limited to quotes carrying a header unit in
   the claim's unit, still cannot tell which column of a flattened row a number came from.
-- **The Repair Planner has no subject guard.** Its evidence contract shares only the quote
-  check, the numeric check, and gap redaction with Ask, so a planner task can cite a real
-  number that belongs to a different component. This is a separate limitation; no roadmap
-  item currently covers it.
+- **The Repair Planner's claim check is lexical, and narrower than it reads.** Until Stage
+  5-E2 of the 2026-10-18 audit (PR #152), a planner claim passed if its text appeared
+  anywhere in its quote, so a fragment could drop the "Do not" before it or attach a number
+  to the wrong part. A claim must still be a verbatim fragment of its quote, and the
+  verifier now also reads where that fragment sits in the source: a negator ("not", "no",
+  "never", "without", "n't", and the like) in the three words before it within its clause is
+  `negation_dropped`; a cut through a range or a signed value is `range_cut`; and a
+  `numeric_spec` or `safety_instruction` that is not a whole clause of its quote is
+  `not_whole_clause`. A claim carrying a figure must name a part, and a `numeric_spec` must
+  share a part word with its task, in the claim or its quote (`subject_missing`), so a bare
+  "37 N·m" never counts. Tool and part matching against the owner's lists is whole-word, and
+  a negated entry ("no torque wrench") counts as absent. What it still cannot see: a
+  qualifier the quote itself leaves off by stopping mid-sentence ("at 2,000 rpm"); a later
+  stage joined by a comma ("then a further 90°"); which row of a flattened table a value came
+  from, unless the quote is that one row; and two parts that both share a word with the
+  task. Being lexical, the task check can also reject an honest claim whose quote does not
+  repeat the task's wording, and the two-words-or-four-letters rule for a tool or part name
+  refuses Toyota's bare "SST". Ask's subject guard was not ported, on purpose: a planner
+  claim is a fragment of its quote, so its part is always "in the quote". See
+  [`docs/repair-planner.md`](repair-planner.md).
 - **Two dormant feature flags are carrying maintenance cost.** The reranker
   (`RERANK_ENABLED`) has never been measured on the real manuals with a key. The legacy
-  non-evidence Ask path (`ASK_EVIDENCE_CONTRACT=false`) is the only route by which model
-  prose still reaches the browser, and it exists for a backwards compatibility that has no
-  consumer.
+  non-evidence Ask path (`ASK_EVIDENCE_CONTRACT=false`) is the only route by which
+  unverified model prose is presented as the answer itself, and it exists for a backwards
+  compatibility that has no consumer.
+- **Model-written text still reaches the browser outside the verified claims, labelled.**
+  With the evidence contract on, Ask shows the model's `generalGuidance` under "General
+  guidance — not from your documents" and its `gaps` under "Not covered by your documents".
+  A guidance line carrying a specification the detector reads is removed and replaced by a
+  gap with the figure redacted; a gap carrying one keeps its words with the figure redacted
+  and is marked "Unverified gap". Each rejected claim also comes back as a gap that reprints
+  the model's words, figures redacted. The Repair Planner does the same with its rejected
+  claims, redacting only the specifications the detector reads. Redaction depends on that
+  detector, so a figure it does not read stays in a guidance line, in a model-written gap,
+  and in a planner gap. And a verified claim is itself model wording: its source, its quote,
+  its figures, and (where the parser finds one) its subject are checked, not that it follows
+  from the quote.
 
 ## 3. How this roadmap differs from the August 2026 strategy review
 
@@ -154,7 +194,7 @@ this alone.
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
 | N4 | Close the two named evidence gaps | High — in progress | Slight increase |
-| N5 | Applicability: say which variant a spec belongs to | High | Slight increase |
+| N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0, P1 done; classification only) | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | High | Slight increase |
 | N8 | Document-health report | High | Slight increase |
@@ -373,7 +413,8 @@ quote printing “12.6 V” still backs a claim saying “12.6 volts”; spelled
 compare with one another exactly as before. Nothing converts between `mV` and `V` or
 between `kΩ` and `Ω`. The ASCII spellings `ohm`, `kohm`, and `kOhm` were already detected
 and are unchanged. Because the detector is shared, the Repair Planner's numeric check and
-gap redaction see these symbols too; planner subject guarding is still not covered.
+gap redaction see these symbols too. This slice added no planner subject guarding; the
+planner's own task-subject check came later, with audit Stage 5-E2.
 *Measured after merge (Experiment D, 2026-09-27, the first live answer eval since N4):* the
 new families' subject check rejects correct claims whose words are ordered differently from
 the quote. "The thermostat valve opening temperature … is 80 to 84°C" is rejected against
@@ -440,15 +481,45 @@ dangerous failure this app can produce, because it looks exactly like a correct 
 "the app gave me *my car's* torque figure." Two eval cases already check that an answer
 names the condition it is scoped to; make that a property of the answer rather than a
 thing the model may or may not mention.
+*Design:* [`docs/n5-applicability-design.md`](n5-applicability-design.md), seven phases,
+P0–P6, one PR each.
+*Status: in progress, classification only (October 2026).* Two phases are done:
+
+- **P0 — Variant details. Done (PR #156).** Migration `006_vehicle_applicability_profile`
+  adds five nullable columns to `vehicles` — engine code, build plant, transmission code,
+  VSC, and Smart Key — and Settings shows and edits them as **Variant details**. Nothing is
+  seeded: an empty value reads as unknown.
+- **P1 — Tagger and report. Done (PR #157).** `applicabilityScope.js` says which engine
+  (and build plant) each stretch of a manual page is scoped to, deterministically, and
+  `npm run diagnose:applicability` reports it, read-only. **Nothing uses it yet:** Ask, the
+  planner, and retrieval behave exactly as before, and `applicabilityNotEnforced.test.js`
+  fails the moment one of them imports the tagger. Measured offline at no cost, on a blind,
+  independently labeled sample of 158 distinct real contexts: none of 18 other-engine
+  figures was judged to apply to the owner's 2ZR-FE, and none of 81 owner figures was judged
+  to belong to another engine. Those are small denominators — a pass, not a proof. See the
+  [iteration log](evals/ask-rag-iteration-log.md).
+
+*Remaining, per the design's section 7:* P2 persists each chunk's scope (a numbered
+migration and a backfill, no API calls); P3 checks it in the Ask verifier, reported in
+shadow first and enforced only after; P4 keeps other-variant chunks out of retrieval and
+labels scope in the prompt and the answer; P5 takes the other axes (plant, VSC,
+transmission, Smart Key) one at a time; P6 gives the Repair Planner the same check. P2 is
+unblocked: audit Stage 4-D2 (PR #158) now saves a document's extraction and its chunk
+rebuild in one transaction (`withTransaction` in `database.js`), which is where P2 computes
+each chunk's scope. P3 must first settle the five residual risks the P1 review recorded in
+the design. Its acceptance test replays captured answers offline with `npm run eval:replay`
+(audit Stage 1b, PR #159), and it needs a capture taken after P2: one taken before P2 has no
+scope field to replay a check against.
 
 **N6 — Retire dormant flags and the legacy Ask path.**
 *Problem it solves:* three code paths are being maintained for no current benefit. Decide
 the reranker (`RERANK_ENABLED`): measure it once on the real manuals with a key, then
 either turn it on or delete it — an unmeasured off-by-default feature with config, tests,
 and a fallback path is pure cost. Delete the legacy non-evidence Ask path
-(`ASK_EVIDENCE_CONTRACT=false`); it is the only route by which unverified model prose still
-reaches the browser, and it serves a compatibility need that does not exist in a
-single-user app. Keep the relevance floor in shadow mode — that one has a recorded reason.
+(`ASK_EVIDENCE_CONTRACT=false`); it is the only route by which unverified model prose is
+presented as the answer itself, and it serves a compatibility need that does not exist in a
+single-user app. (Deleting it does not stop model-written text reaching the browser: the
+labelled guidance and gaps channels described in section 2 stay.) Keep the relevance floor in shadow mode — that one has a recorded reason.
 *Why it matters:* this is the only item here that makes the codebase smaller, and for a
 solo non-professional maintainer that is worth real money.
 
@@ -472,6 +543,41 @@ needs attention.
 future extraction change. Include the already-measured overprinting artifact — 366 of
 19,636 chunks across 75 documents contain a three-times-repeated phrase — as a display-only
 warning on the affected quotes. No re-extraction, no re-embedding.
+
+### The 2026-10-18 full review
+
+A full review of the repository on 18 October 2026 reproduced wrong specifications shown as
+verified in both AI features, a no-login app that any web page open in the same browser
+could drive, and a restore that could delete live files while reporting that nothing had
+changed. Its follow-up plan split the fixes into stages, one PR each. The owner answered its
+seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6.
+
+*Delivered, 19–23 October 2026:*
+
+| Stage | PR | What it did |
+| --- | --- | --- |
+| 1a | #147 | The audit's evidence and safety findings as tests, with the unfixed ones marked `todo`. Tests only |
+| 4-D1 | #148 | Restore swaps folders by rename and reports what it actually did; stopping the server checkpoints the WAL into the `.db` file |
+| 2 | #149 | The Ask verifier fails closed: a claimed number must be printed in its quote in the same unit (D1). Belongs to **N4**, which records it |
+| 3 | #150 | A request gate in place of a login: an unknown `Host` gets 421, a cross-site write 403, a body that is not JSON or multipart 415, and an unhandled error JSON with no stack trace |
+| D1 UI | #151 | Ask shows the figure the manual prints beside each verified claim |
+| 5-E2 | #152 | Planner claims keep their meaning: negation, range, whole-clause, and task-subject checks, and whole-word inventory matching (D2). See section 2 |
+| 6 | #153 | Wheel, tire, CV-axle, hub-bearing, and exhaust jobs block a Ready rating, and the defeat gate's "how does … work" exemption no longer pardons a defeat request. See **N2.5** |
+| 9 | #154 | Tests never read `server/.env`; CI hardening; a time-zone-safe test; `.nvmrc` |
+| 5-E1 | #155 | Planner stream frames carry no model arguments and no provider error body; searches and tool calls per turn have fixed bounds; embedding requests time out and count against the daily ceiling (D4); the defeat gate also runs inside the planner, not only at its route |
+| 4-D2 | #158 | A document's extraction and its chunk rebuild save in one transaction; deleting a symptom or procedure unlinks its notes; an upload whose bytes are not a PDF is refused; and a web upload records its MD5, so the same bytes uploaded twice get a 409. Migration `007_backfill_upload_file_md5` hashes older documents (D6); a byte-identical later copy keeps no hash and is only named on the startup console, and deleting it is left to the owner |
+| 1b | #159 | `npm run eval:capture` (paid) records each model reply the answer evals produce; `npm run eval:replay` (free, offline) re-verifies a capture and prints every verdict that changed. Ask only: the planner has no eval cases to capture |
+
+*Not delivered yet:*
+
+- **1b's injector eval branch.** It waits on D7: a synthetic fixture must replace the
+  verbatim manual text in it before the public repository can carry it.
+- **7, documentation truth pass.** This revision of the roadmap carries its roadmap,
+  model-prose, environment-variable, and changelog findings (3B-05, 3B-06, 3B-12, 3B-14),
+  with matching fixes to `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, and
+  [`docs/environment-variables.md`](environment-variables.md). Its other findings are not
+  re-checked here.
+- **8, performance.** Measure first; nothing in it is urgent.
 
 ### 3–6 months: make it usable at the car, and tune what the evals can now measure
 
@@ -606,9 +712,13 @@ These block or reshape items above and cannot be answered from the repository.
 3. **Do you want to plug in an OBD-II reader eventually,** or is typing a trouble code
    fine? This decides whether L1 stays small.
 4. **The reranker: measure it, or delete it now?** Measuring costs an eval run with a key.
-5. **Is the daily spend ceiling wanted?** The iteration log records that it is disabled by
-   choice (`AI_DAILY_CALL_LIMIT=0`). If that is permanent, the risk of a runaway loop
-   spending past a ceiling should be accepted in writing, or the ceiling turned back on.
+5. ~~**Is the daily spend ceiling wanted?**~~ **Answered by owner decision D4 (19 October
+   2026):** yes, keep it on. `AI_DAILY_CALL_LIMIT` defaults to 500 provider requests a day
+   per server process (`server/src/config.js`), and since PR #155 embedding requests count
+   toward it as well as Responses calls. D4 adds a monthly limit, which the owner sets on
+   the OpenAI project in OpenAI's own dashboard. `0` still disables the ceiling, and the
+   counter keeps counting either way, so Settings → AI can show "AI calls today". Left here
+   as the record of the decision, not as an open question.
 6. **Is the intended Google Cloud deployment still intended?** If not,
    [`docs/gcp-deployment.md`](gcp-deployment.md) should be marked dormant. The V1 roadmap's
    top "next work" item was hardening that path; it is deliberately not carried forward

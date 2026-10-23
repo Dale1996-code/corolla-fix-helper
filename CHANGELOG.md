@@ -1,5 +1,182 @@
 # Changelog
 
+## Week of 2026-10-19
+
+### Highlights
+
+- Acted on the 2026-10-18 full review, one stage per PR. The audit's evidence and safety findings became oracle tests, the unfixed ones marked `todo` ([PR #147](https://github.com/Dale1996-code/corolla-fix-helper/pull/147)). Restore now swaps folders by rename and reports what it actually did, and stopping the server checkpoints the WAL into the `.db` file ([PR #148](https://github.com/Dale1996-code/corolla-fix-helper/pull/148)). The Ask verifier fails closed: a claimed number must be printed in its quote in the same unit, with no tolerance or conversion (owner decision D1) ([PR #149](https://github.com/Dale1996-code/corolla-fix-helper/pull/149)), and Ask shows that printed figure beside each verified claim ([PR #151](https://github.com/Dale1996-code/corolla-fix-helper/pull/151)). A request gate stands in for the missing login: unknown `Host` → 421, cross-site write → 403, a body that is not JSON or multipart → 415, and unhandled errors as JSON ([PR #150](https://github.com/Dale1996-code/corolla-fix-helper/pull/150)).
+- Repair Planner verification keeps a claim's meaning: negation, range, whole-clause, and task-subject checks, plus whole-word tool and part matching ([PR #152](https://github.com/Dale1996-code/corolla-fix-helper/pull/152)). Its stream frames no longer carry model arguments or provider error bodies, searches and tool calls per turn have fixed bounds, embedding requests time out and count against the daily ceiling (owner decision D4), and the defeat gate runs inside the planner as well as at its route ([PR #155](https://github.com/Dale1996-code/corolla-fix-helper/pull/155)).
+- Wheel, tire, CV-axle, hub-bearing, and exhaust jobs now block a Ready rating, and the defeat gate's "how does … work" exemption no longer pardons a defeat request ([PR #153](https://github.com/Dale1996-code/corolla-fix-helper/pull/153)). Tests never read `server/.env`, CI is hardened, a time-zone-dependent test is fixed, and the repo has an `.nvmrc` ([PR #154](https://github.com/Dale1996-code/corolla-fix-helper/pull/154)).
+- Started N5 (applicability): migration `006_vehicle_applicability_profile` and a **Variant details** section on Settings ([PR #156](https://github.com/Dale1996-code/corolla-fix-helper/pull/156)), then a deterministic tagger and `npm run diagnose:applicability` report that classify which engine a manual passage is scoped to. Nothing uses the tagger yet ([PR #157](https://github.com/Dale1996-code/corolla-fix-helper/pull/157)).
+- Data integrity (audit Stage 4-D2): a document's extraction and chunk rebuild save in one transaction, deleting a symptom or procedure unlinks its notes, an upload whose bytes are not a PDF is refused, and a web upload records its MD5 so a duplicate gets a 409, with migration `007_backfill_upload_file_md5` hashing older documents ([PR #158](https://github.com/Dale1996-code/corolla-fix-helper/pull/158)).
+- Answer capture and offline replay (audit Stage 1b): `npm run eval:capture` records the answer evals' model replies, and `npm run eval:replay` re-verifies a capture for free and lists every verdict that changed ([PR #159](https://github.com/Dale1996-code/corolla-fix-helper/pull/159)).
+
+### Key PR Links
+
+- [PR #159: feat(evals): answer capture and offline replay (audit Stage 1b, 4B-11)](https://github.com/Dale1996-code/corolla-fix-helper/pull/159)
+- [PR #158: Audit Stage 4-D2: data integrity (1B-03, 1B-04, 1B-05, 2A-09) + migration 007](https://github.com/Dale1996-code/corolla-fix-helper/pull/158)
+- [PR #157: feat(n5): classification-only applicability tagger and report (N5 P1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/157)
+- [PR #156: feat(n5): vehicle variant details and migration 006 (N5 P0)](https://github.com/Dale1996-code/corolla-fix-helper/pull/156)
+- [PR #155: fix(planner): close SSE and error leaks, bound planner and embedding spend (audit Stage 5-E1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/155)
+- [PR #154: fix(test): global .env isolation for tests, CI hardening, TZ-safe test, .nvmrc (audit Stage 9)](https://github.com/Dale1996-code/corolla-fix-helper/pull/154)
+- [PR #153: fix(safety): safety classifier and defeat gate (audit Stage 6)](https://github.com/Dale1996-code/corolla-fix-helper/pull/153)
+- [PR #152: fix(planner): meaning-preserving claim verification (audit Stage 5-E2)](https://github.com/Dale1996-code/corolla-fix-helper/pull/152)
+- [PR #151: feat(ask): show the manual's printed figure beside each verified claim (D1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/151)
+- [PR #150: fix(security): request gate for the no-login app (Stage 3)](https://github.com/Dale1996-code/corolla-fix-helper/pull/150)
+- [PR #149: fix(ask): make the evidence verifier fail closed (audit Stage 2)](https://github.com/Dale1996-code/corolla-fix-helper/pull/149)
+- [PR #148: fix: rename-only restore and clean SQLite shutdown (Stage 4-D1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/148)
+- [PR #147: test: evidence and safety oracles, audit findings as todo tests (Stage 1a)](https://github.com/Dale1996-code/corolla-fix-helper/pull/147)
+
+## Week of 2026-10-05
+
+### Highlights
+
+- N4: volts, millivolts, ohms, kilohms, amps, and milliamps must equal the printed value, with no tolerance ([PR #140](https://github.com/Dale1996-code/corolla-fix-helper/pull/140)), and the `A` and `mA` symbols are detected, counting only toward current claims ([PR #146](https://github.com/Dale1996-code/corolla-fix-helper/pull/146)).
+- Cleared every dependency advisory in the root, server, and client lockfiles: `brace-expansion` and `shell-quote` ([PR #141](https://github.com/Dale1996-code/corolla-fix-helper/pull/141)), `multer`, `proxy-addr`, and `qs` ([PR #142](https://github.com/Dale1996-code/corolla-fix-helper/pull/142)), `pdfjs-dist` 6.2.108 ([PR #143](https://github.com/Dale1996-code/corolla-fix-helper/pull/143)), a client lockfile refresh ([PR #144](https://github.com/Dale1996-code/corolla-fix-helper/pull/144)), and Vitest 4.1.11 ([PR #145](https://github.com/Dale1996-code/corolla-fix-helper/pull/145)).
+
+### Key PR Links
+
+- [PR #146: Check A and mA current symbols, scoped to current claims (N4)](https://github.com/Dale1996-code/corolla-fix-helper/pull/146)
+- [PR #145: fix(deps): upgrade client to Vitest 4.1.11 (last client advisories)](https://github.com/Dale1996-code/corolla-fix-helper/pull/145)
+- [PR #144: fix(deps): clear client production and in-range dev advisories](https://github.com/Dale1996-code/corolla-fix-helper/pull/144)
+- [PR #143: fix(deps): upgrade server pdfjs-dist to 6.2.108 (last server advisory)](https://github.com/Dale1996-code/corolla-fix-helper/pull/143)
+- [PR #142: fix(deps): clear server multer, proxy-addr and qs advisories](https://github.com/Dale1996-code/corolla-fix-helper/pull/142)
+- [PR #141: fix(deps): clear root brace-expansion and shell-quote advisories](https://github.com/Dale1996-code/corolla-fix-helper/pull/141)
+- [PR #140: Require electrical values to equal the printed value (N4)](https://github.com/Dale1996-code/corolla-fix-helper/pull/140)
+
+## Week of 2026-09-28
+
+### Highlights
+
+- The Ask subject guard accepts a part name in a different word order ("X of the Y") and lettered parts such as "bolt A", alongside an N1 slice of table-derived eval cases; its live eval (Experiment G) passed 14/14 verified ([PR #138](https://github.com/Dale1996-code/corolla-fix-helper/pull/138)).
+- Two test suites that opened the real repair database at import time now use scratch paths, with a guard against it happening again ([PR #139](https://github.com/Dale1996-code/corolla-fix-helper/pull/139)).
+
+### Key PR Links
+
+- [PR #139: test: isolate two suites that opened the real database, and guard it](https://github.com/Dale1996-code/corolla-fix-helper/pull/139)
+- [PR #138: Fix Ask subject-guard word order and lettered parts; add N1 table evals](https://github.com/Dale1996-code/corolla-fix-helper/pull/138)
+
+## Week of 2026-09-14
+
+### Highlights
+
+- The evidence checks recognize the electrical symbols manuals print — `V`, `mV`, `Ω`, and `kΩ` — case-sensitively, with no conversion between them (N4) ([PR #137](https://github.com/Dale1996-code/corolla-fix-helper/pull/137)).
+
+### Key PR Links
+
+- [PR #137: Recognize electrical unit symbols in evidence checks](https://github.com/Dale1996-code/corolla-fix-helper/pull/137)
+
+## Week of 2026-09-07
+
+### Highlights
+
+- The Ask subject guard covers voltage, resistance, rpm, and temperature as well, and each Ask answer now states what verification does and does not check (first N4 slice) ([PR #136](https://github.com/Dale1996-code/corolla-fix-helper/pull/136)).
+
+### Key PR Links
+
+- [PR #136: Extend Ask evidence subject guards](https://github.com/Dale1996-code/corolla-fix-helper/pull/136)
+
+## Week of 2026-08-31
+
+### Highlights
+
+- Planner citations survive into repair history: migration `005_repair_checklist_provenance` and `POST /api/repair-checklists/:id/complete` (N3.2) ([PR #134](https://github.com/Dale1996-code/corolla-fix-helper/pull/134)), then the **Repair History** page and the **Record completed repair** form (N3.3) ([PR #135](https://github.com/Dale1996-code/corolla-fix-helper/pull/135)).
+
+### Key PR Links
+
+- [PR #135: Add N3.3 repair history UI](https://github.com/Dale1996-code/corolla-fix-helper/pull/135)
+- [PR #134: Preserve checklist provenance in repair history](https://github.com/Dale1996-code/corolla-fix-helper/pull/134)
+
+## Week of 2026-08-24
+
+### Highlights
+
+- Recorded the post-M2 live answer eval (Experiment B) and finished N2: a valid vision fixture and a written rule for when the paid answer eval runs ([PR #131](https://github.com/Dale1996-code/corolla-fix-helper/pull/131)).
+- Ask and the Repair Planner refuse requests to permanently defeat a vehicle safety system, in deterministic code (N2.5) ([PR #132](https://github.com/Dale1996-code/corolla-fix-helper/pull/132)).
+- Repair history foundation: migration `004_repair_history` and `/api/repair-history`, with the odometer on the repair record (N3.1) ([PR #133](https://github.com/Dale1996-code/corolla-fix-helper/pull/133)).
+
+### Key PR Links
+
+- [PR #133: Add N3.1 repair history foundation](https://github.com/Dale1996-code/corolla-fix-helper/pull/133)
+- [PR #132: Enforce T4 safety-system defeat refusal](https://github.com/Dale1996-code/corolla-fix-helper/pull/132)
+- [PR #131: Record post-M2 evaluation and repair N2 eval defects](https://github.com/Dale1996-code/corolla-fix-helper/pull/131)
+
+## Week of 2026-08-17
+
+### Highlights
+
+- Recovered the zero-chunk corpus: zero-chunk documents went from 128 to 13, each remaining one explained (N0) ([PR #126](https://github.com/Dale1996-code/corolla-fix-helper/pull/126)).
+- Retrieval returns identical evidence once and caps chunks per logical source (`RETRIEVAL_MAX_CHUNKS_PER_SOURCE`, M2) ([PR #127](https://github.com/Dale1996-code/corolla-fix-helper/pull/127)).
+- Grew and corrected the verified answer-eval set (N1) ([PR #128](https://github.com/Dale1996-code/corolla-fix-helper/pull/128)), recorded its corrected-instrument live run ([PR #129](https://github.com/Dale1996-code/corolla-fix-helper/pull/129)), and demoted the engine-mount case that run showed was unstable ([PR #130](https://github.com/Dale1996-code/corolla-fix-helper/pull/130)).
+
+### Key PR Links
+
+- [PR #130: Demote the unstable engine-mount applicability gate](https://github.com/Dale1996-code/corolla-fix-helper/pull/130)
+- [PR #129: Record the N1 corrected-instrument live eval](https://github.com/Dale1996-code/corolla-fix-helper/pull/129)
+- [PR #128: Grow and strengthen the verified answer-eval set (N1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/128)
+- [PR #127: Stop redundant evidence monopolizing retrieval results (M2)](https://github.com/Dale1996-code/corolla-fix-helper/pull/127)
+- [PR #126: Fix N0 zero-chunk corpus recovery](https://github.com/Dale1996-code/corolla-fix-helper/pull/126)
+
+## Week of 2026-08-10
+
+### Highlights
+
+- Ask's verifier rejections are reported, sanitized, behind `ASK_DEBUG_METRICS`, so a false rejection can be told apart from "not in the documents" ([PR #123](https://github.com/Dale1996-code/corolla-fix-helper/pull/123)).
+- Moved the roadmap into `docs/` ([PR #124](https://github.com/Dale1996-code/corolla-fix-helper/pull/124)), then made the Markdown `docs/roadmap.md` the single current roadmap ([PR #125](https://github.com/Dale1996-code/corolla-fix-helper/pull/125)).
+
+### Key PR Links
+
+- [PR #125: docs: finalize the 2026-2027 roadmap and clarify roadmap history](https://github.com/Dale1996-code/corolla-fix-helper/pull/125)
+- [PR #124: docs: move roadmap into docs/ and add 2026-2027 roadmap PDF](https://github.com/Dale1996-code/corolla-fix-helper/pull/124)
+- [PR #123: Expose Ask verifier rejections behind ASK_DEBUG_METRICS (#107)](https://github.com/Dale1996-code/corolla-fix-helper/pull/123)
+
+## Week of 2026-08-03
+
+### Highlights
+
+- Brought the Repair Planner evidence contract and real readiness onto `main`; PR #97 had merged into its stacked branch only ([PR #98](https://github.com/Dale1996-code/corolla-fix-helper/pull/98)). Turned Ask's evidence contract on by default and hardened its citations ([PR #99](https://github.com/Dale1996-code/corolla-fix-helper/pull/99)), documented both in `CLAUDE.md` and `AGENTS.md` ([PR #100](https://github.com/Dale1996-code/corolla-fix-helper/pull/100)), and generalized the Ask subject guard beyond torque ([PR #122](https://github.com/Dale1996-code/corolla-fix-helper/pull/122)).
+- Repair Planner usability: a real control for the safety acknowledgment ([PR #102](https://github.com/Dale1996-code/corolla-fix-helper/pull/102)), saving a completed plan as a checklist ([PR #109](https://github.com/Dale1996-code/corolla-fix-helper/pull/109)), the AI disclosure and safety warning before generation ([PR #111](https://github.com/Dale1996-code/corolla-fix-helper/pull/111)), and copyable handoff drafts ([PR #112](https://github.com/Dale1996-code/corolla-fix-helper/pull/112)).
+- UI fixes from the H-series review: Ask AI pages its document card from the server ([PR #101](https://github.com/Dale1996-code/corolla-fix-helper/pull/101)), every evidence source card opens at its cited page ([PR #108](https://github.com/Dale1996-code/corolla-fix-helper/pull/108)), an unknown URL shows a Not Found page ([PR #110](https://github.com/Dale1996-code/corolla-fix-helper/pull/110)), Settings shows AI status and restore instructions ([PR #113](https://github.com/Dale1996-code/corolla-fix-helper/pull/113)), one product name and one label per feature ([PR #114](https://github.com/Dale1996-code/corolla-fix-helper/pull/114)), view state in the URL ([PR #115](https://github.com/Dale1996-code/corolla-fix-helper/pull/115)), the shared list/detail layout ([PR #116](https://github.com/Dale1996-code/corolla-fix-helper/pull/116), [PR #117](https://github.com/Dale1996-code/corolla-fix-helper/pull/117), [PR #119](https://github.com/Dale1996-code/corolla-fix-helper/pull/119)), and one vocabulary and counter format ([PR #118](https://github.com/Dale1996-code/corolla-fix-helper/pull/118)).
+- Closed three open issues: readiness inputs are cloned and frozen in the plan-run store (#103, [PR #120](https://github.com/Dale1996-code/corolla-fix-helper/pull/120)), and a test pins `chunkIndex` 0 for a page's first chunk (#105, [PR #121](https://github.com/Dale1996-code/corolla-fix-helper/pull/121)); PR #122 above closed #106.
+
+### Key PR Links
+
+- [PR #122: Generalize the Ask subject guard beyond torque specifications](https://github.com/Dale1996-code/corolla-fix-helper/pull/122)
+- [PR #121: test: pin keyword retrieval chunkIndex 0 for a page's first chunk](https://github.com/Dale1996-code/corolla-fix-helper/pull/121)
+- [PR #120: Clone and deep-freeze both readiness inputs in planRunStore.save() (#103)](https://github.com/Dale1996-code/corolla-fix-helper/pull/120)
+- [PR #119: docs: document the shared ListDetailLayout convention (H6)](https://github.com/Dale1996-code/corolla-fix-helper/pull/119)
+- [PR #118: Copy sweep: one vocabulary and one counter format across the UI](https://github.com/Dale1996-code/corolla-fix-helper/pull/118)
+- [PR #117: Harden the H6 list/detail layout after review](https://github.com/Dale1996-code/corolla-fix-helper/pull/117)
+- [PR #116: H6: fix list/detail layout clipping across the five record pages](https://github.com/Dale1996-code/corolla-fix-helper/pull/116)
+- [PR #115: Put list filters, pagination, and selection in the URL (H7)](https://github.com/Dale1996-code/corolla-fix-helper/pull/115)
+- [PR #114: Identity: one product name and one label per feature (H5)](https://github.com/Dale1996-code/corolla-fix-helper/pull/114)
+- [PR #113: Settings: surface AI status and CLI restore instructions (H8)](https://github.com/Dale1996-code/corolla-fix-helper/pull/113)
+- [PR #112: fix(planner): let each handoff draft be copied to the clipboard (H4)](https://github.com/Dale1996-code/corolla-fix-helper/pull/112)
+- [PR #111: fix(planner): show the AI disclosure and safety warning on Repair Planner](https://github.com/Dale1996-code/corolla-fix-helper/pull/111)
+- [PR #110: fix(client): render a Not Found page instead of a blank screen](https://github.com/Dale1996-code/corolla-fix-helper/pull/110)
+- [PR #109: feat(planner): save a completed repair plan as a checklist](https://github.com/Dale1996-code/corolla-fix-helper/pull/109)
+- [PR #108: fix(ask): make every evidence source card openable at its cited page](https://github.com/Dale1996-code/corolla-fix-helper/pull/108)
+- [PR #102: fix(planner): give the safety readiness requirement a real acknowledgment control](https://github.com/Dale1996-code/corolla-fix-helper/pull/102)
+- [PR #101: fix(search): bound Ask/Search document loading with server pagination](https://github.com/Dale1996-code/corolla-fix-helper/pull/101)
+- [PR #100: docs: sync CLAUDE.md and AGENTS.md with PR #93-#99 behavior](https://github.com/Dale1996-code/corolla-fix-helper/pull/100)
+- [PR #99: Harden Ask citation and evidence integrity](https://github.com/Dale1996-code/corolla-fix-helper/pull/99)
+- [PR #98: Repair Planner PR 2 carry-forward: evidence contract and real readiness](https://github.com/Dale1996-code/corolla-fix-helper/pull/98)
+
+## Week of 2026-07-27
+
+### Highlights
+
+- Implemented the AI/RAG grounding plan with GPT-5 compatibility; its new behaviors shipped behind flags that defaulted off ([PR #93](https://github.com/Dale1996-code/corolla-fix-helper/pull/93)), and the default answer model moved to the pinned `gpt-5.5-2026-04-23` snapshot ([PR #94](https://github.com/Dale1996-code/corolla-fix-helper/pull/94)).
+- Wrote the Repair Planner integrity plan ([PR #95](https://github.com/Dale1996-code/corolla-fix-helper/pull/95)) and landed its first half: the trust boundary, canonical tasks, and completion integrity ([PR #96](https://github.com/Dale1996-code/corolla-fix-helper/pull/96)). The second half, the evidence contract and real readiness, merged into the stacked branch ([PR #97](https://github.com/Dale1996-code/corolla-fix-helper/pull/97)) and reached `main` the next week through PR #98.
+
+### Key PR Links
+
+- [PR #97: Repair Planner PR 2: evidence contract and real readiness](https://github.com/Dale1996-code/corolla-fix-helper/pull/97)
+- [PR #96: Repair Planner PR 1: trust boundary, canonical tasks, and completion integrity](https://github.com/Dale1996-code/corolla-fix-helper/pull/96)
+- [PR #95: docs: corrected Repair Planner integrity plan](https://github.com/Dale1996-code/corolla-fix-helper/pull/95)
+- [PR #94: Update the default OpenAI answer model to the pinned GPT-5.5 snapshot](https://github.com/Dale1996-code/corolla-fix-helper/pull/94)
+- [PR #93: AI/RAG grounding, verified evidence contract, safety hardening, and model compatibility](https://github.com/Dale1996-code/corolla-fix-helper/pull/93)
+
 ## Week of 2026-07-20
 
 ### Highlights
@@ -9,9 +186,11 @@
 - Committed a curated set of offline/PWA phone-access fixes (service worker `/api` bypass, startup-banner refinements, new tests) that had been left uncommitted by a paused scheduled task. See [PR #88](https://github.com/Dale1996-code/corolla-fix-helper/pull/88).
 - Re-applied two `AGENTS.md` corrections — the AI rate limiter is one shared 20/min window, and the folder importer dedups by MD5 only — after PR #88's merge order had reverted them. See [PR #90](https://github.com/Dale1996-code/corolla-fix-helper/pull/90).
 - Frontend accessibility and consistency pass: converted clickable `<div>` list rows to real `<button>`s for keyboard/screen-reader navigation, fixed low-contrast text and a hidden `<h1>`, added `role="alert"`/`role="status"` banners across 57 previously-silent messages, and de-duplicated shared form/section components. See [PR #91](https://github.com/Dale1996-code/corolla-fix-helper/pull/91).
+- Ran a documentation audit against the codebase and fixed the drift it confirmed, including migration `003_link_and_sort_indexes` missing from `DATA_MODEL.md`. See [PR #92](https://github.com/Dale1996-code/corolla-fix-helper/pull/92).
 
 ### Key PR Links
 
+- [PR #92: docs: sync documentation with codebase through PR #91](https://github.com/Dale1996-code/corolla-fix-helper/pull/92)
 - [PR #91: Fix frontend accessibility, contrast, and duplication issues](https://github.com/Dale1996-code/corolla-fix-helper/pull/91)
 - [PR #90: docs(AGENTS): re-apply shared-limiter + MD5-only import corrections](https://github.com/Dale1996-code/corolla-fix-helper/pull/90)
 - [PR #89: Stage 3 indexes: reverse-link + sort indexes, migration 003 (#18)](https://github.com/Dale1996-code/corolla-fix-helper/pull/89)
