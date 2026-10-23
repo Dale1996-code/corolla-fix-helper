@@ -159,6 +159,121 @@ test("SettingsPage loads settings and saves vehicle changes", async () => {
   clickSpy.mockRestore();
 });
 
+function settingsWithVehicle(vehicle) {
+  return {
+    vehicle,
+    runtime: {
+      databaseFile: "C:/temp/corolla.db",
+      uploadsDir: "C:/temp/uploads",
+      maxUploadSizeMb: 20,
+      port: 4000,
+      clientPort: 5173,
+      pathsEditable: false,
+    },
+    documentDefaults: { commonSystems: [], documentTypes: [] },
+    backupExport: { supported: true, path: "Download from Settings", message: "" },
+  };
+}
+
+function stubVehicleSettings(vehicle) {
+  const fetchMock = vi.fn((url, options = {}) => {
+    if (url === "/api/settings") {
+      return jsonResponse(settingsWithVehicle(vehicle));
+    }
+
+    if (url === "/api/settings/vehicle" && options.method === "PUT") {
+      const body = JSON.parse(options.body);
+      return jsonResponse({
+        message: "Vehicle settings updated.",
+        vehicle: { id: 1, ...body, year: Number(body.year) },
+      });
+    }
+
+    throw new Error(`Unexpected fetch call: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function savedVehicleBody(fetchMock) {
+  const call = fetchMock.mock.calls.find(
+    ([url, options]) => url === "/api/settings/vehicle" && options?.method === "PUT"
+  );
+  return call ? JSON.parse(call[1].body) : null;
+}
+
+test("SettingsPage shows saved variant details and saves a changed build plant", async () => {
+  const fetchMock = stubVehicleSettings({
+    id: 1,
+    year: 2009,
+    make: "Toyota",
+    model: "Corolla",
+    trim: "LE",
+    engine: "1.8L",
+    applicability: {
+      engineCode: "2ZR-FE",
+      buildPlant: null,
+      transmissionCode: null,
+      hasVsc: true,
+      hasSmartKey: null,
+    },
+  });
+
+  render(<SettingsPage />);
+
+  expect(await screen.findByDisplayValue("2ZR-FE")).toBeInTheDocument();
+  expect(screen.getByText("Variant details")).toBeInTheDocument();
+  expect(screen.getByLabelText("Engine code")).toHaveValue("2ZR-FE");
+  expect(screen.getByLabelText("Build plant")).toHaveValue("");
+  expect(screen.getByLabelText("VSC (stability control)")).toHaveValue("yes");
+  expect(screen.getByLabelText("Smart Key")).toHaveValue("");
+
+  fireEvent.change(screen.getByLabelText("Build plant"), { target: { value: "NUMMI" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save vehicle profile" }));
+
+  expect(await screen.findByText("Vehicle profile saved.")).toBeInTheDocument();
+  expect(savedVehicleBody(fetchMock).applicability).toEqual({
+    engineCode: "2ZR-FE",
+    buildPlant: "NUMMI",
+    transmissionCode: null,
+    hasVsc: true,
+    hasSmartKey: null,
+  });
+});
+
+test("SettingsPage treats missing variant details as Unknown and saves them as unknown", async () => {
+  const fetchMock = stubVehicleSettings({
+    id: 1,
+    year: 2009,
+    make: "Toyota",
+    model: "Corolla",
+    trim: "LE",
+    engine: "1.8L",
+  });
+
+  render(<SettingsPage />);
+
+  expect(await screen.findByDisplayValue("2009")).toBeInTheDocument();
+  expect(screen.getByLabelText("Engine code")).toHaveValue("");
+  expect(screen.getByLabelText("Transmission code")).toHaveValue("");
+  expect(screen.getByLabelText("Build plant")).toHaveValue("");
+  expect(screen.getByLabelText("VSC (stability control)")).toHaveValue("");
+
+  fireEvent.change(screen.getByLabelText("Smart Key"), { target: { value: "no" } });
+  fireEvent.change(screen.getByLabelText("Transmission code"), { target: { value: "  u341e " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save vehicle profile" }));
+
+  expect(await screen.findByText("Vehicle profile saved.")).toBeInTheDocument();
+  expect(savedVehicleBody(fetchMock).applicability).toEqual({
+    engineCode: null,
+    buildPlant: null,
+    transmissionCode: "u341e",
+    hasVsc: null,
+    hasSmartKey: false,
+  });
+});
+
 test("SymptomsPage supports search, filters, sorting, and empty filtered states", async () => {
   const symptomsPayload = {
     symptoms: [

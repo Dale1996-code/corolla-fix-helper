@@ -25,7 +25,12 @@ export function getVehicle() {
         make,
         model,
         trim,
-        engine
+        engine,
+        engine_code,
+        build_plant,
+        transmission_code,
+        has_vsc,
+        has_smart_key
       FROM vehicles
       ORDER BY id ASC
       LIMIT 1

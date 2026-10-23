@@ -519,6 +519,33 @@ function createRepairChecklistProvenance() {
   `);
 }
 
+// The owner's vehicle variant details (N5, docs/n5-applicability-design.md
+// §6.1): engine code, build plant, transmission code, VSC, and Smart Key. The
+// manuals print some specifications per variant, often in one table, and these
+// are what let the app tell which row is this car's.
+//
+// Every column is NULLABLE and NOTHING IS SEEDED. Unknown is a real state that
+// the applicability check reads as "cannot be confirmed", never as a match, so
+// guessing a value here (a 1.8L Corolla is usually a 2ZR-FE) would be the exact
+// silent assumption N5 exists to remove. Only the owner sets these, in Settings.
+// The CHECKs mirror vehicleApplicabilityProfile.js so a direct SQL write cannot
+// store a plant or flag the app would refuse.
+function addVehicleApplicabilityProfile() {
+  ensureColumn("vehicles", "engine_code", "TEXT");
+  ensureColumn(
+    "vehicles",
+    "build_plant",
+    "TEXT CHECK (build_plant IS NULL OR build_plant IN ('TMC','NUMMI','TMMC'))"
+  );
+  ensureColumn("vehicles", "transmission_code", "TEXT");
+  ensureColumn("vehicles", "has_vsc", "INTEGER CHECK (has_vsc IS NULL OR has_vsc IN (0,1))");
+  ensureColumn(
+    "vehicles",
+    "has_smart_key",
+    "INTEGER CHECK (has_smart_key IS NULL OR has_smart_key IN (0,1))"
+  );
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -791,6 +818,7 @@ export function initializeDatabase() {
   runMigration("003_link_and_sort_indexes", createLinkAndSortIndexes);
   runMigration("004_repair_history", createRepairHistoryTables);
   runMigration("005_repair_checklist_provenance", createRepairChecklistProvenance);
+  runMigration("006_vehicle_applicability_profile", addVehicleApplicabilityProfile);
 
   ensureAppSettingsRecord();
   seedVehicle();

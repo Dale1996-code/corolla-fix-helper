@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
-import { TextAreaField, TextField } from "../components/forms/FormFields";
+import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { requestJson } from "../lib/apiClient";
 
 const emptyVehicleForm = {
@@ -10,7 +10,81 @@ const emptyVehicleForm = {
   model: "",
   trim: "",
   engine: "",
+  engineCode: "",
+  buildPlant: "",
+  transmissionCode: "",
+  hasVsc: "",
+  hasSmartKey: "",
 };
+
+// Variant details (N5): which engine, plant, and options this car has. The
+// form holds strings; "" is Unknown, which the server stores as null and the
+// applicability check never treats as a match.
+const BUILD_PLANT_OPTIONS = [
+  { value: "TMC", label: "Japan (TMC)" },
+  { value: "NUMMI", label: "USA (NUMMI)" },
+  { value: "TMMC", label: "Canada (TMMC)" },
+];
+
+const YES_NO_OPTIONS = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
+
+function triStateToFormValue(value) {
+  if (value === true) {
+    return "yes";
+  }
+
+  return value === false ? "no" : "";
+}
+
+function formValueToTriState(value) {
+  if (value === "yes") {
+    return true;
+  }
+
+  return value === "no" ? false : null;
+}
+
+function trimmedOrNull(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+function vehicleToForm(vehicle) {
+  const applicability = vehicle?.applicability || {};
+
+  return {
+    year: String(vehicle?.year || ""),
+    make: vehicle?.make || "",
+    model: vehicle?.model || "",
+    trim: vehicle?.trim || "",
+    engine: vehicle?.engine || "",
+    engineCode: applicability.engineCode || "",
+    buildPlant: applicability.buildPlant || "",
+    transmissionCode: applicability.transmissionCode || "",
+    hasVsc: triStateToFormValue(applicability.hasVsc),
+    hasSmartKey: triStateToFormValue(applicability.hasSmartKey),
+  };
+}
+
+function formToVehiclePayload(form) {
+  return {
+    year: form.year,
+    make: form.make,
+    model: form.model,
+    trim: form.trim,
+    engine: form.engine,
+    applicability: {
+      engineCode: trimmedOrNull(form.engineCode),
+      buildPlant: trimmedOrNull(form.buildPlant),
+      transmissionCode: trimmedOrNull(form.transmissionCode),
+      hasVsc: formValueToTriState(form.hasVsc),
+      hasSmartKey: formValueToTriState(form.hasSmartKey),
+    },
+  };
+}
 
 const emptyDocumentDefaultsForm = {
   commonSystemsText: "",
@@ -364,13 +438,7 @@ export function SettingsPage() {
           documentTypes: payload.documentDefaults?.documentTypes || [],
         };
 
-        setVehicleForm({
-          year: String(payload.vehicle?.year || ""),
-          make: payload.vehicle?.make || "",
-          model: payload.vehicle?.model || "",
-          trim: payload.vehicle?.trim || "",
-          engine: payload.vehicle?.engine || "",
-        });
+        setVehicleForm(vehicleToForm(payload.vehicle));
         setSavedDocumentDefaults(nextDocumentDefaults);
         setDocumentDefaultsForm({
           commonSystemsText: listToTextareaValue(nextDocumentDefaults.commonSystems),
@@ -443,17 +511,11 @@ export function SettingsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(vehicleForm),
+        body: JSON.stringify(formToVehiclePayload(vehicleForm)),
         errorMessage: "Could not save vehicle settings.",
       });
 
-      setVehicleForm({
-        year: String(payload.vehicle?.year || ""),
-        make: payload.vehicle?.make || "",
-        model: payload.vehicle?.model || "",
-        trim: payload.vehicle?.trim || "",
-        engine: payload.vehicle?.engine || "",
-      });
+      setVehicleForm(vehicleToForm(payload.vehicle));
       setVehicleSaveMessage("Vehicle profile saved.");
     } catch (error) {
       setVehicleSaveError(error.message || "Could not save vehicle settings.");
@@ -589,6 +651,57 @@ export function SettingsPage() {
                   onChange={handleVehicleChange}
                   placeholder="1.8L"
                 />
+
+                <fieldset className="grid gap-4 rounded-xl border border-slate-200 p-4">
+                  <legend className="px-1 text-sm font-semibold text-slate-900">
+                    Variant details
+                  </legend>
+                  <p className="text-sm text-slate-600">
+                    The manuals print some specifications per engine, build plant, or option.
+                    These details let the app tell which ones are yours. Leave anything you&apos;re
+                    not sure of as Unknown — unknown is treated as unconfirmed, never as a match.
+                  </p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <TextField
+                      label="Engine code"
+                      name="engineCode"
+                      value={vehicleForm.engineCode}
+                      onChange={handleVehicleChange}
+                      placeholder="2ZR-FE"
+                    />
+                    <SelectField
+                      label="Build plant"
+                      name="buildPlant"
+                      value={vehicleForm.buildPlant}
+                      onChange={handleVehicleChange}
+                      options={BUILD_PLANT_OPTIONS}
+                      emptyOption="Unknown"
+                    />
+                    <TextField
+                      label="Transmission code"
+                      name="transmissionCode"
+                      value={vehicleForm.transmissionCode}
+                      onChange={handleVehicleChange}
+                      placeholder="U341E or C59"
+                    />
+                    <SelectField
+                      label="VSC (stability control)"
+                      name="hasVsc"
+                      value={vehicleForm.hasVsc}
+                      onChange={handleVehicleChange}
+                      options={YES_NO_OPTIONS}
+                      emptyOption="Unknown"
+                    />
+                    <SelectField
+                      label="Smart Key"
+                      name="hasSmartKey"
+                      value={vehicleForm.hasSmartKey}
+                      onChange={handleVehicleChange}
+                      options={YES_NO_OPTIONS}
+                      emptyOption="Unknown"
+                    />
+                  </div>
+                </fieldset>
 
                 {vehicleSaveMessage ? <SuccessBanner>{vehicleSaveMessage}</SuccessBanner> : null}
 
