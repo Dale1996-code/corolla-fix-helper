@@ -161,8 +161,8 @@ Work down the list; each step isolates one layer.
   `tailscale funnel` with this app; both would put it on the public internet.
 - **Other web pages can't drive it.** No login doesn't mean any website can
   use it. The app answers only to this computer's own names, which blocks DNS
-  rebinding, and it accepts a save, upload or delete only from its own pages
-  (status 403 otherwise). So a page you happen to have open elsewhere can't
+  rebinding, and it accepts a save, upload or delete from a browser only when it
+  comes from its own pages (status 403 otherwise). So a page you happen to have open elsewhere can't
   plant a fake "factory manual" or change your data. This protects against web
   pages, not against devices: anything on your Wi-Fi or tailnet that can reach
   the port can still use the app directly.
@@ -173,4 +173,4 @@ Work down the list; each step isolates one layer.
   from `localhost`, so the app also refuses any request carrying a proxy's
   forwarding headers or addressed to a network name. Pull backups on the
   computer that runs the app, at `http://localhost:4000`.
-- The `/api/ask` rate limit is a spend cap, not authentication.
+- The AI rate limit is a spend cap, not authentication: 20 requests a minute per client address, shared by Ask, the Repair Planner, and suggested procedures. Phones relayed through `tailscale serve` all reach the app from `localhost`, so they share one window.

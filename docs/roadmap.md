@@ -572,11 +572,20 @@ seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6
 
 - **1b's injector eval branch.** It waits on D7: a synthetic fixture must replace the
   verbatim manual text in it before the public repository can carry it.
-- **7, documentation truth pass.** This revision of the roadmap carries its roadmap,
-  model-prose, environment-variable, and changelog findings (3B-05, 3B-06, 3B-12, 3B-14),
-  with matching fixes to `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, and
-  [`docs/environment-variables.md`](environment-variables.md). Its other findings are not
-  re-checked here.
+- **7, documentation truth pass.** Done in two parts, both docs-only. Part 1 (#160)
+  carried the roadmap, model-prose, environment-variable, and changelog findings (3B-05,
+  3B-06, 3B-12, 3B-14), with matching fixes to `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`,
+  and [`docs/environment-variables.md`](environment-variables.md). Part 2 carries the
+  trust model (3B-04: a "What *verified* means" section in `README.md` and
+  [`docs/architecture.md`](architecture.md), including what the request gate does and
+  does not stop), the network-access docs (3B-08, re-checked against `requestGuard.js` and
+  `requireLoopback`), what `not_found` means (3B-09: three causes, in `README.md`,
+  [`docs/api.md`](api.md), `architecture.md`, and `docs/onboarding.md`), the Ask and
+  Planner diagrams and the embedding-version wording (3B-15, 1B-15), and the rate limiter
+  (1B-14: one limiter instance shared by three routes, keyed per client address). The
+  audit's remaining Stage 7 findings are not re-checked here. Owner decision D5 (show
+  source and filename in citations) is not met by the UI yet: Ask shows a document's
+  title and falls back to its filename only when it has no title.
 - **8, performance.** Measure first; nothing in it is urgent.
 
 ### 3–6 months: make it usable at the car, and tune what the evals can now measure

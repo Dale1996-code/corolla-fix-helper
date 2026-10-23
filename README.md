@@ -4,7 +4,7 @@ Corolla Fix Helper is a local-first repair workspace for one vehicle:
 
 - 2009 Toyota Corolla LE 1.8L
 
-**Why it exists:** repair information for one car ends up scattered across PDF manuals, forum printouts, wiring diagrams, and handwritten notes. This app puts all of it in one searchable local place, and adds two AI features that answer questions and plan repairs *using only your uploaded documents* — with citations back to the exact PDF page.
+**Why it exists:** repair information for one car ends up scattered across PDF manuals, forum printouts, wiring diagrams, and handwritten notes. This app puts the PDFs you choose to upload in one searchable local place, and adds two AI features that answer questions and plan repairs from *those documents* — with citations back to the exact PDF page. The app cannot tell a factory service manual from a forum printout: it treats every uploaded PDF as equally authoritative, so what you upload sets how far an answer can be trusted (see [What *verified* means](#what-verified-means)).
 
 **Local-first** means the app stores its working data on the computer that runs it: one SQLite database file and one local uploads folder for PDFs. There is no cloud account and no sync.
 
@@ -15,7 +15,7 @@ Storage is local, but the AI features are not offline: when `OPENAI_API_KEY` is 
 - **Documents** — upload PDFs, edit details, tag, favorite, bookmark, open the saved file, re-run text extraction, and delete with full cleanup
 - **Bulk import** — resumable folder import for many PDFs with MD5 duplicate detection and an image-only report (`npm run import`)
 - **OCR (optional)** — scanned or image-only PDF pages become searchable text when local Tesseract and Poppler are installed
-- **Ask AI** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, OpenAI-generated answers with citations, and a deliberate `not in documents` refusal when your PDFs don't contain the answer. Can optionally include one saved photo (Vision Ask). Sidebar **Ask AI**, route `/search`; the panel on that page is headed "Ask a question".
+- **Ask AI** — RAG-style Q&A: hybrid keyword+embedding retrieval over PDF chunks, then OpenAI-written claims that the server checks against the retrieved text before showing them, each with a citation to a PDF page. The status is `answered`, `partial` (some claims verified, but part of the question was not covered or did not verify), or `not_found` ("not in documents"). `not_found` has three causes: retrieval found nothing usable, no claim passed verification (the answer may still be in your PDFs — the page shows what was retrieved), or the question asked how to defeat a vehicle safety system, which gets its own refusal message before any search. Can optionally include one saved photo (Vision Ask). Sidebar **Ask AI**, route `/search`; the panel on that page is headed "Ask a question".
 - **Search** — plain keyword search, no AI and no API key needed. Its four sections ("Search documents", "Search symptoms", "Search procedures", "Search notes") sit below the Ask AI panel on the same page, and hit `/api/search/*`.
 - **Repair Planner** — a streaming tool-calling agent that turns a rough repair brief into a prioritized plan, readiness score, owner checklist, and handoff drafts, grounded in your PDFs
 - **Symptoms, Procedures, Notes** — create/edit/delete with filters and sorting; link them to documents and to each other; attach photos (JPEG/PNG/WebP)
@@ -49,9 +49,32 @@ The app does **not** include:
 - general open-ended AI chat (both AI features stay grounded in the uploaded documents)
 - a verified current cloud deployment from this branch
 
-> ⚠️ **Do not expose this app on a public URL without putting HTTPS and authentication in front of it.** There is no login, so anyone who can reach it can read your data and spend your OpenAI budget. The AI endpoints are rate-limited (20 requests/minute) as a basic safeguard, but that is not a substitute for authentication. Ask AI sends your question and relevant excerpts from your uploaded PDFs (plus any photo you attach) to OpenAI to generate an answer.
+> ⚠️ **Do not expose this app on a public URL without putting HTTPS and authentication in front of it.** There is no login, so anyone who can reach it can read your data and spend your OpenAI budget. The AI endpoints (Ask, the Repair Planner, and suggested procedures) share one rate limit of 20 requests a minute per client address as a basic safeguard, but that is not a substitute for authentication. Ask AI sends your question and relevant excerpts from your uploaded PDFs (plus any photo you attach) to OpenAI to generate an answer.
 
 Use sample or fake PDFs before sharing a public demo.
+
+## What *verified* means
+
+Ask AI and the Repair Planner only show a statement from your documents as a claim that passed a server-side check. **Verified** means exactly this, and no more:
+
+- the quote the model gave appears word for word in text the app extracted from **some** PDF you uploaded;
+- every number with a unit in the claim is printed in that quote, **in the same unit** (nothing is converted, and there is no tolerance);
+- for common specification wording (torque, capacity, pressure, clearance, and similar), the part the claim names appears in the quote.
+
+It does **not** mean:
+
+- **the PDF is correct.** A wrong forum post, a different year's manual, or a bad OCR read verifies as well as a factory manual does. The app does not know which of your uploads is which.
+- **the PDF applies to this car.** Matching a document to the 2009 Corolla's 2ZR-FE engine is only *classified* so far (`npm run diagnose:applicability`, roadmap N5); neither Ask nor the Planner uses it to include or exclude a page, so a spec for another engine in the same manual can verify.
+- **the claim follows from its quote.** The check does not read for meaning: pronouns, synonyms, unusual sentence shapes, and a long quote that mentions several parts can pass and still need your judgment.
+
+Always open the cited page before you torque, drain, or disconnect anything. Each verified claim is shown with its quote, the document's title, and the page, and **Open cited page** opens the PDF there. Model-written text still reaches the screen, but only in labelled places — "General guidance — not from your documents" and the gaps list — never as the answer itself.
+
+### Who can reach it
+
+The app has no login. What it has instead is a request gate (`server/src/middleware/requestGuard.js`), and the gate is narrower than a login:
+
+- **Blocked:** other web pages open in the same browser. The app answers only to this computer's own names (a page that re-points its own domain at `127.0.0.1` gets `421`), and a browser's save, upload, or delete must come from the app's own pages (`403` otherwise).
+- **Not blocked:** any device that can reach the port. With the default `NETWORK_MODE=0` that is only this computer. With `NETWORK_MODE=1`, every device on your Wi-Fi or Tailscale network can read and change everything and spend your OpenAI credit, because a script or `curl` sends no cross-site headers and is let through. Only the backup download stays host-only. See [Use it on your iPhone](docs/mobile-access.md).
 
 ## Tech Stack
 

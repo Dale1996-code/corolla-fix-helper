@@ -148,8 +148,8 @@ When reporting or debugging a failure, capture the terminal output around the ti
 
 Work down this list — each step isolates one layer:
 
-1. **"AI is not configured"** → `OPENAI_API_KEY` is missing from the server process. Add it to `server\.env`, restart the backend. (This state is by design, not a crash.)
-2. **`not in documents` for things you know are in the PDFs** →
+1. **"AI is not configured"** → `OPENAI_API_KEY` is missing from the server process. Add it to `server\.env`, restart the backend. (This state is by design, not a crash, and it is decided before any search runs.)
+2. **`not in documents` for things you know are in the PDFs** → first read the reply: if it lists "Retrieved context", retrieval found those pages but none of the model's claims passed verification, so the fact may be on one of them in different words or a different unit — open the cited pages. A refusal message about disabling, bypassing, or defeating a safety system is the defeat gate, not a search failure. Otherwise retrieval found nothing usable:
    - Confirm the document's text extracted (Documents page shows extraction status and page count).
    - Rebuild embeddings — required after any import or re-extraction:
 
@@ -158,8 +158,8 @@ Work down this list — each step isolates one layer:
      ```
 
      This is resumable and only embeds chunks missing the current embedding version.
-   - If you changed `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMENSIONS`, **all** old embeddings are ignored (version mismatch) until you re-run the backfill.
-3. **HTTP 429 from `/api/ask`** → the built-in rate limit (20 requests/minute) — wait a minute.
+   - If you changed `OPENAI_EMBEDDING_MODEL` or `OPENAI_EMBEDDING_DIMENSIONS`, **all** old embeddings stop counting toward semantic ranking (version mismatch) until you re-run the backfill. Those chunks still rank by keyword, so documents stay findable, just with weaker ranking.
+3. **HTTP 429 from `/api/ask`** → the built-in rate limit: 20 AI requests a minute per client address, one window shared with the Repair Planner and suggested procedures — wait a minute.
 4. **HTTP 500 / network errors** → the backend can't reach OpenAI (egress, invalid key, OpenAI outage). The backend terminal shows the underlying error.
 5. **Quality regressions** (answers got worse, wrong citations) → run the evals: `npm run eval:retrieval` (no key needed) and `npm run eval:answers` (needs key, costs cents). See [quality-testing.md](quality-testing.md).
 

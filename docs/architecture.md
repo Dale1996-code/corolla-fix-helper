@@ -139,37 +139,61 @@ RAG means retrieval-augmented generation: the server *retrieves* relevant docume
 sequenceDiagram
     participant B as Browser (Ask AI page)
     participant R as routes/ask.js
-    participant Ret as chunkRetrievalService.js
     participant AI as aiAnswerService.js
+    participant Ret as chunkRetrievalService.js
+    participant V as askEvidenceContract.js
     participant O as OpenAI API
 
     B->>R: POST /api/ask { question, history, attachmentId? }
+    opt question asks to defeat a safety system
+        R-->>B: status "not_found" with a refusal message (no search, no model call)
+    end
     R->>AI: askQuestion(question, { history, image })
+    Note over AI: the same defeat gate runs again in the core
+    opt no OPENAI_API_KEY
+        AI-->>B: status "ai_not_configured" (before any retrieval)
+    end
+    opt follow-up question with history
+        AI->>O: rewrite it as a standalone question
+    end
     AI->>Ret: retrieve relevant chunks
     Ret->>O: embed the question (once)
     Ret->>Ret: cosine-scan in-memory embedding cache
     Ret->>Ret: fuse embedding ranking with keyword ranking
     Ret-->>AI: top chunks + scores
-    alt no useful chunks
+    alt nothing retrieved, or the best chunk is too weak
         AI-->>B: status "not_found" ("not in documents")
-    else chunks found, no API key
-        AI-->>B: status "ai_not_configured"
-    else chunks found, key configured
-        AI->>O: Responses API call with question + numbered chunks
-        O-->>AI: answer text
-        AI-->>B: status "answered" + answer + citations (doc + page)
+    else usable chunks
+        AI->>O: Responses API call with question + passages labelled S1, S2, ...
+        O-->>AI: atomic claims, each with a source id and a verbatim quote
+        AI->>V: verifyEvidence(claims, chunks)
+        V-->>AI: accepted claims + rejected claims (turned into gaps)
+        alt no claim accepted
+            AI-->>B: status "not_found" + retrievedContext (what was retrieved, not cited)
+        else some claim rejected, or the model reported a gap
+            AI-->>B: status "partial" + verified claims + gaps + citations
+        else every claim accepted
+            AI-->>B: status "answered" + verified claims + citations (doc + page)
+        end
     end
 ```
 
 The pipeline, file by file:
 
 1. `server/src/services/documentChunkService.js` — writes page-aware chunks into `document_chunks` at upload/extraction time.
-2. `npm run embed:backfill` (`server/src/scripts/embedBackfill.js` → `chunkEmbeddingService.js`) — stores OpenAI embeddings on chunks that don't already have the active embedding version. Versions are stored as `model@dimensions` (e.g. `text-embedding-3-small@512`); retrieval **ignores** chunks whose version doesn't match the current config, so changing the model requires a re-backfill but never mixes incompatible vectors.
+2. `npm run embed:backfill` (`server/src/scripts/embedBackfill.js` → `chunkEmbeddingService.js`) — stores OpenAI embeddings on chunks that don't already have the active embedding version. Versions are stored as `model@dimensions` (e.g. `text-embedding-3-small@512`); a chunk whose version doesn't match the current config is dropped from **semantic** ranking only and still ranks by keyword, so changing the model never mixes incompatible vectors and never makes a document vanish from Ask — but semantic ranking for it needs a re-backfill.
 3. `server/src/services/chunkRetrievalService.js` — embeds the question once, cosine-scans an **in-memory cache** of chunk embeddings, and fuses that ranking with keyword ranking (hybrid retrieval). There is no vector database and no SQLite vector extension.
-4. `server/src/services/aiAnswerService.js` — builds citations and, when a key is set, calls the OpenAI Responses API with raw `fetch`.
-5. `server/src/routes/ask.js` — exposes `POST /api/ask` (question capped at 2000 characters; rate-limited to 20/min).
+4. `server/src/services/aiAnswerService.js` — runs the defeat gate and the no-key exit, then retrieval and the relevance gate, builds the prompt, calls the OpenAI Responses API with raw `fetch`, and derives the final status.
+5. `server/src/services/askEvidenceContract.js` — the verifier. With `ASK_EVIDENCE_CONTRACT` on (the default) the model returns atomic claims, and the server accepts only those whose quote is really in the passage they name and whose numbers match (see [What *verified* means](#what-verified-means)). The status (`answered`, `partial`, `not_found`) is derived from what verified, never taken from the model. Only passages that backed an accepted claim become citations.
+6. `server/src/routes/ask.js` — exposes `POST /api/ask` (question capped at 2000 characters; shares the AI rate limit described under Known Risks). It also runs the defeat gate before it loads an attached image.
 
-The refusal path is a feature, not an error: when the documents don't contain the answer, the response is `not in documents` instead of a guess. `npm run eval:answers` tests exactly this ([quality-testing.md](quality-testing.md)).
+The refusal path is a feature, not an error: when the documents don't support an answer, the response is `not_found` instead of a guess. It has three different causes, and the response tells them apart:
+
+1. **Retrieval found nothing usable.** No chunks came back, or the best one is too weak a match (`aiAnswerService.js`, before any model call that writes an answer). `answer` is `not in documents`. If some chunks were retrieved but judged too weak they come back as `retrievedContext`; if none were, there is nothing to show.
+2. **No claim passed verification.** Retrieval found passages, but every claim the model wrote failed the checks in `askEvidenceContract.js`, or it wrote none. `answer` is `not in documents` — which here does **not** mean the PDFs lack the fact. The specification may well be on the retrieved page and the model may have paraphrased, converted a unit, or cited the wrong passage. The response carries `retrievedContext` (the passages retrieved) and `evidence.gaps` (what was removed, with figures redacted) so the owner can read the page. With the dev metrics flag, a non-empty `metrics.rejected[]` shows claims were rejected rather than never proposed.
+3. **The defeat refusal.** A request to disable, bypass, or defeat a vehicle safety system is refused by a deterministic rule before any search or model call, with or without a key. The status is `not_found` but `answer` is the refusal message, not `not in documents`, and there is no `retrievedContext`.
+
+`npm run eval:answers` tests the refusal behavior ([quality-testing.md](quality-testing.md)); the response fields are in [api.md](api.md#post-apiask--rate-limited-20min).
 
 ### Optional LLM reranker (off by default)
 
@@ -203,19 +227,34 @@ sequenceDiagram
     B->>R: POST /api/repair-plan { brief, skillLevel, ... }
     R->>A: runAgent(input, { emit, signal })
     loop bounded by maxTurns
-        A->>O: streamTurn (model decides: call a tool or write text)
+        A->>O: streamTurn (model decides which tool to call, ending with finalize_repair_plan; any prose it writes is discarded)
         O-->>A: tool call request
-        A-->>B: data: {type:"tool_call"} frame
+        A-->>B: data: {type:"tool_call"} frame (name and turn, never the arguments)
         A->>T: execute tool (extract_repair_tasks, search_repair_docs, ...)
         T-->>A: deterministic result
         A-->>B: data: {type:"tool_result"} frame
-        O-->>A: narrative text chunks
-        A-->>B: data: {type:"text_delta"} frames
     end
-    A-->>B: data: {type:"done", artifacts} frame
+    A->>A: verify the finalizer's claims (repairPlanEvidenceContract.js) and render the plan text from the accepted ones
+    A-->>B: data: {type:"done", text, evidenceStatus, artifacts} frame
 ```
 
-Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTools.js` (five deterministic tools + JSON schemas), `openAiResponsesClient.js` (the only key-dependent piece), `tracing.js` (span observability). Events stream to the browser as `data: <json>\n\n` Server-Sent-Events frames. The full event protocol, readiness rubric, disconnect handling, and how to add a tool are documented in [repair-planner.md](repair-planner.md).
+Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTools.js` (five deterministic tools + JSON schemas), `openAiResponsesClient.js` (the only key-dependent piece), `tracing.js` (span observability), and `repairPlanEvidenceContract.js` (verifies the finalizer's claims). Events stream to the browser as `data: <json>\n\n` Server-Sent-Events frames; no `text_delta` frame is emitted, because the narrative is not streamed — it arrives once, in `done.text`. The full event protocol, readiness rubric, disconnect handling, and how to add a tool are documented in [repair-planner.md](repair-planner.md).
+
+## What *verified* means
+
+Ask and the Repair Planner both render a statement as document-backed only after server-side checks (`askEvidenceContract.js`, `agent/repairPlanEvidenceContract.js`). What those checks establish, and what they leave to the owner:
+
+**Established.** The quote is a verbatim substring of the passage the claim cites, which is a chunk of text extracted from an uploaded PDF. Every unit-bearing number in the claim is printed in that quote in the same unit (no conversion, no tolerance). For common specification wording, the part name in the claim also appears in the quote. The planner adds placement checks (no negator dropped, no cut through a range, a whole clause for specifications and safety instructions) and a task-subject check. Status is derived from what passed, never from the model's own report.
+
+**Not established.**
+
+- **That the PDF is correct.** A forum printout, a manual for another year, or a bad OCR read verifies exactly like a factory service manual. Nothing in the app records or checks a document's provenance.
+- **That the PDF applies to this car.** Applicability is only classified so far: `services/applicabilityScope.js` and `npm run diagnose:applicability` (roadmap N5) report which documents and pages scope to which engine, but neither Ask nor the planner reads them (`applicabilityNotEnforced.test.js` fails if one starts to). A specification for another engine in the same manual can verify.
+- **That the claim follows from its quote.** Non-numeric claims, pronouns, synonyms, unusual sentence shapes, and a long quote naming several parts can verify and still be wrong in meaning.
+
+**What the owner sees.** Each verified Ask claim is shown with its quote, the figure the manual prints, the document's title (its filename when it has no title) and the page, with a link that opens the PDF at that page. Model-written text reaches the browser only in labelled channels — general guidance marked "not from your documents", and gaps with figures redacted.
+
+**Who can use the app at all.** There is no login; the request gate in `middleware/requestGuard.js` stands in for one against *web pages*: a request must name a Host this machine answers to (`421`, which stops DNS rebinding), and a write sent by a browser must come from the app's own pages (`403`). It does not stop a *device*: with `NETWORK_MODE=1`, every device that can reach the port on the LAN or tailnet can read and change everything and spend the OpenAI budget. With the default `NETWORK_MODE=0` the server binds to `127.0.0.1` and only this computer can reach it.
 
 ## Key Modules Reference
 
@@ -225,7 +264,7 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 | `server/src/config.js` | Reads every env var; computes `openAiEmbeddingVersion` |
 | `server/src/initDatabase.js` | Schema creation + numbered migrations (`schema_migrations`) |
 | `server/src/database.js` | The shared `node:sqlite` connection |
-| `server/src/middleware/rateLimit.js` | In-house fixed-window rate limiter (20/min on AI routes) |
+| `server/src/middleware/rateLimit.js` | In-house fixed-window rate limiter: one instance, 20/min per client address, shared by the three AI routes |
 | `server/src/middleware/requestGuard.js` | The no-login request gate: Host allow-list (421), same-origin writes and side-effect GETs (403), JSON body contract (415, `{}` default, 1 MB limit), JSON 404 and error handler |
 | `server/src/services/pdfService.js` | PDF text extraction (`pdfjs-dist`) + local OCR orchestration |
 | `server/src/services/documentService.js` | Document listing, search, delete cleanup, stored-file resolution |
@@ -233,7 +272,8 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 | `server/src/services/chunkEmbeddingService.js` | OpenAI Embeddings API calls; versioned BLOB storage |
 | `server/src/services/chunkRetrievalService.js` | Hybrid keyword + embedding retrieval; in-memory cosine cache |
 | `server/src/services/chunkRerankService.js` | Optional LLM reranker (off by default, fail-safe) |
-| `server/src/services/aiAnswerService.js` | Citation building + OpenAI answer generation (+ Vision Ask) |
+| `server/src/services/aiAnswerService.js` | Ask orchestration: defeat gate, no-key exit, retrieval gates, OpenAI answer call (+ Vision Ask), status derivation |
+| `server/src/services/askEvidenceContract.js` | Ask's verifier: claim schema, quote and number checks, derived status, citations from accepted claims |
 | `server/src/services/vehicleService.js` | Single-vehicle `getVehicle` / `getVehicleId` lookup shared by routes and services |
 | `server/src/services/symptomService.js` | Symptom CRUD, row shaping, document links, and exported `mapSymptomCore` |
 | `server/src/services/procedureService.js` | Procedure CRUD, row shaping, document links, and exported `mapProcedureCore` |
@@ -254,15 +294,16 @@ Files: `server/src/services/agent/repairPlannerAgent.js` (the loop), `repairTool
 - **Raw `fetch` + dependency injection instead of the OpenAI SDK / an agents framework.** Fewer dependencies to break, and the whole AI pipeline is testable offline with mock clients. The cost is some hand-rolled plumbing (SSE parsing in `openAiResponsesClient.js`) that an SDK would provide.
 - **In-memory cosine scan instead of a vector database.** For one vehicle's worth of PDFs the chunk count is small; a linear scan is simple and fast enough. This deliberately would not scale to a huge corpus — and doesn't need to.
 - **Embeddings as a separate manual step (`embed:backfill`) instead of embedding at upload time.** Uploads stay fast and never fail because OpenAI is down; keyword search works immediately. The cost: semantic ranking is missing until you run the backfill (the Documents page shows an embedding-pending indicator).
-- **Refusal over guessing.** Ask answers `not in documents` when retrieval finds nothing useful. For torque specs and safety-critical repair facts, a wrong confident answer is worse than no answer.
-- **Deterministic agent tools.** The Repair Planner's tools are plain functions, so the structured artifacts the UI renders never depend on model randomness — only the narrative text does.
+- **Refusal over guessing.** Ask answers `not_found` when retrieval finds nothing useful, and also when none of the model's claims verifies. For torque specs and safety-critical repair facts, a wrong confident answer is worse than no answer.
+- **Deterministic agent tools, server-rendered plan.** The Repair Planner's tools are plain functions, so the structured artifacts the UI renders never depend on model randomness. The narrative is not model prose either: the model's own text is discarded, and `done.text` is rendered by the server from the claims that passed verification. What still varies run to run is which claims the model proposes, and so which of them verify.
 - **Pragmatic typecheck.** `tsconfig.json` runs `checkJs` over the whole `server/src` tree (plus a curated set of tests) with several strict-family flags, but full `strict` (`strictNullChecks`/`noImplicitAny`) stays off so plain-JS code isn't drowned in annotations. Trade-off: a green `typecheck` is broad coverage, not exhaustive null/any safety.
 
 ## Known Risks and Weak Spots
 
 Documented honestly so they don't surprise anyone:
 
-- **Loopback by default; no authentication.** The server binds to `127.0.0.1` unless `NETWORK_MODE=1` is set (`config.host`), so it is unreachable off-host until network access is a deliberate opt-in. There is still no login, so once network mode is on, anyone who can reach the port can read all data, upload/delete documents, and spend the OpenAI budget — enable it only on trusted networks. The AI rate limiter caps burn rate but is not access control, and the backup export route is loopback-only regardless of mode. Never expose the app publicly (no port-forward, no `tailscale funnel`) without HTTPS + auth in front.
+- **Loopback by default; no authentication.** The server binds to `127.0.0.1` unless `NETWORK_MODE=1` is set (`config.host`), so it is unreachable off-host until network access is a deliberate opt-in. There is still no login, so once network mode is on, anyone who can reach the port can read all data, upload/delete documents, and spend the OpenAI budget — enable it only on trusted networks. The AI rate limiter (one instance shared by `/api/ask`, `/api/repair-plan`, and the suggested-procedures route, keyed by client address) caps burn rate but is not access control. The request gate (`middleware/requestGuard.js`) protects against other **web pages** in the same browser — a Host the machine does not answer to gets `421`, a cross-site write `403` — but not against **devices**: in network mode, anything on the Wi-Fi or tailnet that can reach the port can use every route, because a non-browser client sends no cross-site headers. The backup export is the one route that stays host-only: it refuses any request that is not from a loopback address with a loopback `Host` and no proxy forwarding headers, which also rules out `tailscale serve`. Never expose the app publicly (no port-forward, no `tailscale funnel`) without HTTPS + auth in front.
+- **"Verified" is narrower than it sounds.** It means a quote is in *some* uploaded PDF and its numbers match, not that the PDF is right, applies to this car, or was a factory manual. See [What *verified* means](#what-verified-means).
 - **Typecheck is not fully strict** (see the trade-off above) — it catches shape and typo errors across `server/src` but not every null/any hazard. Lint covers the whole `server/` tree and `client/src`.
 - **The embedding cache and retrieval scan are in-memory and linear.** Fine at this scale; a 100× larger corpus would need re-thinking (and is out of scope).
 - **OCR depends on external tools.** Locally, Tesseract/Poppler must be installed on the machine running the backend or scanned-PDF OCR silently degrades (`ocr_unavailable:` status). The Docker image installs `poppler-utils` and `tesseract-ocr`, so containers are covered.
