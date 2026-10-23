@@ -135,6 +135,8 @@ curl.exe -X POST http://localhost:4000/api/documents/upload `
 
 Upload also extracts text (with OCR on low-text pages when tools are installed) and rebuilds the document's `document_chunks`. On any failure the stored file and partial rows are cleaned up before the error returns. Common errors: `"Only PDF files are allowed right now."`, `"PDF is too large. The limit is 20 MB."`, `"System and document type are required."`
 
+The file's **bytes** must be a PDF, not just its name or MIME type: the `%PDF-` header has to appear in its first 1024 bytes (the window pdf.js and Acrobat accept). A file without it is a `400` whose error begins `"This file is not a PDF, even though its name ends in .pdf."`, and nothing is stored (audit 2A-09). The usual cause is a login or error page that a browser saved under a `.pdf` name. The check proves the file type only. A damaged PDF still passes, and its extraction status reports the damage.
+
 ### `GET /api/documents/:id/file`
 
 Streams the stored PDF inline (`Content-Type: application/pdf`). `404` if the document or its file is missing.
