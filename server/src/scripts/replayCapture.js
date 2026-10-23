@@ -22,6 +22,16 @@ import { formatReplayReport, replayRecords } from "../evals/answerReplay.js";
 
 const USAGE = "Usage: npm run eval:replay -- <path to a capture .jsonl>";
 
+/**
+ * Resolve a path the way the owner typed it. The root script delegates with
+ * `npm --prefix server`, which runs this file from server/, so a relative path
+ * must be read from where npm was invoked (INIT_CWD), not from process.cwd():
+ * otherwise "server/data/captures/x.jsonl" becomes server/server/data/...
+ */
+export function resolveInvocationPath(target, env = process.env) {
+  return path.resolve(env.INIT_CWD || process.cwd(), target);
+}
+
 /** @param {string[]} argv */
 export function parseArguments(argv = []) {
   const paths = [];
@@ -60,7 +70,7 @@ export async function runCli(argv = process.argv.slice(2), { log = console.log, 
     return null;
   }
 
-  const capturePath = path.resolve(options.paths[0]);
+  const capturePath = resolveInvocationPath(options.paths[0]);
   let text;
 
   try {

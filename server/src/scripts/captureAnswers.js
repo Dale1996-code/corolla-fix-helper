@@ -149,7 +149,11 @@ export async function runCli(argv = process.argv.slice(2)) {
     visionModel: config.openAiVisionModel,
     caseCount: cases.length,
   });
-  const outputDir = path.resolve(options.outputDir || DEFAULT_CAPTURE_DIR);
+  // A relative --output-dir is read from where npm was invoked, not from
+  // server/ where `npm --prefix server` runs this file (see replayCapture.js).
+  const outputDir = options.outputDir
+    ? path.resolve(process.env.INIT_CWD || process.cwd(), options.outputDir)
+    : DEFAULT_CAPTURE_DIR;
   const capturePath = path.join(outputDir, buildCaptureFileName(header));
 
   fs.mkdirSync(outputDir, { recursive: true });

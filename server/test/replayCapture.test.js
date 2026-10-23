@@ -206,6 +206,27 @@ test("npm run eval:replay runs offline with no key, no network, and no database"
   assert.equal(fs.existsSync(missingDataDir), false);
 });
 
+test("a repo-relative path works through the root npm script", () => {
+  // `npm run eval:replay` at the root runs `npm --prefix server ...`, so the
+  // script starts in server/ while the owner typed a path from the root. npm
+  // records where it was invoked in INIT_CWD; resolving from process.cwd()
+  // instead read server/server/... and failed on every relative path.
+  const serverDir = path.join(here, "..");
+  const repoRoot = path.join(serverDir, "..");
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { ...process.env, INIT_CWD: repoRoot };
+  delete env.OPENAI_API_KEY;
+
+  const run = spawnSync(
+    process.execPath,
+    [SCRIPT, path.join("server", "test", "fixtures", "synthetic-answer-capture.jsonl")],
+    { cwd: serverDir, env, encoding: "utf8" }
+  );
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim().split(/\r?\n/).at(-1), "0 verdicts changed of 9");
+});
+
 test("eval:replay exits 1 on an unreadable capture and on a bad invocation", () => {
   const bad = path.join(tempRoot, "bad.jsonl");
   fs.writeFileSync(bad, '{"type":"ask"}\n');
