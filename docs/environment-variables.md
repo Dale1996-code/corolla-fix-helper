@@ -119,7 +119,8 @@ Most of these are read once at startup by `server/src/config.js`, which still ac
 
 These are not app settings, and `.env.example` leaves them out.
 
-- `EVAL_CASE_DELAY_MS` is how long `npm run eval:answers` waits between cases, in milliseconds, so a paid run stays under the provider's per-minute token limit. The default is `2000`. A rate-limited case (HTTP 429) is retried up to four times rather than recorded as a failure.
+- `EVAL_CASE_DELAY_MS` is how long the paid answer runs, `npm run eval:answers` and `npm run eval:capture`, wait between cases, in milliseconds, so a run stays under the provider's per-minute token limit. The default is `2000`. A rate-limited case (HTTP 429) is retried up to four times rather than recorded as a failure.
+- `INIT_CWD` is set by npm to the folder you ran `npm` from. `npm run eval:capture` and `npm run eval:replay` resolve a relative path you give them (`--output-dir`, a capture file) from it, because the root scripts run them from `server/`. You do not set it.
 - `NODE_TEST_CONTEXT` is set by Node's own test runner (`node --test`) on every test process. When it is present, `server/src/config.js` does not read `server/.env`, so no suite can pick up the real API key or `NETWORK_MODE`. Never set it yourself: the app would then ignore your `server/.env`.
 - `SystemRoot` and `SystemDrive` are set by Windows. `server/src/services/tarExecutable.js` uses them to find the native `tar.exe` for backups.
 - The smoke test and the retrieval and rerank evals point `DATABASE_FILE` and `UPLOADS_DIR` at a throwaway folder inside their own process, so they never touch your real data. The smoke test also blanks `OPENAI_API_KEY` and `SEED_DEMO`, turns `OCR_ENABLED` off, and sets `PORT=0`. You do not set these for them.

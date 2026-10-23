@@ -62,12 +62,13 @@ state a plan imagined.
   renamed, the checklist is edited, or the document is deleted — see **N3**, which is
   complete. Recording a repair stays a deliberate act: `status = 'done'` on a checklist is
   an organizational state and still records nothing.
-- **Most of the 2026-10-18 full review is acted on.** Nine PRs merged between 19 and 22
+- **Most of the 2026-10-18 full review is acted on.** Eleven PRs merged between 19 and 23
   October: the Ask verifier fails closed instead of accepting a near-miss number, a planner
   claim can no longer drop the "Do not" in front of it, a request gate stands in for the
   login the app does not have, a restore no longer deletes live files on its way to failing,
-  and the safety gates refuse the defeat requests the review reproduced. Stage 4-D2 is still
-  open (below). See the [audit record](#the-2026-10-18-full-review) in section 4.
+  the safety gates refuse the defeat requests the review reproduced, a document's text and
+  chunks now save together, and a verifier change can be judged for free by replaying
+  captured answers. See the [audit record](#the-2026-10-18-full-review) in section 4.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
@@ -158,13 +159,6 @@ state a plan imagined.
   and in a planner gap. And a verified claim is itself model wording: its source, its quote,
   its figures, and (where the parser finds one) its subject are checked, not that it follows
   from the quote.
-- **The 2026-10-18 audit's Stage 4-D2 is still open.** A web upload computes no MD5, so the
-  same PDF can be uploaded twice; a document's row update and its chunk rebuild commit
-  separately, so a failed rebuild leaves the previous chunks under the new text; deleting a
-  symptom or procedure leaves note links pointing at it (deleting a document clears them);
-  and the upload filter accepts a file whose name ends in `.pdf` or whose browser-declared
-  type is `application/pdf`, without checking that the bytes are a PDF. The MD5 part needs a
-  numbered migration, shown to the owner and dry-run on a copy first (owner decision D6).
 
 ## 3. How this roadmap differs from the August 2026 strategy review
 
@@ -509,11 +503,13 @@ P0–P6, one PR each.
 migration and a backfill, no API calls); P3 checks it in the Ask verifier, reported in
 shadow first and enforced only after; P4 keeps other-variant chunks out of retrieval and
 labels scope in the prompt and the answer; P5 takes the other axes (plant, VSC,
-transmission, Smart Key) one at a time; P6 gives the Repair Planner the same check. P2
-should follow audit Stage 4-D2, because both change the chunk-rebuild transaction. P3 must
-first settle the five residual risks the P1 review recorded in the design, and its
-acceptance test replays captured answers offline — a replay harness the repository does not
-have yet (audit Stage 1b).
+transmission, Smart Key) one at a time; P6 gives the Repair Planner the same check. P2 is
+unblocked: audit Stage 4-D2 (PR #158) now saves a document's extraction and its chunk
+rebuild in one transaction (`withTransaction` in `database.js`), which is where P2 computes
+each chunk's scope. P3 must first settle the five residual risks the P1 review recorded in
+the design. Its acceptance test replays captured answers offline with `npm run eval:replay`
+(audit Stage 1b, PR #159), and it needs a capture taken after P2: one taken before P2 has no
+scope field to replay a check against.
 
 **N6 — Retire dormant flags and the legacy Ask path.**
 *Problem it solves:* three code paths are being maintained for no current benefit. Decide
@@ -556,7 +552,7 @@ could drive, and a restore that could delete live files while reporting that not
 changed. Its follow-up plan split the fixes into stages, one PR each. The owner answered its
 seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6.
 
-*Delivered, 19–22 October 2026:*
+*Delivered, 19–23 October 2026:*
 
 | Stage | PR | What it did |
 | --- | --- | --- |
@@ -569,13 +565,12 @@ seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6
 | 6 | #153 | Wheel, tire, CV-axle, hub-bearing, and exhaust jobs block a Ready rating, and the defeat gate's "how does … work" exemption no longer pardons a defeat request. See **N2.5** |
 | 9 | #154 | Tests never read `server/.env`; CI hardening; a time-zone-safe test; `.nvmrc` |
 | 5-E1 | #155 | Planner stream frames carry no model arguments and no provider error body; searches and tool calls per turn have fixed bounds; embedding requests time out and count against the daily ceiling (D4); the defeat gate also runs inside the planner, not only at its route |
+| 4-D2 | #158 | A document's extraction and its chunk rebuild save in one transaction; deleting a symptom or procedure unlinks its notes; an upload whose bytes are not a PDF is refused; and a web upload records its MD5, so the same bytes uploaded twice get a 409. Migration `007_backfill_upload_file_md5` hashes older documents (D6); a byte-identical later copy keeps no hash and is only named on the startup console, and deleting it is left to the owner |
+| 1b | #159 | `npm run eval:capture` (paid) records each model reply the answer evals produce; `npm run eval:replay` (free, offline) re-verifies a capture and prints every verdict that changed. Ask only: the planner has no eval cases to capture |
 
 *Not delivered yet:*
 
-- **4-D2, integrity.** Upload MD5, a transactional chunk rebuild, dangling note links, and
-  non-PDF uploads; see section 2. The MD5 part needs D6's migration.
-- **1b, offline replay.** There is no `eval:replay` script yet, and N5's P3 needs one. The
-  injector eval branch it was paired with waits on D7: a synthetic fixture must replace the
+- **1b's injector eval branch.** It waits on D7: a synthetic fixture must replace the
   verbatim manual text in it before the public repository can carry it.
 - **7, documentation truth pass.** This revision of the roadmap carries its roadmap,
   model-prose, environment-variable, and changelog findings (3B-05, 3B-06, 3B-12, 3B-14),
