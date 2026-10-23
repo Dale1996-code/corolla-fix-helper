@@ -135,6 +135,16 @@ curl.exe -X POST http://localhost:4000/api/documents/upload `
 
 Upload also extracts text (with OCR on low-text pages when tools are installed) and rebuilds the document's `document_chunks`. On any failure the stored file and partial rows are cleaned up before the error returns. Common errors: `"Only PDF files are allowed right now."`, `"PDF is too large. The limit is 20 MB."`, `"System and document type are required."`
 
+The same bytes are never stored twice (audit 1B-03). The upload records the file's MD5 in `file_md5`, and a file already in the library, under any filename, is a `409` that names the document holding it. Nothing is written:
+
+```json
+{ "error": "This PDF is already uploaded as \"Brake Service Guide\".", "existingDocument": { "id": 42, "title": "Brake Service Guide" } }
+```
+
+Two simultaneous uploads of the same new file store exactly one document; the other gets the same `409`.
+
+The file's **bytes** must be a PDF, not just its name or MIME type: the `%PDF-` header has to appear in its first 1024 bytes (the window pdf.js and Acrobat accept). A file without it is a `400` whose error begins `"This file is not a PDF, even though its name ends in .pdf."`, and nothing is stored (audit 2A-09). The usual cause is a login or error page that a browser saved under a `.pdf` name. The check proves the file type only. A damaged PDF still passes, and its extraction status reports the damage.
+
 ### `GET /api/documents/:id/file`
 
 Streams the stored PDF inline (`Content-Type: application/pdf`). `404` if the document or its file is missing.
@@ -591,7 +601,7 @@ Allowed values — `confidence`: `low` | `medium` (default) | `high`; `status`: 
 | `PUT /api/symptoms/:id` | same fields; partial update |
 | `PUT /api/symptoms/:id/procedures` | body `{ "procedureIds": [1, 2] }` — **replaces** the whole linked set; returns the updated symptom |
 | `GET /api/symptoms/:id/suggested-procedures` | ranks existing procedures for this symptom, grounded in retrieved chunks. Response carries `status` (`answered`/`not_found`), `aiConfigured`, and `mode` so the UI can show whether ranking was AI-assisted or the deterministic keyword/system fallback (no key needed). Shares the AI rate-limit window (`429`), and as a side-effect GET it refuses a cross-site request (`403`) |
-| `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments |
+| `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
 
 ```powershell
 $body = @{ title = "Squeak when braking"; system = "Brakes"; status = "open" } | ConvertTo-Json
@@ -612,7 +622,7 @@ Allowed values — `difficulty`: `beginner` | `intermediate` (default) | `advanc
 | `POST /api/procedures` | body: `title` (required), `system`, `difficulty`, `confidence`, `toolsNeeded`, `partsNeeded`, `safetyNotes`, `steps`, `notes`, `linkedDocumentIds` (array). `201` → `{ "message", "procedure" }` |
 | `PUT /api/procedures/:id` | same fields; partial update |
 | `PUT /api/procedures/:id/symptoms` | body `{ "symptomIds": [3] }` — replaces the whole linked set |
-| `DELETE /api/procedures/:id` | also removes links and image attachments |
+| `DELETE /api/procedures/:id` | also removes links and image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
 
 ---
 
@@ -624,7 +634,7 @@ Allowed values — `noteType`: `general` (default) | `observation` | `repair_log
 | --- | --- |
 | `GET /api/notes` | `{ "notes": [...], "total": n }` — linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure` |
 | `POST /api/notes` | body: `title` (required), `content`, `noteType`, `relatedEntityType`, `relatedEntityId`. If `relatedEntityType` is not `none`, `relatedEntityId` is required and must point at an existing record. `201` → `{ "message", "note" }` |
-| `PUT /api/notes/:id` | same fields; partial update |
+| `PUT /api/notes/:id` | same fields; partial update. A link to a missing record is a `400` only when the edit asks for a **new** link. If the note already pointed at a record that has since been deleted, and the edit keeps that link (or omits it), the dead link is cleared and the edit is saved |
 | `DELETE /api/notes/:id` | also removes the note's image attachments |
 
 A note links to **at most one** related record.

@@ -99,7 +99,9 @@ test("a request with a foreign Host header is refused", async () => {
   assert.equal(response.status, 421, `foreign Host served with ${response.status}`);
 });
 
-test("an upload whose bytes are not a PDF is rejected", { todo: "2A-09" }, async () => {
+test("an upload whose bytes are not a PDF is rejected", async () => {
+  const before = (await request(app).get("/api/documents")).body;
+  const filesBefore = fs.readdirSync(process.env.UPLOADS_DIR);
   const response = await request(app)
     .post("/api/documents/upload")
     .field("title", "Not a PDF")
@@ -114,4 +116,19 @@ test("an upload whose bytes are not a PDF is rejected", { todo: "2A-09" }, async
     response.status >= 400 && response.status < 500,
     `non-PDF bytes accepted with ${response.status}`
   );
+  // 2A-09: rejected before anything is stored -- no row, no file on disk.
+  assert.match(response.body.error, /not a PDF/);
+  assert.deepEqual((await request(app).get("/api/documents")).body, before);
+  assert.deepEqual(fs.readdirSync(process.env.UPLOADS_DIR), filesBefore);
+});
+
+test("2A-09: a real PDF still uploads past the byte check", async () => {
+  const response = await request(app)
+    .post("/api/documents/upload")
+    .field("title", "Minimal PDF")
+    .field("system", "Brakes")
+    .field("documentType", "manual")
+    .attach("pdfFile", MINIMAL_PDF, { filename: "minimal.pdf", contentType: "application/pdf" });
+
+  assert.equal(response.status, 201, JSON.stringify(response.body));
 });

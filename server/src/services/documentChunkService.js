@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { db } from "../database.js";
+import { db, withTransaction } from "../database.js";
 import { clearChunkEmbeddingCache } from "./chunkEmbeddingService.js";
 import { clearDocumentContentIdentityCache } from "./documentContentIdentity.js";
 import { extractPdfData } from "./pdfService.js";
@@ -119,9 +119,9 @@ export function rebuildDocumentChunksFromPages(
     ) VALUES (?, ?, ?, ?)
   `);
 
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-
-  try {
+  // Its own transaction when called alone; a savepoint inside the caller's when
+  // the rebuild is one step of a larger write (persistExtractionResult).
+  withTransaction(() => {
     deleteStatement.run(normalizedDocumentId);
 
     for (const chunk of chunks) {
@@ -132,12 +132,7 @@ export function rebuildDocumentChunksFromPages(
         chunk.chunkText
       );
     }
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
   clearChunkEmbeddingCache();
   // Chunks are only ever rebuilt after the document's extracted text was

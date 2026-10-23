@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { db } from "../database.js";
+import { db, withTransaction } from "../database.js";
 import {
   getTagsForDocuments,
   listAllTags,
@@ -17,6 +17,7 @@ import {
   createStoredFilename,
   deriveTitleFromFilename,
 } from "../utils/sanitizeFilename.js";
+import { md5Hex } from "../utils/fileMd5.js";
 
 /**
  * Resolve the on-disk path for a document's stored file.
@@ -711,12 +712,45 @@ export function getDocumentMetadataRecord(documentId) {
     .get(documentId);
 }
 
+// SQLITE_CONSTRAINT_UNIQUE, as node:sqlite reports it on `error.errcode`.
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * An upload whose exact bytes are already a document (audit 1B-03). Carries the
+ * existing document's id and title so the route can name it in its 409.
+ */
+export class DuplicateDocumentError extends Error {
+  /** @param {{ id: number, title: string }} existingDocument */
+  constructor(existingDocument) {
+    super(`This PDF is already uploaded as "${existingDocument.title}".`);
+    this.name = "DuplicateDocumentError";
+    this.existingDocument = { id: existingDocument.id, title: existingDocument.title };
+  }
+}
+
+/**
+ * The document that already holds these exact bytes, or undefined.
+ *
+ * @param {string} fileMd5
+ * @returns {{ id: number, title: string } | undefined}
+ */
+export function findDocumentByFileMd5(fileMd5) {
+  return /** @type {{ id: number, title: string } | undefined} */ (
+    db.prepare("SELECT id, title FROM documents WHERE file_md5 = ? LIMIT 1").get(fileMd5)
+  );
+}
+
 // Persist an uploaded PDF: derive its stored path, write the file, extract its
 // text/pages, insert the row, rebuild chunks, and set tags — returning the
 // freshly mapped document. On any failure the written file and (if it was
 // created) the row + chunks are cleaned up before the error is rethrown, so a
 // failed upload never leaves an orphan file or half-inserted document. Fields
 // are already parsed/normalized by the caller.
+//
+// The same bytes are never stored twice (audit 1B-03): the row records
+// `file_md5`, a file already present throws DuplicateDocumentError before
+// anything is written, and the unique index on `file_md5` turns a simultaneous
+// second upload into the same error rather than a second copy.
 export async function createDocument({
   fileBuffer,
   originalFilename,
@@ -739,6 +773,12 @@ export async function createDocument({
       ? "application/pdf"
       : mimetype || "application/octet-stream";
   const title = titleInput || deriveTitleFromFilename(originalFilename);
+  const fileMd5 = md5Hex(fileBuffer);
+  const existingDocument = findDocumentByFileMd5(fileMd5);
+
+  if (existingDocument) {
+    throw new DuplicateDocumentError(existingDocument);
+  }
 
   let createdDocumentId = null;
 
@@ -748,49 +788,56 @@ export async function createDocument({
     const extractionResult = await extractPdfData(fileBuffer);
     const vehicleId = getVehicleId();
 
-    const result = db
-      .prepare(`
-        INSERT INTO documents (
-          vehicle_id,
+    // The row and its chunks commit together, so a failed rebuild can never
+    // leave a document row with no chunks behind it (audit 1B-04).
+    const newDocumentId = withTransaction(() => {
+      const result = db
+        .prepare(`
+          INSERT INTO documents (
+            vehicle_id,
+            title,
+            original_filename,
+            stored_filename,
+            file_path,
+            file_type,
+            system,
+            subsystem,
+            document_type,
+            source,
+            file_md5,
+            extracted_text,
+            extraction_status,
+            page_count,
+            notes,
+            is_favorite,
+            is_bookmarked
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          vehicleId,
           title,
-          original_filename,
-          stored_filename,
-          file_path,
-          file_type,
+          originalFilename,
+          storedFilename,
+          relativeFilePath,
+          fileType,
           system,
           subsystem,
-          document_type,
+          documentType,
           source,
-          extracted_text,
-          extraction_status,
-          page_count,
+          fileMd5,
+          extractionResult.extractedText,
+          extractionResult.extractionStatus,
+          extractionResult.pageCount,
           notes,
-          is_favorite,
-          is_bookmarked
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        vehicleId,
-        title,
-        originalFilename,
-        storedFilename,
-        relativeFilePath,
-        fileType,
-        system,
-        subsystem,
-        documentType,
-        source,
-        extractionResult.extractedText,
-        extractionResult.extractionStatus,
-        extractionResult.pageCount,
-        notes,
-        0,
-        isBookmarked ? 1 : 0
-      );
+          0,
+          isBookmarked ? 1 : 0
+        );
+      const insertedId = Number(result.lastInsertRowid);
 
-    const newDocumentId = Number(result.lastInsertRowid);
+      rebuildDocumentChunksFromPages(insertedId, extractionResult.pages);
+      return insertedId;
+    });
     createdDocumentId = newDocumentId;
-    rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
 
     if (hasTags) {
       setDocumentTags(newDocumentId, tags);
@@ -809,6 +856,14 @@ export async function createDocument({
       }
     }
 
+    // Another upload of the same bytes committed while this one was extracting.
+    const racedDocument =
+      error?.errcode === SQLITE_CONSTRAINT_UNIQUE ? findDocumentByFileMd5(fileMd5) : undefined;
+
+    if (racedDocument) {
+      throw new DuplicateDocumentError(racedDocument);
+    }
+
     throw error;
   }
 }
@@ -825,28 +880,31 @@ export async function createDocument({
  * substantive text) can run the same persistence the upload route runs, instead
  * of extracting twice or hand-rolling a second copy of these writes.
  *
- * Order matters: the row is updated before the chunks are rebuilt, so an
- * interruption between the two leaves a document with text and no chunks --
- * still visibly unrecovered, and safe to reprocess -- rather than chunks whose
- * document row claims there is no text.
+ * The row update and the chunk rebuild are ONE transaction (audit 1B-04). They
+ * used to be two, and a failure in the rebuild left the row holding the new
+ * text over the old chunks -- a document whose Ask results no longer matched
+ * what it claimed to contain. Now a failure anywhere leaves the document exactly
+ * as it was: old text, old status, old chunks.
  */
 export function persistExtractionResult(documentId, extractionResult) {
-  db.prepare(`
-    UPDATE documents
-    SET
-      extracted_text = ?,
-      extraction_status = ?,
-      page_count = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    extractionResult.extractedText,
-    extractionResult.extractionStatus,
-    extractionResult.pageCount,
-    documentId
-  );
+  return withTransaction(() => {
+    db.prepare(`
+      UPDATE documents
+      SET
+        extracted_text = ?,
+        extraction_status = ?,
+        page_count = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      extractionResult.extractedText,
+      extractionResult.extractionStatus,
+      extractionResult.pageCount,
+      documentId
+    );
 
-  return rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+    return rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+  });
 }
 
 export async function reextractDocument(documentId, fileBuffer) {

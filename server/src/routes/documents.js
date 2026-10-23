@@ -7,6 +7,7 @@ import {
   countDocuments,
   createDocument,
   deleteDocument,
+  DuplicateDocumentError,
   getDocument,
   getDocumentFileLocation,
   getDocumentFileRecord,
@@ -19,6 +20,7 @@ import {
 import { setDocumentTags } from "../services/documentTagService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
 import { parsePositiveInt } from "../utils/http.js";
+import { hasPdfSignature } from "../utils/pdfSignature.js";
 
 export const documentsRouter = Router();
 
@@ -158,6 +160,16 @@ documentsRouter.post("/upload", async (request, response) => {
     return;
   }
 
+  // The filter above trusts the name and the MIME type; this reads the bytes,
+  // before anything is written to disk or the database (audit 2A-09).
+  if (!hasPdfSignature(request.file.buffer)) {
+    response.status(400).json({
+      error:
+        "This file is not a PDF, even though its name ends in .pdf. A web page saved from a browser often looks like this. Download the PDF itself and upload that.",
+    });
+    return;
+  }
+
   const system = normalizeText(request.body.system);
   const documentType = normalizeText(request.body.documentType);
 
@@ -199,6 +211,14 @@ documentsRouter.post("/upload", async (request, response) => {
       totalDocuments: totalBeforeUpload + 1,
     });
   } catch (error) {
+    if (error instanceof DuplicateDocumentError) {
+      response.status(409).json({
+        error: error.message,
+        existingDocument: error.existingDocument,
+      });
+      return;
+    }
+
     response.status(500).json({
       error: error.message || "Could not save the uploaded document.",
     });
