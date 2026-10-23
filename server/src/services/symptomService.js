@@ -1,4 +1,5 @@
-import { db } from "../database.js";
+import { db, withTransaction } from "../database.js";
+import { clearNoteLinksTo } from "./noteService.js";
 import { buildSymptomProcedureLinksMap } from "./symptomProcedureService.js";
 import { normalizeText } from "../utils/text.js";
 
@@ -260,17 +261,26 @@ export function updateSymptomFields(vehicleId, symptomId, fields) {
   );
 }
 
-// Delete an owned symptom row. Returns the number of rows removed so the caller
+// Delete an owned symptom row and unlink the notes that pointed at it, as one
+// unit (audit 1B-05). Returns the number of symptom rows removed so the caller
 // can distinguish "not found" (0) from a successful delete. Attachment cleanup
 // is a separate, caller-driven step.
 export function deleteSymptom(vehicleId, symptomId) {
-  return db
-    .prepare(`
-      DELETE FROM symptoms
-      WHERE id = ?
-      AND vehicle_id = ?
-    `)
-    .run(symptomId, vehicleId).changes;
+  return withTransaction(() => {
+    const removed = db
+      .prepare(`
+        DELETE FROM symptoms
+        WHERE id = ?
+        AND vehicle_id = ?
+      `)
+      .run(symptomId, vehicleId).changes;
+
+    if (removed > 0) {
+      clearNoteLinksTo(vehicleId, "symptom", symptomId);
+    }
+
+    return removed;
+  });
 }
 
 // Stored procedures for one vehicle, shaped for the suggestion service's keyword

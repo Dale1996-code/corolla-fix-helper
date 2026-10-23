@@ -591,7 +591,7 @@ Allowed values — `confidence`: `low` | `medium` (default) | `high`; `status`: 
 | `PUT /api/symptoms/:id` | same fields; partial update |
 | `PUT /api/symptoms/:id/procedures` | body `{ "procedureIds": [1, 2] }` — **replaces** the whole linked set; returns the updated symptom |
 | `GET /api/symptoms/:id/suggested-procedures` | ranks existing procedures for this symptom, grounded in retrieved chunks. Response carries `status` (`answered`/`not_found`), `aiConfigured`, and `mode` so the UI can show whether ranking was AI-assisted or the deterministic keyword/system fallback (no key needed). Shares the AI rate-limit window (`429`), and as a side-effect GET it refuses a cross-site request (`403`) |
-| `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments |
+| `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
 
 ```powershell
 $body = @{ title = "Squeak when braking"; system = "Brakes"; status = "open" } | ConvertTo-Json
@@ -612,7 +612,7 @@ Allowed values — `difficulty`: `beginner` | `intermediate` (default) | `advanc
 | `POST /api/procedures` | body: `title` (required), `system`, `difficulty`, `confidence`, `toolsNeeded`, `partsNeeded`, `safetyNotes`, `steps`, `notes`, `linkedDocumentIds` (array). `201` → `{ "message", "procedure" }` |
 | `PUT /api/procedures/:id` | same fields; partial update |
 | `PUT /api/procedures/:id/symptoms` | body `{ "symptomIds": [3] }` — replaces the whole linked set |
-| `DELETE /api/procedures/:id` | also removes links and image attachments |
+| `DELETE /api/procedures/:id` | also removes links and image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
 
 ---
 
@@ -624,7 +624,7 @@ Allowed values — `noteType`: `general` (default) | `observation` | `repair_log
 | --- | --- |
 | `GET /api/notes` | `{ "notes": [...], "total": n }` — linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure` |
 | `POST /api/notes` | body: `title` (required), `content`, `noteType`, `relatedEntityType`, `relatedEntityId`. If `relatedEntityType` is not `none`, `relatedEntityId` is required and must point at an existing record. `201` → `{ "message", "note" }` |
-| `PUT /api/notes/:id` | same fields; partial update |
+| `PUT /api/notes/:id` | same fields; partial update. A link to a missing record is a `400` only when the edit asks for a **new** link. If the note already pointed at a record that has since been deleted, and the edit keeps that link (or omits it), the dead link is cleared and the edit is saved |
 | `DELETE /api/notes/:id` | also removes the note's image attachments |
 
 A note links to **at most one** related record.

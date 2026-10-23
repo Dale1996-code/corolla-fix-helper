@@ -310,6 +310,26 @@ export function updateNoteFields(vehicleId, noteId, fields) {
   );
 }
 
+// Unlink every note that points at a record being deleted, keeping the notes
+// themselves. The note link is polymorphic, not a foreign key, so nothing
+// cascades: each delete path calls this inside its own transaction. A link left
+// behind made the note uneditable, because the note route re-validates it
+// (audit 1B-05). Returns the number of notes unlinked.
+export function clearNoteLinksTo(vehicleId, relatedEntityType, relatedEntityId) {
+  return db
+    .prepare(`
+      UPDATE notes
+      SET related_entity_type = 'none',
+          related_entity_id = NULL,
+          document_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE vehicle_id = ?
+      AND related_entity_type = ?
+      AND related_entity_id = ?
+    `)
+    .run(vehicleId, relatedEntityType, relatedEntityId).changes;
+}
+
 // Delete an owned note row. Returns the number of rows removed so the caller can
 // distinguish "not found" (0) from a successful delete. Attachment cleanup is a
 // separate, caller-driven step.

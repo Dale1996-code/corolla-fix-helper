@@ -245,6 +245,8 @@ Current use:
 
 Older note rows may still use `document_id` and `body`. The server includes backfill logic to keep older rows usable.
 
+The `(related_entity_type, related_entity_id)` link is polymorphic, not a foreign key, so deleting the linked record cascades nothing. Instead, every delete path unlinks the note in the same transaction: deleting a document, symptom, or procedure sets each linked note back to `related_entity_type = 'none'` and keeps the note itself. Symptoms and procedures did not do this before audit 1B-05, so a database written earlier can still hold notes that point at deleted records. Editing such a note clears the dead link instead of refusing the edit.
+
 ### `repair_checklists`
 
 Stores repair checklists: a titled, status-tracked list of steps for a job. Added by migration `002_repair_checklists`.

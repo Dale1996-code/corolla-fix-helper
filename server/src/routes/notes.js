@@ -192,10 +192,23 @@ notesRouter.put("/:id", (request, response) => {
       );
 
       if (!linkedEntity) {
-        response.status(400).json({
-          error: `Linked ${relatedEntityType} does not exist.`,
-        });
-        return;
+        const keepsExistingLink =
+          relatedEntityType === existingRelatedEntityType &&
+          relatedEntityId === existingRelatedEntityId;
+
+        if (!keepsExistingLink) {
+          response.status(400).json({
+            error: `Linked ${relatedEntityType} does not exist.`,
+          });
+          return;
+        }
+
+        // The note already pointed here and the record has since been deleted
+        // (before 1B-05 a symptom or procedure delete left the link behind).
+        // Refusing would make the note uneditable for good, so the edit drops
+        // the dead link instead. A NEW link to a missing record is still a 400.
+        relatedEntityType = "none";
+        relatedEntityId = null;
       }
     }
 

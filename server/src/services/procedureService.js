@@ -1,4 +1,5 @@
-import { db } from "../database.js";
+import { db, withTransaction } from "../database.js";
+import { clearNoteLinksTo } from "./noteService.js";
 import { buildProcedureSymptomLinksMap } from "./symptomProcedureService.js";
 import { normalizeText } from "../utils/text.js";
 
@@ -280,15 +281,24 @@ export function updateProcedureFields(vehicleId, procedureId, fields) {
   );
 }
 
-// Delete an owned procedure row. Returns the number of rows removed so the
+// Delete an owned procedure row and unlink the notes that pointed at it, as one
+// unit (audit 1B-05). Returns the number of procedure rows removed so the
 // caller can distinguish "not found" (0) from a successful delete. Attachment
 // cleanup is a separate, caller-driven step.
 export function deleteProcedure(vehicleId, procedureId) {
-  return db
-    .prepare(`
-      DELETE FROM procedures
-      WHERE id = ?
-      AND vehicle_id = ?
-    `)
-    .run(procedureId, vehicleId).changes;
+  return withTransaction(() => {
+    const removed = db
+      .prepare(`
+        DELETE FROM procedures
+        WHERE id = ?
+        AND vehicle_id = ?
+      `)
+      .run(procedureId, vehicleId).changes;
+
+    if (removed > 0) {
+      clearNoteLinksTo(vehicleId, "procedure", procedureId);
+    }
+
+    return removed;
+  });
 }
