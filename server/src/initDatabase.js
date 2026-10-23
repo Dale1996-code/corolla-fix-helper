@@ -3,6 +3,7 @@ import path from "node:path";
 import { db } from "./database.js";
 import { config } from "./config.js";
 import { ensureAppSettingsRecord } from "./services/appSettingsService.js";
+import { md5Hex } from "./utils/fileMd5.js";
 
 // Filename of the optional demo document, stored under config.uploadsDir.
 const SEED_DOCUMENT_STORED_FILENAME = "sample-maintenance-schedule.pdf";
@@ -546,6 +547,90 @@ function addVehicleApplicabilityProfile() {
   );
 }
 
+// Migration 007: give web uploads the `file_md5` that bulk import has always
+// recorded (audit 1B-03, owner decision D6). Data only: no table, column, or
+// index changes.
+//
+// THE GAP THIS CLOSES. `file_md5` and its unique index are what stop the same
+// PDF from entering the library twice, but only `npm run import` ever wrote the
+// column. Every web upload was stored with NULL, so uploading a manual twice
+// gave two documents, and the importer could not recognise a manual that had
+// been uploaded first. Uploads write the hash from now on; this fills it in for
+// the rows uploaded before that.
+//
+// For each row with no hash, oldest first, the stored file is read and hashed.
+// The hash is written only if NO other row already holds it, so the oldest copy
+// of a file keeps the hash and every LATER copy keeps NULL -- the unique index
+// forbids two rows sharing it, and choosing which duplicate to delete is the
+// owner's call, not a migration's. A row whose file is missing or unreadable
+// also keeps NULL. Neither case stops startup: each is reported on the console
+// by numeric document id only (the log-safe convention: no titles or
+// filenames), and the migration is recorded as applied. Nothing here deletes a
+// row or a file, and nothing but `file_md5` is written.
+function backfillUploadedDocumentMd5() {
+  const rows = db
+    .prepare(`
+      SELECT id, stored_filename, file_path
+      FROM documents
+      WHERE file_md5 IS NULL OR TRIM(file_md5) = ''
+      ORDER BY id ASC
+    `)
+    .all();
+
+  if (!rows.length) {
+    return;
+  }
+
+  const findHashOwner = db.prepare("SELECT id FROM documents WHERE file_md5 = ? LIMIT 1");
+  const writeHash = db.prepare("UPDATE documents SET file_md5 = ? WHERE id = ?");
+  const leftNull = [];
+  let backfilled = 0;
+
+  for (const row of rows) {
+    // Same resolution as documentService.resolveStoredFilePath: basename only,
+    // so a stored value can never reach outside the uploads folder.
+    const fileName = path.basename(String(row.stored_filename || row.file_path || ""));
+
+    if (!fileName) {
+      leftNull.push(`document ${row.id} (no stored file name)`);
+      continue;
+    }
+
+    let fileMd5;
+
+    try {
+      fileMd5 = md5Hex(fs.readFileSync(path.join(config.uploadsDir, fileName)));
+    } catch (error) {
+      const reason =
+        error?.code === "ENOENT"
+          ? "stored file missing"
+          : `stored file unreadable: ${error?.code || "error"}`;
+      leftNull.push(`document ${row.id} (${reason})`);
+      continue;
+    }
+
+    const owner = findHashOwner.get(fileMd5);
+
+    if (owner) {
+      leftNull.push(`document ${row.id} (same file as document ${owner.id})`);
+      continue;
+    }
+
+    writeHash.run(fileMd5, row.id);
+    backfilled += 1;
+  }
+
+  console.log(
+    `[migration 007] Recorded file_md5 for ${backfilled} of ${rows.length} uploaded document(s).`
+  );
+
+  if (leftNull.length) {
+    console.warn(
+      `[migration 007] ${leftNull.length} document(s) keep file_md5 NULL: ${leftNull.join("; ")}.`
+    );
+  }
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -819,6 +904,7 @@ export function initializeDatabase() {
   runMigration("004_repair_history", createRepairHistoryTables);
   runMigration("005_repair_checklist_provenance", createRepairChecklistProvenance);
   runMigration("006_vehicle_applicability_profile", addVehicleApplicabilityProfile);
+  runMigration("007_backfill_upload_file_md5", backfillUploadedDocumentMd5);
 
   ensureAppSettingsRecord();
   seedVehicle();

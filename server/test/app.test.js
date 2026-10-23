@@ -489,14 +489,22 @@ test("POST /api/documents/upload persists the bookmark flag and tags", async () 
 });
 
 test("POST /api/documents/upload defaults to not bookmarked when the flag is omitted", async () => {
-  const sourcePdf = path.join(fixturesDir, "sample-maintenance-schedule.pdf");
+  // The test above already uploaded the sample, and the same bytes are a 409
+  // (audit 1B-03), so this upload gets bytes of its own: a trailing PDF comment.
+  const sourcePdf = Buffer.concat([
+    fs.readFileSync(path.join(fixturesDir, "sample-maintenance-schedule.pdf")),
+    Buffer.from("\n% bookmark-default variant\n"),
+  ]);
 
   const response = await request(app)
     .post("/api/documents/upload")
     .field("title", "Uploaded without bookmark")
     .field("system", "Engine")
     .field("documentType", "Reference")
-    .attach("pdfFile", sourcePdf);
+    .attach("pdfFile", sourcePdf, {
+      filename: "sample-maintenance-schedule.pdf",
+      contentType: "application/pdf",
+    });
 
   assert.equal(response.status, 201);
   assert.equal(response.body.document.isBookmarked, false);

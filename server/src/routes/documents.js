@@ -7,6 +7,7 @@ import {
   countDocuments,
   createDocument,
   deleteDocument,
+  DuplicateDocumentError,
   getDocument,
   getDocumentFileLocation,
   getDocumentFileRecord,
@@ -210,6 +211,14 @@ documentsRouter.post("/upload", async (request, response) => {
       totalDocuments: totalBeforeUpload + 1,
     });
   } catch (error) {
+    if (error instanceof DuplicateDocumentError) {
+      response.status(409).json({
+        error: error.message,
+        existingDocument: error.existingDocument,
+      });
+      return;
+    }
+
     response.status(500).json({
       error: error.message || "Could not save the uploaded document.",
     });

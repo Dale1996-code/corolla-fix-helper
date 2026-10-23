@@ -91,10 +91,10 @@ Current use:
 - Apply freeform tags.
 - Open stored PDFs.
 - Re-run extraction for one saved document.
-- Skip duplicate files during bulk import.
+- Refuse a duplicate file on web upload (`409`) and skip it during bulk import.
 - Delete documents and clean up related links.
 
-`file_md5` stores the MD5 hash of imported PDF bytes. MD5 is used here as a duplicate key for local repair PDFs, not as a security feature.
+`file_md5` stores the lowercase hex MD5 of the PDF's exact bytes, written by both the web upload and the bulk importer (`utils/fileMd5.js`). The partial unique index `idx_documents_file_md5` (on non-empty values) is what keeps one file from becoming two documents: an upload of bytes already in the library is refused with a `409` that names the existing document, and the importer skips them. Before audit 1B-03 only the importer wrote the column, so web uploads carried `NULL` and could be duplicated freely; migration `007` backfilled them (see below). `NULL` remains legal, and still marks a row whose hash could not be recorded. MD5 is used here as a duplicate key for local repair PDFs, not as a security feature.
 
 Favorites (`is_favorite`) and bookmarks (`is_bookmarked`) are two independent saved-document flags. Tags are stored separately in the `tags` and `document_tags` tables.
 
@@ -459,6 +459,18 @@ Applied migrations:
   reads as "unknown" until the owner fills in Settings. A failure partway through rolls back every
   column it added (`migration006Rollback.test.js`), and older code ignores the new columns, so
   reverting the code needs no schema change.
+- `007_backfill_upload_file_md5` — data only (audit 1B-03, owner decision D6): no table, column, or
+  index changes. For every document with no `file_md5`, oldest first, it hashes the stored file
+  and writes the hash **only if no other row already holds it**. The oldest copy of a file keeps
+  the hash, and every later copy keeps `NULL`, because the unique index forbids two rows sharing
+  one and choosing which duplicate to delete is the owner's call. A row whose file is missing or
+  unreadable also keeps `NULL`. Each kept `NULL` is reported once on the startup console by
+  numeric document id and reason ("same file as document N", "stored file missing"), and the
+  migration is still recorded: startup never fails over it, and a restart does not retry those
+  rows. Nothing else is written: no row, file, or `updated_at` changes. Dry-run on a `VACUUM INTO`
+  copy of the owner's library on 2026-10-23: 9 of 1,443 documents had no hash; 2 were recorded
+  and 7 kept `NULL` (one missing demo file, and six web uploads whose bytes another document
+  already holds).
 
 ## Not In The Current Schema
 

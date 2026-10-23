@@ -135,6 +135,14 @@ curl.exe -X POST http://localhost:4000/api/documents/upload `
 
 Upload also extracts text (with OCR on low-text pages when tools are installed) and rebuilds the document's `document_chunks`. On any failure the stored file and partial rows are cleaned up before the error returns. Common errors: `"Only PDF files are allowed right now."`, `"PDF is too large. The limit is 20 MB."`, `"System and document type are required."`
 
+The same bytes are never stored twice (audit 1B-03). The upload records the file's MD5 in `file_md5`, and a file already in the library, under any filename, is a `409` that names the document holding it. Nothing is written:
+
+```json
+{ "error": "This PDF is already uploaded as \"Brake Service Guide\".", "existingDocument": { "id": 42, "title": "Brake Service Guide" } }
+```
+
+Two simultaneous uploads of the same new file store exactly one document; the other gets the same `409`.
+
 The file's **bytes** must be a PDF, not just its name or MIME type: the `%PDF-` header has to appear in its first 1024 bytes (the window pdf.js and Acrobat accept). A file without it is a `400` whose error begins `"This file is not a PDF, even though its name ends in .pdf."`, and nothing is stored (audit 2A-09). The usual cause is a login or error page that a browser saved under a `.pdf` name. The check proves the file type only. A damaged PDF still passes, and its extraction status reports the damage.
 
 ### `GET /api/documents/:id/file`

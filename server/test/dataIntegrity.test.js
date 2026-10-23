@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import request from "supertest";
 
-// Known data-integrity defects from the 2026-10-18 audit, as todo tests. Each
-// pairs a plain test that pins the setup with a todo that asserts the behavior
-// the app should have, so the todo can only be failing for the defect itself.
+// Data-integrity defects from the 2026-10-18 audit (Stage 4-D2). They began as
+// todo tests: each pairs a plain test that pins the setup with a test that
+// asserts the behavior the app should have, so that test could only fail for
+// the defect itself. 1B-05 and 1B-03 are fixed, so neither carries `todo` now;
+// the tests after each pair pin the edges of its fix.
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-data-integrity-"));
 
@@ -162,7 +164,6 @@ test("setup: a web upload of the sample PDF succeeds", async () => {
 
 test(
   "a web upload records file_md5, so the same PDF cannot enter twice",
-  { todo: "1B-03" },
   async () => {
     // The setup test above already uploaded these exact bytes once.
     const existing = db
@@ -175,3 +176,51 @@ test(
     assert.equal(duplicate.status, 409, `duplicate upload -> ${duplicate.status}`);
   }
 );
+
+const uploadBytes = (bytes, filename) =>
+  request(app)
+    .post("/api/documents/upload")
+    .field("title", filename)
+    .field("system", "Engine")
+    .field("documentType", "manual")
+    .attach("pdfFile", bytes, { filename, contentType: "application/pdf" });
+
+test("1B-03: the 409 names the existing document and stores nothing", async () => {
+  const existing = db
+    .prepare("SELECT id, title FROM documents WHERE original_filename = ? ORDER BY id LIMIT 1")
+    .get("sample-maintenance-schedule.pdf");
+  const countBefore = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
+  const filesBefore = fs.readdirSync(process.env.UPLOADS_DIR).sort();
+
+  // A different filename does not make the same bytes a different PDF.
+  const duplicate = await uploadBytes(SAMPLE_PDF, "renamed-copy.pdf");
+
+  assert.equal(duplicate.status, 409, JSON.stringify(duplicate.body));
+  assert.equal(duplicate.body.error, `This PDF is already uploaded as "${existing.title}".`);
+  assert.deepEqual(duplicate.body.existingDocument, { id: existing.id, title: existing.title });
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM documents").get().c, countBefore);
+  assert.deepEqual(fs.readdirSync(process.env.UPLOADS_DIR).sort(), filesBefore);
+});
+
+test("1B-03: two simultaneous uploads of new bytes store exactly one document", async () => {
+  // Bytes no other test uploads: the sample with a trailing comment.
+  const fresh = Buffer.concat([SAMPLE_PDF, Buffer.from("\n% simultaneous-upload variant\n")]);
+  const countBefore = db.prepare("SELECT COUNT(*) AS c FROM documents").get().c;
+
+  // Both can pass the up-front check while the other is still extracting; the
+  // unique index on file_md5 must then turn the loser into the same 409.
+  const responses = await Promise.all([
+    uploadBytes(fresh, "first-tab.pdf"),
+    uploadBytes(fresh, "second-tab.pdf"),
+  ]);
+
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM documents").get().c, countBefore + 1);
+});
+
+test("1B-03: a PDF whose bytes differ still uploads, whatever its name", async () => {
+  const different = Buffer.concat([SAMPLE_PDF, Buffer.from("\n% a different revision\n")]);
+  const response = await uploadBytes(different, "sample-maintenance-schedule.pdf");
+
+  assert.equal(response.status, 201, JSON.stringify(response.body));
+});

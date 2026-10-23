@@ -17,6 +17,7 @@ import {
   createStoredFilename,
   deriveTitleFromFilename,
 } from "../utils/sanitizeFilename.js";
+import { md5Hex } from "../utils/fileMd5.js";
 
 /**
  * Resolve the on-disk path for a document's stored file.
@@ -711,12 +712,45 @@ export function getDocumentMetadataRecord(documentId) {
     .get(documentId);
 }
 
+// SQLITE_CONSTRAINT_UNIQUE, as node:sqlite reports it on `error.errcode`.
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * An upload whose exact bytes are already a document (audit 1B-03). Carries the
+ * existing document's id and title so the route can name it in its 409.
+ */
+export class DuplicateDocumentError extends Error {
+  /** @param {{ id: number, title: string }} existingDocument */
+  constructor(existingDocument) {
+    super(`This PDF is already uploaded as "${existingDocument.title}".`);
+    this.name = "DuplicateDocumentError";
+    this.existingDocument = { id: existingDocument.id, title: existingDocument.title };
+  }
+}
+
+/**
+ * The document that already holds these exact bytes, or undefined.
+ *
+ * @param {string} fileMd5
+ * @returns {{ id: number, title: string } | undefined}
+ */
+export function findDocumentByFileMd5(fileMd5) {
+  return /** @type {{ id: number, title: string } | undefined} */ (
+    db.prepare("SELECT id, title FROM documents WHERE file_md5 = ? LIMIT 1").get(fileMd5)
+  );
+}
+
 // Persist an uploaded PDF: derive its stored path, write the file, extract its
 // text/pages, insert the row, rebuild chunks, and set tags — returning the
 // freshly mapped document. On any failure the written file and (if it was
 // created) the row + chunks are cleaned up before the error is rethrown, so a
 // failed upload never leaves an orphan file or half-inserted document. Fields
 // are already parsed/normalized by the caller.
+//
+// The same bytes are never stored twice (audit 1B-03): the row records
+// `file_md5`, a file already present throws DuplicateDocumentError before
+// anything is written, and the unique index on `file_md5` turns a simultaneous
+// second upload into the same error rather than a second copy.
 export async function createDocument({
   fileBuffer,
   originalFilename,
@@ -739,6 +773,12 @@ export async function createDocument({
       ? "application/pdf"
       : mimetype || "application/octet-stream";
   const title = titleInput || deriveTitleFromFilename(originalFilename);
+  const fileMd5 = md5Hex(fileBuffer);
+  const existingDocument = findDocumentByFileMd5(fileMd5);
+
+  if (existingDocument) {
+    throw new DuplicateDocumentError(existingDocument);
+  }
 
   let createdDocumentId = null;
 
@@ -764,13 +804,14 @@ export async function createDocument({
             subsystem,
             document_type,
             source,
+            file_md5,
             extracted_text,
             extraction_status,
             page_count,
             notes,
             is_favorite,
             is_bookmarked
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           vehicleId,
@@ -783,6 +824,7 @@ export async function createDocument({
           subsystem,
           documentType,
           source,
+          fileMd5,
           extractionResult.extractedText,
           extractionResult.extractionStatus,
           extractionResult.pageCount,
@@ -812,6 +854,14 @@ export async function createDocument({
       } catch {
         // Best-effort cleanup; surface the original create error to the caller.
       }
+    }
+
+    // Another upload of the same bytes committed while this one was extracting.
+    const racedDocument =
+      error?.errcode === SQLITE_CONSTRAINT_UNIQUE ? findDocumentByFileMd5(fileMd5) : undefined;
+
+    if (racedDocument) {
+      throw new DuplicateDocumentError(racedDocument);
     }
 
     throw error;

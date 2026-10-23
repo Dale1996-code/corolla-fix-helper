@@ -107,14 +107,28 @@ async function createNetworkModeApp({
   });
 }
 
+// Every call sends distinct bytes (a numbered trailing PDF comment): the same
+// bytes twice are a 409 duplicate (audit 1B-03), and this suite is about the
+// request guard, not about deduplication.
+let uploadSequence = 0;
+
 function uploadSamplePdf(target, headers = {}) {
+  uploadSequence += 1;
+  const bytes = Buffer.concat([
+    fs.readFileSync(samplePdf),
+    Buffer.from(`\n% request-guard upload ${uploadSequence}\n`),
+  ]);
+
   return request(target)
     .post("/api/documents/upload")
     .set(headers)
     .field("title", "Toyota FSM")
     .field("system", "Brakes")
     .field("documentType", "Manual")
-    .attach("pdfFile", samplePdf);
+    .attach("pdfFile", bytes, {
+      filename: "sample-maintenance-schedule.pdf",
+      contentType: "application/pdf",
+    });
 }
 
 async function createSymptom(target = app) {

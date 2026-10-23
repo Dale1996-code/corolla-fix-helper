@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,6 +12,7 @@ import {
   sanitizeFilename,
 } from "../utils/sanitizeFilename.js";
 import { normalizeText } from "../utils/text.js";
+import { md5Hex } from "../utils/fileMd5.js";
 
 const IMAGE_ONLY_TEXT_CHARACTER_LIMIT = 20;
 
@@ -30,10 +30,6 @@ function isImageOnlyExtraction(extractionResult) {
   }
 
   return countTextCharacters(extractionResult.extractedText) < IMAGE_ONLY_TEXT_CHARACTER_LIMIT;
-}
-
-function md5Hex(buffer) {
-  return crypto.createHash("md5").update(buffer).digest("hex");
 }
 
 async function findPdfFiles(directoryPath) {
