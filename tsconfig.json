@@ -31,6 +31,8 @@
     "server/test/envIsolation.test.js",
     "server/test/chunkRerankRetrieval.test.js",
     "server/test/answerQualityCases.test.js",
+    "server/test/answerCapture.test.js",
+    "server/test/replayCapture.test.js",
     "server/test/attachmentService.test.js",
     "server/test/attachments.test.js",
     "server/test/config.test.js",

@@ -21,7 +21,10 @@ const { db } = await import("../database.js");
 const { askQuestionUsingDocuments } = await import("../services/aiAnswerService.js");
 const { answerQualityCases } = await import("../evals/answerQualityCases.js");
 const { evaluateAnswerCase, summarize } = await import("../evals/answerQualityScoring.js");
-const { createRejectionProbe } = await import("../evals/answerRejectionProbes.js");
+// Shared with eval:capture, so a capture records exactly what this eval asks.
+const { describeError, isRateLimited, runAnswerCase } = await import(
+  "../evals/answerCaseRunner.js"
+);
 const { validateAskResponse } = await import("../services/askResponseContract.js");
 const { NEGATIVE_CASE_PRECONDITIONS } = await import(
   "../evals/negativeCorpusPreconditions.js"
@@ -71,51 +74,10 @@ const results = [];
 // Pacing. Running every case back-to-back exceeds the account's tokens-per-minute
 // tier (observed: 30000 TPM), and a 429 then looks exactly like a product
 // regression in the results table. Space the cases out, and retry a rate-limited
-// case rather than recording a false failure.
+// case rather than recording a false failure (the retry lives in runAnswerCase).
 const CASE_DELAY_MS = Number(process.env.EVAL_CASE_DELAY_MS || 2000);
-const MAX_RATE_LIMIT_RETRIES = 4;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Rate limiting is infrastructure, not a product signal. Tell them apart. */
-function isRateLimited(error) {
-  return Number(error?.failure?.httpStatus) === 429;
-}
-
-/**
- * The client-facing message is deliberately generic, because provider bodies
- * must never reach a browser. This is a local developer tool, so surface the
- * bounded internal diagnostic here -- otherwise a failing eval is undebuggable.
- */
-function describeError(error) {
-  const parts = [error.message];
-
-  if (error?.failure?.httpStatus) {
-    parts.push(`[http ${error.failure.httpStatus}]`);
-  }
-
-  if (error?.failure?.diagnostic) {
-    parts.push(`diagnostic: ${error.failure.diagnostic}`);
-  }
-
-  return parts.join(" ");
-}
-
-async function askWithRetry(question, options) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await askQuestionUsingDocuments(question, options);
-    } catch (error) {
-      if (!isRateLimited(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
-        throw error;
-      }
-
-      const backoffMs = 5000 * (attempt + 1);
-      console.log(`    - rate limited, retrying in ${backoffMs / 1000}s`);
-      await sleep(backoffMs);
-    }
-  }
-}
 
 let rateLimitedCases = 0;
 let caseIndex = 0;
@@ -127,22 +89,11 @@ for (const testCase of answerQualityCases) {
   caseIndex += 1;
 
   try {
-    // Vision cases attach an image so the run exercises the same not-found gate
-    // with a photo present; text cases pass image: null and are unchanged.
-    // includeMetrics surfaces log-safe timing/size numbers (no document text)
-    // so a run doubles as a retrieval/answer performance check.
-    const primary = await askWithRetry(testCase.question, {
-      image: testCase.image || null,
-      includeMetrics: true,
-      // Rejection cases replace the model reply with a probe crafted to fail one
-      // specific check, and pin the contract on so the local ASK_EVIDENCE_CONTRACT
-      // setting cannot quietly route the case past the verifier it is testing.
-      ...(testCase.rejectionProbe
-        ? {
-            evidenceContract: true,
-            generateEvidenceAnswer: createRejectionProbe(testCase.rejectionProbe),
-          }
-        : {}),
+    // The options each turn is asked with (image, metrics, rejection probe,
+    // follow-up history) are built in runAnswerCase -- see answerCaseRunner.js.
+    const { primary, followUp } = await runAnswerCase(testCase, {
+      askQuestion: askQuestionUsingDocuments,
+      sleep,
     });
 
     // Validate against the shared contract before scoring. The eval calls the
@@ -154,15 +105,6 @@ for (const testCase of answerQualityCases) {
 
     if (!contract.ok) {
       console.log(`    ! response contract: ${contract.errors.join("; ")}`);
-    }
-
-    let followUp = null;
-    if (testCase.followUp) {
-      const history = [
-        { role: "user", content: testCase.question },
-        { role: "assistant", content: primary.answer },
-      ];
-      followUp = await askWithRetry(testCase.followUp.question, { history });
     }
 
     results.push({ ...evaluateAnswerCase(testCase, primary, followUp), metrics: primary.metrics });

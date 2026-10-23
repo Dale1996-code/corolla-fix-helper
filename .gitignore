@@ -30,3 +30,7 @@ desktop.ini
 
 # N5 blind applicability labels quote real manual text; never commit them.
 server/data/applicability-labels/
+
+# eval:capture writes raw model replies with the manual passages they were
+# shown. Like the labels above they quote real manual text; never commit them.
+server/data/captures/
