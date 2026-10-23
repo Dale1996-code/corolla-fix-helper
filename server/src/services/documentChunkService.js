@@ -5,22 +5,13 @@ import { db } from "../database.js";
 import { clearChunkEmbeddingCache } from "./chunkEmbeddingService.js";
 import { clearDocumentContentIdentityCache } from "./documentContentIdentity.js";
 import { extractPdfData } from "./pdfService.js";
-
-const DEFAULT_CHUNK_WORD_SIZE = 200;
-const DEFAULT_CHUNK_WORD_OVERLAP = 40;
-
-function normalizeWords(text) {
-  if (typeof text !== "string") {
-    return [];
-  }
-
-  return text
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .map((word) => word.trim())
-    .filter(Boolean);
-}
+// The window lives in a leaf module because the applicability tagger must cut
+// pages at exactly the same word boundaries (N5).
+import {
+  CHUNK_WORD_OVERLAP as DEFAULT_CHUNK_WORD_OVERLAP,
+  CHUNK_WORD_SIZE as DEFAULT_CHUNK_WORD_SIZE,
+  normalizeChunkWords as normalizeWords,
+} from "./chunkGeometry.js";
 
 export function chunkPageText(
   text,

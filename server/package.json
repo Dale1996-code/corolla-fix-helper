@@ -13,6 +13,8 @@
     "smoke": "node src/scripts/smokeTest.js",
     "embed:backfill": "node src/scripts/embedBackfill.js",
     "diagnose:zero-chunks": "node src/scripts/diagnoseZeroChunkDocuments.js",
+    "diagnose:applicability": "node src/scripts/diagnoseApplicability.js",
+    "check:applicability-labels": "node src/scripts/checkApplicabilityLabels.js",
     "recover:zero-chunks": "node src/scripts/recoverZeroChunkDocuments.js",
     "analyze:ocr-quality": "node src/scripts/analyzeOcrChunkQuality.js",
     "eval:retrieval": "node src/scripts/evalHybridRetrieval.js",

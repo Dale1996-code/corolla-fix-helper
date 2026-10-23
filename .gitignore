@@ -27,3 +27,6 @@ desktop.ini
 # generated *-workspace eval runs and Playwright MCP snapshots are excluded.
 .claude/skills/*-workspace/
 .playwright-mcp/
+
+# N5 blind applicability labels quote real manual text; never commit them.
+server/data/applicability-labels/
