@@ -9,6 +9,10 @@ import test, { after } from "node:test";
 // That is NO LONGER TRUE -- the delete and the inserts already run inside one
 // BEGIN IMMEDIATE / COMMIT / ROLLBACK transaction. Rather than rewrite working
 // code, this pins the property so it cannot silently regress.
+//
+// Audit 1B-04 widened it: persisting an extraction updates the document row AND
+// rebuilds its chunks, and those once committed separately. The last test pins
+// that a failed rebuild now rolls the row back too.
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-chunk-atomic-"));
 process.env.DATABASE_FILE = path.join(tempRoot, "chunks.db");
 process.env.UPLOADS_DIR = path.join(tempRoot, "uploads");
@@ -18,6 +22,7 @@ const { initializeDatabase } = await import("../src/initDatabase.js");
 const { rebuildDocumentChunksFromPages } = await import(
   "../src/services/documentChunkService.js"
 );
+const { persistExtractionResult } = await import("../src/services/documentService.js");
 
 initializeDatabase();
 
@@ -107,6 +112,53 @@ test("a failed rebuild rolls back and leaves the previous chunks intact", () => 
     before.map((row) => row.chunk_text),
     "the document must not be left empty or partially rebuilt"
   );
+});
+
+test("a failed rebuild while persisting an extraction rolls the document row back too (1B-04)", () => {
+  const documentId = seedDocument();
+
+  persistExtractionResult(documentId, {
+    extractedText: "Original page one\n\nOriginal page two",
+    extractionStatus: "completed",
+    pageCount: 2,
+    pages: [
+      { pageNumber: 1, text: "Original page one" },
+      { pageNumber: 2, text: "Original page two" },
+    ],
+  });
+
+  const readRow = () =>
+    db
+      .prepare("select extracted_text, extraction_status, page_count from documents where id = ?")
+      .get(documentId);
+  const readChunks = () =>
+    db
+      .prepare("select chunk_text from document_chunks where document_id = ? order by page_number")
+      .all(documentId)
+      .map((row) => row.chunk_text);
+  const rowBefore = readRow();
+  const chunksBefore = readChunks();
+
+  assert.equal(rowBefore.page_count, 2);
+  assert.equal(chunksBefore.length, 2);
+
+  // The row UPDATE succeeds; the rebuild then collides on the unique index (see
+  // the test above). Before 1B-04 the row kept the new text over the old chunks.
+  assert.throws(() =>
+    persistExtractionResult(documentId, {
+      extractedText: "New text that must not survive the failure",
+      extractionStatus: "completed_with_ocr",
+      pageCount: 7,
+      pages: [
+        { pageNumber: 1, text: "New page one" },
+        { pageNumber: 1, text: "Duplicate page one collides on the unique index" },
+      ],
+    })
+  );
+
+  assert.deepEqual(readRow(), rowBefore, "the document row must roll back with its chunks");
+  assert.deepEqual(readChunks(), chunksBefore, "the chunks must be left exactly as they were");
+  assert.equal(db.isTransaction, false, "no transaction may be left open after the failure");
 });
 
 test("other documents are untouched by a rebuild", () => {

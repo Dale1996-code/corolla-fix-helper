@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { db } from "../database.js";
+import { db, withTransaction } from "../database.js";
 import {
   getTagsForDocuments,
   listAllTags,
@@ -748,49 +748,54 @@ export async function createDocument({
     const extractionResult = await extractPdfData(fileBuffer);
     const vehicleId = getVehicleId();
 
-    const result = db
-      .prepare(`
-        INSERT INTO documents (
-          vehicle_id,
+    // The row and its chunks commit together, so a failed rebuild can never
+    // leave a document row with no chunks behind it (audit 1B-04).
+    const newDocumentId = withTransaction(() => {
+      const result = db
+        .prepare(`
+          INSERT INTO documents (
+            vehicle_id,
+            title,
+            original_filename,
+            stored_filename,
+            file_path,
+            file_type,
+            system,
+            subsystem,
+            document_type,
+            source,
+            extracted_text,
+            extraction_status,
+            page_count,
+            notes,
+            is_favorite,
+            is_bookmarked
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          vehicleId,
           title,
-          original_filename,
-          stored_filename,
-          file_path,
-          file_type,
+          originalFilename,
+          storedFilename,
+          relativeFilePath,
+          fileType,
           system,
           subsystem,
-          document_type,
+          documentType,
           source,
-          extracted_text,
-          extraction_status,
-          page_count,
+          extractionResult.extractedText,
+          extractionResult.extractionStatus,
+          extractionResult.pageCount,
           notes,
-          is_favorite,
-          is_bookmarked
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        vehicleId,
-        title,
-        originalFilename,
-        storedFilename,
-        relativeFilePath,
-        fileType,
-        system,
-        subsystem,
-        documentType,
-        source,
-        extractionResult.extractedText,
-        extractionResult.extractionStatus,
-        extractionResult.pageCount,
-        notes,
-        0,
-        isBookmarked ? 1 : 0
-      );
+          0,
+          isBookmarked ? 1 : 0
+        );
+      const insertedId = Number(result.lastInsertRowid);
 
-    const newDocumentId = Number(result.lastInsertRowid);
+      rebuildDocumentChunksFromPages(insertedId, extractionResult.pages);
+      return insertedId;
+    });
     createdDocumentId = newDocumentId;
-    rebuildDocumentChunksFromPages(newDocumentId, extractionResult.pages);
 
     if (hasTags) {
       setDocumentTags(newDocumentId, tags);
@@ -825,28 +830,31 @@ export async function createDocument({
  * substantive text) can run the same persistence the upload route runs, instead
  * of extracting twice or hand-rolling a second copy of these writes.
  *
- * Order matters: the row is updated before the chunks are rebuilt, so an
- * interruption between the two leaves a document with text and no chunks --
- * still visibly unrecovered, and safe to reprocess -- rather than chunks whose
- * document row claims there is no text.
+ * The row update and the chunk rebuild are ONE transaction (audit 1B-04). They
+ * used to be two, and a failure in the rebuild left the row holding the new
+ * text over the old chunks -- a document whose Ask results no longer matched
+ * what it claimed to contain. Now a failure anywhere leaves the document exactly
+ * as it was: old text, old status, old chunks.
  */
 export function persistExtractionResult(documentId, extractionResult) {
-  db.prepare(`
-    UPDATE documents
-    SET
-      extracted_text = ?,
-      extraction_status = ?,
-      page_count = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    extractionResult.extractedText,
-    extractionResult.extractionStatus,
-    extractionResult.pageCount,
-    documentId
-  );
+  return withTransaction(() => {
+    db.prepare(`
+      UPDATE documents
+      SET
+        extracted_text = ?,
+        extraction_status = ?,
+        page_count = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      extractionResult.extractedText,
+      extractionResult.extractionStatus,
+      extractionResult.pageCount,
+      documentId
+    );
 
-  return rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+    return rebuildDocumentChunksFromPages(documentId, extractionResult.pages);
+  });
 }
 
 export async function reextractDocument(documentId, fileBuffer) {
