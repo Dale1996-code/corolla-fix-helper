@@ -2,7 +2,9 @@
 
 This is how you check that the Ask chatbot gives **correct, well-cited answers** — and
 catch it if a future change quietly makes answers worse. There are three checks: two you
-run regularly, and one you run only when tuning a specific setting.
+run regularly, and one you run only when tuning a specific setting. The answer check also has
+a free, offline companion, the **replay**, for judging a change to the verifier before you pay
+for a run.
 
 ## 1. Retrieval check (cheap)
 
@@ -103,6 +105,79 @@ a baseline and cannot reproduce.
   normal outcome: `applicability-engine-mount-build-variant` was promoted on 2026-08-20 and
   demoted on 2026-08-22 — its expectations were never weakened, it simply varied at the product
   level, and a gate that flickers is worse than no gate.
+
+### Judging a verifier change for free: capture, then replay
+
+The verifier (`server/src/services/askEvidenceContract.js`) decides which of the model's claims
+survive. Every change to it, such as a new rejection rule or a stricter number match, changes
+that. `eval:answers` shows what a change does to *today's* answers, but every run costs money
+and asks the model again. A different reply can hide a difference or invent one. A replay asks
+the other question, for free: *what does the new verifier decide about replies we already have?*
+
+It comes in two halves.
+
+**1. Capture (paid, once in a while):**
+
+```powershell
+npm run eval:capture
+```
+
+This runs the same cases as `eval:answers`, the same way, and saves each raw model reply. With
+each reply it saves the manual passages the model was shown and what the verifier decided about
+each claim at the time. The file goes in `server/data/captures/`, named after the time and the
+code revision, for example `2026-10-23T04-12-33Z-e4c66eb.jsonl`. A capture costs about what one
+`eval:answers` run costs, so run it only when you have agreed to the spend. To capture only some
+cases, add `-- --case <id>` (repeat `--case` for more).
+
+**A capture quotes your manuals word for word.** The folder is ignored by git and must stay
+that way, because the repository is public. Don't commit a capture, and don't paste its passages
+into a committed doc.
+
+A capture does not score answers, so it is not an `eval:answers` run. Don't record it as one in
+the iteration log.
+
+**2. Replay (free, as often as you like):**
+
+```powershell
+npm run eval:replay -- server/data/captures/2026-10-23T04-12-33Z-e4c66eb.jsonl
+```
+
+This re-checks every saved reply with the verifier as it is now. It needs no API key, no
+database, and no network. It prints every verdict that changed. Here is the shape, from the
+invented test fixture with one claim edited:
+
+```
+synthetic-widget-torque (primary) documentSupported[0]: accepted → numeric_anomaly
+    claim: The widget housing bolt torque is 25 N*m.
+    source: S1, Synthetic Widget Manual (invented text), page 3
+
+0 answer statuses changed of 4 records
+1 verdict changed of 9
+```
+
+How to read it:
+
+- A **verdict** belongs to one claim, one general-guidance line, or one gap. It is either
+  `accepted` or the reason the item was removed (`numeric_anomaly`, `quote_not_in_source`, and the
+  other reasons the verifier can give).
+- **The last line is the one a change is judged by.** `0 verdicts changed` means the change makes
+  no difference to the captured replies.
+- **Read every changed line.** Each one should be a row the change was *meant* to move. A change
+  anywhere else is a regression to fix before you spend anything. The N5 P3 engine check has
+  exactly this as its acceptance test: verdicts change only on applicability rows.
+- **Then run `eval:answers` as usual.** The replay does not replace it. It can't see how the model
+  answers today, and model answers drift.
+
+What a replay cannot do:
+
+- **It can only replay checks whose inputs the capture holds.** Each passage is saved with every
+  simple field the search returned. A check that needs a field the search only returns later
+  works on captures taken after that, not before.
+- **It does not cover the Repair Planner's verifier.** The planner has no eval case set, so
+  nothing captures what its verifier reads.
+- **It refuses a file it can't read in full.** If it reports lines that "could not be
+  replayed", it exits with an error, and its totals don't cover the whole file. That usually
+  means a capture from an older format version: take a new capture.
 
 ### The automated tests never read your `server/.env`
 
