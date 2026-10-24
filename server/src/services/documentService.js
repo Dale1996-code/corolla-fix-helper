@@ -248,9 +248,98 @@ function getDocumentBaseQuery() {
   `;
 }
 
-export function countDocuments() {
+// The filters the Documents page can apply. One builder feeds both the page
+// query and its COUNT(*), so the reported total can never disagree with the rows
+// a page actually returns. Every value is bound as a parameter, never spliced.
+//
+// Semantics match what the page used to do in the browser: system/type are exact
+// matches, the tag is a case-insensitive exact match, and `favorite`/`bookmarked`
+// take "true" (only those) or "false" (everything but those). Anything else --
+// including "" and "all" -- applies no filter, so a stale link degrades to the
+// unfiltered list instead of an error.
+function buildDocumentListFilter({
+  system = "",
+  documentType = "",
+  favorite = "",
+  bookmarked = "",
+  tag = "",
+} = {}) {
+  const clauses = [];
+  const params = [];
+
+  const trimmedSystem = typeof system === "string" ? system.trim() : "";
+  const trimmedType = typeof documentType === "string" ? documentType.trim() : "";
+  const trimmedTag = typeof tag === "string" ? tag.trim() : "";
+
+  if (trimmedSystem) {
+    clauses.push("documents.system = ?");
+    params.push(trimmedSystem);
+  }
+
+  if (trimmedType) {
+    clauses.push("documents.document_type = ?");
+    params.push(trimmedType);
+  }
+
+  if (favorite === "true") {
+    clauses.push("documents.is_favorite = 1");
+  } else if (favorite === "false") {
+    clauses.push("documents.is_favorite = 0");
+  }
+
+  if (bookmarked === "true") {
+    clauses.push("documents.is_bookmarked = 1");
+  } else if (bookmarked === "false") {
+    clauses.push("documents.is_bookmarked = 0");
+  }
+
+  if (trimmedTag) {
+    clauses.push(`EXISTS (
+      SELECT 1
+      FROM document_tags
+      JOIN tags ON tags.id = document_tags.tag_id
+      WHERE document_tags.document_id = documents.id
+        AND tags.name = ? COLLATE NOCASE
+    )`);
+    params.push(trimmedTag);
+  }
+
+  return {
+    whereSql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+    params,
+  };
+}
+
+// The library's last-touched time as the Documents page has always ordered it
+// (updated, falling back to created). datetime() normalizes the bare
+// `YYYY-MM-DD HH:MM:SS` SQLite writes and ISO `...T...Z` text to one comparable
+// form, so the two spellings cannot sort apart.
+const DOCUMENT_TOUCHED_AT_SQL =
+  "datetime(COALESCE(NULLIF(documents.updated_at, ''), documents.created_at))";
+
+// Every ordering ends in `documents.id DESC`, a unique tie-breaker: without it
+// rows sharing a leading value could swap places between two page queries and a
+// document would appear on two pages or on none. The tie order before the id is
+// the library's legacy order (newest created first), which is also what the
+// browser's stable sort used to leave behind.
+const DOCUMENT_LIST_SORTS = {
+  newest: `ORDER BY ${DOCUMENT_TOUCHED_AT_SQL} DESC, documents.created_at DESC, documents.id DESC`,
+  oldest: `ORDER BY ${DOCUMENT_TOUCHED_AT_SQL} ASC, documents.created_at DESC, documents.id DESC`,
+  title_asc:
+    "ORDER BY documents.title COLLATE NOCASE ASC, documents.created_at DESC, documents.id DESC",
+};
+
+export const DOCUMENT_LIST_SORT_KEYS = Object.keys(DOCUMENT_LIST_SORTS);
+
+// Rows matching `filters`, or the whole library with none. Not a page count:
+// the Documents page uses it to know how many pages exist.
+export function countDocuments(filters = {}) {
+  const { whereSql, params } = buildDocumentListFilter(filters);
+
   return Number(
-    db.prepare("SELECT COUNT(*) AS count FROM documents").get().count
+    db
+      .prepare(`SELECT COUNT(*) AS count FROM documents ${whereSql}`)
+      .get(...params).count
   );
 }
 
@@ -258,38 +347,64 @@ export function countDocuments() {
 // (never embedded, or embedded under an older model/dimension). Used to show an
 // "embedding pending" hint: such documents are still findable by keyword, but
 // have not yet gained semantic ranking.
-function getPendingEmbeddingDocumentIds() {
+function getPendingEmbeddingDocumentIds(documentIds = null) {
+  // A page only needs the answer for its own rows. Scanning every chunk in the
+  // library to decorate 25 of them is the same whole-library cost this paging
+  // exists to remove, so a known id list narrows the query.
+  const narrowed = Array.isArray(documentIds);
+
+  if (narrowed && documentIds.length === 0) {
+    return new Set();
+  }
+
   const rows = db
     .prepare(`
       SELECT DISTINCT document_id
       FROM document_chunks
       WHERE COALESCE(embedding_version, '') <> ?
+      ${narrowed ? `AND document_id IN (${documentIds.map(() => "?").join(", ")})` : ""}
     `)
-    .all(config.openAiEmbeddingVersion);
+    .all(config.openAiEmbeddingVersion, ...(narrowed ? documentIds : []));
 
   return new Set(rows.map((row) => row.document_id));
 }
 
 /**
- * List documents, newest first.
+ * List documents.
  *
- * With no options every document is returned (backward compatible). Pass a
- * positive `limit` (and optional `offset`) to page through large libraries.
+ * With no options every document is returned, newest created first (backward
+ * compatible: the other record pages read the whole list). Pass a positive
+ * `limit` (and optional `offset`) to page through a large library, and any of
+ * the filters to narrow it. Pass `sort` (`newest`, `oldest`, `title_asc`) for the
+ * Documents page's own orderings; an unknown or missing `sort` keeps the legacy
+ * order.
  */
-export function listDocuments({ limit = null, offset = 0 } = {}) {
+export function listDocuments({
+  limit = null,
+  offset = 0,
+  sort = "",
+  ...filters
+} = {}) {
   const hasLimit = Number.isInteger(limit) && limit > 0;
   const safeOffset = Number.isInteger(offset) && offset > 0 ? offset : 0;
+  const { whereSql, params } = buildDocumentListFilter(filters);
+  const orderSql =
+    DOCUMENT_LIST_SORTS[sort] ||
+    "ORDER BY documents.created_at DESC, documents.id DESC";
 
   const rows = db
     .prepare(`
       ${getDocumentBaseQuery()}
-      ORDER BY documents.created_at DESC, documents.id DESC
+      ${whereSql}
+      ${orderSql}
       ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
     `)
-    .all(...(hasLimit ? [limit, safeOffset] : []));
+    .all(...params, ...(hasLimit ? [limit, safeOffset] : []));
 
   const documents = attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
-  const pendingIds = getPendingEmbeddingDocumentIds();
+  const pendingIds = getPendingEmbeddingDocumentIds(
+    hasLimit ? documents.map((document) => document.id) : null
+  );
 
   return documents.map((document) => ({
     ...document,
