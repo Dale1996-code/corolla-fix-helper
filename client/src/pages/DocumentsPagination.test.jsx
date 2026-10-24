@@ -350,19 +350,6 @@ test("favoriting under a favorites-only filter refreshes the page and keeps the 
   await waitFor(() => expect(selectedHeading()).toBe("Doc 060"));
   const requestsBefore = fetchMock.api.listRequests.length;
 
-  // The stand-in's PUT is not part of the shared helper, so the test supplies it.
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((url, init = {}) => {
-      if (url === "/api/documents/60" && init.method === "PUT") {
-        const index = fetchMock.api.library.findIndex((document) => document.id === 60);
-        fetchMock.api.library[index] = { ...fetchMock.api.library[index], isFavorite: false };
-        return jsonResponse({ document: fetchMock.api.library[index] });
-      }
-      return fetchMock.api.fetch(url, init);
-    })
-  );
-
   fireEvent.click(screen.getByRole("button", { name: "Unfavorite" }));
 
   // The server was asked again, so the row that no longer matches leaves the
@@ -456,19 +443,7 @@ test("the pager is a labelled navigation with a full-size tap target", async () 
 // document to page one -- and the panel used to switch to whatever row slid
 // into its place, dropping the "Details saved." confirmation with it.
 test("saving the default-selected document keeps it selected after it re-sorts off the page", async () => {
-  const fetchMock = stubApi(buildLibrary(), (url, init, state) => {
-    if (url === "/api/documents/35" && init.method === "PUT") {
-      const index = state.library.findIndex((document) => document.id === 35);
-      state.library[index] = {
-        ...state.library[index],
-        ...JSON.parse(init.body),
-        tags: [],
-        updatedAt: "2027-01-01T00:00:00.000Z",
-      };
-      return jsonResponse({ document: state.library[index] });
-    }
-    return undefined;
-  });
+  const fetchMock = stubApi();
 
   await renderPage("/documents?page=2");
   await screen.findByText("Showing 26–50 of 60 documents.");
@@ -492,27 +467,72 @@ test("saving the default-selected document keeps it selected after it re-sorts o
   expect(selectedHeading()).toBe("Doc 035");
 });
 
-test("toggling favorite on another row does not move the selection", async () => {
-  stubApi(buildLibrary(), (url, init, state) => {
-    const target = url.match(/^\/api\/documents\/(\d+)$/);
-    if (target && init.method === "PUT") {
-      const index = state.library.findIndex((document) => document.id === Number(target[1]));
-      state.library[index] = { ...state.library[index], ...JSON.parse(init.body) };
-      return jsonResponse({ document: state.library[index] });
-    }
-    return undefined;
-  });
+// Real-library regression: a favorite bumps `updated_at`, so the toggled row
+// jumps to the top of "Newest" and becomes the page's first row. With no
+// `documentId` the panel showed "the first row", so it switched to a document
+// the owner never picked. (An earlier version of this test stubbed a PUT that
+// did not bump `updated_at`, so nothing re-sorted and it passed vacuously.)
+test("toggling favorite on another row keeps the displayed document on page one", async () => {
+  const fetchMock = stubApi();
 
   await renderPage();
   expect(selectedHeading()).toBe("Doc 060");
 
   fireEvent.click(screen.getByRole("button", { name: "Favorite: Doc 059" }));
 
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Favorite: Doc 059" })).toHaveTextContent("Yes")
-  );
+  // The re-read puts Doc 059 first -- the reorder that used to move the panel.
+  await waitFor(() => expect(rowTitles()[0]).toBe("Doc 059"));
+  expect(fetchMock.api.writes).toEqual([{ documentId: 59, changes: { isFavorite: true } }]);
   expect(selectedHeading()).toBe("Doc 060");
-  expect(currentUrl()).toBe("/documents");
+  // The document on display is pinned by replace, so the view stays put.
+  await waitFor(() => expect(currentUrl()).toBe("/documents?documentId=60"));
+  expect(selectedHeading()).toBe("Doc 060");
+});
+
+test("toggling favorite on another row keeps the displayed document on a later page", async () => {
+  stubApi();
+
+  await renderPage("/documents?page=2");
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(selectedHeading()).toBe("Doc 035");
+
+  // Doc 030 jumps to page one, so every row from there to its old slot shifts
+  // down one and page two's first row becomes Doc 036.
+  fireEvent.click(screen.getByRole("button", { name: "Favorite: Doc 030" }));
+
+  await waitFor(() => expect(rowTitles()[0]).toBe("Doc 036"));
+  expect(selectedHeading()).toBe("Doc 035");
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=2&documentId=35"));
+});
+
+test("bookmarking the default-selected document keeps it selected after it re-sorts", async () => {
+  stubApi();
+
+  await renderPage("/documents?page=2");
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(selectedHeading()).toBe("Doc 035");
+
+  fireEvent.click(screen.getByRole("button", { name: "Bookmark" }));
+
+  await waitFor(() => expect(rowTitles()).not.toContain("Doc 035"));
+  expect(selectedHeading()).toBe("Doc 035");
+  expect(screen.getByRole("button", { name: "Remove bookmark" })).toBeInTheDocument();
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=2&documentId=35"));
+});
+
+test("re-running extraction on the default-selected document keeps it selected", async () => {
+  stubApi();
+
+  await renderPage("/documents?page=2");
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(selectedHeading()).toBe("Doc 035");
+
+  fireEvent.click(screen.getByRole("button", { name: "Re-run extraction" }));
+
+  await waitFor(() => expect(rowTitles()).not.toContain("Doc 035"));
+  expect(selectedHeading()).toBe("Doc 035");
+  expect(await screen.findByText(/Extraction re-run complete/)).toBeInTheDocument();
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=2&documentId=35"));
 });
 
 function BackButton() {

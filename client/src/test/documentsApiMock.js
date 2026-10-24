@@ -14,6 +14,42 @@ function touchedAt(document) {
   return Number.isNaN(time) ? 0 : time;
 }
 
+// The real server stamps `updated_at` on every write -- details, favorite,
+// bookmark, re-extraction -- so the written document re-sorts to the top of
+// "Newest". A stand-in that only merged the request body would leave the order
+// untouched and let a test pass that the real page fails. Each write here is
+// stamped one second after the newest stamp in the library, so it always sorts
+// first, exactly as a fresh write does against older data.
+function nextWriteStamp(library) {
+  const newest = Math.max(0, ...library.map(touchedAt));
+  return new Date(newest + 1000).toISOString();
+}
+
+function applyWrite(state, documentId, changes) {
+  const index = state.library.findIndex((document) => document.id === documentId);
+
+  if (index === -1) {
+    return jsonResponse({ error: "Document not found." }, { ok: false, status: 404 });
+  }
+
+  const merged = { ...state.library[index], ...changes };
+
+  // The edit form sends tags as one comma-separated string; the API answers
+  // with the parsed list.
+  if (typeof merged.tags === "string") {
+    merged.tags = merged.tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  merged.updatedAt = nextWriteStamp(state.library);
+  state.library[index] = merged;
+  state.writes.push({ documentId, changes });
+
+  return jsonResponse({ document: merged });
+}
+
 function applyListRequest(library, params) {
   const system = params.get("system");
   const documentType = params.get("documentType");
@@ -61,9 +97,10 @@ function applyListRequest(library, params) {
  * @param {object[]} initialLibrary the synthetic library
  * @param {object} [hooks]
  * @param {(url: string, init: object) => (Promise<object>|undefined)} [hooks.extra]
- *   called first for requests this stand-in does not own (settings, PUT, ...);
- *   return a response to handle it, or undefined to fall through
- * @returns {{ fetch: Function, library: object[], listRequests: URLSearchParams[], lookups: string[] }}
+ *   called first for every request, so a test can override or fail any of them
+ *   (upload, delete, a slow page); return a response to handle it, or undefined
+ *   to fall through to the stand-in
+ * @returns {{ fetch: Function, library: object[], listRequests: URLSearchParams[], lookups: string[], writes: object[] }}
  */
 export function createDocumentsApi(initialLibrary, { extra } = {}) {
   const state = {
@@ -72,6 +109,8 @@ export function createDocumentsApi(initialLibrary, { extra } = {}) {
     listRequests: [],
     // Every by-id lookup, as the path requested.
     lookups: [],
+    // Every PUT or re-extraction the stand-in applied, in order.
+    writes: [],
     filterOptionRequests: 0,
   };
 
@@ -102,6 +141,16 @@ export function createDocumentsApi(initialLibrary, { extra } = {}) {
     }
 
     const byId = path.match(/^\/api\/documents\/(\d+)$/);
+
+    if (method === "PUT" && byId) {
+      return applyWrite(state, Number(byId[1]), JSON.parse(init.body || "{}"));
+    }
+
+    const extract = path.match(/^\/api\/documents\/(\d+)\/extract$/);
+
+    if (method === "POST" && extract) {
+      return applyWrite(state, Number(extract[1]), { extractionStatus: "completed" });
+    }
 
     if (method === "GET" && byId) {
       state.lookups.push(path);

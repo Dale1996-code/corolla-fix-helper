@@ -968,28 +968,35 @@ export function DocumentsPage() {
   // that follows lets the server decide whether the document still belongs on
   // this page (a filter, a sort by last update).
   //
-  // Every write bumps `updated_at`, so under "Newest" the reload can carry the
-  // selected document off this page. When the selection was only implicit (the
-  // page's first row), it is pinned into the URL first -- by replace, since the
-  // view does not change -- and kept as the by-id copy, so the panel stays on
-  // the document the owner just changed instead of whatever row slides up.
+  // Every write bumps `updated_at`, so under "Newest" the reload reorders the
+  // page: the written row jumps to the top, and every row between there and its
+  // old slot shifts down one. When the selection is only implicit (the page's
+  // first row), that reorder would hand the panel to a different document --
+  // whether the write was to the document on display or to another row's
+  // favorite. So the document ON DISPLAY is pinned into the URL first -- by
+  // replace, since the view does not change -- and kept as the by-id copy, so
+  // the panel stays where the owner was looking.
   function applyUpdatedDocument(updatedDocument) {
-    const isSelected = updatedDocument.id === selectedDocumentId;
+    const displayedDocument = selectedDocument;
+    const isDisplayed = updatedDocument.id === displayedDocument?.id;
+    const pinDisplayed = Boolean(displayedDocument) && !requestedDocumentId;
 
     setDocuments((currentDocuments) =>
       currentDocuments.map((document) =>
         document.id === updatedDocument.id ? updatedDocument : document
       )
     );
-    setFetchedDocument((currentDocument) =>
-      isSelected || currentDocument?.id === updatedDocument.id
-        ? updatedDocument
-        : currentDocument
-    );
+    setFetchedDocument((currentDocument) => {
+      if (isDisplayed || currentDocument?.id === updatedDocument.id) {
+        return updatedDocument;
+      }
 
-    if (isSelected && !requestedDocumentId) {
-      setPinnedDocumentId(updatedDocument.id);
-      updateViewParams({ documentId: updatedDocument.id }, { replace: true });
+      return pinDisplayed ? displayedDocument : currentDocument;
+    });
+
+    if (pinDisplayed) {
+      setPinnedDocumentId(displayedDocument.id);
+      updateViewParams({ documentId: displayedDocument.id }, { replace: true });
     }
   }
 
