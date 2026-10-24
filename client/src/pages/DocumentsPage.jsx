@@ -598,6 +598,11 @@ export function DocumentsPage() {
   // favorites-only filter).
   const [fetchedDocument, setFetchedDocument] = useState(null);
   const [lookupFailedId, setLookupFailedId] = useState(null);
+  // A selection that was only implicit (the page's first row) and has just been
+  // pinned to the URL after a save. React Router commits that navigation as a
+  // transition, so the re-read page can render first; this holds the selection
+  // on the saved document until the URL catches up.
+  const [pinnedDocumentId, setPinnedDocumentId] = useState(null);
 
   const [uploadForm, setUploadForm] = useState(emptyUploadForm);
   const [uploading, setUploading] = useState(false);
@@ -628,6 +633,7 @@ export function DocumentsPage() {
   } = readFilterValues(searchParams, DOCUMENT_FILTERS);
   const requestedPage = readPageParam(searchParams);
   const requestedDocumentId = readIdParam(searchParams, "documentId");
+  const selectionId = requestedDocumentId ?? pinnedDocumentId;
 
   const [editingDocumentId, setEditingDocumentId] = useState(null);
   const [editForm, setEditForm] = useState(emptyEditForm);
@@ -727,19 +733,17 @@ export function DocumentsPage() {
   // parameter, so an untouched library keeps a clean `/documents` URL. A
   // `documentId` whose row is not on this page is fetched on its own below, so
   // a deep link opens its record under any filter or page.
-  const rowDocument = requestedDocumentId
-    ? documents.find((document) => document.id === requestedDocumentId)
+  const rowDocument = selectionId
+    ? documents.find((document) => document.id === selectionId)
     : null;
   const fetchedMatch =
-    requestedDocumentId && fetchedDocument?.id === requestedDocumentId
-      ? fetchedDocument
-      : null;
-  const selectedDocument = requestedDocumentId
+    selectionId && fetchedDocument?.id === selectionId ? fetchedDocument : null;
+  const selectedDocument = selectionId
     ? rowDocument ||
       fetchedMatch ||
       // Still resolving: show nothing rather than the wrong record. If the
       // lookup itself failed, fall back to the page's first row.
-      (lookupFailedId === requestedDocumentId ? documents[0] || null : null)
+      (lookupFailedId === selectionId ? documents[0] || null : null)
     : documents[0] || null;
   const selectedDocumentId = selectedDocument?.id ?? null;
 
@@ -797,11 +801,11 @@ export function DocumentsPage() {
   const requestedRowIsOnPage = Boolean(rowDocument);
   useEffect(() => {
     if (
-      !requestedDocumentId ||
+      !selectionId ||
       !dataIsCurrent ||
       requestedRowIsOnPage ||
-      fetchedDocument?.id === requestedDocumentId ||
-      lookupFailedId === requestedDocumentId
+      fetchedDocument?.id === selectionId ||
+      lookupFailedId === selectionId
     ) {
       return undefined;
     }
@@ -810,7 +814,7 @@ export function DocumentsPage() {
 
     async function lookUpDocument() {
       try {
-        const response = await fetch(`/api/documents/${requestedDocumentId}`);
+        const response = await fetch(`/api/documents/${selectionId}`);
         const payload = await response.json().catch(() => ({}));
 
         if (cancelled) {
@@ -819,6 +823,7 @@ export function DocumentsPage() {
 
         if (response.status === 404) {
           setFetchedDocument(null);
+          setPinnedDocumentId(null);
           updateViewParams({ documentId: null }, { replace: true });
           return;
         }
@@ -830,7 +835,7 @@ export function DocumentsPage() {
         setFetchedDocument(payload.document);
       } catch {
         if (!cancelled) {
-          setLookupFailedId(requestedDocumentId);
+          setLookupFailedId(selectionId);
         }
       }
     }
@@ -841,13 +846,25 @@ export function DocumentsPage() {
       cancelled = true;
     };
   }, [
-    requestedDocumentId,
+    selectionId,
     dataIsCurrent,
     requestedRowIsOnPage,
     fetchedDocument,
     lookupFailedId,
     updateViewParams,
   ]);
+
+  // A failed lookup is remembered only for the visit it failed on: coming back
+  // to that `documentId` later asks the server again.
+  useEffect(() => {
+    setLookupFailedId(null);
+  }, [selectionId]);
+
+  // The pin's job is done once the URL names a document itself, and it never
+  // outlives the view it was made in.
+  useEffect(() => {
+    setPinnedDocumentId(null);
+  }, [requestedDocumentId, listQuery]);
 
   // An edit form belongs to the document it was opened on. Moving the selection
   // any other way than the list's own click (Back, a deep link) closes it
@@ -950,15 +967,30 @@ export function DocumentsPage() {
   // A saved edit reaches the rows and the by-id copy immediately; the reload
   // that follows lets the server decide whether the document still belongs on
   // this page (a filter, a sort by last update).
+  //
+  // Every write bumps `updated_at`, so under "Newest" the reload can carry the
+  // selected document off this page. When the selection was only implicit (the
+  // page's first row), it is pinned into the URL first -- by replace, since the
+  // view does not change -- and kept as the by-id copy, so the panel stays on
+  // the document the owner just changed instead of whatever row slides up.
   function applyUpdatedDocument(updatedDocument) {
+    const isSelected = updatedDocument.id === selectedDocumentId;
+
     setDocuments((currentDocuments) =>
       currentDocuments.map((document) =>
         document.id === updatedDocument.id ? updatedDocument : document
       )
     );
     setFetchedDocument((currentDocument) =>
-      currentDocument?.id === updatedDocument.id ? updatedDocument : currentDocument
+      isSelected || currentDocument?.id === updatedDocument.id
+        ? updatedDocument
+        : currentDocument
     );
+
+    if (isSelected && !requestedDocumentId) {
+      setPinnedDocumentId(updatedDocument.id);
+      updateViewParams({ documentId: updatedDocument.id }, { replace: true });
+    }
   }
 
   async function loadDocumentDefaults() {
@@ -1308,6 +1340,7 @@ export function DocumentsPage() {
 
       setEditingDocumentId(null);
       setFetchedDocument(null);
+      setPinnedDocumentId(null);
 
       if (requestedDocumentId === document.id) {
         updateViewParams({ documentId: null }, { replace: true });

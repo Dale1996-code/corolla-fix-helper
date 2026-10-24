@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { DocumentsPage } from "./DocumentsPage";
 import { createDocumentsApi, jsonResponse } from "../test/documentsApiMock";
@@ -449,4 +449,113 @@ test("the pager is a labelled navigation with a full-size tap target", async () 
   expect(previous.className).toContain("min-h-11");
   expect(next.className).toContain("min-h-11");
   expect(within(pager).getByText("Page", { exact: false }).textContent).toContain("Page 1 of 3");
+});
+
+// Review fix: with no `documentId` in the URL the detail panel shows the page's
+// first row. Saving bumps `updated_at`, so under "Newest" the re-read moves the
+// document to page one -- and the panel used to switch to whatever row slid
+// into its place, dropping the "Details saved." confirmation with it.
+test("saving the default-selected document keeps it selected after it re-sorts off the page", async () => {
+  const fetchMock = stubApi(buildLibrary(), (url, init, state) => {
+    if (url === "/api/documents/35" && init.method === "PUT") {
+      const index = state.library.findIndex((document) => document.id === 35);
+      state.library[index] = {
+        ...state.library[index],
+        ...JSON.parse(init.body),
+        tags: [],
+        updatedAt: "2027-01-01T00:00:00.000Z",
+      };
+      return jsonResponse({ document: state.library[index] });
+    }
+    return undefined;
+  });
+
+  await renderPage("/documents?page=2");
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(selectedHeading()).toBe("Doc 035");
+  const requestsBefore = fetchMock.api.listRequests.length;
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+
+  // The page was re-read and Doc 035 is now the newest document, on page one.
+  await waitFor(() => expect(fetchMock.api.listRequests.length).toBeGreaterThan(requestsBefore));
+  await waitFor(() => expect(rowTitles()).not.toContain("Doc 035"));
+
+  // The panel stays on the document that was saved, and says so.
+  expect(selectedHeading()).toBe("Doc 035");
+  expect(screen.getByText("Details saved.")).toBeInTheDocument();
+  // The selection is pinned in the URL by replace, not left implicit. The router
+  // commits that as a transition, so it can land after the re-read -- which is
+  // exactly why the panel above must not depend on it having landed.
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=2&documentId=35"));
+  expect(selectedHeading()).toBe("Doc 035");
+});
+
+test("toggling favorite on another row does not move the selection", async () => {
+  stubApi(buildLibrary(), (url, init, state) => {
+    const target = url.match(/^\/api\/documents\/(\d+)$/);
+    if (target && init.method === "PUT") {
+      const index = state.library.findIndex((document) => document.id === Number(target[1]));
+      state.library[index] = { ...state.library[index], ...JSON.parse(init.body) };
+      return jsonResponse({ document: state.library[index] });
+    }
+    return undefined;
+  });
+
+  await renderPage();
+  expect(selectedHeading()).toBe("Doc 060");
+
+  fireEvent.click(screen.getByRole("button", { name: "Favorite: Doc 059" }));
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Favorite: Doc 059" })).toHaveTextContent("Yes")
+  );
+  expect(selectedHeading()).toBe("Doc 060");
+  expect(currentUrl()).toBe("/documents");
+});
+
+function BackButton() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      history back
+    </button>
+  );
+}
+
+// Review fix: one failed by-id lookup used to be remembered forever, so every
+// later visit to that `documentId` showed the page's first row without asking
+// the server again.
+test("a failed lookup is retried when the owner comes back to that document", async () => {
+  let failNext = true;
+  const fetchMock = stubApi(buildLibrary(), (url) => {
+    if (url === "/api/documents/3" && failNext) {
+      failNext = false;
+      return jsonResponse({ error: "Database is busy." }, { ok: false, status: 500 });
+    }
+    return undefined;
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/documents?documentId=3"]}>
+      <DocumentsPage />
+      <LocationProbe />
+      <BackButton />
+    </MemoryRouter>
+  );
+  await screen.findByText("Library controls");
+
+  // The failure is not a 404, so the URL keeps naming Doc 003 and the panel
+  // falls back to the first row rather than staying blank.
+  await waitFor(() => expect(selectedHeading()).toBe("Doc 060"));
+  expect(currentUrl()).toBe("/documents?documentId=3");
+
+  fireEvent.click(screen.getByRole("button", { name: "Select document: Doc 058" }));
+  await waitFor(() => expect(selectedHeading()).toBe("Doc 058"));
+
+  fireEvent.click(screen.getByRole("button", { name: "history back" }));
+  await waitFor(() => expect(currentUrl()).toBe("/documents?documentId=3"));
+  await waitFor(() => expect(selectedHeading()).toBe("Doc 003"));
+  expect(fetchMock.api.lookups.filter((path) => path === "/api/documents/3")).toHaveLength(1);
 });
