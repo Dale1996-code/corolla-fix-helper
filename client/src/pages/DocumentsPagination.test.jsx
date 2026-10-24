@@ -325,10 +325,144 @@ test("a failure on a later page keeps the controls and the rows already on scree
 
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-  expect(await screen.findByText("Database is busy.")).toBeInTheDocument();
+  expect(await screen.findByText(/Database is busy\./)).toBeInTheDocument();
   // The owner can still change the filter to recover.
   expect(screen.getByRole("combobox", { name: "System" })).toBeInTheDocument();
   expect(rowButtons()).toHaveLength(25);
+});
+
+// Hold list responses for the given offsets until the test releases them.
+function gateOffsets(offsets) {
+  const gates = new Map(
+    offsets.map((offset) => {
+      let release;
+      const promise = new Promise((resolve) => {
+        release = resolve;
+      });
+      return [String(offset), { promise, release }];
+    })
+  );
+
+  // Each gate holds only the first request for its offset; a repeat (and the
+  // stand-in's own re-entry below) passes straight through.
+  const used = new Set();
+
+  return {
+    release: (offset) => gates.get(String(offset)).release(),
+    hook: (url, init, state) => {
+      if (!url.startsWith("/api/documents?")) return undefined;
+      const offset = new URLSearchParams(url.split("?")[1]).get("offset");
+      const gate = gates.get(offset);
+      if (!gate || used.has(offset)) return undefined;
+      used.add(offset);
+      // Answer from the stand-in, but only once released.
+      return gate.promise.then(() => state.fetch(url, init));
+    },
+  };
+}
+
+function pagerLabel() {
+  const pager = screen.getByRole("navigation", { name: "Documents pages" });
+  return within(pager).getByText("Page", { exact: false }).textContent;
+}
+
+// Real-library regression: the counter and pager followed the URL the moment
+// Next was pressed, while the rows were still the previous page's -- and after a
+// failed load they stayed that way, "Showing 26-50" over rows 1-25.
+test("while a later page loads, the counter and pager still describe the rows on screen", async () => {
+  const gate = gateOffsets([25]);
+  stubApi(buildLibrary(), gate.hook);
+  await renderPage();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=2"));
+
+  expect(rowTitles()[0]).toBe("Doc 060");
+  expect(screen.getByText("Showing 1–25 of 60 documents.")).toBeInTheDocument();
+  expect(pagerLabel()).toContain("Page 1 of 3");
+  expect(screen.getByText("Loading page 2...")).toBeInTheDocument();
+
+  gate.release(25);
+
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(rowTitles()[0]).toBe("Doc 035");
+  expect(pagerLabel()).toContain("Page 2 of 3");
+  expect(screen.queryByText("Loading page 2...")).not.toBeInTheDocument();
+});
+
+test("a later page that fails keeps describing the rows shown and can be retried", async () => {
+  let failNext = true;
+  stubApi(buildLibrary(), (url) => {
+    if (url.includes("offset=25") && failNext) {
+      failNext = false;
+      return jsonResponse({ error: "Database is busy." }, { ok: false, status: 500 });
+    }
+    return undefined;
+  });
+  await renderPage();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Database is busy.");
+  // The rows are still page one's, and everything on screen says so.
+  expect(rowTitles()[0]).toBe("Doc 060");
+  expect(screen.getByText("Showing 1–25 of 60 documents.")).toBeInTheDocument();
+  expect(pagerLabel()).toContain("Page 1 of 3");
+
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(rowTitles()[0]).toBe("Doc 035");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(currentUrl()).toBe("/documents?page=2");
+});
+
+test("Next after a failed page asks for that page again rather than skipping past it", async () => {
+  let failNext = true;
+  const fetchMock = stubApi(buildLibrary(), (url) => {
+    if (url.includes("offset=25") && failNext) {
+      failNext = false;
+      return jsonResponse({ error: "Database is busy." }, { ok: false, status: 500 });
+    }
+    return undefined;
+  });
+  await renderPage();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByRole("alert");
+
+  // The owner sees page one, so Next means page two -- not page three.
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+  await screen.findByText("Showing 26–50 of 60 documents.");
+  expect(currentUrl()).toBe("/documents?page=2");
+  expect(fetchMock.api.listRequests.some((request) => request.get("offset") === "50")).toBe(false);
+});
+
+test("a page past the end is never shown as an empty list", async () => {
+  // 60 documents make three pages; page 9 asks for offset 200.
+  const gate = gateOffsets([200, 50]);
+  stubApi(buildLibrary(), gate.hook);
+
+  render(
+    <MemoryRouter initialEntries={["/documents?page=9"]}>
+      <DocumentsPage />
+      <LocationProbe />
+    </MemoryRouter>
+  );
+
+  gate.release(200);
+  // The empty answer for page 9 moves the URL to the last real page...
+  await waitFor(() => expect(currentUrl()).toBe("/documents?page=3"));
+  // ...without ever rendering that empty answer as the library.
+  expect(screen.getByText("Loading documents...")).toBeInTheDocument();
+  expect(rowButtons()).toHaveLength(0);
+  expect(screen.queryByText(/No documents/)).not.toBeInTheDocument();
+
+  gate.release(50);
+  await screen.findByText("Showing 51–60 of 60 documents.");
+  expect(rowTitles()[0]).toBe("Doc 010");
 });
 
 test("a deep link to a document outside the page and outside the filter still opens it", async () => {

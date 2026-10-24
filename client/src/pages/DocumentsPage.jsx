@@ -604,6 +604,10 @@ export function DocumentsPage() {
   // view" (clamping the page, resolving the selection) waits until it equals
   // the current request, so a stale page can never be mistaken for the new one.
   const [settledQuery, setSettledQuery] = useState(null);
+  // The page number the rows on screen belong to. The counter and the pager
+  // describe THESE rows, not the page the URL asks for: while a new page loads,
+  // or after it failed to, the URL is ahead of what is actually shown.
+  const [settledPage, setSettledPage] = useState(DEFAULT_PAGE);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -711,7 +715,10 @@ export function DocumentsPage() {
   const dataIsCurrent = settledQuery === listQuery;
 
   const totalPages = countDocumentPages(matchedCount);
-  const currentPage = Math.min(requestedPage, totalPages);
+  // The page on screen. `matchedCount` and `documents` come from the same
+  // settled response, so the counter, the pager, and the rows always agree.
+  const currentPage = Math.min(settledPage, totalPages);
+  const loadingAnotherPage = isFetching && !dataIsCurrent && requestedPage !== currentPage;
 
   // Whether the library on screen is narrower than the library itself. Drives
   // both the counter's second sentence and which empty state the list shows --
@@ -784,6 +791,29 @@ export function DocumentsPage() {
     },
     [setSearchParams]
   );
+  // React Router recreates `setSearchParams` whenever the query string changes,
+  // so `updateViewParams` does too. The list fetch must not re-run on every
+  // selection click, so it reaches the latest writer through a ref instead of
+  // listing it as a dependency.
+  const updateViewParamsRef = useRef(updateViewParams);
+  useEffect(() => {
+    updateViewParamsRef.current = updateViewParams;
+  }, [updateViewParams]);
+
+  // Previous/Next act on the page the owner can see. When that lands on the
+  // page the URL already asks for -- its load is in flight or just failed --
+  // ask the server again (unless it is already being asked) rather than
+  // navigating nowhere or skipping past it.
+  function goToPage(targetPage) {
+    if (targetPage === requestedPage) {
+      if (!isFetching) {
+        reloadList();
+      }
+      return;
+    }
+
+    updateViewParams({ page: pageParamValue(targetPage) });
+  }
 
   // Changing a filter is a navigation step the owner should be able to undo, so
   // it pushes -- and it drops `page`, because page 4 of the old filter says
@@ -921,6 +951,8 @@ export function DocumentsPage() {
 
     async function loadDocuments() {
       setIsFetching(true);
+      // Set when this answer hands over to another request instead of settling.
+      let handedOff = false;
 
       try {
         const response = await fetch(`/api/documents?${listQuery}`);
@@ -939,8 +971,24 @@ export function DocumentsPage() {
         const nextMatched = Number.isFinite(payload.matched)
           ? payload.matched
           : nextDocuments.length;
+        const offset = Number(new URLSearchParams(listQuery).get("offset")) || 0;
+
+        // A page past the end (a hand-typed `page=9`, or the last page after
+        // its only row was deleted) answers with no rows while documents do
+        // match. That empty answer is never shown as the library: the URL moves
+        // to the last real page -- by replace, it is normalization -- and that
+        // request's answer is the one that settles.
+        if (!nextDocuments.length && nextMatched > 0 && offset >= nextMatched) {
+          handedOff = true;
+          updateViewParamsRef.current(
+            { page: pageParamValue(countDocumentPages(nextMatched)) },
+            { replace: true }
+          );
+          return;
+        }
 
         setDocuments(nextDocuments);
+        setSettledPage(Math.floor(offset / DOCUMENTS_PER_PAGE) + 1);
         setMatchedCount(nextMatched);
         setLibraryTotal(Number.isFinite(payload.total) ? payload.total : nextMatched);
         setSettledQuery(listQuery);
@@ -951,7 +999,7 @@ export function DocumentsPage() {
           setLoadError(error.message || "Could not load documents.");
         }
       } finally {
-        if (requestId === latestListRequest.current) {
+        if (requestId === latestListRequest.current && !handedOff) {
           setIsFetching(false);
         }
       }
@@ -1478,6 +1526,14 @@ export function DocumentsPage() {
           {loadError ? (
             <ErrorBanner title="Could not load documents." className="shadow-sm">
               {loadError}
+              {hasLoaded ? " The documents below are the last ones that loaded." : null}
+              <button
+                type="button"
+                className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+                onClick={() => reloadList()}
+              >
+                Try again
+              </button>
             </ErrorBanner>
           ) : null}
 
@@ -1513,7 +1569,9 @@ export function DocumentsPage() {
                 <span role="status">
                   {documentRangeSummary}
                   {isFetching ? (
-                    <span className="ml-2 text-xs text-slate-500">Updating...</span>
+                    <span className="ml-2 text-xs text-slate-500">
+                      {loadingAnotherPage ? `Loading page ${requestedPage}...` : "Updating..."}
+                    </span>
                   ) : null}
                 </span>
 
@@ -1525,9 +1583,7 @@ export function DocumentsPage() {
                     <button
                       type="button"
                       className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() =>
-                        updateViewParams({ page: pageParamValue(Math.max(1, currentPage - 1)) })
-                      }
+                      onClick={() => goToPage(Math.max(1, currentPage - 1))}
                       disabled={currentPage <= 1}
                     >
                       Previous
@@ -1539,11 +1595,7 @@ export function DocumentsPage() {
                     <button
                       type="button"
                       className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() =>
-                        updateViewParams({
-                          page: pageParamValue(Math.min(totalPages, currentPage + 1)),
-                        })
-                      }
+                      onClick={() => goToPage(Math.min(totalPages, currentPage + 1))}
                       disabled={currentPage >= totalPages}
                     >
                       Next
