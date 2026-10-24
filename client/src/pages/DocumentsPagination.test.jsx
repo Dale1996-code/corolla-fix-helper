@@ -544,9 +544,54 @@ function BackButton() {
   );
 }
 
+// Real-library regression: a by-id lookup that failed for a reason other than
+// 404 used to fall back to the page's first row, so a link to Doc 003 silently
+// showed Doc 060 as though it were the requested record.
+test("a failed lookup names the requested document, shows no other one, and can be retried", async () => {
+  let failNext = true;
+  const fetchMock = stubApi(buildLibrary(), (url) => {
+    if (url === "/api/documents/3" && failNext) {
+      failNext = false;
+      return jsonResponse({ error: "Database is busy." }, { ok: false, status: 500 });
+    }
+    return undefined;
+  });
+
+  await renderPage("/documents?documentId=3");
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Could not load document #3.");
+  expect(alert).toHaveTextContent("Database is busy.");
+  // No other document stands in for it, and no row claims to be selected.
+  expect(screen.queryByRole("heading", { level: 2, name: /^Doc \d{3}$/ })).not.toBeInTheDocument();
+  expect(screen.queryByText("Select a document to view details.")).not.toBeInTheDocument();
+  // Not a 404, so the link keeps naming the document the owner asked for.
+  expect(currentUrl()).toBe("/documents?documentId=3");
+
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+  await waitFor(() => expect(selectedHeading()).toBe("Doc 003"));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  // Asked twice: the failure, then the retry. (The failing answer comes from the
+  // test's own hook, which the stand-in's `lookups` log never sees.)
+  expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents/3")).toHaveLength(2);
+  expect(currentUrl()).toBe("/documents?documentId=3");
+});
+
+test("a lookup that cannot reach the server is reported the same way", async () => {
+  stubApi(buildLibrary(), (url) =>
+    url === "/api/documents/3" ? Promise.reject(new TypeError("Failed to fetch")) : undefined
+  );
+
+  await renderPage("/documents?documentId=3");
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not load document #3.");
+  expect(screen.queryByRole("heading", { level: 2, name: /^Doc \d{3}$/ })).not.toBeInTheDocument();
+  expect(currentUrl()).toBe("/documents?documentId=3");
+});
+
 // Review fix: one failed by-id lookup used to be remembered forever, so every
-// later visit to that `documentId` showed the page's first row without asking
-// the server again.
+// later visit to that `documentId` never asked the server again.
 test("a failed lookup is retried when the owner comes back to that document", async () => {
   let failNext = true;
   const fetchMock = stubApi(buildLibrary(), (url) => {
@@ -567,8 +612,8 @@ test("a failed lookup is retried when the owner comes back to that document", as
   await screen.findByText("Library controls");
 
   // The failure is not a 404, so the URL keeps naming Doc 003 and the panel
-  // falls back to the first row rather than staying blank.
-  await waitFor(() => expect(selectedHeading()).toBe("Doc 060"));
+  // says the lookup failed instead of showing some other document.
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not load document #3.");
   expect(currentUrl()).toBe("/documents?documentId=3");
 
   fireEvent.click(screen.getByRole("button", { name: "Select document: Doc 058" }));

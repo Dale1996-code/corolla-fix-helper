@@ -568,6 +568,27 @@ function DocumentDetails({
   );
 }
 
+// The detail panel when the document a link names could not be loaded for a
+// reason other than "it does not exist" (a 404 drops the link instead). It
+// names the requested document so nothing else is mistaken for it, and the
+// link is kept so the owner can simply try again.
+function DocumentLookupError({ documentId, message, onRetry }) {
+  return (
+    <section className="rounded-lg border border-slate-300 bg-white p-6 shadow-sm">
+      <ErrorBanner title={`Could not load document #${documentId}.`}>
+        {message} The link to it is kept, so you can try again.
+        <button
+          type="button"
+          className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+          onClick={onRetry}
+        >
+          Try again
+        </button>
+      </ErrorBanner>
+    </section>
+  );
+}
+
 export function DocumentsPage() {
   useScrollToHash();
 
@@ -597,7 +618,10 @@ export function DocumentsPage() {
   // an upload that a filter hides, a favorite just unfavorited under a
   // favorites-only filter).
   const [fetchedDocument, setFetchedDocument] = useState(null);
-  const [lookupFailedId, setLookupFailedId] = useState(null);
+  // A by-id lookup that failed for a reason other than "no such document":
+  // `{ documentId, message }`. The panel reports it instead of showing anything
+  // else in the requested document's place.
+  const [lookupFailure, setLookupFailure] = useState(null);
   // A selection that was only implicit (the page's first row) and has just been
   // pinned to the URL after a save. React Router commits that navigation as a
   // transition, so the re-read page can render first; this holds the selection
@@ -738,14 +762,17 @@ export function DocumentsPage() {
     : null;
   const fetchedMatch =
     selectionId && fetchedDocument?.id === selectionId ? fetchedDocument : null;
+  // A named document is shown only as itself. While its lookup is in flight the
+  // panel is empty, and if the lookup fails the panel says so -- never another
+  // row standing in for it, which would read as the record the link asked for.
   const selectedDocument = selectionId
-    ? rowDocument ||
-      fetchedMatch ||
-      // Still resolving: show nothing rather than the wrong record. If the
-      // lookup itself failed, fall back to the page's first row.
-      (lookupFailedId === selectionId ? documents[0] || null : null)
+    ? rowDocument || fetchedMatch || null
     : documents[0] || null;
   const selectedDocumentId = selectedDocument?.id ?? null;
+  const selectionLookupFailure =
+    selectionId && !selectedDocument && lookupFailure?.documentId === selectionId
+      ? lookupFailure
+      : null;
 
   // One writer for every URL change this page makes, so "carry the parameters
   // I did not mention" is guaranteed rather than remembered at each call site.
@@ -805,7 +832,7 @@ export function DocumentsPage() {
       !dataIsCurrent ||
       requestedRowIsOnPage ||
       fetchedDocument?.id === selectionId ||
-      lookupFailedId === selectionId
+      lookupFailure?.documentId === selectionId
     ) {
       return undefined;
     }
@@ -829,13 +856,21 @@ export function DocumentsPage() {
         }
 
         if (!response.ok || !payload.document) {
-          throw new Error(payload.error || "Could not load the document.");
+          throw new Error(payload.error || "The server could not load it.");
         }
 
         setFetchedDocument(payload.document);
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setLookupFailedId(selectionId);
+          setLookupFailure({
+            documentId: selectionId,
+            // fetch rejects with a TypeError when the request never reached
+            // the server; its own text ("Failed to fetch") means nothing here.
+            message:
+              error instanceof TypeError
+                ? "The server could not be reached."
+                : error.message || "The server could not load it.",
+          });
         }
       }
     }
@@ -850,14 +885,14 @@ export function DocumentsPage() {
     dataIsCurrent,
     requestedRowIsOnPage,
     fetchedDocument,
-    lookupFailedId,
+    lookupFailure,
     updateViewParams,
   ]);
 
   // A failed lookup is remembered only for the visit it failed on: coming back
   // to that `documentId` later asks the server again.
   useEffect(() => {
-    setLookupFailedId(null);
+    setLookupFailure(null);
   }, [selectionId]);
 
   // The pin's job is done once the URL names a document itself, and it never
@@ -1531,25 +1566,34 @@ export function DocumentsPage() {
                   />
                 }
                 detail={
-                  <DocumentDetails
-                    document={selectedDocument}
-                    isEditing={editingDocumentId === selectedDocumentId}
-                    editValues={editForm}
-                    saveState={saveState}
-                    extractionRunState={extractionRunState}
-                    bookmarkUpdateState={bookmarkUpdateState}
-                    onStartEdit={startEditingDocument}
-                    onCancelEdit={cancelEditingDocument}
-                    onEditChange={handleEditFormChange}
-                    onSaveEdit={handleSaveDetails}
-                    onOpenFile={openDocumentFile}
-                    onToggleFavorite={toggleFavorite}
-                    onToggleBookmark={toggleBookmark}
-                    onRerunExtraction={rerunExtraction}
-                    onDeleteDocument={handleDeleteDocument}
-                    systemSuggestions={systemSuggestions}
-                    documentTypeSuggestions={documentTypeSuggestions}
-                  />
+                  selectionLookupFailure ? (
+                    <DocumentLookupError
+                      documentId={selectionLookupFailure.documentId}
+                      message={selectionLookupFailure.message}
+                      // Clearing the failure is what lets the lookup run again.
+                      onRetry={() => setLookupFailure(null)}
+                    />
+                  ) : (
+                    <DocumentDetails
+                      document={selectedDocument}
+                      isEditing={editingDocumentId === selectedDocumentId}
+                      editValues={editForm}
+                      saveState={saveState}
+                      extractionRunState={extractionRunState}
+                      bookmarkUpdateState={bookmarkUpdateState}
+                      onStartEdit={startEditingDocument}
+                      onCancelEdit={cancelEditingDocument}
+                      onEditChange={handleEditFormChange}
+                      onSaveEdit={handleSaveDetails}
+                      onOpenFile={openDocumentFile}
+                      onToggleFavorite={toggleFavorite}
+                      onToggleBookmark={toggleBookmark}
+                      onRerunExtraction={rerunExtraction}
+                      onDeleteDocument={handleDeleteDocument}
+                      systemSuggestions={systemSuggestions}
+                      documentTypeSuggestions={documentTypeSuggestions}
+                    />
+                  )
                 }
               />
             </>
