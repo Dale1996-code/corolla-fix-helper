@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ListDetailLayout } from "../components/ListDetailLayout";
@@ -8,7 +8,12 @@ import {
   TextAreaField,
   TextField,
 } from "../components/forms/FormFields";
-import { formatDate, getSortTimestamp } from "../lib/formatDate";
+import { formatDate } from "../lib/formatDate";
+import {
+  buildDocumentsListQuery,
+  countDocumentPages,
+  DOCUMENTS_PER_PAGE,
+} from "../lib/documentsQuery";
 import { formatCount, formatLibraryTotal, formatResultRange } from "../lib/resultRange";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
 import { useScrollToHash } from "../lib/useScrollToHash";
@@ -75,8 +80,11 @@ const DOCUMENT_FILTERS = {
   tag: { default: "all" },
 };
 
-// Show the documents in fixed-size pages so a large library stays scannable.
-const DOCUMENTS_PER_PAGE = 25;
+const emptyFilterOptions = {
+  systems: [],
+  documentTypes: [],
+  tags: [],
+};
 
 
 function UploadForm({
@@ -565,10 +573,36 @@ export function DocumentsPage() {
 
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  // `documents` is the ONE PAGE the server last sent -- never the library. The
+  // server also owns the counts: `matchedCount` is how many documents the
+  // current filters leave, `libraryTotal` how many exist at all.
   const [documents, setDocuments] = useState([]);
-  const [documentDefaults, setDocumentDefaults] = useState(emptyDocumentDefaults);
-  const [loading, setLoading] = useState(true);
+  const [matchedCount, setMatchedCount] = useState(0);
+  const [libraryTotal, setLibraryTotal] = useState(0);
+  // Which request the rows above answer. Anything that reasons about "this
+  // view" (clamping the page, resolving the selection) waits until it equals
+  // the current request, so a stale page can never be mistaken for the new one.
+  const [settledQuery, setSettledQuery] = useState(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const latestListRequest = useRef(0);
+  // The options the filter dropdowns offer, from the whole library rather than
+  // from the loaded page.
+  const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
+  const [optionsToken, setOptionsToken] = useState(0);
+  const [documentDefaults, setDocumentDefaults] = useState(emptyDocumentDefaults);
+  // The selected document when its row is not on the current page (a deep link,
+  // an upload that a filter hides, a favorite just unfavorited under a
+  // favorites-only filter).
+  const [fetchedDocument, setFetchedDocument] = useState(null);
+  const [lookupFailedId, setLookupFailedId] = useState(null);
+  // A selection that was only implicit (the page's first row) and has just been
+  // pinned to the URL after a save. React Router commits that navigation as a
+  // transition, so the re-read page can render first; this holds the selection
+  // on the saved document until the URL catches up.
+  const [pinnedDocumentId, setPinnedDocumentId] = useState(null);
 
   const [uploadForm, setUploadForm] = useState(emptyUploadForm);
   const [uploading, setUploading] = useState(false);
@@ -599,6 +633,7 @@ export function DocumentsPage() {
   } = readFilterValues(searchParams, DOCUMENT_FILTERS);
   const requestedPage = readPageParam(searchParams);
   const requestedDocumentId = readIdParam(searchParams, "documentId");
+  const selectionId = requestedDocumentId ?? pinnedDocumentId;
 
   const [editingDocumentId, setEditingDocumentId] = useState(null);
   const [editForm, setEditForm] = useState(emptyEditForm);
@@ -623,116 +658,36 @@ export function DocumentsPage() {
     error: "",
   });
 
-  const systems = useMemo(() => {
-    return Array.from(
-      new Set(documents.map((document) => document.system).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b));
-  }, [documents]);
-
-  const documentTypes = useMemo(() => {
-    return Array.from(
-      new Set(documents.map((document) => document.documentType).filter(Boolean))
-    ).sort((a, b) => a.localeCompare(b));
-  }, [documents]);
-
-  const availableTags = useMemo(() => {
-    return Array.from(
-      new Set(documents.flatMap((document) => getDocumentTags(document)))
-    ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [documents]);
-
   const systemSuggestions = useMemo(() => {
     return mergeSuggestionValues([
       ...documentDefaults.commonSystems,
-      ...documents.map((document) => document.system),
+      ...filterOptions.systems,
     ]);
-  }, [documentDefaults.commonSystems, documents]);
+  }, [documentDefaults.commonSystems, filterOptions.systems]);
 
   const documentTypeSuggestions = useMemo(() => {
     return mergeSuggestionValues([
       ...documentDefaults.documentTypes,
-      ...documents.map((document) => document.documentType),
+      ...filterOptions.documentTypes,
     ]);
-  }, [documentDefaults.documentTypes, documents]);
+  }, [documentDefaults.documentTypes, filterOptions.documentTypes]);
 
-  const filteredDocuments = useMemo(() => {
-    const nextDocuments = documents.filter((document) => {
-      if (systemFilter !== "all" && document.system !== systemFilter) {
-        return false;
-      }
+  // Filtering, sorting, and slicing all happen on the server, over the whole
+  // library. The request is a pure function of the view state in the URL, and
+  // that string is the only thing the fetch effect depends on.
+  const listQuery = buildDocumentsListQuery({
+    sort: sortBy,
+    system: systemFilter,
+    documentType: documentTypeFilter,
+    favorite: favoriteFilter,
+    bookmark: bookmarkFilter,
+    tag: tagFilter,
+    page: requestedPage,
+  });
+  const dataIsCurrent = settledQuery === listQuery;
 
-      if (
-        documentTypeFilter !== "all" &&
-        document.documentType !== documentTypeFilter
-      ) {
-        return false;
-      }
-
-      if (favoriteFilter === "favorites_only" && !document.isFavorite) {
-        return false;
-      }
-
-      if (favoriteFilter === "not_favorites" && document.isFavorite) {
-        return false;
-      }
-
-      if (bookmarkFilter === "bookmarked_only" && !document.isBookmarked) {
-        return false;
-      }
-
-      if (bookmarkFilter === "not_bookmarked" && document.isBookmarked) {
-        return false;
-      }
-
-      if (
-        tagFilter !== "all" &&
-        !getDocumentTags(document).some(
-          (tag) => tag.toLowerCase() === tagFilter.toLowerCase()
-        )
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-
-    nextDocuments.sort((firstDocument, secondDocument) => {
-      if (sortBy === "title_asc") {
-        return firstDocument.title.localeCompare(secondDocument.title, undefined, {
-          sensitivity: "base",
-        });
-      }
-
-      const firstTime = getSortTimestamp(firstDocument);
-      const secondTime = getSortTimestamp(secondDocument);
-
-      if (sortBy === "oldest") {
-        return firstTime - secondTime;
-      }
-
-      return secondTime - firstTime;
-    });
-
-    return nextDocuments;
-  }, [
-    documents,
-    sortBy,
-    systemFilter,
-    documentTypeFilter,
-    favoriteFilter,
-    bookmarkFilter,
-    tagFilter,
-  ]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredDocuments.length / DOCUMENTS_PER_PAGE)
-  );
+  const totalPages = countDocumentPages(matchedCount);
   const currentPage = Math.min(requestedPage, totalPages);
-  const pagedDocuments = useMemo(() => {
-    const start = (currentPage - 1) * DOCUMENTS_PER_PAGE;
-    return filteredDocuments.slice(start, start + DOCUMENTS_PER_PAGE);
-  }, [filteredDocuments, currentPage]);
 
   // Whether the library on screen is narrower than the library itself. Drives
   // both the counter's second sentence and which empty state the list shows --
@@ -752,13 +707,13 @@ export function DocumentsPage() {
     // each other, and "nothing here" is never confused with "nothing exists".
     const range = formatResultRange({
       from: firstOnPage,
-      to: firstOnPage + pagedDocuments.length - 1,
-      total: filteredDocuments.length,
+      to: firstOnPage + documents.length - 1,
+      total: matchedCount,
       noun: "document",
       nounPlural: "documents",
-      emptyText: documents.length
+      emptyText: libraryTotal
         ? `No documents match these filters. ${formatLibraryTotal({
-            total: documents.length,
+            total: libraryTotal,
             noun: "document",
             nounPlural: "documents",
           })}`
@@ -767,24 +722,29 @@ export function DocumentsPage() {
 
     // The library total is shown nowhere else on this page, so a narrowed list
     // says what it was narrowed from.
-    return filteredDocuments.length && filteredDocuments.length !== documents.length
-      ? `${range} Filtered from ${formatCount(documents.length)} in your library.`
+    return matchedCount && matchedCount !== libraryTotal
+      ? `${range} Filtered from ${formatCount(libraryTotal)} in your library.`
       : range;
   })();
 
   // The selected document is derived, not stored. No `documentId` in the URL
-  // means "the first document" -- the same default the page always had, but now
-  // spelled as the absence of a parameter, so an untouched library keeps a
-  // clean `/documents` URL. Lookup runs over the whole library rather than the
-  // filtered page, matching the existing behaviour where a filter hides a row
-  // from the list without emptying the detail panel beside it.
-  const selectedDocument = useMemo(() => {
-    const requestedDocument = requestedDocumentId
-      ? documents.find((document) => document.id === requestedDocumentId)
-      : null;
-
-    return requestedDocument || documents[0] || null;
-  }, [documents, requestedDocumentId]);
+  // means "the first document" -- now the first row of the page on screen, since
+  // the rest of the library is not loaded -- spelled as the absence of a
+  // parameter, so an untouched library keeps a clean `/documents` URL. A
+  // `documentId` whose row is not on this page is fetched on its own below, so
+  // a deep link opens its record under any filter or page.
+  const rowDocument = selectionId
+    ? documents.find((document) => document.id === selectionId)
+    : null;
+  const fetchedMatch =
+    selectionId && fetchedDocument?.id === selectionId ? fetchedDocument : null;
+  const selectedDocument = selectionId
+    ? rowDocument ||
+      fetchedMatch ||
+      // Still resolving: show nothing rather than the wrong record. If the
+      // lookup itself failed, fall back to the page's first row.
+      (lookupFailedId === selectionId ? documents[0] || null : null)
+    : documents[0] || null;
   const selectedDocumentId = selectedDocument?.id ?? null;
 
   // One writer for every URL change this page makes, so "carry the parameters
@@ -810,10 +770,10 @@ export function DocumentsPage() {
 
   // Normalization only, so it replaces rather than pushing: a URL that says
   // `page=99` or `page=abc` should not become a history entry the owner has to
-  // press Back through. Waits for the load to settle -- before that every page
-  // looks out of range because the library is still empty.
+  // press Back through. Waits until the rows on screen answer THIS request --
+  // before that, the page count belongs to some other view.
   useEffect(() => {
-    if (loading || loadError) {
+    if (!dataIsCurrent || loadError) {
       return;
     }
 
@@ -822,62 +782,214 @@ export function DocumentsPage() {
     if ((searchParams.get("page") ?? null) !== canonicalPage) {
       updateViewParams({ page: canonicalPage }, { replace: true });
     }
-  }, [loading, loadError, requestedPage, totalPages, searchParams, updateViewParams]);
+  }, [dataIsCurrent, loadError, requestedPage, totalPages, searchParams, updateViewParams]);
 
-  // A `documentId` naming a document that is not there -- deleted, or a
-  // hand-typed id, well-formed or not -- drops out of the URL so the address
-  // stops describing a view that does not exist. Only that parameter is
-  // touched; the filters and page the owner chose stay exactly as they are.
+  // An unusable `documentId` ("abc", "0") names nothing, so it drops out of the
+  // URL. Only that parameter is touched; the filters and page the owner chose
+  // stay exactly as they are.
   useEffect(() => {
-    if (loading || loadError || !searchParams.has("documentId")) {
+    if (!dataIsCurrent || !searchParams.has("documentId") || requestedDocumentId) {
       return;
     }
 
-    const namesALoadedDocument =
-      requestedDocumentId && documents.some((document) => document.id === requestedDocumentId);
+    updateViewParams({ documentId: null }, { replace: true });
+  }, [dataIsCurrent, requestedDocumentId, searchParams, updateViewParams]);
 
-    if (!namesALoadedDocument) {
-      updateViewParams({ documentId: null }, { replace: true });
+  // A well-formed `documentId` whose row is not on this page is looked up by id.
+  // The server's 404 is what says it does not exist -- deleted, or hand-typed --
+  // and only then does the parameter drop out of the URL.
+  const requestedRowIsOnPage = Boolean(rowDocument);
+  useEffect(() => {
+    if (
+      !selectionId ||
+      !dataIsCurrent ||
+      requestedRowIsOnPage ||
+      fetchedDocument?.id === selectionId ||
+      lookupFailedId === selectionId
+    ) {
+      return undefined;
     }
-  }, [loading, loadError, requestedDocumentId, documents, searchParams, updateViewParams]);
 
-  async function loadDocuments() {
-    try {
-      setLoadError("");
-      setLoading(true);
+    let cancelled = false;
 
-      const response = await fetch("/api/documents");
-      const payload = await response.json();
+    async function lookUpDocument() {
+      try {
+        const response = await fetch(`/api/documents/${selectionId}`);
+        const payload = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        throw new Error(payload.error || "Could not load documents.");
-      }
-
-      const nextDocuments = Array.isArray(payload.documents) ? payload.documents : [];
-      setDocuments(nextDocuments);
-
-      if (nextDocuments.length === 0) {
-        setEditingDocumentId(null);
-        return;
-      }
-
-      // Selection needs no repair here: it is derived from the URL and this
-      // list, so a document that vanished simply stops matching and the
-      // normalization effect drops the stale parameter.
-      setEditingDocumentId((currentEditingId) => {
-        if (
-          currentEditingId &&
-          nextDocuments.some((document) => document.id === currentEditingId)
-        ) {
-          return currentEditingId;
+        if (cancelled) {
+          return;
         }
 
-        return null;
-      });
-    } catch (error) {
-      setLoadError(error.message || "Could not load documents.");
-    } finally {
-      setLoading(false);
+        if (response.status === 404) {
+          setFetchedDocument(null);
+          setPinnedDocumentId(null);
+          updateViewParams({ documentId: null }, { replace: true });
+          return;
+        }
+
+        if (!response.ok || !payload.document) {
+          throw new Error(payload.error || "Could not load the document.");
+        }
+
+        setFetchedDocument(payload.document);
+      } catch {
+        if (!cancelled) {
+          setLookupFailedId(selectionId);
+        }
+      }
+    }
+
+    lookUpDocument();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectionId,
+    dataIsCurrent,
+    requestedRowIsOnPage,
+    fetchedDocument,
+    lookupFailedId,
+    updateViewParams,
+  ]);
+
+  // A failed lookup is remembered only for the visit it failed on: coming back
+  // to that `documentId` later asks the server again.
+  useEffect(() => {
+    setLookupFailedId(null);
+  }, [selectionId]);
+
+  // The pin's job is done once the URL names a document itself, and it never
+  // outlives the view it was made in.
+  useEffect(() => {
+    setPinnedDocumentId(null);
+  }, [requestedDocumentId, listQuery]);
+
+  // An edit form belongs to the document it was opened on. Moving the selection
+  // any other way than the list's own click (Back, a deep link) closes it
+  // instead of leaving it armed for when that document comes back.
+  useEffect(() => {
+    setEditingDocumentId((currentEditingId) =>
+      currentEditingId && currentEditingId !== selectedDocumentId ? null : currentEditingId
+    );
+  }, [selectedDocumentId]);
+
+  // One request per view. The fetch depends on the request string alone, so a
+  // filter, sort, or page change is exactly one fetch, a selection change within
+  // the page is none, and Back/Forward re-requests the page it lands on. Rows
+  // from the previous view stay on screen until the new ones arrive, so the
+  // controls the owner is using never unmount mid-interaction.
+  useEffect(() => {
+    const requestId = latestListRequest.current + 1;
+    latestListRequest.current = requestId;
+
+    async function loadDocuments() {
+      setIsFetching(true);
+
+      try {
+        const response = await fetch(`/api/documents?${listQuery}`);
+        const payload = await response.json();
+
+        // A newer view has been asked for since: this answer is stale.
+        if (requestId !== latestListRequest.current) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Could not load documents.");
+        }
+
+        const nextDocuments = Array.isArray(payload.documents) ? payload.documents : [];
+        const nextMatched = Number.isFinite(payload.matched)
+          ? payload.matched
+          : nextDocuments.length;
+
+        setDocuments(nextDocuments);
+        setMatchedCount(nextMatched);
+        setLibraryTotal(Number.isFinite(payload.total) ? payload.total : nextMatched);
+        setSettledQuery(listQuery);
+        setLoadError("");
+        setHasLoaded(true);
+      } catch (error) {
+        if (requestId === latestListRequest.current) {
+          setLoadError(error.message || "Could not load documents.");
+        }
+      } finally {
+        if (requestId === latestListRequest.current) {
+          setIsFetching(false);
+        }
+      }
+    }
+
+    loadDocuments();
+  }, [listQuery, reloadToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilterOptions() {
+      try {
+        const response = await fetch("/api/documents/filter-options");
+        const payload = await response.json();
+
+        if (cancelled || !response.ok) {
+          return;
+        }
+
+        setFilterOptions({
+          systems: Array.isArray(payload.systems) ? payload.systems : [],
+          documentTypes: Array.isArray(payload.documentTypes) ? payload.documentTypes : [],
+          tags: Array.isArray(payload.tags) ? payload.tags : [],
+        });
+      } catch {
+        // The dropdowns just keep what they had; the list does not depend on them.
+      }
+    }
+
+    loadFilterOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [optionsToken]);
+
+  // Re-ask the server for the page on screen after something changed it. The
+  // rows stay put meanwhile, so a favorite toggle does not flash the list away.
+  function reloadList({ options = false } = {}) {
+    setReloadToken((token) => token + 1);
+
+    if (options) {
+      setOptionsToken((token) => token + 1);
+    }
+  }
+
+  // A saved edit reaches the rows and the by-id copy immediately; the reload
+  // that follows lets the server decide whether the document still belongs on
+  // this page (a filter, a sort by last update).
+  //
+  // Every write bumps `updated_at`, so under "Newest" the reload can carry the
+  // selected document off this page. When the selection was only implicit (the
+  // page's first row), it is pinned into the URL first -- by replace, since the
+  // view does not change -- and kept as the by-id copy, so the panel stays on
+  // the document the owner just changed instead of whatever row slides up.
+  function applyUpdatedDocument(updatedDocument) {
+    const isSelected = updatedDocument.id === selectedDocumentId;
+
+    setDocuments((currentDocuments) =>
+      currentDocuments.map((document) =>
+        document.id === updatedDocument.id ? updatedDocument : document
+      )
+    );
+    setFetchedDocument((currentDocument) =>
+      isSelected || currentDocument?.id === updatedDocument.id
+        ? updatedDocument
+        : currentDocument
+    );
+
+    if (isSelected && !requestedDocumentId) {
+      setPinnedDocumentId(updatedDocument.id);
+      updateViewParams({ documentId: updatedDocument.id }, { replace: true });
     }
   }
 
@@ -899,11 +1011,7 @@ export function DocumentsPage() {
     }
   }
 
-  // The library is fetched once. Filters, paging, and selection are all applied
-  // to the loaded list, so moving through them never costs a request -- and
-  // Back/Forward across those views never refetches either.
   useEffect(() => {
-    loadDocuments();
     loadDocumentDefaults();
   }, []);
 
@@ -968,11 +1076,13 @@ export function DocumentsPage() {
       );
       setUploadForm(emptyUploadForm);
 
-      await loadDocuments();
+      reloadList({ options: true });
 
       if (newDocument?.id) {
         // Replace, not push: landing on the document just uploaded is part of
-        // the upload, not a separate step to press Back through.
+        // the upload, not a separate step to press Back through. Whether the
+        // new row is on this page is the server's call; if a filter or sort
+        // hides it, it is still opened by id.
         updateViewParams({ documentId: newDocument.id, page: null }, { replace: true });
       }
     } catch (error) {
@@ -1087,11 +1197,8 @@ export function DocumentsPage() {
 
       const updatedDocument = payload.document;
 
-      setDocuments((currentDocuments) =>
-        currentDocuments.map((document) =>
-          document.id === updatedDocument.id ? updatedDocument : document
-        )
-      );
+      applyUpdatedDocument(updatedDocument);
+      reloadList({ options: true });
 
       setSaveState({
         documentId: updatedDocument.id,
@@ -1135,11 +1242,8 @@ export function DocumentsPage() {
 
       const updatedDocument = payload.document;
 
-      setDocuments((currentDocuments) =>
-        currentDocuments.map((currentDocument) =>
-          currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
-        )
-      );
+      applyUpdatedDocument(updatedDocument);
+      reloadList();
 
       if (editingDocumentId === updatedDocument.id) {
         setEditForm((currentForm) => ({
@@ -1185,11 +1289,8 @@ export function DocumentsPage() {
 
       const updatedDocument = payload.document;
 
-      setDocuments((currentDocuments) =>
-        currentDocuments.map((currentDocument) =>
-          currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
-        )
-      );
+      applyUpdatedDocument(updatedDocument);
+      reloadList();
 
       if (editingDocumentId === updatedDocument.id) {
         setEditForm((currentForm) => ({
@@ -1238,7 +1339,14 @@ export function DocumentsPage() {
       });
 
       setEditingDocumentId(null);
-      await loadDocuments();
+      setFetchedDocument(null);
+      setPinnedDocumentId(null);
+
+      if (requestedDocumentId === document.id) {
+        updateViewParams({ documentId: null }, { replace: true });
+      }
+
+      reloadList({ options: true });
     } catch (error) {
       setSaveState({
         documentId: document.id,
@@ -1275,14 +1383,10 @@ export function DocumentsPage() {
       const extraction = normalizeExtractionStatus(updatedDocument?.extractionStatus);
 
       if (updatedDocument?.id) {
-        setDocuments((currentDocuments) =>
-          currentDocuments.map((currentDocument) =>
-            currentDocument.id === updatedDocument.id ? updatedDocument : currentDocument
-          )
-        );
-      } else {
-        await loadDocuments();
+        applyUpdatedDocument(updatedDocument);
       }
+
+      reloadList();
 
       setExtractionRunState({
         documentId,
@@ -1322,8 +1426,8 @@ export function DocumentsPage() {
           onSubmit={handleUploadSubmit}
         />
 
-        <div id="document-library" className="space-y-6">
-          {loading ? (
+        <div id="document-library" className="space-y-6" aria-busy={isFetching}>
+          {!hasLoaded && !loadError ? (
             <section className="rounded-lg border border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
               Loading documents...
             </section>
@@ -1335,7 +1439,7 @@ export function DocumentsPage() {
             </ErrorBanner>
           ) : null}
 
-          {!loading && !loadError ? (
+          {hasLoaded ? (
             <>
               <ListControls
                 sortBy={sortBy}
@@ -1358,19 +1462,27 @@ export function DocumentsPage() {
                 }
                 tagFilter={tagFilter}
                 onTagFilterChange={(event) => handleFilterChange("tag", event.target.value)}
-                systems={systems}
-                documentTypes={documentTypes}
-                tags={availableTags}
+                systems={filterOptions.systems}
+                documentTypes={filterOptions.documentTypes}
+                tags={filterOptions.tags}
               />
 
-              <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-                <span>{documentRangeSummary}</span>
+              <section className="flex flex-col gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                <span role="status">
+                  {documentRangeSummary}
+                  {isFetching ? (
+                    <span className="ml-2 text-xs text-slate-500">Updating...</span>
+                  ) : null}
+                </span>
 
                 {totalPages > 1 ? (
-                  <span className="flex items-center gap-2">
+                  <nav
+                    aria-label="Documents pages"
+                    className="flex items-center justify-between gap-3 sm:justify-end"
+                  >
                     <button
                       type="button"
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={() =>
                         updateViewParams({ page: pageParamValue(Math.max(1, currentPage - 1)) })
                       }
@@ -1384,7 +1496,7 @@ export function DocumentsPage() {
                     </span>
                     <button
                       type="button"
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="min-h-11 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={() =>
                         updateViewParams({
                           page: pageParamValue(Math.min(totalPages, currentPage + 1)),
@@ -1394,7 +1506,7 @@ export function DocumentsPage() {
                     >
                       Next
                     </button>
-                  </span>
+                  </nav>
                 ) : null}
               </section>
 
@@ -1402,8 +1514,8 @@ export function DocumentsPage() {
                 selectedId={selectedDocumentId}
                 list={
                   <DocumentsList
-                    documents={pagedDocuments}
-                    totalDocuments={documents.length}
+                    documents={documents}
+                    totalDocuments={libraryTotal}
                     hasActiveFilters={hasActiveFilters}
                     selectedDocumentId={selectedDocumentId}
                     onSelectDocument={handleSelectDocument}

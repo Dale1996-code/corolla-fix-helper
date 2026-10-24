@@ -7,8 +7,10 @@ import {
   countDocuments,
   createDocument,
   deleteDocument,
+  DOCUMENT_LIST_SORT_KEYS,
   DuplicateDocumentError,
   getDocument,
+  getDocumentFilterOptions,
   getDocumentFileLocation,
   getDocumentFileRecord,
   getDocumentMetadataRecord,
@@ -19,7 +21,7 @@ import {
 } from "../services/documentService.js";
 import { setDocumentTags } from "../services/documentTagService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt } from "../utils/http.js";
+import { parsePageLimit, parsePageOffset, parsePositiveInt } from "../utils/http.js";
 import { hasPdfSignature } from "../utils/pdfSignature.js";
 
 export const documentsRouter = Router();
@@ -64,23 +66,76 @@ function runUploadMiddleware(request, response) {
   });
 }
 
+function getQueryString(request, name) {
+  return typeof request.query[name] === "string" ? request.query[name] : "";
+}
+
+// Filters and ordering for the list. Only plain strings count: Express parses
+// `?system=a&system=b` into an array, which would otherwise reach SQL binding.
+function readDocumentListOptions(request) {
+  const sort = getQueryString(request, "sort");
+
+  return {
+    system: getQueryString(request, "system"),
+    documentType: getQueryString(request, "documentType"),
+    favorite: getQueryString(request, "favorite"),
+    bookmarked: getQueryString(request, "bookmarked"),
+    tag: getQueryString(request, "tag"),
+    sort: DOCUMENT_LIST_SORT_KEYS.includes(sort) ? sort : "",
+  };
+}
+
 documentsRouter.get("/", (request, response) => {
+  // `total` is always the whole library; `matched` is how many documents the
+  // filters leave. They are equal when no filter is applied.
   const total = countDocuments();
+  const options = readDocumentListOptions(request);
 
   // Backward compatible: with no `limit` query, return every document (the
-  // current Documents page relies on this). When `limit` is supplied, page
-  // through with a sane cap so a huge library cannot be pulled at once.
+  // Symptoms, Procedures, and Notes pages still rely on this). When `limit` is
+  // supplied, page through with a sane cap so a huge library cannot be pulled
+  // at once.
   if (request.query.limit === undefined) {
-    const documents = listDocuments();
-    response.json({ documents, total });
+    const documents = listDocuments(options);
+    response.json({ documents, total, matched: documents.length });
     return;
   }
 
-  const limit = Math.min(200, parsePositiveInt(request.query.limit) || 50);
-  const offset = parsePositiveInt(request.query.offset) || 0;
-  const documents = listDocuments({ limit, offset });
+  const limit = parsePageLimit(request.query.limit, { defaultLimit: 50, maxLimit: 200 });
+  const offset = parsePageOffset(request.query.offset);
+  const documents = listDocuments({ ...options, limit, offset });
+  const matched = countDocuments(options);
 
-  response.json({ documents, total, limit, offset });
+  response.json({ documents, total, matched, limit, offset });
+});
+
+// The values the Documents page's filter dropdowns offer, built from the whole
+// library so a filtered or paged view never shrinks its own choices. Declared
+// before `/:id` so "filter-options" is never read as a document id.
+documentsRouter.get("/filter-options", (_request, response) => {
+  response.json(getDocumentFilterOptions());
+});
+
+documentsRouter.get("/:id", (request, response) => {
+  const documentId = parsePositiveInt(request.params.id);
+
+  if (documentId === null) {
+    response.status(400).json({
+      error: "Document ID must be a positive number.",
+    });
+    return;
+  }
+
+  const document = getDocument(documentId);
+
+  if (!document) {
+    response.status(404).json({
+      error: "Document not found.",
+    });
+    return;
+  }
+
+  response.json({ document });
 });
 
 documentsRouter.get("/:id/file", async (request, response) => {
