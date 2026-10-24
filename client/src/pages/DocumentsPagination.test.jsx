@@ -72,8 +72,13 @@ async function renderPage(entry = "/documents") {
   await screen.findByText("Library controls");
 }
 
+// The same buttons a role query for /^Select document: / finds, by attribute.
+// A role query computes the accessible name of every button on the page --
+// about 117 ms a call on this page -- and `waitFor` re-runs its callback on
+// each poll and DOM change, so under a loaded full-suite run a wait built on it
+// ran out of time before it saw the update it was waiting for.
 function rowButtons() {
-  return screen.queryAllByRole("button", { name: /^Select document: / });
+  return Array.from(document.querySelectorAll('button[aria-label^="Select document: "]'));
 }
 
 function rowTitles() {
