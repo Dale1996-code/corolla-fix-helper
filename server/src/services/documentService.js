@@ -325,11 +325,66 @@ const DOCUMENT_TOUCHED_AT_SQL =
 const DOCUMENT_LIST_SORTS = {
   newest: `ORDER BY ${DOCUMENT_TOUCHED_AT_SQL} DESC, documents.created_at DESC, documents.id DESC`,
   oldest: `ORDER BY ${DOCUMENT_TOUCHED_AT_SQL} ASC, documents.created_at DESC, documents.id DESC`,
-  title_asc:
-    "ORDER BY documents.title COLLATE NOCASE ASC, documents.created_at DESC, documents.id DESC",
 };
 
-export const DOCUMENT_LIST_SORT_KEYS = Object.keys(DOCUMENT_LIST_SORTS);
+// Title A-Z is ordered the way the Documents page always ordered it in the
+// browser: `localeCompare(..., { sensitivity: "base" })`. SQLite cannot do
+// that -- NOCASE folds ASCII case and then compares UTF-8 bytes, so a title led
+// by a symbol or emoji ("❗️TSB ...") sorted after "Z" and an accented "É" after
+// every ASCII letter -- and node:sqlite offers no way to register a collation.
+// The locale is pinned so the order does not depend on the server's settings.
+const titleCollator = new Intl.Collator("en-US", { sensitivity: "base" });
+
+// Same tie-breakers as the SQL orderings: newest created first, then id. `id`
+// is unique, so the order is total and a page boundary can never repeat or
+// skip a row.
+function compareTitleKeys(first, second) {
+  return (
+    titleCollator.compare(first.title ?? "", second.title ?? "") ||
+    (first.created_at < second.created_at ? 1 : first.created_at > second.created_at ? -1 : 0) ||
+    second.id - first.id
+  );
+}
+
+export const DOCUMENT_LIST_SORT_KEYS = [...Object.keys(DOCUMENT_LIST_SORTS), "title_asc"];
+
+// Title A-Z in two steps, both on the server. Read only the sort key -- id,
+// title, created_at -- for every matching document, order those in JS, then
+// load full rows for the requested slice alone. The browser still receives one
+// page; the server reads three short columns per matching row instead of
+// sorting inside SQLite.
+function listDocumentRowsByTitle({ whereSql, params, limit, offset }) {
+  const keys = db
+    .prepare(`
+      SELECT documents.id, documents.title, documents.created_at
+      FROM documents
+      JOIN vehicles ON vehicles.id = documents.vehicle_id
+      ${whereSql}
+    `)
+    .all(...params);
+
+  keys.sort(compareTitleKeys);
+
+  const slice = limit ? keys.slice(offset, offset + limit) : keys;
+
+  if (!slice.length) {
+    return [];
+  }
+
+  // One bound parameter however long the slice is (the unpaged form can ask
+  // for the whole library), rather than one `?` per id.
+  const rowsById = new Map(
+    db
+      .prepare(`
+        ${getDocumentBaseQuery()}
+        WHERE documents.id IN (SELECT value FROM json_each(?))
+      `)
+      .all(JSON.stringify(slice.map((key) => key.id)))
+      .map((row) => [row.id, row])
+  );
+
+  return slice.map((key) => rowsById.get(key.id)).filter(Boolean);
+}
 
 // Rows matching `filters`, or the whole library with none. Not a page count:
 // the Documents page uses it to know how many pages exist.
@@ -392,14 +447,22 @@ export function listDocuments({
     DOCUMENT_LIST_SORTS[sort] ||
     "ORDER BY documents.created_at DESC, documents.id DESC";
 
-  const rows = db
-    .prepare(`
-      ${getDocumentBaseQuery()}
-      ${whereSql}
-      ${orderSql}
-      ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
-    `)
-    .all(...params, ...(hasLimit ? [limit, safeOffset] : []));
+  const rows =
+    sort === "title_asc"
+      ? listDocumentRowsByTitle({
+          whereSql,
+          params,
+          limit: hasLimit ? limit : null,
+          offset: safeOffset,
+        })
+      : db
+          .prepare(`
+            ${getDocumentBaseQuery()}
+            ${whereSql}
+            ${orderSql}
+            ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
+          `)
+          .all(...params, ...(hasLimit ? [limit, safeOffset] : []));
 
   const documents = attachTags(rows, (row, tags) => mapDocumentRow(row, tags));
   const pendingIds = getPendingEmbeddingDocumentIds(

@@ -116,7 +116,7 @@ With `?limit=25&offset=0`, pages through instead. `limit` defaults to 50 and is 
 | `system`, `documentType` | exact match |
 | `tag` | exact match, case-insensitive |
 | `favorite`, `bookmarked` | `true` (only those) or `false` (all but those); anything else applies no filter |
-| `sort` | `newest` / `oldest` (by last update, falling back to created) or `title_asc` (case-insensitive); anything else keeps the default order |
+| `sort` | `newest` / `oldest` (by last update, falling back to created) or `title_asc` (the browser's `localeCompare` order with base sensitivity, pinned to `en-US`: case- and accent-insensitive, with symbol- and emoji-led titles before digits and letters; sorted on the server over every matching document before paging); anything else keeps the default order |
 
 Every ordering ends in `id`, so no document appears on two pages or none. A repeated parameter (`?system=a&system=b`) is ignored rather than read as a list. Rows are the same slim list shape as before — no `extractedText`.
 

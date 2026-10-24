@@ -288,6 +288,48 @@ test("sorting orders the whole library, then pages it", async () => {
   db.prepare("DELETE FROM documents WHERE system = 'SortLab'").run();
 });
 
+// Real-library regression: Title A-Z used to be the browser's
+// `localeCompare(..., { sensitivity: "base" })`, which puts symbol- and
+// emoji-led titles ("❗️TSB ...") first and folds accents ("É" beside "E").
+// SQLite's NOCASE compares UTF-8 bytes after folding ASCII case only, which put
+// those four TSB titles on the LAST page and "Émile" after "zeta".
+test("Title A-Z keeps the browser's ordering for symbols, digits, case, and accents", async () => {
+  const add = (title, createdAt) => addDocument({ title, system: "TitleLab", createdAt });
+  const zeta = add("zeta sensor", "2024-01-01 00:00:00");
+  const emile = add("Émile bracket", "2024-01-01 00:00:00");
+  const brake = add("Brake caliper", "2024-01-01 00:00:00");
+  const apple = add("apple pump", "2024-01-01 00:00:00");
+  const digits = add("260 Electrical", "2024-01-01 00:00:00");
+  const tsb = add("❗️TSB Coolant", "2024-01-01 00:00:00");
+  // Equal ignoring case: the tie falls back to the legacy order, newest created
+  // first, exactly as the browser's stable sort over the legacy list did.
+  const olderDelta = add("Delta valve", "2024-01-01 00:00:00");
+  const newerDelta = add("delta Valve", "2024-02-01 00:00:00");
+
+  const expected = [tsb, digits, apple, brake, newerDelta, olderDelta, emile, zeta];
+
+  try {
+    const onePage = await getDocuments("?limit=25&system=TitleLab&sort=title_asc");
+    assert.equal(onePage.matched, expected.length);
+    assert.deepEqual(idsOf(onePage), expected);
+
+    // Sorted across the whole filtered set before paging: walking two at a time
+    // gives the same order with no row repeated or skipped.
+    const walked = [];
+    for (let offset = 0; offset < expected.length; offset += 2) {
+      walked.push(...idsOf(await getDocuments(`?limit=2&offset=${offset}&system=TitleLab&sort=title_asc`)));
+    }
+    assert.deepEqual(walked, expected);
+
+    // The unpaged form honours the same sort.
+    assert.deepEqual(idsOf(await getDocuments("?system=TitleLab&sort=title_asc")), expected);
+  } finally {
+    // Cleanup must run even when an assertion fails, or the extra rows leak
+    // into every later test's library-size checks.
+    db.prepare("DELETE FROM documents WHERE system = 'TitleLab'").run();
+  }
+});
+
 test("with no limit the list is still the whole library in the legacy order", async () => {
   const body = await getDocuments();
 
