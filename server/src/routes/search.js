@@ -17,6 +17,9 @@ import {
 
 export const searchRouter = Router();
 
+const PROCEDURE_SEARCH_PAGE_SIZE = 25;
+const PROCEDURE_SEARCH_MAX_PAGE_SIZE = 100;
+
 function getQueryValue(request, name, fallback = "") {
   return typeof request.query[name] === "string" ? request.query[name] : fallback;
 }
@@ -85,9 +88,31 @@ searchRouter.get("/procedures", (request, response) => {
     sort: getQueryValue(request, "sort", "relevance"),
   });
 
+  // Unbounded unless asked: the Ask AI page's procedure card reads the whole
+  // result set. A `limit` (the Symptoms page's procedure picker) returns one
+  // page of it, with `total` still counting every match.
+  if (request.query.limit === undefined) {
+    response.json({
+      results,
+      total: results.length,
+      filters: getProcedureFilterOptions(),
+    });
+    return;
+  }
+
+  const limit = parsePageLimit(request.query.limit, {
+    defaultLimit: PROCEDURE_SEARCH_PAGE_SIZE,
+    maxLimit: PROCEDURE_SEARCH_MAX_PAGE_SIZE,
+  });
+  const offset = parsePageOffset(request.query.offset);
+  const page = results.slice(offset, offset + limit);
+
   response.json({
-    results,
+    results: page,
     total: results.length,
+    limit,
+    offset,
+    hasMore: offset + page.length < results.length,
     filters: getProcedureFilterOptions(),
   });
 });

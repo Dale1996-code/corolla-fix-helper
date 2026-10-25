@@ -88,8 +88,16 @@ export function setProcedureSymptoms(procedureId, requestedSymptomIds) {
 /**
  * Build a map of symptom id -> linked procedures for one vehicle, so the symptom
  * list/detail responses can embed procedures the same way they embed documents.
+ * Pass `symptomIds` to read only those symptoms' links (one page, one record)
+ * instead of every link the vehicle has.
  */
-export function buildSymptomProcedureLinksMap(vehicleId) {
+export function buildSymptomProcedureLinksMap(vehicleId, symptomIds = null) {
+  const narrowed = Array.isArray(symptomIds);
+
+  if (narrowed && symptomIds.length === 0) {
+    return new Map();
+  }
+
   const linkRows = db
     .prepare(`
       SELECT
@@ -102,9 +110,10 @@ export function buildSymptomProcedureLinksMap(vehicleId) {
       JOIN symptoms ON symptoms.id = symptom_procedures.symptom_id
       JOIN procedures ON procedures.id = symptom_procedures.procedure_id
       WHERE symptoms.vehicle_id = ?
+      ${narrowed ? "AND symptom_procedures.symptom_id IN (SELECT value FROM json_each(?))" : ""}
       ORDER BY procedures.title COLLATE NOCASE ASC
     `)
-    .all(vehicleId);
+    .all(vehicleId, ...(narrowed ? [JSON.stringify(symptomIds)] : []));
 
   const linksMap = new Map();
 

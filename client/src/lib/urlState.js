@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // The query string is the canonical home for list view state -- which filters
 // are on, which page is showing, and which record the detail panel describes.
@@ -22,6 +22,9 @@ import { useEffect, useRef, useState } from "react";
 //    because they did not know about it.
 
 export const DEFAULT_PAGE = 1;
+
+// A stable empty default, so an omitted option never changes an effect's deps.
+const NO_KEYS = [];
 
 /**
  * A query-string value constrained to a known set of options.
@@ -136,6 +139,48 @@ export function applyParamUpdates(searchParams, updates) {
 }
 
 /**
+ * One writer for every URL change a page makes, built so that writes made close
+ * together all land.
+ *
+ * React Router's `setSearchParams(fn)` hands `fn` the parameters of the render
+ * that created it, not the latest ones. So two writes before the next render
+ * (or a write from a callback created before an earlier write committed) do not
+ * chain: the second starts from the old URL and silently undoes the first. A
+ * delete that clears `symptomId` and a refetch that then clamps `page` was one
+ * such pair. This writer applies each update to the last parameters it WROTE,
+ * and adopts the rendered URL whenever that changes (its own write committing,
+ * or Back/Forward/a pasted link).
+ *
+ * The writer is stable, so effects and async callbacks can hold it without
+ * re-running or going stale. Call it before any effect of the page that writes:
+ * effects run in declaration order, and the URL must be adopted first.
+ *
+ * @param {URLSearchParams} searchParams
+ * @param {(next: URLSearchParams, options?: object) => void} setSearchParams
+ * @returns {(updates: Record<string, string|number|null|undefined>, options?: { replace?: boolean }) => void}
+ */
+export function useViewParamWriter(searchParams, setSearchParams) {
+  const renderedSearch = searchParams.toString();
+  const latestParams = useRef(new URLSearchParams(renderedSearch));
+  const setSearchParamsRef = useRef(setSearchParams);
+
+  useEffect(() => {
+    setSearchParamsRef.current = setSearchParams;
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    latestParams.current = new URLSearchParams(renderedSearch);
+  }, [renderedSearch]);
+
+  return useCallback((updates, { replace = false } = {}) => {
+    const nextParams = applyParamUpdates(latestParams.current, updates);
+
+    latestParams.current = nextParams;
+    setSearchParamsRef.current(nextParams, { replace });
+  }, []);
+}
+
+/**
  * Read a whole group of filters in one call.
  *
  * `spec` maps each parameter name to `{ default, options? }` -- `options` for a
@@ -243,15 +288,22 @@ export function resolveSelectedRecord(requestedId, records, visibleRecords) {
  * external URL change -- Back, Forward, a pasted link -- resets the draft, so
  * the box always shows what the list is actually filtered by.
  *
+ * `clearOnCommit` names parameters the same write removes -- a paged list's
+ * `page`, since page 4 of the old keyword says nothing about the new one.
+ *
  * @param {string} key
  * @param {{
  *   searchParams: URLSearchParams,
  *   setSearchParams: (updater: (current: URLSearchParams) => URLSearchParams, options?: object) => void,
  *   delayMs?: number,
+ *   clearOnCommit?: string[],
  * }} options
  * @returns {[string, (value: string) => void]}
  */
-export function useDraftTextParam(key, { searchParams, setSearchParams, delayMs = 300 }) {
+export function useDraftTextParam(
+  key,
+  { searchParams, setSearchParams, delayMs = 300, clearOnCommit = NO_KEYS }
+) {
   const committedValue = readTextParam(searchParams, key);
   const [draftValue, setDraftValue] = useState(committedValue);
 
@@ -274,14 +326,17 @@ export function useDraftTextParam(key, { searchParams, setSearchParams, delayMs 
     }
 
     const timer = setTimeout(() => {
+      const cleared = Object.fromEntries(clearOnCommit.map((name) => [name, null]));
+
       setSearchParamsRef.current(
-        (currentParams) => applyParamUpdates(currentParams, { [key]: draftValue || null }),
+        (currentParams) =>
+          applyParamUpdates(currentParams, { ...cleared, [key]: draftValue || null }),
         { replace: true }
       );
     }, delayMs);
 
     return () => clearTimeout(timer);
-  }, [draftValue, committedValue, key, delayMs]);
+  }, [draftValue, committedValue, key, delayMs, clearOnCommit]);
 
   return [draftValue, setDraftValue];
 }

@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
 import { SymptomsPage } from "./SymptomsPage";
+import { createSymptomsApi } from "../test/symptomsApiMock";
 
 function jsonResponse(payload, ok = true) {
   return Promise.resolve({
@@ -348,19 +349,14 @@ test("SymptomsPage supports search, filters, sorting, and empty filtered states"
     total: 2,
   };
 
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse(symptomsPayload);
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
+  // The page asks for one filtered, ordered page at a time, so the stand-in
+  // server (test/symptomsApiMock.js) does the filtering the real one does.
+  const api = createSymptomsApi({
+    symptoms: symptomsPayload.symptoms,
+    documents: documentsPayload.documents,
   });
 
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
 
   render(
     <MemoryRouter initialEntries={["/symptoms"]}>
@@ -515,19 +511,14 @@ test("SymptomsPage helps narrow to active and high-confidence symptoms, then cle
     total: 2,
   };
 
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse(symptomsPayload);
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
+  // The page asks for one filtered, ordered page at a time, so the stand-in
+  // server (test/symptomsApiMock.js) does the filtering the real one does.
+  const api = createSymptomsApi({
+    symptoms: symptomsPayload.symptoms,
+    documents: documentsPayload.documents,
   });
 
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
 
   render(
     <MemoryRouter initialEntries={["/symptoms"]}>

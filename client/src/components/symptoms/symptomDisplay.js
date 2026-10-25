@@ -15,18 +15,18 @@ export function getStatusBadgeClass(status) {
   return "bg-slate-100 text-slate-700";
 }
 
-// The visible-range counter for the symptom list. The whole filtered list is on
-// screen (symptoms do not page), so the range runs from the first row to the
-// last. It deliberately does NOT restate the library total: the summary cards
-// directly above already show "Total symptoms" and "Visible now", and two
-// counters for one list is what this sweep was cleaning up.
-export function formatVisibleSymptomsText(totalCount, visibleCount) {
+// The range counter for the symptom page on screen: "Showing 26–50 of 60
+// symptoms." The total in it is how many symptoms the filters leave (the
+// server's `matched`). It deliberately does NOT restate the library total: the
+// summary cards directly above already show "Total symptoms" and "Visible now",
+// and two counters for one list is what the counter sweep was cleaning up.
+export function formatSymptomRangeText({ libraryTotal, matched, from, count }) {
   return formatResultRange({
-    from: 1,
-    to: visibleCount,
-    total: visibleCount,
+    from,
+    to: from + count - 1,
+    total: matched,
     noun: "symptom",
     nounPlural: "symptoms",
-    emptyText: totalCount ? "No symptoms match these filters." : "No symptoms yet.",
+    emptyText: libraryTotal ? "No symptoms match these filters." : "No symptoms yet.",
   });
 }

@@ -66,7 +66,21 @@ export function mapSymptomRow(row, documentLinksMap, procedureLinksMap) {
   };
 }
 
-export function listSymptoms(vehicleId) {
+// Full mapped symptoms, in the list's legacy order (latest update first). With
+// `symptomIds` the rows AND both link maps are read for those symptoms alone, so
+// one page or one record never costs a scan of every link the vehicle has.
+function loadMappedSymptoms(vehicleId, symptomIds = null) {
+  const narrowed = Array.isArray(symptomIds);
+
+  if (narrowed && symptomIds.length === 0) {
+    return [];
+  }
+
+  // One bound parameter however many ids there are, rather than one `?` each.
+  const idFilterSql = (column) =>
+    narrowed ? `AND ${column} IN (SELECT value FROM json_each(?))` : "";
+  const idParams = narrowed ? [JSON.stringify(symptomIds)] : [];
+
   const symptomRows = db
     .prepare(`
       SELECT
@@ -82,9 +96,10 @@ export function listSymptoms(vehicleId) {
         updated_at
       FROM symptoms
       WHERE vehicle_id = ?
+      ${idFilterSql("id")}
       ORDER BY updated_at DESC, id DESC
     `)
-    .all(vehicleId);
+    .all(vehicleId, ...idParams);
 
   const linkRows = db
     .prepare(`
@@ -98,9 +113,10 @@ export function listSymptoms(vehicleId) {
       JOIN symptoms ON symptoms.id = symptom_documents.symptom_id
       JOIN documents ON documents.id = symptom_documents.document_id
       WHERE symptoms.vehicle_id = ?
+      ${idFilterSql("symptom_documents.symptom_id")}
       ORDER BY documents.title COLLATE NOCASE ASC
     `)
-    .all(vehicleId);
+    .all(vehicleId, ...idParams);
 
   const documentLinksMap = new Map();
 
@@ -117,18 +133,165 @@ export function listSymptoms(vehicleId) {
     });
   }
 
-  const procedureLinksMap = buildSymptomProcedureLinksMap(vehicleId);
+  const procedureLinksMap = buildSymptomProcedureLinksMap(
+    vehicleId,
+    narrowed ? symptomIds : null
+  );
 
   return symptomRows.map((row) =>
     mapSymptomRow(row, documentLinksMap, procedureLinksMap)
   );
 }
 
+export function listSymptoms(vehicleId) {
+  return loadMappedSymptoms(vehicleId);
+}
+
 // A single mapped symptom, or undefined when it does not belong to the vehicle.
-// Derived from listSymptoms so the link maps are built exactly as in the list
-// view (behavior-preserving; callers relied on this whole-list-then-find shape).
+// Same mapping and link maps as the list view, read for this one symptom only.
 export function getSymptom(vehicleId, symptomId) {
-  return listSymptoms(vehicleId).find((symptom) => symptom.id === symptomId);
+  return loadMappedSymptoms(vehicleId, [symptomId])[0];
+}
+
+export const SYMPTOM_LIST_SORT_KEYS = ["newest", "oldest", "title"];
+export const SYMPTOM_LIST_STATUS_FILTERS = ["active", "open", "monitoring", "resolved"];
+
+// Title A-Z the way the Symptoms page ordered it in the browser: a plain
+// `localeCompare`. SQLite's NOCASE compares bytes after folding ASCII case, so
+// it would put accented and symbol-led titles somewhere else. The locale is
+// pinned so the order does not depend on the server's settings.
+const symptomTextCollator = new Intl.Collator("en-US");
+
+function updatedAtTime(value) {
+  const time = new Date(value || 0).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+// The comparisons the page's own sort used. Ties fall back to the legacy list
+// order the rows arrive in (latest update, then highest id), exactly what the
+// browser's stable sort left behind -- and since ids are unique, the order is
+// total, so a page boundary can never repeat or skip a symptom.
+const SYMPTOM_COMPARATORS = {
+  newest: (first, second) => updatedAtTime(second.updatedAt) - updatedAtTime(first.updatedAt),
+  oldest: (first, second) => updatedAtTime(first.updatedAt) - updatedAtTime(second.updatedAt),
+  title: (first, second) => symptomTextCollator.compare(first.title, second.title),
+};
+
+function matchesSymptomStatus(status, statusFilter) {
+  if (!statusFilter) {
+    return true;
+  }
+
+  if (statusFilter === "active") {
+    return status === "open" || status === "monitoring";
+  }
+
+  return status === statusFilter;
+}
+
+/**
+ * One page of the Symptoms page's list, filtered and ordered over every symptom
+ * the vehicle has.
+ *
+ * The filters are the ones the page used to apply in the browser, applied here
+ * with the same rules: `query` is a case-insensitive substring of the title,
+ * system, suspected causes, or notes; `status` is a status or `active` (open or
+ * monitoring); `system` and `confidence` are exact. Empty means "no filter".
+ *
+ * Only the sort key columns are read for every symptom; full rows and their
+ * links are loaded for the requested slice alone.
+ *
+ * `total` and `statusCounts` describe the whole list, not the filtered one, so
+ * the page's summary cards never shrink with a filter. Anything that is not
+ * monitoring or resolved counts as open, as the page always counted it.
+ *
+ * @returns {{
+ *   symptoms: object[],
+ *   matched: number,
+ *   total: number,
+ *   statusCounts: { open: number, monitoring: number, resolved: number },
+ * }}
+ */
+export function listSymptomPage(
+  vehicleId,
+  { query = "", status = "", system = "", confidence = "", sort = "newest", limit, offset = 0 }
+) {
+  const keys = db
+    .prepare(`
+      SELECT id, title, system, suspected_causes, notes, confidence, status, updated_at
+      FROM symptoms
+      WHERE vehicle_id = ?
+      ORDER BY updated_at DESC, id DESC
+    `)
+    .all(vehicleId)
+    .map((row, index) => ({
+      index,
+      id: Number(row.id),
+      title: String(row.title || ""),
+      system: String(row.system || ""),
+      suspectedCauses: String(row.suspected_causes || ""),
+      notes: String(row.notes || ""),
+      confidence: String(row.confidence || "medium"),
+      status: String(row.status || "open"),
+      updatedAt: row.updated_at,
+    }));
+
+  const statusCounts = { open: 0, monitoring: 0, resolved: 0 };
+
+  for (const key of keys) {
+    if (key.status === "monitoring") {
+      statusCounts.monitoring += 1;
+    } else if (key.status === "resolved") {
+      statusCounts.resolved += 1;
+    } else {
+      statusCounts.open += 1;
+    }
+  }
+
+  const normalizedQuery = normalizeText(query).toLowerCase();
+  const compare = SYMPTOM_COMPARATORS[sort] || SYMPTOM_COMPARATORS.newest;
+
+  const matching = keys
+    .filter(
+      (key) =>
+        matchesSymptomStatus(key.status, status) &&
+        (!system || key.system === system) &&
+        (!confidence || key.confidence === confidence) &&
+        (!normalizedQuery ||
+          [key.title, key.system, key.suspectedCauses, key.notes].some((value) =>
+            value.toLowerCase().includes(normalizedQuery)
+          ))
+    )
+    .sort((first, second) => compare(first, second) || first.index - second.index);
+
+  const sliceIds = matching.slice(offset, offset + limit).map((key) => key.id);
+  const rowsById = new Map(
+    loadMappedSymptoms(vehicleId, sliceIds).map((symptom) => [symptom.id, symptom])
+  );
+
+  return {
+    symptoms: sliceIds.map((id) => rowsById.get(id)).filter(Boolean),
+    matched: matching.length,
+    total: keys.length,
+    statusCounts,
+  };
+}
+
+// Every system name the vehicle's symptoms use, for the page's System filter.
+// Built from the whole list so a filtered or paged view never shrinks its own
+// choices; ordered as the page ordered them.
+export function listSymptomSystems(vehicleId) {
+  return db
+    .prepare(`
+      SELECT DISTINCT system
+      FROM symptoms
+      WHERE vehicle_id = ?
+      AND system IS NOT NULL
+      AND system <> ''
+    `)
+    .all(vehicleId)
+    .map((row) => String(row.system))
+    .sort((first, second) => symptomTextCollator.compare(first, second));
 }
 
 // Raw symptom row (snake_case) for an owned symptom, used by the partial-update

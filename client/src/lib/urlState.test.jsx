@@ -1,4 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom";
+import { describe, expect, test, vi } from "vitest";
 import {
   applyParamUpdates,
   clearFilterUpdates,
@@ -10,6 +12,8 @@ import {
   readPageParam,
   readTextParam,
   resolveSelectedRecord,
+  useDraftTextParam,
+  useViewParamWriter,
 } from "./urlState";
 
 function params(query) {
@@ -167,5 +171,97 @@ describe("resolveSelectedRecord", () => {
   test("returns null when nothing is visible", () => {
     expect(resolveSelectedRecord(2, records, [])).toBe(null);
     expect(resolveSelectedRecord(null, [], [])).toBe(null);
+  });
+});
+
+// Hosts the two URL hooks under a real router, and hands the test their
+// functions so it can call them the way a page's handlers and effects do.
+function renderUrlHooks(entry, { clearOnCommit } = {}) {
+  const hooks = {};
+
+  function Probe() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const location = useLocation();
+    hooks.write = useViewParamWriter(searchParams, setSearchParams);
+    [hooks.draft, hooks.setDraft] = useDraftTextParam("q", {
+      searchParams,
+      setSearchParams,
+      clearOnCommit,
+    });
+    return <span data-testid="search">{location.search}</span>;
+  }
+
+  render(
+    <MemoryRouter initialEntries={[entry]}>
+      <Probe />
+    </MemoryRouter>
+  );
+
+  return hooks;
+}
+
+describe("useViewParamWriter", () => {
+  test("two writes before the next render both land", async () => {
+    const hooks = renderUrlHooks("/list?page=2&recordId=1");
+    const firstWriter = hooks.write;
+
+    await act(async () => {
+      hooks.write({ recordId: null }, { replace: true });
+      hooks.write({ page: null }, { replace: true });
+    });
+
+    expect(screen.getByTestId("search").textContent).toBe("");
+    // Stable across renders, so an effect or async callback can hold it.
+    expect(hooks.write).toBe(firstWriter);
+  });
+
+  test("a writer held from before an earlier write still builds on it", async () => {
+    const hooks = renderUrlHooks("/list?page=2&recordId=1&sort=title");
+    const heldWriter = hooks.write;
+
+    await act(async () => {
+      hooks.write({ recordId: null }, { replace: true });
+    });
+    await act(async () => {
+      heldWriter({ page: null }, { replace: true });
+    });
+
+    expect(screen.getByTestId("search").textContent).toBe("?sort=title");
+  });
+});
+
+describe("useDraftTextParam clearOnCommit", () => {
+  test("the keyword commit also removes the named parameters", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const hooks = renderUrlHooks("/list?page=4&sort=title", { clearOnCommit: ["page"] });
+
+      act(() => hooks.setDraft("brake"));
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.getByTestId("search").textContent).toBe("?sort=title&q=brake");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("without it, a commit touches only its own parameter", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const hooks = renderUrlHooks("/list?page=4");
+
+      act(() => hooks.setDraft("brake"));
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.getByTestId("search").textContent).toBe("?page=4&q=brake");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

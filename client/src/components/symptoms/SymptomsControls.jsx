@@ -1,5 +1,3 @@
-import { formatVisibleSymptomsText } from "./symptomDisplay";
-
 export function SymptomsControls({
   searchValue,
   onSearchChange,
@@ -12,8 +10,9 @@ export function SymptomsControls({
   sortBy,
   onSortByChange,
   systems,
-  totalCount,
-  visibleCount,
+  rangeText,
+  fetchingText = "",
+  pager = null,
   hasActiveFilters,
   onClearFilters,
 }) {
@@ -89,20 +88,26 @@ export function SymptomsControls({
         </label>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
-        <p className="text-sm text-slate-600">
-          {formatVisibleSymptomsText(totalCount, visibleCount)}
+      <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-600" role="status">
+          {rangeText}
+          {fetchingText ? (
+            <span className="ml-2 text-xs text-slate-500">{fetchingText}</span>
+          ) : null}
         </p>
 
-        {hasActiveFilters ? (
-          <button
-            type="button"
-            onClick={onClearFilters}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-          >
-            Clear filters
-          </button>
-        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {pager}
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              Clear filters
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );
