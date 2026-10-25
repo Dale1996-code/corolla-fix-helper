@@ -204,12 +204,12 @@ All search endpoints are `GET`, share the shape `{ "results": [...], "total": n,
 | --- | --- |
 | `GET /api/search` and `GET /api/search/documents` | `q`, `system`, `documentType`, `favorite`, `bookmarked`, `tag`, `sort`, `limit`, `offset` |
 | `GET /api/search/symptoms` | `q`, `system`, `status`, `sort` |
-| `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort` |
+| `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort`, optional `limit`, `offset` |
 | `GET /api/search/notes` | `q`, `noteType`, `relatedEntityType`, `sort` |
 
 Document search covers metadata, notes, extracted text (including OCR text), and tags.
 
-**Document search is always paged.** It is the one scope that can grow into the thousands, so `/api/search` and `/api/search/documents` add `limit`, `offset`, and `hasMore` to the shared shape and never return the whole library — including when no pagination params are sent. `limit` defaults to 25 and is clamped to a maximum of 100 (a `limit` above 100 is capped down to 100, not rejected); `offset` defaults to 0 and otherwise is used as given, however large, since paging past the end just returns an empty page. Missing, negative, fractional, and non-numeric values fall back to those defaults rather than erroring. `total` is the full count of matching documents (a separate `COUNT(*)` over the same filters), not the number of rows in `results`. Results carry a server-built `snippet`, never the full `extractedText`. The other three scopes are unpaged and unchanged.
+**Document search is always paged.** It is the one scope that can grow into the thousands, so `/api/search` and `/api/search/documents` add `limit`, `offset`, and `hasMore` to the shared shape and never return the whole library — including when no pagination params are sent. `limit` defaults to 25 and is clamped to a maximum of 100 (a `limit` above 100 is capped down to 100, not rejected); `offset` defaults to 0 and otherwise is used as given, however large, since paging past the end just returns an empty page. Missing, negative, fractional, and non-numeric values fall back to those defaults rather than erroring. `total` is the full count of matching documents (a separate `COUNT(*)` over the same filters), not the number of rows in `results`. Results carry a server-built `snippet`, never the full `extractedText`. The other three scopes are unpaged by default. Procedure search alone also accepts an optional `limit` (default 25, capped at 100) and `offset`, used by the Symptoms page's procedure picker: with `limit` it returns one page of the same ordered results plus `limit`, `offset`, and `hasMore`, and `total` still counts every match; without `limit` its response is exactly as before.
 
 ```powershell
 curl.exe "http://localhost:4000/api/search/documents?q=caliper&system=Brakes"
@@ -626,13 +626,33 @@ Allowed values — `confidence`: `low` | `medium` (default) | `high`; `status`: 
 
 | Endpoint | Notes |
 | --- | --- |
-| `GET /api/symptoms` | `{ "symptoms": [...], "total": n }` — each includes `linkedDocuments` and `linkedProcedures` |
+| `GET /api/symptoms` | `{ "symptoms": [...], "total": n }` — every symptom; each includes `linkedDocuments` and `linkedProcedures`. With `limit`, one filtered, sorted page (below) |
+| `GET /api/symptoms/filter-options` | `{ "systems": [...] }` — every system name the symptoms use, for the Symptoms page's System filter |
 | `GET /api/symptoms/:id` | `{ "symptom": {...} }` |
 | `POST /api/symptoms` | body: `title` (required), `description`, `system`, `suspectedCauses`, `notes`, `confidence`, `status`, `linkedDocumentIds` (array). `201` → `{ "message", "symptom" }` |
 | `PUT /api/symptoms/:id` | same fields; partial update |
 | `PUT /api/symptoms/:id/procedures` | body `{ "procedureIds": [1, 2] }` — **replaces** the whole linked set; returns the updated symptom |
 | `GET /api/symptoms/:id/suggested-procedures` | ranks existing procedures for this symptom, grounded in retrieved chunks. Response carries `status` (`answered`/`not_found`), `aiConfigured`, and `mode` so the UI can show whether ranking was AI-assisted or the deterministic keyword/system fallback (no key needed). Shares the AI rate-limit window (`429`), and as a side-effect GET it refuses a cross-site request (`403`) |
 | `DELETE /api/symptoms/:id` | also removes document/procedure links and the symptom's image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
+
+**Paged list.** Without `limit`, `GET /api/symptoms` returns every symptom and ignores any filter (the Procedures, Notes, and Repair Checklists pages read it that way). With `limit`, it returns one page, filtered and sorted by the server over **every** symptom:
+
+```json
+{ "symptoms": [ ... ], "total": 300, "matched": 31, "limit": 25, "offset": 0,
+  "statusCounts": { "open": 100, "monitoring": 100, "resolved": 100 } }
+```
+
+| Param | Meaning |
+| --- | --- |
+| `limit` | page size; defaults to 25, capped at 100; a zero, negative, fractional, or non-numeric value falls back to 25 |
+| `offset` | rows to skip; defaults to 0. Past the end, `symptoms` is empty while `matched` still counts the matches |
+| `q` | case-insensitive substring of the title, system, suspected causes, or notes (not the description) |
+| `status` | `open`, `monitoring`, `resolved`, or `active` (open or monitoring) |
+| `system` | exact system name |
+| `confidence` | `low`, `medium`, or `high` |
+| `sort` | `newest` (default, latest update first), `oldest`, or `title` (A–Z, `localeCompare` order) |
+
+`total` and `statusCounts` describe every symptom, whatever the filters; `matched` is how many the filters leave. A status other than `monitoring` or `resolved` counts as `open`. An unknown `status`, `confidence`, or `sort`, or a repeated parameter, is ignored rather than rejected. Ties in any ordering fall back to latest update, then highest id, so a page boundary never repeats or skips a symptom.
 
 ```powershell
 $body = @{ title = "Squeak when braking"; system = "Brakes"; status = "open" } | ConvertTo-Json

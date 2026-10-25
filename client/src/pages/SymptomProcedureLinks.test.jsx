@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { SymptomsPage } from "./SymptomsPage";
+import { createSymptomsApi } from "../test/symptomsApiMock";
 
 function jsonResponse(payload, ok = true) {
   return Promise.resolve({
@@ -49,24 +50,28 @@ const settingsPayload = {
   documentDefaults: { commonSystems: ["Engine"], documentTypes: [] },
 };
 
-test("symptom detail renders linked procedures and the link selector", async () => {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse({ symptoms: [baseSymptom()], total: 1 });
+// The page searches procedures a page at a time instead of downloading them
+// all, so the stand-in server answers those searches from `proceduresPayload`.
+function stubSymptomsApi({ extra } = {}) {
+  const api = createSymptomsApi(
+    { symptoms: [baseSymptom()], procedures: proceduresPayload.procedures },
+    {
+      extra: (url, init, state) => {
+        if (url === "/api/settings") {
+          return jsonResponse(settingsPayload);
+        }
+        return extra?.(url, init, state);
+      },
     }
-    if (url === "/api/documents") {
-      return jsonResponse({ documents: [], total: 0 });
-    }
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-    if (url === "/api/settings") {
-      return jsonResponse(settingsPayload);
-    }
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
+  );
+  const fetchMock = vi.fn(api.fetch);
+  fetchMock.api = api;
   vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+test("symptom detail renders linked procedures and the link selector", async () => {
+  stubSymptomsApi();
 
   render(
     <MemoryRouter initialEntries={["/symptoms"]}>
@@ -83,41 +88,31 @@ test("symptom detail renders linked procedures and the link selector", async () 
     await screen.findByRole("link", { name: "Open procedure Clean the throttle body" })
   ).toHaveAttribute("href", "/procedures?procedureId=31#procedure-library");
 
-  // The link selector lists every procedure with a checkbox.
-  expect(screen.getByRole("checkbox", { name: /Replace spark plugs/i })).toBeInTheDocument();
+  // The link selector lists the first page of procedures with a checkbox.
+  expect(
+    await screen.findByRole("checkbox", { name: /Replace spark plugs/i })
+  ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save linked procedures" })).toBeInTheDocument();
 });
 
 test("user can save linked procedures with mocked fetch", async () => {
-  const fetchMock = vi.fn((url, options = {}) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse({ symptoms: [baseSymptom()], total: 1 });
-    }
-    if (url === "/api/documents") {
-      return jsonResponse({ documents: [], total: 0 });
-    }
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-    if (url === "/api/settings") {
-      return jsonResponse(settingsPayload);
-    }
-    if (url === "/api/symptoms/1/procedures" && options.method === "PUT") {
-      return jsonResponse({
-        message: "Linked procedures updated.",
-        symptom: baseSymptom({
-          linkedProcedureIds: [31, 32],
-          linkedProcedures: [
-            { id: 31, title: "Clean the throttle body", system: "Engine", difficulty: "beginner" },
-            { id: 32, title: "Replace spark plugs", system: "Engine", difficulty: "intermediate" },
-          ],
-        }),
-      });
-    }
-    throw new Error(`Unexpected fetch call: ${url}`);
+  const fetchMock = stubSymptomsApi({
+    extra: (url, options = {}) => {
+      if (url === "/api/symptoms/1/procedures" && options.method === "PUT") {
+        return jsonResponse({
+          message: "Linked procedures updated.",
+          symptom: baseSymptom({
+            linkedProcedureIds: [31, 32],
+            linkedProcedures: [
+              { id: 31, title: "Clean the throttle body", system: "Engine", difficulty: "beginner" },
+              { id: 32, title: "Replace spark plugs", system: "Engine", difficulty: "intermediate" },
+            ],
+          }),
+        });
+      }
+      return undefined;
+    },
   });
-
-  vi.stubGlobal("fetch", fetchMock);
 
   render(
     <MemoryRouter initialEntries={["/symptoms"]}>
@@ -166,38 +161,26 @@ test("suggested procedures render with reasons and citations and can be linked",
     citations: [],
   };
 
-  const fetchMock = vi.fn((url, options = {}) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse({ symptoms: [baseSymptom()], total: 1 });
-    }
-    if (url === "/api/documents") {
-      return jsonResponse({ documents: [], total: 0 });
-    }
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-    if (url === "/api/settings") {
-      return jsonResponse(settingsPayload);
-    }
-    if (url === "/api/symptoms/1/suggested-procedures") {
-      return jsonResponse(suggestionsPayload);
-    }
-    if (url === "/api/symptoms/1/procedures" && options.method === "PUT") {
-      return jsonResponse({
-        message: "Linked procedures updated.",
-        symptom: baseSymptom({
-          linkedProcedureIds: [31, 32],
-          linkedProcedures: [
-            { id: 31, title: "Clean the throttle body", system: "Engine", difficulty: "beginner" },
-            { id: 32, title: "Replace spark plugs", system: "Engine", difficulty: "intermediate" },
-          ],
-        }),
-      });
-    }
-    throw new Error(`Unexpected fetch call: ${url}`);
+  const fetchMock = stubSymptomsApi({
+    extra: (url, options = {}) => {
+      if (url === "/api/symptoms/1/suggested-procedures") {
+        return jsonResponse(suggestionsPayload);
+      }
+      if (url === "/api/symptoms/1/procedures" && options.method === "PUT") {
+        return jsonResponse({
+          message: "Linked procedures updated.",
+          symptom: baseSymptom({
+            linkedProcedureIds: [31, 32],
+            linkedProcedures: [
+              { id: 31, title: "Clean the throttle body", system: "Engine", difficulty: "beginner" },
+              { id: 32, title: "Replace spark plugs", system: "Engine", difficulty: "intermediate" },
+            ],
+          }),
+        });
+      }
+      return undefined;
+    },
   });
-
-  vi.stubGlobal("fetch", fetchMock);
 
   render(
     <MemoryRouter initialEntries={["/symptoms"]}>

@@ -8,6 +8,7 @@ import { NotesPage } from "./NotesPage";
 import { RepairChecklistsPage } from "./RepairChecklistsPage";
 import { RepairHistoryPage } from "./RepairHistoryPage";
 import { createDocumentsApi } from "../test/documentsApiMock";
+import { createSymptomsApi } from "../test/symptomsApiMock";
 
 // H7: filters, pagination, and the selected record are query-string state, so
 // the browser can restore them. These tests drive the same journey the audit
@@ -359,20 +360,12 @@ const SYMPTOMS = [
   },
 ];
 
+// The page asks the server for one filtered page at a time, so the stand-in
+// server (see test/symptomsApiMock.js) does the filtering the real one does.
 function stubSymptomsFetch(symptoms = SYMPTOMS) {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/symptoms") return jsonResponse({ symptoms, total: symptoms.length });
-    if (url === "/api/documents") return jsonResponse({ documents: [], total: 0 });
-    if (url === "/api/procedures") return jsonResponse({ procedures: [], total: 0 });
-    if (url === "/api/settings") {
-      return jsonResponse({ documentDefaults: { commonSystems: [], documentTypes: [] } });
-    }
-    if (url.startsWith("/api/attachments")) {
-      return jsonResponse({ attachments: [], total: 0 });
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
+  const api = createSymptomsApi({ symptoms });
+  const fetchMock = vi.fn(api.fetch);
+  fetchMock.api = api;
 
   vi.stubGlobal("fetch", fetchMock);
 
@@ -407,40 +400,48 @@ test("Symptoms writes filter and selection changes into the URL and Back undoes 
     target: { value: "resolved" },
   });
   expect(currentUrl()).toBe("/symptoms?status=resolved");
-  expect(selectedSymptomTitle()).toBe("Brake squeal");
+  // The filtered page comes from the server, so its first row lands a beat later.
+  await waitFor(() => expect(selectedSymptomTitle()).toBe("Brake squeal"));
 
   goBack();
   await waitFor(() => expect(currentUrl()).toBe("/symptoms"));
   expect(screen.getByRole("combobox", { name: "Status filter" })).toHaveValue("all");
-  expect(selectedSymptomTitle()).toBe("Rough idle");
+  await waitFor(() => expect(selectedSymptomTitle()).toBe("Rough idle"));
 
   goForward();
   await waitFor(() => expect(currentUrl()).toBe("/symptoms?status=resolved"));
-  expect(selectedSymptomTitle()).toBe("Brake squeal");
+  await waitFor(() => expect(selectedSymptomTitle()).toBe("Brake squeal"));
 });
 
-test("Symptoms commits the keyword box without a history entry per keystroke", async () => {
+test("Symptoms commits the keyword box without a history entry or a request per keystroke", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
 
   try {
     // A prior entry to fall back to, so "one Back leaves the page" is provable
     // rather than a no-op at the bottom of the history stack.
-    await renderSymptoms("/symptoms", ["/elsewhere", "/symptoms"]);
+    const fetchMock = await renderSymptoms("/symptoms", ["/elsewhere", "/symptoms"]);
+    const { listRequests } = fetchMock.api;
+    const requestsBeforeTyping = listRequests.length;
 
     const searchBox = screen.getByPlaceholderText(
       "Search title, system, causes, or notes"
     );
 
-    // Typing filters the list straight away, exactly as it did before the URL
-    // held this state...
+    // The server does the searching now, so typing asks it nothing yet: the box
+    // shows the draft, and the list stays on the last answer...
     fireEvent.change(searchBox, { target: { value: "bra" } });
     fireEvent.change(searchBox, { target: { value: "brake" } });
-    expect(selectedSymptomTitle()).toBe("Brake squeal");
+    expect(searchBox).toHaveValue("brake");
     expect(currentUrl()).toBe("/symptoms");
+    expect(listRequests).toHaveLength(requestsBeforeTyping);
 
-    // ...and lands in the URL once, after the typing stops.
+    // ...then the keyword lands in the URL once, after the typing stops, and
+    // that one view is one request.
     await vi.advanceTimersByTimeAsync(400);
     await waitFor(() => expect(currentUrl()).toBe("/symptoms?q=brake"));
+    await waitFor(() => expect(selectedSymptomTitle()).toBe("Brake squeal"));
+    expect(listRequests).toHaveLength(requestsBeforeTyping + 1);
+    expect(listRequests.at(-1).get("q")).toBe("brake");
 
     // It replaced rather than pushed, so a single Back leaves the page instead
     // of walking backwards through "brake", "brak", "bra", "br", "b".

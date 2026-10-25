@@ -86,9 +86,10 @@ state a plan imagined.
   hand-reviewed live runs during Stage 5-E2 are the planner's only live check: all five came
   back `partial`, mainly because no run established its tools, and readiness never went
   above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)).
-- **Three pages still download whole collections.** Symptoms, Procedures, and Notes each
-  fetch every record with no limit (Notes fetches four collections). Ask AI's document card
-  and the Documents page now page on the server (first slice of N7); these were not.
+- **Two pages still download whole collections.** Procedures and Notes each fetch every
+  record with no limit (Notes fetches four collections). Ask AI's document card, the
+  Documents page, and the Symptoms page now page on the server (the first two slices of
+  N7); these were not.
 - **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
   `Ω`, and `kΩ` are detected (N4's second slice), so are `A` and `mA`, and since Stage 2 of
   the 2026-10-18 audit so are `kV`, `mΩ`, and `MΩ`, but case-sensitively: a lowercase `v`

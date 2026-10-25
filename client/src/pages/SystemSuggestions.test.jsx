@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { ProceduresPage } from "./ProceduresPage";
 import { SymptomsPage } from "./SymptomsPage";
+import { createSymptomsApi } from "../test/symptomsApiMock";
 
 function jsonResponse(payload, ok = true) {
   return Promise.resolve({
@@ -17,53 +18,42 @@ afterEach(() => {
 });
 
 test("SymptomsPage shows saved system suggestions from Settings in create and edit forms", async () => {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/symptoms") {
-      return jsonResponse({
-        symptoms: [
-          {
-            id: 1,
-            title: "Brake squeal during cold start",
-            description: "Squeals for the first minute of driving.",
-            system: "Brakes",
-            suspectedCauses: "Glazed pads",
-            confidence: "medium",
-            status: "open",
-            notes: "",
-            createdAt: "2026-04-15T10:00:00.000Z",
-            updatedAt: "2026-04-17T09:00:00.000Z",
-            linkedDocumentIds: [],
-            linkedDocuments: [],
-          },
-        ],
-      });
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse({
-        documents: [
-          {
-            id: 11,
-            title: "Brake inspection notes",
-            system: "Brakes",
-            documentType: "Inspection",
-          },
-        ],
-      });
-    }
-
-    if (url === "/api/settings") {
-      return jsonResponse({
-        documentDefaults: {
-          commonSystems: ["Engine", "Cooling"],
+  const api = createSymptomsApi(
+    {
+      symptoms: [
+        {
+          id: 1,
+          title: "Brake squeal during cold start",
+          description: "Squeals for the first minute of driving.",
+          system: "Brakes",
+          suspectedCauses: "Glazed pads",
+          confidence: "medium",
+          status: "open",
+          notes: "",
+          createdAt: "2026-04-15T10:00:00.000Z",
+          updatedAt: "2026-04-17T09:00:00.000Z",
+          linkedDocumentIds: [],
+          linkedDocuments: [],
         },
-      });
+      ],
+      documents: [
+        {
+          id: 11,
+          title: "Brake inspection notes",
+          system: "Brakes",
+          documentType: "Inspection",
+        },
+      ],
+    },
+    {
+      extra: (url) =>
+        url === "/api/settings"
+          ? jsonResponse({ documentDefaults: { commonSystems: ["Engine", "Cooling"] } })
+          : undefined,
     }
+  );
 
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
 
   const { container } = render(
     <MemoryRouter initialEntries={["/symptoms"]}>

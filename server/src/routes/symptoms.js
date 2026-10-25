@@ -9,32 +9,88 @@ import {
   getSymptom,
   getSymptomRecord,
   listCandidateProcedures,
+  listSymptomPage,
   listSymptoms,
+  listSymptomSystems,
   normalizeConfidence,
   normalizeStatus,
   replaceSymptomDocumentLinks,
+  SYMPTOM_LIST_SORT_KEYS,
+  SYMPTOM_LIST_STATUS_FILTERS,
   updateSymptomFields,
 } from "../services/symptomService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt, parsePositiveIntArray } from "../utils/http.js";
+import {
+  parsePageLimit,
+  parsePageOffset,
+  parsePositiveInt,
+  parsePositiveIntArray,
+} from "../utils/http.js";
+
+const ALLOWED_CONFIDENCE_FILTERS = ["low", "medium", "high"];
+
+// Only plain strings count: Express parses `?system=a&system=b` into an array,
+// which must never reach a filter comparison.
+function getQueryString(request, name) {
+  return typeof request.query[name] === "string" ? request.query[name] : "";
+}
 
 export function createSymptomsRouter({
   suggestProcedures = suggestProceduresForSymptom,
 } = {}) {
   const router = Router();
 
-  router.get("/", (_request, response) => {
+  router.get("/", (request, response) => {
     try {
       const vehicleId = getVehicleId();
-      const symptoms = listSymptoms(vehicleId);
 
-      response.json({
-        symptoms,
-        total: symptoms.length,
+      // Backward compatible: with no `limit` query, return every symptom and
+      // ignore any filter (the Procedures, Notes, and Repair Checklists pages
+      // still rely on this). With `limit`, return one filtered, ordered page.
+      if (request.query.limit === undefined) {
+        const symptoms = listSymptoms(vehicleId);
+
+        response.json({
+          symptoms,
+          total: symptoms.length,
+        });
+        return;
+      }
+
+      const limit = parsePageLimit(request.query.limit, { defaultLimit: 25, maxLimit: 100 });
+      const offset = parsePageOffset(request.query.offset);
+      const sort = getQueryString(request, "sort");
+      const status = getQueryString(request, "status");
+      const confidence = getQueryString(request, "confidence");
+      const page = listSymptomPage(vehicleId, {
+        query: getQueryString(request, "q"),
+        system: getQueryString(request, "system"),
+        // An unknown value is no filter rather than an error, the same way an
+        // unknown sort is the default order.
+        status: SYMPTOM_LIST_STATUS_FILTERS.includes(status) ? status : "",
+        confidence: ALLOWED_CONFIDENCE_FILTERS.includes(confidence) ? confidence : "",
+        sort: SYMPTOM_LIST_SORT_KEYS.includes(sort) ? sort : "newest",
+        limit,
+        offset,
       });
+
+      // `total` is every symptom; `matched` is how many the filters leave.
+      response.json({ ...page, limit, offset });
     } catch (error) {
       response.status(500).json({
         error: error.message || "Could not load symptoms.",
+      });
+    }
+  });
+
+  // The choices the page's System filter offers, from every symptom rather than
+  // from the loaded page. Declared before `/:id` so it is never read as an id.
+  router.get("/filter-options", (_request, response) => {
+    try {
+      response.json({ systems: listSymptomSystems(getVehicleId()) });
+    } catch (error) {
+      response.status(500).json({
+        error: error.message || "Could not load symptom filters.",
       });
     }
   });

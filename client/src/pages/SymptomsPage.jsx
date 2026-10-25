@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
 import { ListDetailLayout } from "../components/ListDetailLayout";
+import { ListPager } from "../components/ListPager";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   SelectField,
@@ -10,6 +11,7 @@ import {
   TextAreaField,
   TextField,
 } from "../components/forms/FormFields";
+import { RecordPicker } from "../components/forms/RecordPicker";
 import {
   fetchSuggestedProcedures,
   setSymptomProcedures,
@@ -20,15 +22,25 @@ import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
 import { useScrollToHash } from "../lib/useScrollToHash";
 import {
-  applyParamUpdates,
+  buildSymptomsListQuery,
+  countSymptomPages,
+  SYMPTOMS_PER_PAGE,
+} from "../lib/symptomsQuery";
+import {
   clearFilterUpdates,
+  DEFAULT_PAGE,
   filterValueUpdates,
+  pageParamValue,
   readFilterValues,
   readIdParam,
-  resolveSelectedRecord,
+  readPageParam,
   useDraftTextParam,
+  useViewParamWriter,
 } from "../lib/urlState";
-import { getStatusBadgeClass } from "../components/symptoms/symptomDisplay";
+import {
+  formatSymptomRangeText,
+  getStatusBadgeClass,
+} from "../components/symptoms/symptomDisplay";
 import { SymptomsControls } from "../components/symptoms/SymptomsControls";
 import { SymptomsSummary } from "../components/symptoms/SymptomsSummary";
 import { SymptomsList } from "../components/symptoms/SymptomsList";
@@ -41,7 +53,9 @@ const emptySymptomForm = {
   confidence: "medium",
   status: "open",
   notes: "",
-  linkedDocumentIds: [],
+  // Records, not bare ids: the picker no longer holds the whole library, so a
+  // linked document's title has to travel with its id.
+  linkedDocuments: [],
 };
 
 // The filters that materially decide which symptoms are on screen, and so
@@ -59,91 +73,67 @@ const SYMPTOM_FILTERS = {
   sort: { default: "newest", options: ["newest", "oldest", "title"] },
 };
 
-function compareSymptoms(firstSymptom, secondSymptom, sortBy) {
-  if (sortBy === "oldest") {
-    return new Date(firstSymptom.updatedAt || 0) - new Date(secondSymptom.updatedAt || 0);
-  }
+// A committed keyword starts its results from page 1.
+const PAGE_KEYS = ["page"];
 
-  if (sortBy === "title") {
-    return firstSymptom.title.localeCompare(secondSymptom.title);
-  }
+// The status cards' counts until the server sends its own (the cards are not
+// shown before the first answer), and the fallback for any count it omits.
+const emptyStatusCounts = { open: 0, monitoring: 0, resolved: 0 };
 
-  return new Date(secondSymptom.updatedAt || 0) - new Date(firstSymptom.updatedAt || 0);
+function describeDocument(document) {
+  return `${document.system || "No system"} - ${document.documentType || "No type"}`;
 }
 
-function matchesStatusFilter(symptom, statusFilter) {
-  if (statusFilter === "all") {
-    return true;
-  }
-
-  if (statusFilter === "active") {
-    return symptom.status === "open" || symptom.status === "monitoring";
-  }
-
-  return symptom.status === statusFilter;
+function describeProcedure(procedure) {
+  return `${procedure.system || "No system"} - ${labelize(procedure.difficulty)}`;
 }
 
-function matchesSearch(symptom, query) {
-  if (!query) {
-    return true;
-  }
-
-  const searchableFields = [
-    symptom.title,
-    symptom.system,
-    symptom.suspectedCauses,
-    symptom.notes,
-  ];
-
-  return searchableFields.some((value) => value?.toLowerCase().includes(query));
+function toLinkedDocument(document) {
+  return {
+    id: document.id,
+    title: document.title,
+    system: document.system || "",
+    documentType: document.documentType || "",
+  };
 }
 
+function toLinkedProcedure(procedure) {
+  return {
+    id: procedure.id,
+    title: procedure.title,
+    system: procedure.system || "",
+    difficulty: procedure.difficulty,
+  };
+}
 
-function LinkedDocumentsSelector({
-  documents,
-  selectedIds,
-  onToggle,
-  disabled = false,
-}) {
+function toggleRecord(records, record, toLinkedRecord) {
+  return records.some((current) => current.id === record.id)
+    ? records.filter((current) => current.id !== record.id)
+    : [...records, toLinkedRecord(record)];
+}
+
+function LinkedDocumentsSelector({ selectedDocuments, onToggle, pickerCache, disabled = false }) {
   return (
-    <fieldset className="grid gap-2 text-sm text-slate-700">
-      <legend className="font-medium text-slate-900">Linked documents</legend>
-
-      {documents.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          No documents available yet. Upload a PDF on the Documents page first.
-        </p>
-      ) : (
-        <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-          {documents.map((document) => {
-            const checked = selectedIds.includes(document.id);
-
-            return (
-              <label key={document.id} className="flex items-start gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={disabled}
-                  onChange={() => onToggle(document.id)}
-                />
-                <span>
-                  <span className="font-medium text-slate-900">{document.title}</span>
-                  <span className="block text-xs text-slate-500">
-                    {document.system} - {document.documentType}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </fieldset>
+    <RecordPicker
+      legend="Linked documents"
+      endpoint="/api/search/documents"
+      cache={pickerCache}
+      selected={selectedDocuments}
+      onToggle={onToggle}
+      describe={describeDocument}
+      noun="document"
+      nounPlural="documents"
+      searchLabel="Find documents"
+      searchPlaceholder="Search titles, systems, or text"
+      emptyLibraryText="No documents available yet. Upload a PDF on the Documents page first."
+      disabled={disabled}
+    />
   );
 }
 
 function SymptomCreateForm({
   form,
-  documents,
+  pickerCache,
   systemSuggestions,
   creating,
   createMessage,
@@ -229,9 +219,9 @@ function SymptomCreateForm({
         />
 
         <LinkedDocumentsSelector
-          documents={documents}
-          selectedIds={form.linkedDocumentIds}
+          selectedDocuments={form.linkedDocuments}
           onToggle={onToggleDocument}
+          pickerCache={pickerCache}
           disabled={creating}
         />
 
@@ -260,7 +250,7 @@ function SymptomCreateForm({
 
 function SymptomEditForm({
   form,
-  documents,
+  pickerCache,
   systemSuggestions,
   saveState,
   onChange,
@@ -319,9 +309,9 @@ function SymptomEditForm({
       <TextAreaField label="Notes" name="notes" value={form.notes} onChange={onChange} />
 
       <LinkedDocumentsSelector
-        documents={documents}
-        selectedIds={form.linkedDocumentIds}
+        selectedDocuments={form.linkedDocuments}
         onToggle={onToggleDocument}
+        pickerCache={pickerCache}
         disabled={saveState.saving}
       />
 
@@ -374,10 +364,11 @@ function SuggestionCitations({ citations }) {
 
 // Manual procedure links plus the "Suggest fixes" helper for one symptom.
 // Keeps its own UI state but pushes the updated symptom back up so the page
-// list and detail panel stay in sync.
-function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
+// list and detail panel stay in sync. The selector searches procedures a page
+// at a time instead of listing every procedure in the library.
+function SymptomProcedurePanel({ symptom, pickerCache, onSymptomUpdated }) {
   const linkedProcedures = symptom.linkedProcedures || [];
-  const [selectedIds, setSelectedIds] = useState(symptom.linkedProcedureIds || []);
+  const [selectedProcedures, setSelectedProcedures] = useState(linkedProcedures);
   const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
   const [suggestions, setSuggestions] = useState([]);
   const [suggestState, setSuggestState] = useState({
@@ -388,13 +379,10 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
     aiConfigured: true,
   });
   const [linkingId, setLinkingId] = useState(null);
+  const selectedIds = selectedProcedures.map((procedure) => procedure.id);
 
-  function toggleProcedure(procedureId) {
-    setSelectedIds((current) =>
-      current.includes(procedureId)
-        ? current.filter((id) => id !== procedureId)
-        : [...current, procedureId]
-    );
+  function toggleProcedure(procedure) {
+    setSelectedProcedures((current) => toggleRecord(current, procedure, toLinkedProcedure));
   }
 
   async function handleSaveLinks() {
@@ -402,7 +390,7 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
       setSaveState({ saving: true, message: "", error: "" });
       const payload = await setSymptomProcedures(symptom.id, selectedIds);
       onSymptomUpdated(payload.symptom);
-      setSelectedIds(payload.symptom.linkedProcedureIds || []);
+      setSelectedProcedures(payload.symptom.linkedProcedures || []);
       setSaveState({ saving: false, message: "Linked procedures saved.", error: "" });
     } catch (error) {
       setSaveState({
@@ -445,7 +433,7 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
         : [...selectedIds, procedureId];
       const payload = await setSymptomProcedures(symptom.id, nextIds);
       onSymptomUpdated(payload.symptom);
-      setSelectedIds(payload.symptom.linkedProcedureIds || []);
+      setSelectedProcedures(payload.symptom.linkedProcedures || []);
       setSuggestions((current) =>
         current.filter((suggestion) => suggestion.procedureId !== procedureId)
       );
@@ -487,55 +475,41 @@ function SymptomProcedurePanel({ symptom, procedures, onSymptomUpdated }) {
         <p className="mt-2 text-slate-700">No linked procedures yet.</p>
       )}
 
-      <fieldset className="mt-3 grid gap-2 text-sm text-slate-700">
-        <legend className="font-medium text-slate-900">Link procedures</legend>
-
-        {procedures.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            No procedures available yet. Create one on the Procedures page first.
-          </p>
-        ) : (
-          <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-            {procedures.map((procedure) => (
-              <label
-                key={procedure.id}
-                className="flex items-start gap-2 text-sm text-slate-700"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(procedure.id)}
+      <div className="mt-3">
+        <RecordPicker
+          legend="Link procedures"
+          endpoint="/api/search/procedures"
+          cache={pickerCache}
+          selected={selectedProcedures}
+          onToggle={toggleProcedure}
+          describe={describeProcedure}
+          noun="procedure"
+          nounPlural="procedures"
+          searchLabel="Find procedures"
+          searchPlaceholder="Search titles, systems, steps, or parts"
+          emptyLibraryText="No procedures available yet. Create one on the Procedures page first."
+          disabled={saveState.saving}
+          footer={
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveLinks}
                   disabled={saveState.saving}
-                  onChange={() => toggleProcedure(procedure.id)}
-                />
-                <span>
-                  <span className="font-medium text-slate-900">{procedure.title}</span>
-                  <span className="block text-xs text-slate-500">
-                    {procedure.system || "No system"} - {labelize(procedure.difficulty)}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
+                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
+                >
+                  {saveState.saving ? "Saving..." : "Save linked procedures"}
+                </button>
+                {saveState.message ? (
+                  <span className="text-sm text-emerald-700">{saveState.message}</span>
+                ) : null}
+              </div>
 
-        {procedures.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleSaveLinks}
-              disabled={saveState.saving}
-              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
-            >
-              {saveState.saving ? "Saving..." : "Save linked procedures"}
-            </button>
-            {saveState.message ? (
-              <span className="text-sm text-emerald-700">{saveState.message}</span>
-            ) : null}
-          </div>
-        ) : null}
-
-        {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
-      </fieldset>
+              {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
+            </>
+          }
+        />
+      </div>
 
       <div className="mt-4 border-t border-slate-200 pt-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -611,8 +585,7 @@ function SymptomDetails({
   symptom,
   isEditing,
   editForm,
-  documents,
-  procedures,
+  pickerCache,
   systemSuggestions,
   saveState,
   deleteState,
@@ -739,7 +712,7 @@ function SymptomDetails({
         <SymptomProcedurePanel
           key={symptom.id}
           symptom={symptom}
-          procedures={procedures}
+          pickerCache={pickerCache}
           onSymptomUpdated={onSymptomUpdated}
         />
 
@@ -749,7 +722,7 @@ function SymptomDetails({
       {isEditing ? (
         <SymptomEditForm
           form={editForm}
-          documents={documents}
+          pickerCache={pickerCache}
           systemSuggestions={systemSuggestions}
           saveState={saveState}
           onChange={onEditChange}
@@ -779,8 +752,29 @@ function toSymptomPayload(form) {
     confidence: form.confidence,
     status: form.status,
     notes: form.notes,
-    linkedDocumentIds: form.linkedDocumentIds,
+    linkedDocumentIds: form.linkedDocuments.map((document) => document.id),
   };
+}
+
+// The detail panel when the symptom a link names could not be loaded for a
+// reason other than "it does not exist" (a 404 drops the link instead). It names
+// the requested symptom so nothing else is mistaken for it, and the link is kept
+// so the owner can simply try again.
+function SymptomLookupError({ symptomId, message, onRetry }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <ErrorBanner title={`Could not load symptom #${symptomId}.`}>
+        {message} The link to it is kept, so you can try again.
+        <button
+          type="button"
+          className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+          onClick={onRetry}
+        >
+          Try again
+        </button>
+      </ErrorBanner>
+    </section>
+  );
 }
 
 export function SymptomsPage() {
@@ -788,12 +782,48 @@ export function SymptomsPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSymptomId = readIdParam(searchParams, "symptomId");
+  const requestedPage = readPageParam(searchParams);
+  // `symptoms` is the ONE PAGE the server last sent -- never the whole list. The
+  // server also owns the counts: `matchedCount` is how many symptoms the current
+  // filters leave; `libraryTotal` and `statusCounts` describe every symptom.
   const [symptoms, setSymptoms] = useState([]);
-  const [documents, setDocuments] = useState([]);
-  const [procedures, setProcedures] = useState([]);
-  const [savedCommonSystems, setSavedCommonSystems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [matchedCount, setMatchedCount] = useState(0);
+  const [libraryTotal, setLibraryTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState(emptyStatusCounts);
+  // Which request the rows above answer. Anything that reasons about "this view"
+  // (clamping the page, resolving the selection) waits until it equals the
+  // current request, so a stale page can never be mistaken for the new one.
+  const [settledQuery, setSettledQuery] = useState(null);
+  // The page the rows on screen belong to. The counter and the pager describe
+  // THESE rows: while a new page loads, or after it failed to, the URL is ahead
+  // of what is actually shown.
+  const [settledPage, setSettledPage] = useState(DEFAULT_PAGE);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const latestListRequest = useRef(0);
+  // The System filter's choices, from every symptom rather than the loaded page.
+  const [filterSystems, setFilterSystems] = useState([]);
+  const [optionsToken, setOptionsToken] = useState(0);
+  const [savedCommonSystems, setSavedCommonSystems] = useState([]);
+  // The selected symptom when its row is not on the current page (a deep link,
+  // a symptom just created that a filter hides).
+  const [fetchedSymptom, setFetchedSymptom] = useState(null);
+  // A by-id lookup that failed for a reason other than "no such symptom":
+  // `{ symptomId, message }`. The panel reports it instead of showing anything
+  // else in the requested symptom's place.
+  const [lookupFailure, setLookupFailure] = useState(null);
+  // A selection made by this page (a symptom just created, or the one on display
+  // when a save re-sorts the page) before the URL has caught up with it: React
+  // Router commits that navigation as a transition, so the page can render first.
+  const [pinnedSymptomId, setPinnedSymptomId] = useState(null);
+  // Pickers on this page share one answer cache per visit, so opening another
+  // symptom does not ask for the same first page of procedures again.
+  const pickerCache = useRef(new Map()).current;
+  // Symptoms this page deleted. Their row goes before the URL stops naming them,
+  // and a lookup for one (in that gap, or after Back) could only answer 404.
+  const deletedSymptomIds = useRef(new Set());
 
   const [createForm, setCreateForm] = useState(emptySymptomForm);
   const [creating, setCreating] = useState(false);
@@ -814,8 +844,10 @@ export function SymptomsPage() {
   // Filters live in the URL so Back returns to the filtered list the owner was
   // reading, not to an unfiltered one. The keyword box is the exception: it
   // types into local state and lands in the URL a beat later (see
-  // useDraftTextParam), because "brake" is one view, not five history entries.
+  // useDraftTextParam), because "brake" is one view, not five history entries
+  // -- and, now that the server does the searching, not five requests either.
   const {
+    q: committedSearch,
     status: statusFilter,
     system: systemFilter,
     confidence: confidenceFilter,
@@ -824,215 +856,393 @@ export function SymptomsPage() {
   const [searchValue, setSearchValue] = useDraftTextParam("q", {
     searchParams,
     setSearchParams,
+    clearOnCommit: PAGE_KEYS,
   });
+  // The pin outranks the URL: it only exists while a selection this page made
+  // has not reached the URL yet, and the URL still names the previous one.
+  const selectionId = pinnedSymptomId ?? requestedSymptomId;
 
-  const updateViewParams = useCallback(
-    (updates, { replace = false } = {}) => {
-      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
-        replace,
-      });
-    },
-    [setSearchParams]
-  );
+  // One writer for every URL change this page makes, so "carry the parameters
+  // I did not mention" is guaranteed rather than remembered at each call site,
+  // and two writes close together (a delete clearing `symptomId`, then the
+  // refetch clamping `page`) both land. It is stable, so the list fetch can use
+  // it without re-running on every selection click.
+  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
 
+  // Filtering, sorting, and slicing all happen on the server, over every
+  // symptom. The request is a pure function of the view state in the URL, and
+  // that string is the only thing the fetch effect depends on.
+  const listQuery = buildSymptomsListQuery({
+    q: committedSearch,
+    status: statusFilter,
+    system: systemFilter,
+    confidence: confidenceFilter,
+    sort: sortBy,
+    page: requestedPage,
+  });
+  const dataIsCurrent = settledQuery === listQuery;
+  const totalPages = countSymptomPages(matchedCount);
+  const currentPage = Math.min(settledPage, totalPages);
+  const loadingAnotherPage = isFetching && !dataIsCurrent && requestedPage !== currentPage;
+
+  // Changing a filter is a navigation step the owner should be able to undo, so
+  // it pushes -- and it drops `page`, because page 4 of the old filter says
+  // nothing about the new one.
   function handleFilterChange(key, value) {
-    updateViewParams(filterValueUpdates({ [key]: value }, SYMPTOM_FILTERS));
+    updateViewParams({
+      ...filterValueUpdates({ [key]: value }, SYMPTOM_FILTERS),
+      page: null,
+    });
   }
 
-  const availableSystems = useMemo(() => {
-    return Array.from(
-      new Set(symptoms.map((symptom) => symptom.system).filter(Boolean))
-    ).sort((firstSystem, secondSystem) => firstSystem.localeCompare(secondSystem));
-  }, [symptoms]);
+  // Previous/Next act on the page the owner can see. When that lands on the page
+  // the URL already asks for -- its load is in flight or just failed -- ask the
+  // server again (unless it is already being asked) rather than navigating
+  // nowhere.
+  function goToPage(targetPage) {
+    if (targetPage === requestedPage) {
+      if (!isFetching) {
+        reloadList();
+      }
+      return;
+    }
+
+    updateViewParams({ page: pageParamValue(targetPage) });
+  }
 
   const systemSuggestions = useMemo(() => {
-    return mergeSuggestionValues([
-      ...savedCommonSystems,
-      ...symptoms.map((symptom) => symptom.system),
-    ]);
-  }, [savedCommonSystems, symptoms]);
+    return mergeSuggestionValues([...savedCommonSystems, ...filterSystems]);
+  }, [savedCommonSystems, filterSystems]);
 
-  const statusCounts = useMemo(() => {
-    return symptoms.reduce(
-      (counts, symptom) => {
-        if (symptom.status === "monitoring") {
-          counts.monitoring += 1;
-        } else if (symptom.status === "resolved") {
-          counts.resolved += 1;
-        } else {
-          counts.open += 1;
-        }
-
-        return counts;
-      },
-      {
-        open: 0,
-        monitoring: 0,
-        resolved: 0,
-      }
-    );
-  }, [symptoms]);
-
-  const filteredSymptoms = useMemo(() => {
-    const normalizedQuery = searchValue.trim().toLowerCase();
-
-    return symptoms
-      .filter((symptom) => {
-        if (!matchesStatusFilter(symptom, statusFilter)) {
-          return false;
-        }
-
-        if (systemFilter !== "all" && symptom.system !== systemFilter) {
-          return false;
-        }
-
-        if (confidenceFilter !== "all" && symptom.confidence !== confidenceFilter) {
-          return false;
-        }
-
-        return matchesSearch(symptom, normalizedQuery);
-      })
-      .sort((firstSymptom, secondSymptom) =>
-        compareSymptoms(firstSymptom, secondSymptom, sortBy)
-      );
-  }, [symptoms, searchValue, statusFilter, systemFilter, confidenceFilter, sortBy]);
-
-  // Derived from the URL and the list rather than stored. No `symptomId` means
-  // the page's existing default (see resolveSelectedRecord), now spelled as an
-  // absent parameter so an untouched list keeps a clean `/symptoms` URL.
-  const selectedSymptom = useMemo(
-    () => resolveSelectedRecord(requestedSymptomId, symptoms, filteredSymptoms),
-    [requestedSymptomId, symptoms, filteredSymptoms]
-  );
-  const selectedSymptomId = selectedSymptom?.id ?? null;
-
+  // Whether the list on screen is narrower than the list itself. Drives which
+  // empty state the list shows. The keyword counts once it has reached the URL;
+  // the Clear filters button also appears for a keyword still being typed.
   const hasActiveFilters =
-    searchValue.trim() !== "" ||
+    committedSearch.trim() !== "" ||
     statusFilter !== "all" ||
     systemFilter !== "all" ||
     confidenceFilter !== "all";
 
-  function toggleLinkedDocument(selectedIds, documentId) {
-    if (selectedIds.includes(documentId)) {
-      return selectedIds.filter((id) => id !== documentId);
-    }
+  // The selected symptom is derived, not stored. No `symptomId` in the URL means
+  // "the first symptom" -- the first row of the page on screen, since the rest
+  // of the list is not loaded -- spelled as the absence of a parameter, so an
+  // untouched list keeps a clean `/symptoms` URL. A `symptomId` whose row is not
+  // on this page is fetched on its own below, so a deep link opens its record
+  // under any filter or page, and is shown only as itself: while its lookup is
+  // in flight the panel is empty, and if it fails the panel says so.
+  const rowSymptom = selectionId
+    ? symptoms.find((symptom) => symptom.id === selectionId)
+    : null;
+  const fetchedMatch =
+    selectionId && fetchedSymptom?.id === selectionId ? fetchedSymptom : null;
+  const selectedSymptom = selectionId
+    ? rowSymptom || fetchedMatch || null
+    : symptoms[0] || null;
+  const selectedSymptomId = selectedSymptom?.id ?? null;
+  const selectionLookupFailure =
+    selectionId && !selectedSymptom && lookupFailure?.symptomId === selectionId
+      ? lookupFailure
+      : null;
 
-    return [...selectedIds, documentId];
-  }
-
-  // Keep the list and detail panel in sync after a procedure link change.
-  function handleSymptomUpdated(updatedSymptom) {
-    if (!updatedSymptom) {
+  // Normalization only, so it replaces rather than pushing: `page=99` or
+  // `page=abc` should not become a history entry. Waits until the rows on screen
+  // answer THIS request -- before that, the page count belongs to another view.
+  useEffect(() => {
+    if (!dataIsCurrent || loadError) {
       return;
     }
+
+    const canonicalPage = pageParamValue(
+      Math.min(Math.max(requestedPage, DEFAULT_PAGE), totalPages)
+    );
+
+    if ((searchParams.get("page") ?? null) !== canonicalPage) {
+      updateViewParams({ page: canonicalPage }, { replace: true });
+    }
+  }, [dataIsCurrent, loadError, requestedPage, totalPages, searchParams, updateViewParams]);
+
+  // An unusable `symptomId` ("abc", "0") names nothing, so it drops out of the
+  // URL. Only that parameter is touched; the filters stay as they are.
+  useEffect(() => {
+    if (!dataIsCurrent || !searchParams.has("symptomId") || requestedSymptomId) {
+      return;
+    }
+
+    updateViewParams({ symptomId: null }, { replace: true });
+  }, [dataIsCurrent, requestedSymptomId, searchParams, updateViewParams]);
+
+  // A well-formed `symptomId` whose row is not on this page is looked up by id.
+  // The server's 404 is what says it does not exist -- deleted, or hand-typed --
+  // and only then does the parameter drop out of the URL. A symptom that exists
+  // but that the filters hide keeps its parameter and is shown.
+  const requestedRowIsOnPage = Boolean(rowSymptom);
+  useEffect(() => {
+    if (
+      !selectionId ||
+      !dataIsCurrent ||
+      requestedRowIsOnPage ||
+      fetchedSymptom?.id === selectionId ||
+      lookupFailure?.symptomId === selectionId
+    ) {
+      return undefined;
+    }
+
+    // Deleted here, so the server would only say 404: answer that without asking.
+    if (deletedSymptomIds.current.has(selectionId)) {
+      setPinnedSymptomId(null);
+      updateViewParams({ symptomId: null }, { replace: true });
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function lookUpSymptom() {
+      try {
+        const response = await fetch(`/api/symptoms/${selectionId}`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (cancelled) {
+          return;
+        }
+
+        if (response.status === 404) {
+          setFetchedSymptom(null);
+          setPinnedSymptomId(null);
+          updateViewParams({ symptomId: null }, { replace: true });
+          return;
+        }
+
+        if (!response.ok || !payload.symptom) {
+          throw new Error(payload.error || "The server could not load it.");
+        }
+
+        setFetchedSymptom(payload.symptom);
+      } catch (error) {
+        if (!cancelled) {
+          setLookupFailure({
+            symptomId: selectionId,
+            message:
+              error instanceof TypeError
+                ? "The server could not be reached."
+                : error.message || "The server could not load it.",
+          });
+        }
+      }
+    }
+
+    lookUpSymptom();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectionId,
+    dataIsCurrent,
+    requestedRowIsOnPage,
+    fetchedSymptom,
+    lookupFailure,
+    updateViewParams,
+  ]);
+
+  // A failed lookup is remembered only for the visit it failed on: coming back
+  // to that `symptomId` later asks the server again.
+  useEffect(() => {
+    setLookupFailure(null);
+  }, [selectionId]);
+
+  // The pin's job is done once the URL names a symptom itself, and it never
+  // outlives the view it was made in.
+  useEffect(() => {
+    setPinnedSymptomId(null);
+  }, [requestedSymptomId, listQuery]);
+
+  // An edit form belongs to the symptom it was opened on. Moving the selection
+  // any other way (a row click, Back, a deep link, a filter that changes the
+  // first row) closes it instead of leaving it armed for another record.
+  useEffect(() => {
+    setEditingSymptomId((currentId) =>
+      currentId && currentId !== selectedSymptomId ? null : currentId
+    );
+  }, [selectedSymptomId]);
+
+  // One request per view. The fetch depends on the request string alone, so a
+  // filter, sort, keyword, or page change is exactly one fetch, a selection
+  // change within the page is none, and Back/Forward re-requests the page it
+  // lands on. Rows from the previous view stay on screen until the new ones
+  // arrive, so the controls the owner is using never unmount mid-interaction.
+  useEffect(() => {
+    const requestId = latestListRequest.current + 1;
+    latestListRequest.current = requestId;
+
+    async function loadSymptoms() {
+      setIsFetching(true);
+      // Set when this answer hands over to another request instead of settling.
+      let handedOff = false;
+
+      try {
+        const response = await fetch(`/api/symptoms?${listQuery}`);
+        const payload = await response.json();
+
+        // A newer view has been asked for since: this answer is stale.
+        if (requestId !== latestListRequest.current) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Could not load symptoms.");
+        }
+
+        const nextSymptoms = Array.isArray(payload.symptoms) ? payload.symptoms : [];
+        const nextMatched = Number.isFinite(payload.matched)
+          ? payload.matched
+          : nextSymptoms.length;
+        const offset = Number(new URLSearchParams(listQuery).get("offset")) || 0;
+
+        // A page past the end (a hand-typed `page=9`, or the last page after its
+        // only row was deleted) answers with no rows while symptoms do match.
+        // That empty answer is never shown as the list: the URL moves to the
+        // last real page -- by replace, it is normalization -- and that
+        // request's answer is the one that settles.
+        if (!nextSymptoms.length && nextMatched > 0 && offset >= nextMatched) {
+          handedOff = true;
+          updateViewParams(
+            { page: pageParamValue(countSymptomPages(nextMatched)) },
+            { replace: true }
+          );
+          return;
+        }
+
+        setSymptoms(nextSymptoms);
+        setSettledPage(Math.floor(offset / SYMPTOMS_PER_PAGE) + 1);
+        setMatchedCount(nextMatched);
+        setLibraryTotal(Number.isFinite(payload.total) ? payload.total : nextMatched);
+        setStatusCounts({ ...emptyStatusCounts, ...payload.statusCounts });
+        setSettledQuery(listQuery);
+        setLoadError("");
+        setHasLoaded(true);
+      } catch (error) {
+        if (requestId === latestListRequest.current) {
+          setLoadError(
+            error instanceof TypeError
+              ? "The server could not be reached."
+              : error.message || "Could not load symptoms."
+          );
+        }
+      } finally {
+        if (requestId === latestListRequest.current && !handedOff) {
+          setIsFetching(false);
+        }
+      }
+    }
+
+    loadSymptoms();
+
+    // Leaving the page, or asking for another view, makes this answer stale, so
+    // it can neither fill a page nobody sees nor move a URL the owner has left.
+    return () => {
+      latestListRequest.current += 1;
+    };
+  }, [listQuery, reloadToken, updateViewParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilterOptions() {
+      try {
+        const response = await fetch("/api/symptoms/filter-options");
+        const payload = await response.json();
+
+        if (cancelled || !response.ok) {
+          return;
+        }
+
+        setFilterSystems(Array.isArray(payload.systems) ? payload.systems : []);
+      } catch {
+        // The dropdown keeps what it had; the list does not depend on it.
+      }
+    }
+
+    loadFilterOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [optionsToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSettings() {
+      try {
+        const response = await fetch("/api/settings");
+        const payload = await response.json();
+
+        if (!cancelled && response.ok) {
+          setSavedCommonSystems(payload.documentDefaults?.commonSystems || []);
+        }
+      } catch {
+        // Suggestions only; the page works without them.
+      }
+    }
+
+    loadSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Re-ask the server for the page on screen after something changed it. The
+  // rows stay put meanwhile, so a save does not flash the list away.
+  function reloadList({ options = false } = {}) {
+    setReloadToken((token) => token + 1);
+
+    if (options) {
+      setOptionsToken((token) => token + 1);
+    }
+  }
+
+  // A saved symptom reaches its row and the by-id copy immediately; the reload
+  // that follows lets the server decide whether it still belongs on this page.
+  //
+  // Every save bumps `updated_at`, so a sort by last update reorders the page.
+  // When the selection is only implicit (the page's first row), that reorder
+  // would hand the panel to a different symptom. So the symptom ON DISPLAY is
+  // pinned into the URL first -- by replace, since the view does not change --
+  // and kept as the by-id copy, so the panel stays where the owner was looking.
+  function applyUpdatedSymptom(updatedSymptom) {
+    const displayedSymptom = selectedSymptom;
+    const isDisplayed = updatedSymptom.id === displayedSymptom?.id;
+    const pinDisplayed = Boolean(displayedSymptom) && !requestedSymptomId;
 
     setSymptoms((currentSymptoms) =>
       currentSymptoms.map((symptom) =>
         symptom.id === updatedSymptom.id ? updatedSymptom : symptom
       )
     );
-  }
-
-  async function loadData() {
-    try {
-      setLoadError("");
-      setLoading(true);
-
-      const [symptomsResponse, documentsResponse] = await Promise.all([
-        fetch("/api/symptoms"),
-        fetch("/api/documents"),
-      ]);
-
-      const symptomsPayload = await symptomsResponse.json();
-      const documentsPayload = await documentsResponse.json();
-
-      if (!symptomsResponse.ok) {
-        throw new Error(symptomsPayload.error || "Could not load symptoms.");
+    setFetchedSymptom((currentSymptom) => {
+      if (isDisplayed || currentSymptom?.id === updatedSymptom.id) {
+        return updatedSymptom;
       }
 
-      if (!documentsResponse.ok) {
-        throw new Error(documentsPayload.error || "Could not load documents.");
-      }
+      return pinDisplayed ? displayedSymptom : currentSymptom;
+    });
 
-      const nextSymptoms = Array.isArray(symptomsPayload.symptoms)
-        ? symptomsPayload.symptoms
-        : [];
-      const nextDocuments = Array.isArray(documentsPayload.documents)
-        ? documentsPayload.documents
-        : [];
-
-      setSymptoms(nextSymptoms);
-      setDocuments(nextDocuments);
-
-      // Procedures power the manual link selector; a failure here should not
-      // block the symptom list, so it loads on its own.
-      try {
-        const proceduresResponse = await fetch("/api/procedures");
-        const proceduresPayload = await proceduresResponse.json();
-
-        if (proceduresResponse.ok) {
-          setProcedures(
-            Array.isArray(proceduresPayload.procedures)
-              ? proceduresPayload.procedures
-              : []
-          );
-        }
-      } catch {
-        setProcedures([]);
-      }
-
-      try {
-        const settingsResponse = await fetch("/api/settings");
-        const settingsPayload = await settingsResponse.json();
-
-        if (settingsResponse.ok) {
-          setSavedCommonSystems(settingsPayload.documentDefaults?.commonSystems || []);
-        }
-      } catch {
-        setSavedCommonSystems([]);
-      }
-    } catch (error) {
-      setLoadError(error.message || "Could not load symptom data.");
-    } finally {
-      setLoading(false);
+    if (pinDisplayed) {
+      setPinnedSymptomId(displayedSymptom.id);
+      updateViewParams({ symptomId: displayedSymptom.id }, { replace: true });
     }
   }
 
-  // Loaded once. Filtering, sorting, and picking a symptom all work on this
-  // list, so URL changes -- including Back and Forward -- never refetch.
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  // An edit form has to close when its symptom leaves the visible list, or the
-  // page would keep editing a record nobody can see.
-  useEffect(() => {
-    setEditingSymptomId((currentId) => {
-      if (currentId && filteredSymptoms.some((symptom) => symptom.id === currentId)) {
-        return currentId;
-      }
-
-      return null;
-    });
-  }, [filteredSymptoms]);
-
-  // A `symptomId` for a symptom that is not in the library -- deleted, or
-  // hand-typed, well-formed or not -- drops out of the URL so the address stops
-  // naming a record that does not exist. A symptom that exists but is hidden by
-  // the current filter keeps its parameter: it is the filter doing the hiding,
-  // and loosening it should bring the owner's selection back.
-  useEffect(() => {
-    if (loading || loadError || !searchParams.has("symptomId")) {
+  // Keep the list and detail panel in sync after a procedure link change. Links
+  // do not touch the symptom's own row, so the page needs no reload for them.
+  function handleSymptomUpdated(updatedSymptom) {
+    if (!updatedSymptom) {
       return;
     }
 
-    const namesALoadedSymptom =
-      requestedSymptomId && symptoms.some((symptom) => symptom.id === requestedSymptomId);
-
-    if (!namesALoadedSymptom) {
-      updateViewParams({ symptomId: null }, { replace: true });
-    }
-  }, [loading, loadError, requestedSymptomId, symptoms, searchParams, updateViewParams]);
+    applyUpdatedSymptom(updatedSymptom);
+  }
 
   function handleCreateFormChange(event) {
     const { name, value } = event.target;
@@ -1043,10 +1253,10 @@ export function SymptomsPage() {
     }));
   }
 
-  function handleToggleCreateDocument(documentId) {
+  function handleToggleCreateDocument(document) {
     setCreateForm((currentForm) => ({
       ...currentForm,
-      linkedDocumentIds: toggleLinkedDocument(currentForm.linkedDocumentIds, documentId),
+      linkedDocuments: toggleRecord(currentForm.linkedDocuments, document, toLinkedDocument),
     }));
   }
 
@@ -1079,10 +1289,15 @@ export function SymptomsPage() {
 
       const newSymptom = payload.symptom;
 
-      setSymptoms((currentSymptoms) => [newSymptom, ...currentSymptoms]);
+      // The new symptom is shown at once from the server's answer, whether or
+      // not the current filters and page will include its row; the reload then
+      // brings the list (and its counts) up to date.
+      setFetchedSymptom(newSymptom);
+      setPinnedSymptomId(newSymptom.id);
       // Replace, not push: opening the symptom just created is part of creating
       // it, not a step the owner should have to press Back through.
       updateViewParams({ symptomId: newSymptom.id }, { replace: true });
+      reloadList({ options: true });
       setCreateForm(emptySymptomForm);
       setCreateMessage("Symptom saved.");
       setEditingSymptomId(null);
@@ -1108,7 +1323,7 @@ export function SymptomsPage() {
       confidence: symptom.confidence || "medium",
       status: symptom.status || "open",
       notes: symptom.notes || "",
-      linkedDocumentIds: symptom.linkedDocumentIds || [],
+      linkedDocuments: (symptom.linkedDocuments || []).map(toLinkedDocument),
     });
     setSaveState({
       saving: false,
@@ -1140,10 +1355,10 @@ export function SymptomsPage() {
     }));
   }
 
-  function handleToggleEditDocument(documentId) {
+  function handleToggleEditDocument(document) {
     setEditForm((currentForm) => ({
       ...currentForm,
-      linkedDocumentIds: toggleLinkedDocument(currentForm.linkedDocumentIds, documentId),
+      linkedDocuments: toggleRecord(currentForm.linkedDocuments, document, toLinkedDocument),
     }));
   }
 
@@ -1184,13 +1399,8 @@ export function SymptomsPage() {
         throw new Error(payload.error || "Could not update symptom.");
       }
 
-      const updatedSymptom = payload.symptom;
-
-      setSymptoms((currentSymptoms) =>
-        currentSymptoms.map((symptom) =>
-          symptom.id === updatedSymptom.id ? updatedSymptom : symptom
-        )
-      );
+      applyUpdatedSymptom(payload.symptom);
+      reloadList({ options: true });
       setSaveState({
         saving: false,
         message: "Changes saved.",
@@ -1231,12 +1441,22 @@ export function SymptomsPage() {
         throw new Error(payload.error || "Could not delete symptom.");
       }
 
-      // Dropping the row is enough: the deleted id no longer matches anything,
-      // so the detail panel falls back to the first remaining symptom and the
-      // normalization effect clears the stale `symptomId` from the URL.
+      deletedSymptomIds.current.add(symptom.id);
+      // The row goes at once; the reload refills the page from the server (and
+      // steps back a page when this was the last row on the last one). A URL
+      // that named the deleted symptom stops naming it, so the panel falls back
+      // to the first row rather than looking up a record that is gone.
       setSymptoms((currentSymptoms) =>
         currentSymptoms.filter((currentSymptom) => currentSymptom.id !== symptom.id)
       );
+      setFetchedSymptom((current) => (current?.id === symptom.id ? null : current));
+      setPinnedSymptomId((current) => (current === symptom.id ? null : current));
+
+      if (requestedSymptomId === symptom.id) {
+        updateViewParams({ symptomId: null }, { replace: true });
+      }
+
+      reloadList({ options: true });
 
       if (editingSymptomId === symptom.id) {
         cancelEditingSymptom();
@@ -1254,6 +1474,18 @@ export function SymptomsPage() {
     }
   }
 
+  const rangeText = formatSymptomRangeText({
+    libraryTotal,
+    matched: matchedCount,
+    from: (currentPage - 1) * SYMPTOMS_PER_PAGE + 1,
+    count: symptoms.length,
+  });
+  const fetchingText = isFetching
+    ? loadingAnotherPage
+      ? `Loading page ${requestedPage}...`
+      : "Updating..."
+    : "";
+
   return (
     <>
       <PageHeader
@@ -1264,7 +1496,7 @@ export function SymptomsPage() {
       <div className="space-y-6">
         <SymptomCreateForm
           form={createForm}
-          documents={documents}
+          pickerCache={pickerCache}
           systemSuggestions={systemSuggestions}
           creating={creating}
           createMessage={createMessage}
@@ -1274,8 +1506,8 @@ export function SymptomsPage() {
           onSubmit={handleCreateSymptom}
         />
 
-        <div id="symptom-library" className="space-y-6">
-          {loading ? (
+        <div id="symptom-library" className="space-y-6" aria-busy={isFetching}>
+          {!hasLoaded && !loadError ? (
             <section className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
               Loading symptoms...
             </section>
@@ -1284,14 +1516,22 @@ export function SymptomsPage() {
           {loadError ? (
             <ErrorBanner title="Could not load symptoms." className="shadow-sm">
               {loadError}
+              {hasLoaded ? " The symptoms below are the last ones that loaded." : null}
+              <button
+                type="button"
+                className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+                onClick={() => reloadList()}
+              >
+                Try again
+              </button>
             </ErrorBanner>
           ) : null}
 
-          {!loading && !loadError ? (
+          {hasLoaded ? (
             <>
               <SymptomsSummary
-                totalCount={symptoms.length}
-                visibleCount={filteredSymptoms.length}
+                totalCount={libraryTotal}
+                visibleCount={matchedCount}
                 statusCounts={statusCounts}
               />
 
@@ -1312,15 +1552,24 @@ export function SymptomsPage() {
                 }
                 sortBy={sortBy}
                 onSortByChange={(event) => handleFilterChange("sort", event.target.value)}
-                systems={availableSystems}
-                totalCount={symptoms.length}
-                visibleCount={filteredSymptoms.length}
-                hasActiveFilters={hasActiveFilters}
+                systems={filterSystems}
+                rangeText={rangeText}
+                fetchingText={fetchingText}
+                pager={
+                  <ListPager
+                    label="Symptoms pages"
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onGoToPage={goToPage}
+                  />
+                }
+                hasActiveFilters={hasActiveFilters || searchValue.trim() !== ""}
                 onClearFilters={() => {
                   setSearchValue("");
-                  // Clears only the filters this page owns; a `symptomId` deep
-                  // link (or anything else in the query string) survives.
-                  updateViewParams(clearFilterUpdates(SYMPTOM_FILTERS));
+                  // Clears only the filters this page owns (and the page they
+                  // were on); a `symptomId` deep link, or anything else in the
+                  // query string, survives.
+                  updateViewParams({ ...clearFilterUpdates(SYMPTOM_FILTERS), page: null });
                 }}
               />
 
@@ -1328,31 +1577,39 @@ export function SymptomsPage() {
                 selectedId={selectedSymptomId}
                 list={
                   <SymptomsList
-                    symptoms={filteredSymptoms}
-                    totalSymptoms={symptoms.length}
+                    symptoms={symptoms}
+                    totalSymptoms={libraryTotal}
                     hasActiveFilters={hasActiveFilters}
                     selectedSymptomId={selectedSymptomId}
                     onSelectSymptom={(symptomId) => updateViewParams({ symptomId })}
                   />
                 }
                 detail={
-                  <SymptomDetails
-                    symptom={selectedSymptom}
-                    isEditing={editingSymptomId === selectedSymptomId}
-                    editForm={editForm}
-                    documents={documents}
-                    procedures={procedures}
-                    systemSuggestions={systemSuggestions}
-                    saveState={saveState}
-                    deleteState={deleteState}
-                    onStartEdit={startEditingSymptom}
-                    onCancelEdit={cancelEditingSymptom}
-                    onEditChange={handleEditFormChange}
-                    onToggleEditDocument={handleToggleEditDocument}
-                    onSaveEdit={handleSaveSymptom}
-                    onDelete={handleDeleteSymptom}
-                    onSymptomUpdated={handleSymptomUpdated}
-                  />
+                  selectionLookupFailure ? (
+                    <SymptomLookupError
+                      symptomId={selectionLookupFailure.symptomId}
+                      message={selectionLookupFailure.message}
+                      // Clearing the failure is what lets the lookup run again.
+                      onRetry={() => setLookupFailure(null)}
+                    />
+                  ) : (
+                    <SymptomDetails
+                      symptom={selectedSymptom}
+                      isEditing={editingSymptomId === selectedSymptomId}
+                      editForm={editForm}
+                      pickerCache={pickerCache}
+                      systemSuggestions={systemSuggestions}
+                      saveState={saveState}
+                      deleteState={deleteState}
+                      onStartEdit={startEditingSymptom}
+                      onCancelEdit={cancelEditingSymptom}
+                      onEditChange={handleEditFormChange}
+                      onToggleEditDocument={handleToggleEditDocument}
+                      onSaveEdit={handleSaveSymptom}
+                      onDelete={handleDeleteSymptom}
+                      onSymptomUpdated={handleSymptomUpdated}
+                    />
+                  )
                 }
               />
             </>
