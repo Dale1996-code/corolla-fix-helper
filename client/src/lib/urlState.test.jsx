@@ -185,7 +185,7 @@ function renderUrlHooks(entry, { clearOnCommit } = {}) {
     hooks.write = useViewParamWriter(searchParams, setSearchParams);
     [hooks.draft, hooks.setDraft] = useDraftTextParam("q", {
       searchParams,
-      setSearchParams,
+      writeParams: hooks.write,
       clearOnCommit,
     });
     return <span data-testid="search">{location.search}</span>;

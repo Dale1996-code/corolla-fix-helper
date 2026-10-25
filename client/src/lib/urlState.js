@@ -291,10 +291,17 @@ export function resolveSelectedRecord(requestedId, records, visibleRecords) {
  * `clearOnCommit` names parameters the same write removes -- a paged list's
  * `page`, since page 4 of the old keyword says nothing about the new one.
  *
+ * The commit goes through the page's `useViewParamWriter` (`writeParams`), never
+ * through React Router's `setSearchParams(fn)` directly. That `fn` is handed the
+ * parameters of the render that created it, so a commit landing in the same
+ * moment as a filter change started from a stale copy and one of the two writes
+ * undid the other (issue #164). Sharing the writer means every write on the page
+ * applies to the last parameters ANY of them wrote.
+ *
  * @param {string} key
  * @param {{
  *   searchParams: URLSearchParams,
- *   setSearchParams: (updater: (current: URLSearchParams) => URLSearchParams, options?: object) => void,
+ *   writeParams: ReturnType<typeof useViewParamWriter>,
  *   delayMs?: number,
  *   clearOnCommit?: string[],
  * }} options
@@ -302,16 +309,15 @@ export function resolveSelectedRecord(requestedId, records, visibleRecords) {
  */
 export function useDraftTextParam(
   key,
-  { searchParams, setSearchParams, delayMs = 300, clearOnCommit = NO_KEYS }
+  { searchParams, writeParams, delayMs = 300, clearOnCommit = NO_KEYS }
 ) {
   const committedValue = readTextParam(searchParams, key);
   const [draftValue, setDraftValue] = useState(committedValue);
 
-  // react-router rebuilds setSearchParams whenever the URL changes. Holding it
-  // in a ref keeps that identity churn out of the timer effect below, which
-  // would otherwise restart the countdown on every unrelated URL change.
-  const setSearchParamsRef = useRef(setSearchParams);
-  setSearchParamsRef.current = setSearchParams;
+  // Held in a ref so a caller that passes a new function each render cannot
+  // restart the countdown below on every unrelated URL change.
+  const writeParamsRef = useRef(writeParams);
+  writeParamsRef.current = writeParams;
 
   // URL -> draft: Back/Forward and deep links win over whatever was typed.
   useEffect(() => {
@@ -328,11 +334,7 @@ export function useDraftTextParam(
     const timer = setTimeout(() => {
       const cleared = Object.fromEntries(clearOnCommit.map((name) => [name, null]));
 
-      setSearchParamsRef.current(
-        (currentParams) =>
-          applyParamUpdates(currentParams, { ...cleared, [key]: draftValue || null }),
-        { replace: true }
-      );
+      writeParamsRef.current({ ...cleared, [key]: draftValue || null }, { replace: true });
     }, delayMs);
 
     return () => clearTimeout(timer);

@@ -846,6 +846,13 @@ export function SymptomsPage() {
   // types into local state and lands in the URL a beat later (see
   // useDraftTextParam), because "brake" is one view, not five history entries
   // -- and, now that the server does the searching, not five requests either.
+  // One writer for every URL change this page makes, so "carry the parameters
+  // I did not mention" is guaranteed rather than remembered at each call site,
+  // and two writes close together (the keyword box committing as a filter changes, a delete clearing `symptomId`, then the
+  // refetch clamping `page`) both land. It is stable, so the list fetch can use
+  // it without re-running on every selection click.
+  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
+
   const {
     q: committedSearch,
     status: statusFilter,
@@ -855,19 +862,12 @@ export function SymptomsPage() {
   } = readFilterValues(searchParams, SYMPTOM_FILTERS);
   const [searchValue, setSearchValue] = useDraftTextParam("q", {
     searchParams,
-    setSearchParams,
+    writeParams: updateViewParams,
     clearOnCommit: PAGE_KEYS,
   });
   // The pin outranks the URL: it only exists while a selection this page made
   // has not reached the URL yet, and the URL still names the previous one.
   const selectionId = pinnedSymptomId ?? requestedSymptomId;
-
-  // One writer for every URL change this page makes, so "carry the parameters
-  // I did not mention" is guaranteed rather than remembered at each call site,
-  // and two writes close together (a delete clearing `symptomId`, then the
-  // refetch clamping `page`) both land. It is stable, so the list fetch can use
-  // it without re-running on every selection click.
-  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
 
   // Filtering, sorting, and slicing all happen on the server, over every
   // symptom. The request is a pure function of the view state in the URL, and
