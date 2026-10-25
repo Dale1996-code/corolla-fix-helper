@@ -28,7 +28,9 @@ Every HTTP endpoint the Corolla Fix Helper server exposes, grounded in the route
 | `GET /api` | API name/version info |
 | `GET /api/health` | Health check |
 | `GET /api/dashboard` | Summary counts + recent activity |
-| `GET /api/documents` | List documents (optional pagination) |
+| `GET /api/documents` | List documents (optional filters, sort, and pagination) |
+| `GET /api/documents/filter-options` | Systems, types, and tags in use |
+| `GET /api/documents/:id` | One document |
 | `POST /api/documents/upload` | Upload one PDF |
 | `GET /api/documents/:id/file` | Open the stored PDF |
 | `POST /api/documents/:id/extract` | Re-run text extraction |
@@ -95,17 +97,36 @@ Returns the vehicle profile, summary counts, and recent lists in one call (all l
 
 ### `GET /api/documents`
 
-With no query params, returns **every** document (the Documents page relies on this):
+With no `limit`, returns **every** document, newest created first. The Symptoms, Procedures, and Notes pages still rely on this; the Documents page does not.
 
 ```json
-{ "documents": [ ... ], "total": 42 }
+{ "documents": [ ... ], "total": 42, "matched": 42 }
 ```
 
-With `?limit=50&offset=0`, pages through instead — `limit` is capped at 200:
+With `?limit=25&offset=0`, pages through instead. `limit` defaults to 50 and is capped at 200; a missing, non-numeric, fractional, or non-positive `limit` falls back to 50, and a bad `offset` to 0. Paging past the end returns an empty `documents` with the counts intact, never an error.
 
 ```json
-{ "documents": [ ... ], "total": 42, "limit": 50, "offset": 0 }
+{ "documents": [ ... ], "total": 1443, "matched": 31, "limit": 25, "offset": 0 }
 ```
+
+`total` is always the whole library; `matched` is how many documents the filters below leave (equal to `total` with none). Both modes accept the same optional filters and ordering, all applied by the server over the **whole** library before paging:
+
+| Param | Values |
+| --- | --- |
+| `system`, `documentType` | exact match |
+| `tag` | exact match, case-insensitive |
+| `favorite`, `bookmarked` | `true` (only those) or `false` (all but those); anything else applies no filter |
+| `sort` | `newest` / `oldest` (by last update, falling back to created) or `title_asc` (the browser's `localeCompare` order with base sensitivity, pinned to `en-US`: case- and accent-insensitive, with symbol- and emoji-led titles before digits and letters; sorted on the server over every matching document before paging); anything else keeps the default order |
+
+Every ordering ends in `id`, so no document appears on two pages or none. A repeated parameter (`?system=a&system=b`) is ignored rather than read as a list. Rows are the same slim list shape as before — no `extractedText`.
+
+### `GET /api/documents/filter-options`
+
+`{ "systems": [...], "documentTypes": [...], "tags": [...] }` — every value in use across the whole library, which is what the Documents page's filter dropdowns offer. The same block that `/api/search/documents` returns as `filters`.
+
+### `GET /api/documents/:id`
+
+`{ "document": { ... } }` in the list's shape, `400` for a non-numeric id, `404` for one that does not exist. The Documents page uses it to open a record that is not on the page on screen (a deep link, or a document a filter hides).
 
 ### `POST /api/documents/upload`
 

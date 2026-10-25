@@ -7,6 +7,7 @@ import { SymptomsPage } from "./SymptomsPage";
 import { NotesPage } from "./NotesPage";
 import { RepairChecklistsPage } from "./RepairChecklistsPage";
 import { RepairHistoryPage } from "./RepairHistoryPage";
+import { createDocumentsApi } from "../test/documentsApiMock";
 
 // H7: filters, pagination, and the selected record are query-string state, so
 // the browser can restore them. These tests drive the same journey the audit
@@ -67,13 +68,18 @@ function renderPage(Page, entries) {
 
 // "Page 2 of 3" is split across <span>s for its bold numbers, so match on the
 // wrapper's whole text instead of on a single text node.
-function expectPageIndicator(expectedText) {
-  expect(
-    screen.getByText(
-      (_content, element) =>
-        element?.tagName === "SPAN" && element.textContent.replace(/\s+/g, " ") === expectedText
-    )
-  ).toBeInTheDocument();
+//
+// Paging is the server's, so the count in this indicator belongs to the page on
+// screen until the next response lands; wait for it rather than assuming.
+async function expectPageIndicator(expectedText) {
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "SPAN" && element.textContent.replace(/\s+/g, " ") === expectedText
+      )
+    ).toBeInTheDocument()
+  );
 }
 
 // --- Documents ---------------------------------------------------------------
@@ -107,18 +113,13 @@ const LIBRARY = Array.from({ length: 60 }, (_, index) =>
   buildDocument(60 - index, index % 2 === 0 ? "Brakes" : "Engine")
 );
 
+// The page asks the server for one filtered, ordered page at a time, so the
+// stand-in server (see test/documentsApiMock.js) does the slicing the real one
+// does. `.api` is the recorder: every list request and by-id lookup it saw.
 function stubDocumentsFetch(documents = LIBRARY) {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/documents") {
-      return jsonResponse({ documents, total: documents.length });
-    }
-
-    if (url === "/api/settings") {
-      return jsonResponse({ documentDefaults: { commonSystems: [], documentTypes: [] } });
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
+  const api = createDocumentsApi(documents);
+  const fetchMock = vi.fn(api.fetch);
+  fetchMock.api = api;
 
   vi.stubGlobal("fetch", fetchMock);
 
@@ -130,6 +131,12 @@ function selectedDocumentTitle() {
   return screen.getByRole("heading", { level: 2, name: /^Doc \d{3}$/ }).textContent;
 }
 
+// A selection whose row is not on the page on screen is looked up by id, so its
+// heading arrives a beat after the list does.
+async function expectSelectedTitle(title) {
+  await waitFor(() => expect(selectedDocumentTitle()).toBe(title));
+}
+
 async function renderDocuments(entry = "/documents") {
   const fetchMock = stubDocumentsFetch();
   renderPage(DocumentsPage, [entry]);
@@ -139,11 +146,13 @@ async function renderDocuments(entry = "/documents") {
 }
 
 test("Documents rebuilds filter, page, and selection from a deep link", async () => {
-  await renderDocuments("/documents?system=Brakes&page=2&documentId=4");
+  const fetchMock = await renderDocuments("/documents?system=Brakes&page=2&documentId=4");
 
   expect(screen.getByRole("combobox", { name: "System" })).toHaveValue("Brakes");
-  expectPageIndicator("Page 2 of 2");
+  await expectPageIndicator("Page 2 of 2");
   expect(selectedDocumentTitle()).toBe("Doc 004");
+  // Doc 004 is a row on this very page, so nothing needed fetching by id.
+  expect(fetchMock.api.lookups).toEqual([]);
   // The deep link is left exactly as it was handed to us -- normalizing a URL
   // that is already canonical would spend a history entry saying nothing.
   expect(currentUrl()).toBe("/documents?system=Brakes&page=2&documentId=4");
@@ -157,7 +166,9 @@ test("Documents opens the record a buildEntityLink deep link names, #hash and al
 
   await renderDocuments(link);
 
-  expect(selectedDocumentTitle()).toBe("Doc 004");
+  // Doc 004 is the 57th-newest of 60, so it is not on page one: it is opened by
+  // id rather than found in a list the page never loaded.
+  await expectSelectedTitle("Doc 004");
   expect(currentUrl()).toBe("/documents?documentId=4");
 });
 
@@ -165,8 +176,8 @@ test("Documents survives duplicate query keys", async () => {
   await renderDocuments("/documents?page=1&page=99&documentId=8&documentId=4");
 
   // URLSearchParams reads the first value of a repeated key, and nothing throws.
-  expect(selectedDocumentTitle()).toBe("Doc 008");
-  expectPageIndicator("Page 1 of 3");
+  await expectSelectedTitle("Doc 008");
+  await expectPageIndicator("Page 1 of 3");
 });
 
 test("Documents keeps a default view's URL clean", async () => {
@@ -221,7 +232,7 @@ test("Documents restores the previous view on Back and the next one on Forward",
   goBack();
   await waitFor(() => expect(currentUrl()).toBe(viewedUrl));
   expect(screen.getByRole("combobox", { name: "System" })).toHaveValue("Brakes");
-  expectPageIndicator("Page 2 of 2");
+  await expectPageIndicator("Page 2 of 2");
   expect(selectedDocumentTitle()).toBe("Doc 004");
 
   // Back again steps through the selection and the page, not over them.
@@ -229,11 +240,11 @@ test("Documents restores the previous view on Back and the next one on Forward",
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes&page=2"));
   goBack();
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes"));
-  expectPageIndicator("Page 1 of 2");
+  await expectPageIndicator("Page 1 of 2");
 
   goForward();
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes&page=2"));
-  expectPageIndicator("Page 2 of 2");
+  await expectPageIndicator("Page 2 of 2");
 });
 
 test("Documents survives unusable query parameters and normalizes them once", async () => {
@@ -242,7 +253,7 @@ test("Documents survives unusable query parameters and normalizes them once", as
   // Nothing throws, every unusable value falls back to its default, and the
   // parameter this page knows nothing about is left alone.
   expect(screen.getByRole("combobox", { name: "Sort" })).toHaveValue("newest");
-  expectPageIndicator("Page 1 of 3");
+  await expectPageIndicator("Page 1 of 3");
   expect(selectedDocumentTitle()).toBe("Doc 060");
 
   // The unusable selection is cleared; the unknown `sort` value and the
@@ -254,7 +265,7 @@ test("Documents clamps a page past the end of the filtered results", async () =>
   await renderDocuments("/documents?system=Brakes&page=9");
 
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes&page=2"));
-  expectPageIndicator("Page 2 of 2");
+  await expectPageIndicator("Page 2 of 2");
 });
 
 test("Documents drops a selection for a document that is not there, keeping list state", async () => {
@@ -263,13 +274,13 @@ test("Documents drops a selection for a document that is not there, keeping list
   // Only the selection is invalid, so only the selection is cleared.
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes&page=2"));
   expect(screen.getByRole("combobox", { name: "System" })).toHaveValue("Brakes");
-  expectPageIndicator("Page 2 of 2");
+  await expectPageIndicator("Page 2 of 2");
 });
 
 test("Documents narrowed by a filter falls back to the first page", async () => {
   await renderDocuments("/documents?page=3");
 
-  expectPageIndicator("Page 3 of 3");
+  await expectPageIndicator("Page 3 of 3");
 
   fireEvent.change(screen.getByRole("combobox", { name: "System" }), {
     target: { value: "Brakes" },
@@ -277,27 +288,38 @@ test("Documents narrowed by a filter falls back to the first page", async () => 
 
   // Page 3 of the whole library says nothing about the Brakes-only list.
   expect(currentUrl()).toBe("/documents?system=Brakes");
-  expectPageIndicator("Page 1 of 2");
+  await expectPageIndicator("Page 1 of 2");
 });
 
-test("Documents does not refetch when filters, pages, or the selection change", async () => {
+test("Documents makes one list request per view and none for a selection inside the page", async () => {
   const fetchMock = await renderDocuments();
+  const { listRequests } = fetchMock.api;
 
-  const documentRequests = () =>
-    fetchMock.mock.calls.filter(([url]) => url === "/api/documents").length;
-
-  expect(documentRequests()).toBe(1);
+  expect(listRequests).toHaveLength(1);
 
   fireEvent.change(screen.getByRole("combobox", { name: "System" }), {
     target: { value: "Brakes" },
   });
+  await waitFor(() => expect(listRequests).toHaveLength(2));
+
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() => expect(listRequests).toHaveLength(3));
+
+  // Picking a row changes only `documentId`, which is not part of the request.
   fireEvent.click(await screen.findByRole("button", { name: "Select document: Doc 004" }));
+  expect(currentUrl()).toBe("/documents?system=Brakes&page=2&documentId=4");
+  expect(listRequests).toHaveLength(3);
+
+  // Back to page 2 of Brakes re-requests only the view it lands on: the same
+  // request string as before, with no second view's worth of traffic.
   goBack();
   await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes&page=2"));
+  expect(listRequests).toHaveLength(3);
 
-  // The library is loaded once; the URL only decides how it is sliced.
-  expect(documentRequests()).toBe(1);
+  goBack();
+  await waitFor(() => expect(currentUrl()).toBe("/documents?system=Brakes"));
+  await waitFor(() => expect(listRequests).toHaveLength(4));
+  expect(listRequests[3].get("offset")).toBe("0");
 });
 
 // --- Symptoms ----------------------------------------------------------------
