@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
@@ -20,13 +20,13 @@ import { useScrollToHash } from "../lib/useScrollToHash";
 import { ProceduresListControls } from "../components/procedures/ProceduresListControls";
 import { ProceduresList } from "../components/procedures/ProceduresList";
 import {
-  applyParamUpdates,
   clearFilterUpdates,
   filterValueUpdates,
   readFilterValues,
   readIdParam,
   resolveSelectedRecord,
   useDraftTextParam,
+  useViewParamWriter,
 } from "../lib/urlState";
 
 const emptyProcedureForm = {
@@ -685,19 +685,13 @@ export function ProceduresPage() {
     confidence: confidenceFilter,
     sort: sortBy,
   } = readFilterValues(searchParams, PROCEDURE_FILTERS);
+  // One writer for every URL change this page makes -- including the keyword
+  // box's commit -- so two writes close together both land.
+  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
   const [searchValue, setSearchValue] = useDraftTextParam("q", {
     searchParams,
-    setSearchParams,
+    writeParams: updateViewParams,
   });
-
-  const updateViewParams = useCallback(
-    (updates, { replace = false } = {}) => {
-      setSearchParams((currentParams) => applyParamUpdates(currentParams, updates), {
-        replace,
-      });
-    },
-    [setSearchParams]
-  );
 
   function handleFilterChange(key, value) {
     updateViewParams(filterValueUpdates({ [key]: value }, PROCEDURE_FILTERS));
