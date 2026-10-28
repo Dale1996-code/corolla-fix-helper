@@ -1947,6 +1947,46 @@ test("a verified figure carries the quote's own printing of it, not the claim's"
   }
 });
 
+test("a viscosity grade must equal a grade the quote prints, never sit inside one", () => {
+  // "0W-30" is a substring of "10W-30": a different oil, and once a false pass.
+  const cases = [
+    ["The recommended engine oil grade is 0W-30.", "Recommended engine oil grade SAE 10W-30"],
+    ["The recommended engine oil grade is 0W-20.", "Recommended engine oil grade SAE 10W-20"],
+    ["The recommended engine oil grade is 5W-30.", "Recommended engine oil grade SAE 15W-30"],
+    ["The recommended engine oil grade is 5W-3.", "Recommended engine oil grade SAE 5W-30"],
+  ];
+
+  for (const [claim, quote] of cases) {
+    const result = verifyOne(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "numeric_anomaly", claim);
+  }
+});
+
+test("a viscosity grade matches across case, spacing, hyphen, and en dash", () => {
+  // The separator is typesetting, not a different grade: a PDF may print a
+  // hyphen, an en dash, a space, or nothing between the two numbers.
+  const cases = [
+    ["Use 5W-30 oil.", "Recommended oil grade SAE 5W-30", ["5W-30"]],
+    ["Use 5W-30 oil.", "Recommended oil grade SAE 5W30", ["5W30"]],
+    ["Use 5W30 oil.", "Recommended oil grade SAE 5W-30", ["5W-30"]],
+    ["Use 5W-30 oil.", "Recommended oil grade SAE 5 W-30", ["5 W-30"]],
+    ["Use 5w-30 oil.", "Recommended oil grade SAE 5W-30", ["5W-30"]],
+    ["Use 5W-30 oil.", "Recommended oil grade SAE 5W–30", ["5W–30"]],
+    ["Use 5W–30 oil.", "Recommended oil grade SAE 5W-30", ["5W-30"]],
+    // The printed grade is the one the claim equals, not the first in the quote.
+    ["Use 10W-30 oil.", "Recommended oil grade SAE 0W-20 or 10W-30", ["10W-30"]],
+  ];
+
+  for (const [claim, quote, printedFigures] of cases) {
+    const result = verifyOne(claim, quote);
+
+    assert.equal(result.rejected.length, 0, `${claim} / ${quote}: ${JSON.stringify(result.rejected)}`);
+    assert.deepEqual(result.documentSupported[0].printedFigures, printedFigures, claim);
+  }
+});
+
 test("a figure printed as part of a range shows the whole printed range", () => {
   const thermostat = "Thermostat opening temperature 80 to 84 °C";
   const cases = [
