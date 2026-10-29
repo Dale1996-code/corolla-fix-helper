@@ -3851,3 +3851,103 @@ are separate and not started.
 (that is F1) is unknown. The new eval case `reject-figure-from-another-row`
 (`row_mismatch` probe) is `verified: false`. Offline on the snapshot it selects
 doc 748 p4 c0 and is rejected as `row_mismatch`, but it has never run end to end.
+
+## F1 row-scoped claims prompt — one targeted live capture (2026-10-29)
+
+**This is an `eval:capture`, not an `eval:answers` run.** It records what the model wrote
+for six cases and what the verifier decided. Its pass/fail column comes from feeding the
+captured replies through `evaluateAnswerCase` (a throwaway script), so it is
+capture-derived. The gate (`eval:answers`) has **not** been run for this change.
+
+**Change.** Prompt only: 14 lines added to `buildEvidencePromptLines`
+(`askEvidenceContract.js`), three rule groups. *Row scope*: quote only the one table row
+or sentence that prints the figure, and name the part with that row's own words. *Conditions*:
+a condition printed in another row or sentence is its own claim, put first, and the figure
+claim must refer to it. *Figures*: every number in a claim must be printed in that claim's
+own quote. No verifier, retrieval, chunking, schema, or model change.
+
+### Reproducibility
+
+| | |
+|---|---|
+| Code | `2bfae32` (`origin/main` after #166, #167, #168) plus the uncommitted F1 prompt change; the capture header says `dirty: true`. Diff of `askEvidenceContract.js`: sha256 `95c699caf5ff01ce…` |
+| Capture | `server/data/captures/2026-10-29T16-09-05Z-2bfae32.jsonl` (gitignored; quotes real manual text), sha256 `8021a759f6826ef7…` |
+| Model | `gpt-5.5-2026-04-23`, effort `low` (the module default), `max_output_tokens` 2048, evidence contract on, rerank and relevance floor off |
+| Data | a copy of the 2026-10-28 `VACUUM INTO` snapshot of the live DB (migrations 1–7; 1,443 documents; 20,447 chunks, all embedded at `text-embedding-3-small@512`). Not the live database |
+| Cases | `engine-oil-capacity`, `charging-system-voltage`, `valve-cover-bolt-torque` (the three targets) and the verified canaries `oil-drain-plug-torque`, `spark-plug-gap`, `refuse-turbo-boost-pressure` |
+| Provider requests | 12 (6 answers, 6 embeddings); no retries logged. Captures do not record token usage, so **cost was not metered**; estimated about $0.15 from Experiment I's per-answer usage |
+| Sample size | one reply per case |
+
+### Result
+
+| Case | Before (`41ed0d4` capture) | After | Capture-derived check |
+|---|---|---|---|
+| `engine-oil-capacity` | `not_found`, `numeric_anomaly` | **`answered`**, 1 of 1 claims accepted | PASS (unverified template case) |
+| `charging-system-voltage` | `not_found`, `subject_mismatch` + `numeric_anomaly` | **`partial`**: the condition claim accepted, the voltage claim `numeric_anomaly` | FAIL, as before: the voltage is not in the answer |
+| `valve-cover-bolt-torque` | `not_found`, `numeric_anomaly` | `not_found`, `numeric_anomaly` | FAIL, as before |
+| `oil-drain-plug-torque` (verified) | not in the old capture | `answered`, 2 of 2 accepted | PASS |
+| `spark-plug-gap` (verified) | not in the old capture | `answered`, 6 of 6 accepted; new and used limits both qualified | PASS |
+| `refuse-turbo-boost-pressure` (verified) | not in the old capture | `not_found`, no claims, one accepted gap | PASS |
+
+The three canaries have no earlier sample in a capture, so "unchanged" for them means they
+pass now, not that a before/after pair was measured. Every status the pipeline returned
+equals the status judged from the captured reply.
+
+### Did the model follow the new rules?
+
+- **Row scope: yes, in all four claims of the three target cases.** Each `evidenceQuote` is
+  one row or one sentence (`quoteRows` is 1, or 0 for the valve-cover row, whose bare numbers
+  count as a row only with a unit header in the quote; 6 to 16 words). The canaries' quotes are
+  the same shape (6 to 19 words, no more than one row). Before F1 the oil and valve-cover replies were not this shape.
+- **Condition split: yes, once.** The charging reply made the speed condition (doc 717 p4 c0)
+  its own claim and the voltage a second claim.
+- **Figures in the claim's own quote: no, once, and it cost the answer.** The charging voltage
+  claim repeated the condition's number, which its own quote does not print, so it failed
+  `numeric_anomaly`. The same claim without the repeated number verifies, and so does the
+  wording hand-written for variant R2 ("…for that check…"), tested offline on the captured quote.
+  The prompt's second rule ("make the figure claim refer to that condition") and third rule
+  (no number the quote lacks) pull against each other, and the model satisfied the first by
+  breaking the second. **A refinement is not applied and has not been run live:** ask the
+  figure claim to refer to the condition in words, without repeating its number.
+
+### What F1 does not change, and what it trades
+
+- **Valve cover stays blocked, now by the header alone.** The reply is the shape F1 asks for
+  (a nine-word, one-row quote; the subject check passes), and it fails `numeric_anomaly`
+  because the row prints bare numbers and the unit header is not in the quote. The table's
+  header is in doc 1269 p3 c0 (#18772, words 2 to 4); the row is in c1 (#18773) at its word 59,
+  about 218 words after the header, and c1 carries no column header. The chunker uses
+  200-word windows with a 40-word overlap, so c0 cannot reach c1's row. The model was not
+  shown c0.
+- **The oil claim is generic.** It reads "the capacity…" under the row's own wording, because
+  the row does not print the part. The subject check had nothing to check
+  (`checked: false`), and the same claim also verifies against an invented quote about a
+  different part with the same figures. Part identity rests on the citation (the oil change
+  page), not on the claim. The verifier has always worked this way; F1 makes such claims
+  likelier.
+- **The charging condition claim says "without load".** The quote does not print it; the
+  chunk's heading does. Non-numeric wording is outside what the verifier checks.
+- **A latent false pass, found while reading the header logic and unrelated to F1.** On
+  invented text, a quote that ends just before a row's trailing `in.*lbf` unit lets the row's
+  bare "48" verify as 48 ft·lbf from the header's third column. With the unit inside the
+  quote it is rejected. Not fixed here; any change that takes a header unit from outside
+  the quote would need to close it first.
+
+### Free replay (verifier regression, not model behavior)
+
+The three diagnosis captures replay identically on `main` and on the F1 branch (1 of 18,
+5 of 11 and 3 of 6 verdicts changed against their recorded verdicts, same as before),
+and the invented-text fixture `synthetic-row-scoped-capture.jsonl` replays 0 of 8. The H3 and H4
+"(no such item)" lines come from hand-edited records that carry stale recorded verdicts; they
+are not verifier changes.
+
+### Not established
+
+One reply per case cannot separate non-compliance from run-to-run variance. `eval:answers`
+(47 cases) has not been run, so the other verified cases (`oil-drain-plug-torque-citation-support`,
+`refuse-timing-belt-interval`, the three fictional refusals) are untested under the new
+prompt; the six `reject-*` probes replace the model reply and cannot be affected by it.
+Reach of the header problem, measured offline on the snapshot: 10 chunks in 6 documents
+(docs 88, 739, 740, 1269, 1400, 1401) have a bare-number row whose column header is only in
+the previous chunk of the page, and none have it two or more chunks back. The count assumes
+a row of three bare numbers, so it is approximate.
