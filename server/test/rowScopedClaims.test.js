@@ -33,36 +33,63 @@ function promptText(options = {}) {
     .replace(/\s+/g, " ");
 }
 
+// Each rule is grouped by what it answers. The first capture (2026-10-29) showed
+// three ways a model can follow the row-scope rules and still lose the answer:
+//   charging -- the figure claim pointed back to its condition by repeating the
+//               condition's number, which the figure's own quote does not print;
+//   oil      -- the claim named nothing ("the capacity is ..."), so the subject
+//               guard had nothing to check;
+//   words    -- a condition claim added a word ("without load") that its quote
+//               does not print, which the verifier cannot see in non-numeric text.
 const ROW_SCOPE_RULES = [
   [
-    "quote only the row or sentence that prints the figure",
+    "row scope: quote only the row or sentence that prints the figure",
     /quote ONLY the one table row or sentence that prints the figure you claim/i,
   ],
   [
-    "not the surrounding table or neighbouring rows",
+    "row scope: not the surrounding table or neighbouring rows",
     /not the table around it, and not the rows before or after it/i,
   ],
   [
-    "name the part with the same row's wording",
-    /name the part in the claim with the words that SAME row or sentence uses/i,
+    "oil: begin the claim with a subject made of the same row's own words",
+    /begin the claim with a subject made of the words that SAME row or sentence prints/i,
   ],
   [
-    "never use words from a heading or another row",
-    /never with words taken from a heading or from another row/i,
+    "oil: never use words from a heading or another row",
+    /never use words from a heading or from another row/i,
   ],
   [
-    "a condition printed elsewhere gets its own claim and quote",
-    /give that condition its own claim with its own quote/i,
+    "oil: a bare 'the capacity is ...' names nothing the server can check",
+    /a bare 'the capacity is \.\.\.' or 'the torque is \.\.\.' names nothing, so the server cannot check it/i,
   ],
   [
-    "a conditional figure is never stated as unconditional",
+    "oil: a row with no part name lends its own label as the subject",
+    /if the row prints no part name, use its own label as the subject/i,
+  ],
+  [
+    "conditions: a condition printed elsewhere gets its own claim and quote, first",
+    /give that condition its own claim with its own quote and put it first/i,
+  ],
+  [
+    "charging: the figure claim points back to it in words only",
+    /the figure claim may point back to it in words only/i,
+  ],
+  [
+    "charging: it never repeats the condition's number or unit, and says why",
+    /never repeat the condition's number or unit there, because the figure's own quote does not print it/i,
+  ],
+  [
+    "conditions: a conditional figure is never stated as unconditional",
     /never state a figure as if it always held when the source prints it only under a condition/i,
   ],
   [
-    "every claimed number is printed in the claim's own quote",
-    /every number in a claim must be printed in that claim's own quote/i,
+    "words: every number and every stated qualifier must be in the claim's own quote",
+    /every number in the claim must be printed there, and so must every qualifier you state/i,
   ],
-  ["a number the quote does not print is left out", /leave it out of the claim/i],
+  [
+    "words: nothing is added from a heading or from memory",
+    /do not add it from a heading or from memory/i,
+  ],
 ];
 
 for (const [name, pattern] of ROW_SCOPE_RULES) {
@@ -70,6 +97,33 @@ for (const [name, pattern] of ROW_SCOPE_RULES) {
     assert.match(promptText(), pattern);
   });
 }
+
+test("F1 prompt: the wording that made the first capture's charging claim fail is gone", () => {
+  const text = promptText();
+
+  // "Word the figure claim so it refers to that condition" was met by repeating
+  // the condition's number, then broke the rule that every number be printed in
+  // the claim's own quote. The two instructions must not be able to collide.
+  assert.doesNotMatch(text, /word the figure claim so it refers to that condition/i);
+
+  // The only way left to refer to the condition is in words.
+  const conditions = text.slice(text.search(/Conditions:/), text.search(/Words and figures:/));
+
+  assert.match(conditions, /in words only/);
+  assert.match(conditions, /never repeat the condition's number or unit/i);
+});
+
+test("F1 prompt: the subject rule offers a shape, not just a ban", () => {
+  // Telling a model what NOT to write ("the capacity is ...") leaves it free to
+  // write another generic claim. The rule names the shape to write instead.
+  const subject = promptText().slice(
+    promptText().search(/Subject:/),
+    promptText().search(/Conditions:/)
+  );
+
+  assert.match(subject, /its part or row label, then what is measured/i);
+  assert.match(subject, /for example 'ROW LABEL capacity'/);
+});
 
 test("F1 prompt: the row-scope rules belong to the documentSupported instructions", () => {
   const text = promptText();
@@ -159,12 +213,12 @@ test("the row-scoped fixture is invented text, never a real capture", () => {
 test("an unchanged verifier reports 0 changed verdicts over the row-scoped fixture", () => {
   const result = replayRecords(parsed.records);
 
-  assert.equal(result.recordCount, 6);
-  assert.equal(result.verdictTotal, 8);
+  assert.equal(result.recordCount, 8);
+  assert.equal(result.verdictTotal, 12);
   assert.deepEqual(result.verdictChanges, []);
   assert.deepEqual(result.statusChanges, []);
   assert.deepEqual(result.errors, []);
-  assert.equal(formatReplayReport({ header: parsed.header, result }).split("\n").at(-1), "0 verdicts changed of 8");
+  assert.equal(formatReplayReport({ header: parsed.header, result }).split("\n").at(-1), "0 verdicts changed of 12");
 });
 
 // [case, status, verdict of each documentSupported claim, what the case stands for]
@@ -204,6 +258,18 @@ const EXPECTED = [
     "not_found",
     ["row_mismatch"],
     "adversarial: the part named in a long quote, the other row's figure",
+  ],
+  [
+    "synthetic-voltage-figure-repeats-condition",
+    "partial",
+    [ACCEPTED, "numeric_anomaly"],
+    "the first live charging reply: the figure claim repeats the condition's number its quote lacks",
+  ],
+  [
+    "synthetic-capacity-generic-subject",
+    "answered",
+    [ACCEPTED],
+    "the first live oil reply: 'the capacity is ...' names nothing, so nothing is checked",
   ],
 ];
 
@@ -272,4 +338,37 @@ test("the row-scoped wording does not launder another row's figure", () => {
     assert.equal(result.documentSupported.length, 0, quote);
     assert.equal(result.rejected[0].reason, reason, quote);
   }
+});
+
+test("a claim that names its row is checked against that row; a generic claim is not checked at all", () => {
+  const rowLabelled = byCase.get("synthetic-capacity-row-scoped");
+  const generic = byCase.get("synthetic-capacity-generic-subject");
+  const [rowClaim] = rowLabelled.reply.documentSupported;
+  const [genericClaim] = generic.reply.documentSupported;
+
+  // The subject guard has something to check only when the claim names something.
+  const named = checkClaimSubject(rowClaim.claim, rowClaim.evidenceQuote);
+  const bare = checkClaimSubject(genericClaim.claim, genericClaim.evidenceQuote);
+
+  assert.equal(named.checked, true);
+  assert.equal(named.grounded, true);
+  assert.equal(bare.checked, false);
+
+  // The same figures printed on a row about a DIFFERENT part (invented here).
+  const otherPart = "Replace and refill with coolant change 3.2 liters (3.4 US qts, 2.8 lmp. qts)";
+  const verdictAgainst = (claim) => {
+    const result = verifyEvidence(
+      { documentSupported: [{ claim: claim.claim, sourceId: "S1", evidenceQuote: otherPart }], generalGuidance: [], gaps: [] },
+      [{ ...rowLabelled.chunks[0], chunkText: otherPart }]
+    );
+
+    return result.documentSupported.length ? ACCEPTED : result.rejected[0].reason;
+  };
+
+  assert.equal(verdictAgainst(rowClaim), "subject_mismatch");
+  // KNOWN LIMIT of the verifier, not something this change fixes: a claim with no
+  // subject verifies against any row printing its figures. The prompt's Subject
+  // rule exists to keep the model from writing such a claim; if the verifier ever
+  // learns to refuse one, this assertion should flip and this test be updated.
+  assert.equal(verdictAgainst(genericClaim), ACCEPTED);
 });

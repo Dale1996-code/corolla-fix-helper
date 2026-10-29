@@ -3907,8 +3907,8 @@ equals the status judged from the captured reply.
   wording hand-written for variant R2 ("…for that check…"), tested offline on the captured quote.
   The prompt's second rule ("make the figure claim refer to that condition") and third rule
   (no number the quote lacks) pull against each other, and the model satisfied the first by
-  breaking the second. **A refinement is not applied and has not been run live:** ask the
-  figure claim to refer to the condition in words, without repeating its number.
+  breaking the second. A refinement written after this capture (prompt v2, below) has not
+  been run live.
 
 ### What F1 does not change, and what it trades
 
@@ -3951,3 +3951,54 @@ Reach of the header problem, measured offline on the snapshot: 10 chunks in 6 do
 (docs 88, 739, 740, 1269, 1400, 1401) have a bare-number row whose column header is only in
 the previous chunk of the page, and none have it two or more chunks back. The count assumes
 a row of three bare numbers, so it is approximate.
+
+### Refinement after this capture (prompt v2) — not yet run live
+
+The capture exposed three ways a model can obey the row-scope rules and still lose the
+answer. Prompt v2 rewrites the rule block (prompt text only; the verifier, D1, S1 and the
+viscosity rule are untouched, and no evaluation expectation changed):
+
+1. **Charging.** The figure claim may point back to its condition *in words only* ("for that
+   check"), and must never repeat the condition's number or unit, because the figure's own
+   quote does not print it. The v1 instruction "word the figure claim so it refers to that
+   condition" is removed, so no two rules can collide.
+2. **Oil.** A new Subject rule: begin the claim with the part or row label the same row
+   prints, then what is measured (for example "ROW LABEL capacity"); a bare "the capacity is …"
+   names nothing and cannot be checked; a row that prints no part name lends its own label.
+3. **Conditions.** Every number *and every qualifier the claim states* (a load, speed,
+   temperature, filter) must be printed in the claim's own quote; nothing is added from a
+   heading or from memory. The verifier cannot check this for non-numeric words, so only a
+   live capture or a human read can show whether it is followed.
+
+Offline evidence for v2, none of it about model behavior: the prompt tests fail on v1 (12
+failures) and pass on v2; the invented fixture now also holds the two shapes the capture
+produced (a figure claim repeating the condition's number → `numeric_anomaly`; a claim
+naming nothing → accepted, subject unchecked), and a test shows a claim that names its row
+is rejected against a different part's row while a generic claim is not; every earlier
+capture replays identically before and after v2 (the three diagnosis captures, and the first
+F1 capture re-judged by the same verifier). A live capture of charging, oil and
+`spark-plug-gap` under v2 is proposed but not run.
+
+### Follow-up work, separate from F1 (not in this branch)
+
+- **A 12× unit false accept (pre-existing; found while reading the header logic).** When a
+  table row prints its own unit after its numbers (`in.*lbf`) and the quote ends before that
+  unit, the bare number verifies in the header's third column (ft·lbf): on invented text, 48
+  in·lbf verifies as "48 ft·lbf", a twelve-fold overstatement. With the unit inside the quote
+  it is rejected. Reach, approximately: 172 chunks in 40 documents print both a unit header and
+  an `in.*lbf` unit (a loose count; the diagnosis's stricter row count was 65 chunks in 26
+  documents). It needs its own fix and tests: refuse the header fallback when the source text
+  right after the claimed row prints a different unit.
+- **F2, the unit header across a chunk boundary.** Valve cover is blocked only by this: with
+  the header in the quote the F1-shaped claim verifies, and a wrong unit still does not.
+  Recommended shape, if it is built: take the header from the *previous chunk of the same
+  page*, only when the quote prints no unit of its own, the row's number of bare numbers
+  equals the header's unit columns, and nothing after the row prints a different unit, so it
+  must follow the false-accept fix above. Reach: 10 chunks in 6 documents (docs 88, 739,
+  740, 1269, 1400, 1401), none with the header two or more chunks back. Re-chunking
+  (repeating the header at a continuation chunk's start) is not recommended: the verifier
+  reads units from the quote only, so a short one-row quote would still lack the header,
+  and it would put text into stored chunks that is not on the page there.
+- **Verifier blind spots this capture showed, not addressed by prompting.** A claim that names
+  nothing is never subject-checked; non-numeric words in a claim (such as "without load") are
+  not compared with the quote.
