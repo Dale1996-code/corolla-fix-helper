@@ -4002,3 +4002,67 @@ F1 capture re-judged by the same verifier). A live capture of charging, oil and
 - **Verifier blind spots this capture showed, not addressed by prompting.** A claim that names
   nothing is never subject-checked; non-numeric words in a claim (such as "without load") are
   not compared with the quote.
+
+### Second capture — prompt v2, 2026-10-29 (charging, oil, spark plug)
+
+**This is an `eval:capture`, not an `eval:answers` run.** The pass/fail column is
+capture-derived (the captured replies fed through `evaluateAnswerCase` in a throwaway
+script). `eval:answers` has not been run for v1 or v2.
+
+| | |
+|---|---|
+| Code | `2d18de3`, clean tree (`dirty: false`): `2bfae32` plus F1 v1 (`e034f91`) plus prompt v2 |
+| Capture | `server/data/captures/2026-10-29T17-26-58Z-2d18de3.jsonl` (gitignored; quotes real manual text), sha256 `9c86794e60284491…` |
+| Model and data | as the first capture: `gpt-5.5-2026-04-23`, effort `low`, 2048 output tokens, a copy of the 2026-10-28 snapshot (20,447 chunks) |
+| Provider requests | 6 (3 answers, 3 embeddings). Cost not metered; estimated about $0.08 |
+| Sample size | one reply per case |
+
+| Case | First capture (v1) | This capture (v2) | Capture-derived check |
+|---|---|---|---|
+| `charging-system-voltage` | `partial`: condition claim accepted, voltage claim `numeric_anomaly` | **`partial`: both claims accepted** | **PASS** (v1: FAIL, the voltage was missing) |
+| `engine-oil-capacity` | `answered`, subject unchecked | `answered`, **subject checked and grounded** | PASS |
+| `spark-plug-gap` (verified) | `answered`, 6 of 6 claims | **`partial`, 5 of 6**: the used-plug maximum claim is `quote_not_in_source` | PASS |
+
+**Verifier results (deterministic).**
+- Charging: the voltage claim points back to its condition in words and repeats no number;
+  all numbers are in their own quotes. The rendered answer lists the speed condition first and
+  the voltage second, then the gap that no idle figure is printed.
+- Oil: the claim begins with the row's own label plus the measured noun. The subject check
+  now runs (`checked: true`) and is grounded. Against invented rows about a coolant and a
+  transaxle fluid with the same figures it is rejected (`subject_mismatch`), where v1's generic
+  claim was accepted.
+- Spark plug: the rejected quote joins a label and a figure that sit on **different pages**.
+  The label naming the used-plug maximum gap ends doc 724 p5 c0; its value starts doc 724
+  p6 c0. The model stitched them into one quote, which is not a substring of either
+  chunk, so the verifier failed closed (existing rule: never combine text from two sources
+  into one quote). The figure is redacted from the resulting gap.
+
+**What v1 had really accepted.** In the first capture the same claim said "maximum" and
+"used" while quoting only the value on p6, so the qualifiers came from the other page and were
+not in the quote. The verifier does not compare non-numeric words, so it was accepted. v2's
+"every qualifier must be in the claim's own quote" rule exposed that; the claim is now refused
+instead of accepted on a qualifier the quote lacks. The answer is less complete, not less
+safe.
+
+**Heuristic and human judgment (not verifier results).** A script listed the claim words absent
+from each claim's own quote. For the accepted claims it found: charging condition claim adds
+"charging circuit" (heading words; no load, speed, or temperature qualifier is added, and the
+v1 "without load" is gone); charging figure claim "check" (the in-words pointer the rule
+asks for); oil claim "capacity" (the measured noun the rule asks for); spark plug, none. The
+"charging circuit" addition is a small departure from "use only what the quote prints"; it
+is the page's own heading and not a condition.
+
+**Trade-offs and limits.**
+- The spark-plug canary lost one accepted claim, so under the criteria set before this
+  capture it counts as a completeness regression. It is not a gate failure
+  (`evaluateAnswerCase` passes: `partial` counts, and the qualified-value check passes
+  because the 1.3 mm figure is no longer stated) and not an integrity failure. `eval:answers`
+  cannot see this kind of loss.
+- All six spark-plug claims had their subject unchecked (`gap` is not a guarded noun).
+  That predates F1.
+- The cause is a label and value split across a page boundary, the same family as the F2 unit
+  header split across a chunk boundary (follow-up work above).
+- The oil claim still does not say "engine oil": the row does not print it. Part identity comes
+  from the citation (the oil change page), not from the claim.
+- One reply per case: the spark-plug stitch may or may not recur.
+- The drain-plug canary and the turbo refusal were not re-captured under v2.
