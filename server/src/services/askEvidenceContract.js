@@ -896,9 +896,14 @@ function allNumbersIn(text) {
   return signedNumbers(text).filter((number) => Number.isFinite(number.value));
 }
 
-/** A viscosity grade as it is compared: no case, no spaces, no en dash. */
+/**
+ * A viscosity grade as it is compared: no case, no spaces, and no separator,
+ * hyphen or en dash alike, so "5W-30", "5W–30", "5W30", and "5 W-30" are one
+ * grade. VISCOSITY_REGEX reads only digits, a W, and digits, so what is left
+ * ("5w30") still names exactly one grade.
+ */
 function collapseGrade(text) {
-  return normalizeForMatch(text).replace(/[\s–]/g, "");
+  return normalizeForMatch(text).replace(/[\s\-–]/g, "");
 }
 
 /**
@@ -919,7 +924,6 @@ function matchClaimNumbers(claimText, evidenceText) {
   const evidenceNumbers = allNumbersIn(evidenceText);
   const evidenceSpecs = readSpecs(evidenceText);
   const headerUnits = headerUnitsIn(evidenceText);
-  const normalizedEvidence = normalizeForMatch(evidenceText);
   const unsupported = [];
   const printedFigures = [];
 
@@ -927,24 +931,20 @@ function matchClaimNumbers(claimText, evidenceText) {
     let printed;
 
     if (spec.unit === "viscosity") {
-      // Compared textually: "5W-30" must literally appear.
+      // The claimed grade must equal one grade the quote prints, whole. Never
+      // a substring: "0W-30" sits inside "10W-30", a different oil.
       const grade = collapseGrade(spec.raw);
+      const evidenceGrade = evidenceSpecs.find(
+        (evidenceSpec) =>
+          evidenceSpec.unit === "viscosity" && collapseGrade(evidenceSpec.raw) === grade
+      );
 
-      if (!normalizedEvidence.replace(/[\s–]/g, "").includes(grade)) {
+      if (!evidenceGrade) {
         unsupported.push(spec.raw);
         continue;
       }
 
-      // The printed grade the same substring test finds the claim's in. Kept
-      // the same test on purpose: if it ever accepts a grade inside a longer
-      // one, the figure shown beside the claim is the longer grade, so the
-      // owner can see the difference.
-      const evidenceGrade = evidenceSpecs.find(
-        (evidenceSpec) =>
-          evidenceSpec.unit === "viscosity" && collapseGrade(evidenceSpec.raw).includes(grade)
-      );
-
-      printed = evidenceGrade ? evidenceGrade.printed : null;
+      printed = evidenceGrade.printed;
     } else {
       printed = printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits);
 

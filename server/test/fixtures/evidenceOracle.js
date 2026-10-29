@@ -423,7 +423,31 @@ export const ASK_ORACLE = [
     note: "A pressure cannot ground a torque; 3.1 kgf/cm² is read as 3.1 kgf*cm = 0.3 N*m.",
   },
 
+  // ---- D1: a viscosity grade was matched as a substring of the quote ----
+  {
+    id: "viscosity-grade-inside-longer-grade",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Recommended engine oil grade SAE 10W-30.",
+    quote: "Recommended engine oil grade SAE 10W-30",
+    claim: "The recommended engine oil grade is 0W-30.",
+    expect: "reject",
+    finding: "D1",
+    note: "0W-30 is a different oil; it only appears inside the printed 10W-30.",
+  },
+
   // ---- Controls: must-accept, so a stricter fix cannot over-reject ----
+  {
+    id: "control-viscosity-separator",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Recommended engine oil grade SAE 5W30.",
+    quote: "Recommended engine oil grade SAE 5W30",
+    claim: "The recommended engine oil grade is 5W-30.",
+    expect: "accept",
+    finding: "control",
+    note: "The same grade printed without its hyphen.",
+  },
   {
     id: "control-drain-plug-exact",
     verifier: "ask",
