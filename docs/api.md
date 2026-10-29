@@ -206,7 +206,7 @@ All search endpoints are `GET`, share the shape `{ "results": [...], "total": n,
 | `GET /api/search/symptoms` | `q`, `system`, `status`, `sort`, optional `limit`, `offset` |
 | `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort`, optional `limit`, `offset` |
 
-`GET /api/search/symptoms` and `GET /api/search/procedures` return every match when no `limit` is sent (the Ask AI page's cards read the whole set). With a `limit` (default 25, at most 100) they return one page plus `limit`, `offset`, and `hasMore`, with `total` still counting every match; that is what the link pickers on the Symptoms, Procedures, Notes, and Repair Checklists pages ask for.
+`GET /api/search/symptoms` and `GET /api/search/procedures` return every match when no `limit` is sent (the Ask AI page's cards read the whole set). With a `limit` (default 25, at most 100) they return one page plus `limit`, `offset`, and `hasMore`, with `total` still counting every match; that is what the link pickers on the Symptoms, Procedures, Notes, and Repair Checklists pages ask for. A paged symptom search omits `filters`, which only the unpaged Ask AI card uses.
 | `GET /api/search/notes` | `q`, `noteType`, `relatedEntityType`, `sort` |
 
 Document search covers metadata, notes, extracted text (including OCR text), and tags.

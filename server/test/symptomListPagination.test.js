@@ -321,6 +321,20 @@ test("the symptom search pages only when asked, for the symptom pickers", async 
   assert.equal((await request(app).get("/api/search/symptoms?limit=500")).body.limit, 100);
 });
 
+test("a paged symptom search leaves out the filter options the pickers never read", async () => {
+  // The Ask AI card (unpaged) offers system/status filters, so it still gets
+  // them. A picker page does not: building them is a second scan of every
+  // symptom, paid on each keystroke pause and each "Show more".
+  const unpaged = await request(app).get("/api/search/symptoms");
+  assert.ok(Array.isArray(unpaged.body.filters.systems));
+  assert.ok(Array.isArray(unpaged.body.filters.statuses));
+
+  const paged = await request(app).get("/api/search/symptoms?limit=25");
+  assert.equal(paged.status, 200);
+  assert.ok(paged.body.results.length > 0);
+  assert.equal("filters" in paged.body, false);
+});
+
 // Sorting and the keyword's case rules on a small, separate vehicle-wide set.
 // They run last and replace the fixture, so the earlier tests keep theirs.
 test("sorting and keyword matching follow the page's old browser rules", async () => {

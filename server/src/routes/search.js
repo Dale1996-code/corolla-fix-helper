@@ -78,7 +78,8 @@ searchRouter.get("/symptoms", (request, response) => {
   // Unbounded unless asked: the Ask AI page's symptom card reads the whole
   // result set. A `limit` (the symptom pickers on the Procedures, Notes, and
   // Repair Checklists pages) returns one page of it, with `total` still counting
-  // every match.
+  // every match -- and no `filters`: the pickers never read them, and building
+  // them would scan every symptom a second time on each picker request.
   if (request.query.limit === undefined) {
     response.json({
       results,
@@ -101,7 +102,6 @@ searchRouter.get("/symptoms", (request, response) => {
     limit,
     offset,
     hasMore: offset + page.length < results.length,
-    filters: getSymptomFilterOptions(),
   });
 });
 
