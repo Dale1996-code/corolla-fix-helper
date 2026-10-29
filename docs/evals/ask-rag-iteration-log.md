@@ -3857,7 +3857,8 @@ doc 748 p4 c0 and is rejected as `row_mismatch`, but it has never run end to end
 **This is an `eval:capture`, not an `eval:answers` run.** It records what the model wrote
 for six cases and what the verifier decided. Its pass/fail column comes from feeding the
 captured replies through `evaluateAnswerCase` (a throwaway script), so it is
-capture-derived. The gate (`eval:answers`) has **not** been run for this change.
+capture-derived. The gate (`eval:answers`) had not been run when this capture was taken;
+it was run afterwards on prompt v2 (Experiment K, below).
 
 **Change.** Prompt only: 14 lines added to `buildEvidencePromptLines`
 (`askEvidenceContract.js`), three rule groups. *Row scope*: quote only the one table row
@@ -3943,10 +3944,11 @@ are not verifier changes.
 
 ### Not established
 
-One reply per case cannot separate non-compliance from run-to-run variance. `eval:answers`
-(47 cases) has not been run, so the other verified cases (`oil-drain-plug-torque-citation-support`,
-`refuse-timing-belt-interval`, the three fictional refusals) are untested under the new
-prompt; the six `reject-*` probes replace the model reply and cannot be affected by it.
+One reply per case cannot separate non-compliance from run-to-run variance. This capture
+did not run `eval:answers`, so the other verified cases (`oil-drain-plug-torque-citation-support`,
+`refuse-timing-belt-interval`, the three fictional refusals) were untested under the new
+prompt when it was taken (they were tested under v2 afterwards: Experiment K, below); the six
+`reject-*` probes replace the model reply and cannot be affected by it.
 Reach of the header problem, measured offline on the snapshot: 10 chunks in 6 documents
 (docs 88, 739, 740, 1269, 1400, 1401) have a bare-number row whose column header is only in
 the previous chunk of the page, and none have it two or more chunks back. The count assumes
@@ -3977,7 +3979,7 @@ naming nothing → accepted, subject unchecked), and a test shows a claim that n
 is rejected against a different part's row while a generic claim is not; every earlier
 capture replays identically before and after v2 (the three diagnosis captures, and the first
 F1 capture re-judged by the same verifier). A live capture of charging, oil and
-`spark-plug-gap` under v2 is proposed but not run.
+`spark-plug-gap` under v2 was run afterwards (second capture, below).
 
 ### Follow-up work, separate from F1 (not in this branch)
 
@@ -4007,7 +4009,7 @@ F1 capture re-judged by the same verifier). A live capture of charging, oil and
 
 **This is an `eval:capture`, not an `eval:answers` run.** The pass/fail column is
 capture-derived (the captured replies fed through `evaluateAnswerCase` in a throwaway
-script). `eval:answers` has not been run for v1 or v2.
+script). `eval:answers` was run afterwards on v2 (Experiment K, below).
 
 | | |
 |---|---|
@@ -4066,3 +4068,98 @@ is the page's own heading and not a condition.
   from the citation (the oil change page), not from the claim.
 - One reply per case: the spark-plug stitch may or may not recur.
 - The drain-plug canary and the turbo refusal were not re-captured under v2.
+
+## EXPERIMENT K — live answer eval of F1 prompt v2, 2026-10-29
+
+**The twelfth `eval:answers` run, approved separately by the owner after the second F1
+capture, on prompt v2 (`2d18de3`). 14/14 verified PASS. Exit code 0. Overall 39/47.** This
+run gates the merge; it does not show that F1 has no remaining answer-quality problems (see
+"Scoring is not completeness" below).
+
+### Reproducibility
+
+| | |
+|---|---|
+| Command | `npm run eval:answers` with `DATABASE_FILE` and `UPLOADS_DIR` pointing at scratch copies and the key in the process environment only (no `server/.env` in the worktree); run once |
+| Revision | `f24d3b9`: `2bfae32` plus F1 v1 (`e034f91`), prompt v2 (`2d18de3`) and a docs-only commit. Clean tree, not pushed. The verifier, D1, S1 and the viscosity rule are those of `main` |
+| Data | a copy of the 2026-10-28 `VACUUM INTO` snapshot (20,447 chunks), sha256 `7eb9a0d69ef7cb20…`, byte-identical after the run. Not the live database |
+| Model and settings | as resolved before the run and as in the captures: `gpt-5.5-2026-04-23`, effort `low` (module default), `max_output_tokens` 2048. **Not confirmed from captured requests**: unlike Experiments I and J, this run did not capture them |
+| Cases | 47 (14 verified, 33 templates): Experiment J's 46 plus `reject-figure-from-another-row` |
+| Provider requests and cost | about 83 and about $0.95, estimated from Experiment J's usage; **not metered** |
+| Infrastructure noise | 0 rate-limit warnings, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 25/33. Overall **39/47**.
+
+| Category | K | J |
+|---|---|---|
+| torque | 3/7 (2/2 verified) | 2/7 |
+| refusal | 8/8 (5/5) | 8/8 |
+| capacity | 10/11 (1/1) | 8/11 |
+| procedure | 8/9 | 7/9 |
+| behavior | 1/3 | 2/3 |
+| verifier | 9/9 (6/6) | 8/8 |
+
+The 14 verified cases: `oil-drain-plug-torque`, `oil-drain-plug-torque-citation-support`,
+`spark-plug-gap`, the five refusals (`refuse-flux-capacitor`, `refuse-boeing-tire`,
+`refuse-warp-core`, `refuse-turbo-boost-pressure`, `refuse-timing-belt-interval`) and the six
+`reject-*` probes: all PASS.
+
+### Every case movement against Experiment J
+
+Experiment J's failing set is derived from I's failing-template list and J's movement table
+above (11 cases). Every case not named here has the same result in both.
+
+| Case | J | K | Attributable to F1 v2? |
+|---|---|---|---|
+| `charging-system-voltage` | FAIL | **PASS** | **Plausibly, not proven.** The second capture shows both claims verifying under v2. The "at idle" expectation is unchanged (see below) |
+| `engine-oil-capacity` | FAIL | **PASS** | **Plausibly, not proven.** The second capture shows the row-labelled claim verifying |
+| `wheel-lug-nut-torque` | FAIL | PASS | Not shown. On the unstable list (its usual wording is rejected; it passed in H) |
+| `front-lower-ball-joint-procedure` | FAIL | PASS | Not shown. On the unstable list |
+| `hazard-t3-airbag-module-shop-referral` | FAIL | PASS | Not shown. On the unstable list; its expectation is not document-grounded |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | Not shown. It failed in D, F and G and passed in I and J |
+| `coolant-drain-and-refill` | PASS | FAIL (`not_found`) | Not shown. The corpus has no coolant procedure, and a pre-F1 sample (the diagnosis capture at `41ed0d4`) was also `not_found` |
+| `reject-figure-from-another-row` | (new) | PASS | A probe: no model call |
+
+Still failing, for the reasons already documented: `rear-brake-caliper-torque`,
+`front-strut-mount-torque`, `auto-transaxle-fluid-type` (corpus gaps, owner action O1; the
+caliper expectation also doubtful, O2); `valve-cover-bolt-torque` (the unit header in the
+previous chunk, F2); `applicability-engine-mount-build-variant` and
+`applicability-abs-wiring-variant` (N5 P2/P3). **No verified case regressed, and no expectation
+or `verified` flag changed.**
+
+### Scoring is not completeness, and neither is integrity
+
+- **Scoring.** All 14 verified cases pass the scorer. `partial` counts as answered, and the
+  value checks look for what is present.
+- **Completeness: an unresolved regression is kept visible.** In the second capture the
+  `spark-plug-gap` answer lost its used-plug maximum (5 of 6 claims, `partial`), because the
+  label and the value sit on different pages (doc 724 p5 c0 and p6 c0) and the model's stitched
+  quote was refused. That is a known completeness regression of v2 against v1, and it stays
+  open. **This run cannot say whether it recurred:** `eval:answers` records neither the status
+  nor the claims, and the case passes either way (a `partial` is accepted, and the
+  qualified-value check passes when the figure is not stated).
+- **Identity.** The oil claim names the row's label, not "engine oil", because the row does not
+  print it; part identity rests on the citation. `engine-oil-capacity` passing does not mean
+  the claim says what part it is about.
+- **Expectation mismatch.** `charging-system-voltage` expects a figure "at idle"; the manual
+  gives it for a 2000 rpm check and prints no idle figure. The case now passes because the
+  voltage is present, with the 2000 rpm condition and a gap saying no idle figure is printed.
+  The expectation was not changed (owner action O2).
+- **Integrity.** The verifier is unchanged, so every accepted claim is as verified as before.
+  This run adds no evidence about qualifier wording, which the verifier does not check.
+- **Separate follow-up work, not in this branch** (see above): the unit header across a chunk
+  boundary (F2), the label and value split across a page boundary (the same family), and the
+  pre-existing 12× unit false accept (a quote cut before a row's trailing `in.*lbf`).
+
+### Limits, stated plainly
+
+- **n = 1.** Every template movement above could be generation variance; no reply is saved by
+  `eval:answers`, so none can be attributed to the prompt. The unstable-list cases moved both
+  ways.
+- Model and settings were not confirmed from captured requests, and cost was not metered.
+- **Nothing was promoted.** The new `reject-figure-from-another-row` has now passed once live;
+  promoting it is the owner's call.
+
+Counts after this run: **47 cases, 14 verified, 33 templates.**
