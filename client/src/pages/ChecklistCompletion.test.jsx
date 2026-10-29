@@ -559,6 +559,32 @@ test("the symptom picker is optional, searched a page at a time, and loaded only
   }
 });
 
+test("Enter in the symptom search box searches and does not record the repair", async () => {
+  // The form is valid as soon as the date is filled, so an unguarded Enter in
+  // "Find symptoms" would record the repair on the spot -- without the symptom
+  // being chosen and with the form gone, so the entry could not be finished.
+  const fetchMock = await renderChecklists();
+  await openCompletionForm();
+
+  const form = completionForm();
+
+  fireEvent.change(within(form).getByLabelText(/Repair date/), {
+    target: { value: "2026-08-20" },
+  });
+  const searchBox = within(form).getByLabelText("Find symptoms");
+  fireEvent.change(searchBox, { target: { value: "brake" } });
+
+  // What a browser does with Enter in a form's text field, which jsdom does not:
+  // submit the form unless the keystroke was cancelled.
+  if (fireEvent.keyDown(searchBox, { key: "Enter", code: "Enter" })) {
+    form.requestSubmit();
+  }
+
+  await within(form).findByRole("radio", { name: /Pulsating brake pedal/ });
+  expect(completionRequests(fetchMock)).toEqual([]);
+  expect(completionForm()).toBe(form);
+});
+
 test("a chosen symptom can be cleared back to no symptom", async () => {
   const fetchMock = await renderChecklists();
   await openCompletionForm();
