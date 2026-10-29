@@ -3801,3 +3801,53 @@ documented overrides that move only between rejections (`other_variant` → `unr
 - The `none → applies` row is OCR noise ("1 L") on a connector-face page carrying a "(2ZR-FE)" tag.
 - 25 owner figures read `not_stated`: mostly the merged manual's "2ZR-FE ENGINE CONTROL: …"
   headings, which the tagger does not read as titles. That under-claims; it is a P3 prerequisite.
+
+## S1 row-aware verification and F3 `lmp.` — measured offline (2026-10-28)
+
+**Why.** A diagnosis of seven failing template cases (capture at `41ed0d4`,
+`gpt-5.5-2026-04-23`, one paid `eval:capture` run approved in session) found a
+latent false pass. On the oil-change page (doc 748 p4 c0), a quote spanning both
+capacity rows named "engine oil" (in the viscosity-grade row) and printed the
+without-filter figure. The verifier accepted a claim that the without-filter
+figure is the with-filter capacity: the subject check and the numeric check each
+look anywhere in the quote. The same page spells the Imperial unit `lmp.`, which
+nothing read, so a correct Imperial figure always failed (`numeric_anomaly`).
+
+**Change** (on top of `bb9d37e`, branch `claude/diagnose-template-failures-06dbc3`):
+`checkClaimRow` / `row_mismatch`, and `lmp.` as the Imperial spelling. See
+`docs/api.md` → "Table rows". No prompt, retrieval, chunking, or model change.
+F1 (prompting row-scoped claims) and F2 (table headers across chunk boundaries)
+are separate and not started.
+
+**Measured, all free and offline** (snapshot of the live DB, 20,447 chunks):
+
+- `eval:replay` on the diagnosis capture: 0 statuses changed. The oil claim moves
+  `numeric_anomaly → subject_mismatch` — F3 reads the Imperial figure, which
+  exposes the second blocker the diagnosis predicted.
+- `eval:replay` on hand-edited variants of that capture: row-scoped claims still
+  verify (oil `answered`, charging `partial`). Two claims the old verifier
+  accepted are now `row_mismatch` by design: the long oil quote, whose
+  "engine oil" labels the grade row and not the capacity rows; and one charging
+  claim joining "2000 rpm" from one sentence with the voltage from the next.
+- Generated claims over every multi-row chunk (6,591), quoting the whole chunk:
+  - **Wrong-row** pairings (part from one row, the adjacent row's figure, not
+    printed in the first row): the old verifier accepted 12,098; the new one
+    rejects 11,374 and accepts 165. The 165 are diagnostic tables whose rows
+    name the same signal under conditions outside the vocabulary (ignition
+    on/off, "condition A/B", terminal pairs).
+  - **Correct-row**, fully stated (the row label's last six words plus its
+    threshold): 9,222 still accepted, 0 newly accepted, 1,573 newly rejected.
+    **None of the 1,573 states every condition its own row prints**: 1,526 drop
+    a "min."/"max." cut off at a colon in tire-pressure data lists, and the rest
+    drop a designation (No. 1/No. 2) or pedal state that a sibling row of the
+    same part prints differently. A claim stating its row's conditions was never
+    rejected.
+- Unit tests: 1,595/1,595 server tests, including invented-text fixtures for
+  both rows of a capacity table (in either order), shared header units, shared
+  header subjects over condition sub-rows, a foreign part blocking the header,
+  designations, pedal states, thresholds, and minimum vs standard.
+
+**Not measured.** No paid run. Whether the model words its claims so they pass
+(that is F1) is unknown. The new eval case `reject-figure-from-another-row`
+(`row_mismatch` probe) is `verified: false`. Offline on the snapshot it selects
+doc 748 p4 c0 and is rejected as `row_mismatch`, but it has never run end to end.

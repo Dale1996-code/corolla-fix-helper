@@ -17,8 +17,17 @@
 // would break, and they are what these cases pin.
 
 // The source-label format is owned by the evidence contract; importing it keeps
-// the probe and the verifier from drifting apart on what "S1" means.
-import { sourceLabel } from "../services/askEvidenceContract.js";
+// the probe and the verifier from drifting apart on what "S1" means. The row
+// probe reads rows the way the verifier does, and checks its claim clears every
+// check that runs BEFORE the row check, so it can only fail on the row.
+import {
+  checkClaimNumbers,
+  checkClaimSubject,
+  checkUnrecognizedFigures,
+  extractSpecNumbers,
+  quoteRows,
+  sourceLabel,
+} from "../services/askEvidenceContract.js";
 
 /**
  * An impossible torque figure. Chosen so it cannot collide with a real value in
@@ -105,6 +114,76 @@ function findTorqueEvidence(chunks) {
 
     if (match) {
       return { sourceId: sourceLabel(index), quote, torque: match[0] };
+    }
+  }
+
+  return null;
+}
+
+/** The specification noun a probe claim uses for a figure's unit, or "" when none fits. */
+function specNounFor(unit) {
+  if (/n\s*[·.*-]?\s*m\b|nm|ft|lb|kgf/i.test(unit)) return "torque";
+  if (/lit|qt|quart|pint|gal/i.test(unit)) return "capacity";
+  if (/kpa|mpa|psi|bar/i.test(unit)) return "pressure";
+  if (/^(mm|cm|in\.?)$/i.test(unit)) return "thickness";
+  return "";
+}
+
+/**
+ * A claim pairing the part one table row names with the figure a LATER row
+ * prints, quoted from the first row's part through the later row's figure.
+ *
+ * Built only from the retrieved text: the part is the last words of a row's
+ * label, the figure the first unit-bearing value of a later row whose label
+ * does not repeat that part and which the first row does not also print. The
+ * claim must clear the numeric, figure, and subject checks -- the part and the
+ * figure ARE both in the quote -- so the row check is the only one left.
+ */
+function findTwoRowEvidence(chunks) {
+  for (const [index, chunk] of chunks.entries()) {
+    const text = String(chunk?.chunkText || "");
+    const rows = quoteRows(text);
+
+    for (let first = 0; first < rows.length; first += 1) {
+      const part = rows[first].label.match(
+        /(?:^|\s)((?:[A-Za-z][A-Za-z-]*\s+){1,3}[A-Za-z][A-Za-z-]*)\s*$/
+      );
+
+      if (!part) {
+        continue;
+      }
+
+      const partStart = rows[first].labelStart + part.index + part[0].indexOf(part[1]);
+      const ownValues = new Set(
+        (text.slice(rows[first].start, rows[first].end).match(/\d+(?:\.\d+)?/g) || []).map(Number)
+      );
+
+      for (let later = first + 1; later < rows.length; later += 1) {
+        if (rows[later].label.toLowerCase().includes(part[1].toLowerCase())) {
+          continue;
+        }
+
+        const figure = extractSpecNumbers(text.slice(rows[later].start, rows[later].end)).find(
+          (spec) => Number.isFinite(spec.value) && specNounFor(spec.unit) && !ownValues.has(spec.value)
+        );
+
+        if (!figure) {
+          continue;
+        }
+
+        const quote = text.slice(partStart, rows[later].end);
+        const claim = `The ${part[1]} ${specNounFor(figure.unit)} is ${figure.raw}.`;
+        const subject = checkClaimSubject(claim, quote);
+
+        if (
+          checkClaimNumbers(claim, quote).grounded &&
+          checkUnrecognizedFigures(claim, quote).grounded &&
+          subject.checked &&
+          subject.grounded
+        ) {
+          return { sourceId: sourceLabel(index), quote, claim };
+        }
+      }
     }
   }
 
@@ -230,6 +309,35 @@ const PROBES = {
           sourceId: evidence.sourceId,
           evidenceQuote: evidence.quote,
         },
+      ],
+      generalGuidance: [],
+      gaps: [],
+    };
+  },
+
+  /**
+   * A real part and a real figure from one quote -- printed in different rows.
+   *
+   * The diagnosed false pass (2026-10-28): a quote spanning two table rows
+   * names the part in one and prints the claimed figure in the other, so the
+   * subject and numeric checks each find what they look for. Only the row
+   * check (S1) can stop it. Read out of the retrieved evidence at run time, like
+   * the subject probe, so it keeps testing the check rather than one chunk.
+   */
+  row_mismatch: (chunks) => {
+    const evidence = findTwoRowEvidence(chunks);
+
+    if (!evidence) {
+      // Loudly, for the same reason as subject_mismatch.
+      throw new Error(
+        "row_mismatch probe: no two-row table in the retrieved evidence, " +
+          "so the claim could not clear the subject and numeric checks first"
+      );
+    }
+
+    return {
+      documentSupported: [
+        { claim: evidence.claim, sourceId: evidence.sourceId, evidenceQuote: evidence.quote },
       ],
       generalGuidance: [],
       gaps: [],

@@ -344,8 +344,12 @@ export function quoteAppearsInChunk(quote, chunkText) {
 // (3B-01). The torque spellings cover the manuals' own "ft.*lbf" and "in.*lbf"
 // (two separators) and the owner's "ft-lbs", "ft lbs", and "lb-ft". US and
 // Imperial quarts, pints, and gallons are different sizes, so "Imp." stays part
-// of the unit; a bare "qt" is the US quart. A bare "L" is matched apart from
-// this case-insensitive pattern -- see VOLUME_SYMBOL_REGEX.
+// of the unit; a bare "qt" is the US quart. "lmp." -- a lowercase L for the
+// capital I, with its period -- is the same Imperial unit as the text layer of
+// one oil-capacity page spells it (F3, 2026-10-28). Unread, it left that page's
+// Imperial figure unchecked and every claim stating it rejected; it is never a
+// US quart. A bare "L" is matched apart from this case-insensitive pattern --
+// see VOLUME_SYMBOL_REGEX.
 //
 // "kgf/cm2", "kgf/cm²", and "kgf*cm2" are a PRESSURE (kilogram-force per square
 // centimetre), tried before the "kgf*cm" torque spelling they start with. The
@@ -368,7 +372,7 @@ const UNIT_PATTERN =
   "millimet(?:er|re)s?|mm|centimet(?:er|re)s?|cm|micron?s?|" +
   "inch(?:es)?|in\\.|in(?=[)\\],;:]|$)|" +
   "lit(?:er|re)s?|ml|millilit(?:er|re)s?|" +
-  "imp(?:\\.|erial)?\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
+  "(?:imp(?:\\.|erial)?|lmp\\.)\\s*(?:qts?|quarts?|pints?|gal(?:lons?)?)|" +
   "(?:US\\s*)?(?:qts?|quarts?|pints?|gal(?:lons?)?)|fl\\s*oz|" +
   "miles?|kilomet(?:er|re)s?|km\\s*\\/\\s*h|kph|mph|km|" +
   "ohms?|kilohms?|k\\s*ohms?|milliohms?|meg(?:a)?ohms?|Ω(?=[A-Za-z0-9_])|" +
@@ -677,9 +681,10 @@ const MEASUREMENT_UNITS = [
   { id: "qt", family: "volume", match: /^(US\s*)?(qts?|quarts?)$/i },
   { id: "pt", family: "volume", match: /^(US\s*)?pints?$/i },
   { id: "gal", family: "volume", match: /^(US\s*)?(gal|gallons?)$/i },
-  { id: "imp qt", family: "volume", match: /^imp(\.|erial)?\s*(qts?|quarts?)$/i },
-  { id: "imp pt", family: "volume", match: /^imp(\.|erial)?\s*pints?$/i },
-  { id: "imp gal", family: "volume", match: /^imp(\.|erial)?\s*(gal|gallons?)$/i },
+  // "lmp." is the Imperial spelling UNIT_PATTERN explains, so it names the same unit.
+  { id: "imp qt", family: "volume", match: /^(imp(\.|erial)?|lmp\.)\s*(qts?|quarts?)$/i },
+  { id: "imp pt", family: "volume", match: /^(imp(\.|erial)?|lmp\.)\s*pints?$/i },
+  { id: "imp gal", family: "volume", match: /^(imp(\.|erial)?|lmp\.)\s*(gal|gallons?)$/i },
   { id: "fl oz", family: "volume", match: /^fl\s*oz$/i },
   { id: "mm", family: "length", match: /^(millimet(er|re)s?|mm)$/i },
   { id: "cm", family: "length", match: /^(centimet(er|re)s?|cm)$/i },
@@ -809,8 +814,22 @@ function sameUnit(left, right) {
  * that verified it, so the figure shown can never be one this check did not use.
  */
 function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
+  const [first] = evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits);
+
+  return first ? first.printed : null;
+}
+
+/**
+ * Every place the evidence prints the claimed spec, in order, as its verbatim
+ * text and position. printedSpecFor shows the first; the row check needs them
+ * all, because a figure printed in two rows of a table may be the right figure
+ * in either one (see checkClaimRow).
+ *
+ * @returns {Array<{ printed: string, index: number }>}
+ */
+function evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   if (!Number.isFinite(spec.value)) {
-    return null;
+    return [];
   }
 
   // A current symbol in the evidence counts only for a current claim. Most
@@ -838,16 +857,16 @@ function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   // units. A matching numeral alone is not enough: "37 psi" must never be
   // grounded by an unrelated "37 N·m" torque passage, nor "27 ft-lbf" by the
   // "37 N·m" it might have been converted from.
-  const match = comparableSpecs.find(
+  const matches = comparableSpecs.filter(
     (evidenceSpec) => evidenceSpec.value === spec.value && sameUnit(evidenceSpec.unit, spec.unit)
   );
 
-  if (match) {
-    return match.printed;
+  if (matches.length) {
+    return matches.map(({ printed, index }) => ({ printed, index }));
   }
 
   if (comparableSpecs.length) {
-    return null;
+    return [];
   }
 
   // Some extracted manual tables put units in a header and only numbers in the
@@ -860,12 +879,12 @@ function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
   // The printed figure is then the bare number: the page prints its unit only
   // in the header.
   if (!headerUnits.some((unit) => sameUnit(unit, spec.unit))) {
-    return null;
+    return [];
   }
 
-  const number = evidenceNumbers.find((candidate) => candidate.value === spec.value);
-
-  return number ? number.raw : null;
+  return evidenceNumbers
+    .filter((candidate) => candidate.value === spec.value)
+    .map(({ raw, index }) => ({ printed: raw, index }));
 }
 
 // A unit standing alone in a quote, attached to no number: the column header of
@@ -1452,6 +1471,25 @@ function phraseNamesSubject(subject, evidenceText) {
  * remaining limit.
  */
 export function checkClaimSubject(claimText, evidenceText) {
+  const subject = parseClaimSubject(claimText);
+
+  if (!subject.length) {
+    return { grounded: true, checked: false, subject: "" };
+  }
+
+  return {
+    grounded: textNamesSubject(evidenceText, subject),
+    checked: true,
+    subject: subject.join(" "),
+  };
+}
+
+/**
+ * The part a claim's specification is about, as subject tokens, or [] when the
+ * claim states no guarded specification or has a shape the parser cannot read.
+ * Shared by the subject check and the row check, so both read one subject.
+ */
+function parseClaimSubject(claimText) {
   const specs = extractSpecNumbers(claimText);
   const hasMeasurementSpec = specs.some(
     (spec) => spec.unit !== "viscosity" && Boolean(findMeasurementUnit(spec.unit))
@@ -1464,29 +1502,455 @@ export function checkClaimSubject(claimText, evidenceText) {
   ];
 
   if (!hasMeasurementSpec && !otherFamilyNouns.length) {
-    return { grounded: true, checked: false, subject: "" };
+    return [];
   }
 
   // A claim carrying a measurement spec keeps the original noun list, so its
   // parse is byte-identical to the behavior shipped in PR #122.
-  const subject = extractSpecSubject(
-    claimText,
-    hasMeasurementSpec ? SPEC_SUBJECT_NOUNS : otherFamilyNouns
-  );
+  return extractSpecSubject(claimText, hasMeasurementSpec ? SPEC_SUBJECT_NOUNS : otherFamilyNouns);
+}
 
-  if (!subject.length) {
-    return { grounded: true, checked: false, subject: "" };
+/** Does this text name the parsed subject (see checkClaimSubject for how)? */
+function textNamesSubject(text, subject) {
+  // The unbroken run is still the first test, unchanged. The phrase test only
+  // ever ADDS acceptances, so no claim verified before this can be rejected now.
+  return containsTokenSequence(subjectTokens(text), subject) || phraseNamesSubject(subject, text);
+}
+
+// ---------------------------------------------------------------------------
+// Row-aware verification (S1)
+// ---------------------------------------------------------------------------
+//
+// A flattened table puts several rows in one quote: "Oil change with filter
+// 4.5 liters ... Oil change without filter 4.1 liters". The subject check asks
+// whether the quote names the claim's part, and the numeric check whether it
+// prints the claim's figure -- each ANYWHERE in the quote. Together they
+// verified the part of one row with the figure of another: diagnosed
+// 2026-10-28, a quote spanning both capacity rows "confirmed" the without-
+// filter figure as the with-filter capacity. The row check asks what neither
+// can: is there ONE row that prints every figure of the claim, names its part,
+// and carries no condition the claim contradicts?
+//
+// A row is a run of printed values -- a figure, the same figure in its other
+// units, both ends of a range -- and the label text before it, back to the
+// previous row's values. A quote with one row is judged exactly as before.
+
+// Words that may stand between two values of ONE row, besides units and
+// punctuation: "13.2 to 14.8 V", "25 and 30 N*m", and "at" introducing the
+// value's own measurement condition, "11.6 to 12.4 Ω at 20°C (68°F)".
+const ROW_GLUE_WORDS = new Set(["to", "and", "or", "at"]);
+
+// A step number opening a sentence ("1. Remove", "(2)") is not a value.
+const STEP_MARKER = /^\(?\d{1,2}[.)]$/;
+
+// Label words that never name a part: links between words, the specification
+// nouns, table vocabulary, and the action a capacity row names ("Drain and
+// refill with oil filter change"). Only a part word in a later row's label
+// keeps a shared header from carrying over to it.
+const ROW_NON_PART_WORDS = new Set(
+  [
+    ...["and", "or", "to", "of", "for", "at", "in", "on", "by", "x", "is", "are"],
+    ...SPEC_SUBJECT_NOUNS,
+    ...["voltage", "resistance", "speed", "temperature", "current"],
+    ...["item", "condition", "specified", "specification", "standard", "value", "part"],
+    ...["tightened", "tightening", "system", "installation"],
+    ...["drain", "refill", "fill", "replace", "replacement", "change", "install", "remove"],
+    ...["check", "inspect", "tighten"],
+  ].map((word) => normalizeSubjectToken(word))
+);
+
+// Links that may follow a shared header's part name inside the first row's
+// label without being that row's own label.
+const HEADER_GLUE_WORDS = new Set(
+  ["and", "or", "to", "of", "for", "at", "in", "on", "by", "x", "is", "are"].map((word) =>
+    normalizeSubjectToken(word)
+  )
+);
+
+// A threshold printed AFTER its value -- "0.2 V or less" -- qualifies that
+// value, not the next row's. It is read into the value's row, as one word
+// ("orless"), so it can tell two threshold rows of one signal apart.
+const THRESHOLD_TAIL = /^\s*\)?\s*or\s+(?:less|lower|below|more|higher|greater|above)\b/i;
+const THRESHOLD_REGEX = /\bor\s+(less|lower|below|more|higher|greater|above)\b/gi;
+
+// Conditions that tell table rows apart. Each group lists the alternatives,
+// and each alternative its spellings. A row's condition must not be
+// contradicted by the claim, and where another row about the SAME part carries
+// a different alternative, the claim must state the row's own -- that is what
+// keeps "with filter" from claiming the "without filter" row's figure, and a
+// table's minimum from passing as its standard value.
+const ROW_CONDITION_GROUPS = [
+  [["with"], ["without"]],
+  [["front"], ["rear"]],
+  [["left", "lh"], ["right", "rh"]],
+  [["upper"], ["lower"]],
+  [["inner"], ["outer"]],
+  [["intake"], ["exhaust"]],
+  [["hot"], ["cold"]],
+  [["new"], ["used", "reused"]],
+  [["released"], ["depressed", "pressed", "pushed"]],
+  [["standard"], ["minimum", "min"], ["maximum", "max"], ["limit"]],
+  [
+    ["orless", "orlower", "orbelow"],
+    ["ormore", "orhigher", "orgreater", "orabove"],
+  ],
+];
+
+const ROW_CONDITION_WORDS = new Set(ROW_CONDITION_GROUPS.flat(2));
+
+// The alternative a claim means by saying none: "the disc thickness is 25.0 mm"
+// is the standard thickness, never the minimum.
+const UNMARKED_CONDITION_WORDS = new Set(["standard"]);
+
+// A part designation, "No. 1" or "No.2", read as one word ("no1"): rows for
+// No. 1 and No. 2 of the same part differ by nothing else.
+const DESIGNATION_REGEX = /\bno\.?\s*(\d+)\b/gi;
+
+/** [start, end) spans of every match of these global regexes. */
+function spansOf(text, regexes) {
+  return regexes.flatMap((regex) =>
+    [...text.matchAll(regex)].map((match) => [match.index, match.index + match[0].length])
+  );
+}
+
+const insideSpans = (spans, index) => spans.some(([start, end]) => index >= start && index < end);
+
+/** Is this bare number a name, a step number, or a designation rather than a value? */
+function isNonValueNumber(text, number) {
+  if (IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(text, number.index)))) {
+    return true;
   }
 
-  return {
-    // The unbroken run is still the first test, unchanged. The phrase test only
-    // ever ADDS acceptances, so no claim verified before this can be rejected now.
-    grounded:
-      containsTokenSequence(subjectTokens(evidenceText), subject) ||
-      phraseNamesSubject(subject, evidenceText),
-    checked: true,
-    subject: subject.join(" "),
-  };
+  const before = text.slice(0, number.index);
+
+  if (/\bno\.?\s*$/i.test(before)) {
+    return true;
+  }
+
+  let start = number.index;
+  let end = number.index;
+
+  while (start > 0 && !/\s/.test(text[start - 1])) start -= 1;
+  while (end < text.length && !/\s/.test(text[end])) end += 1;
+
+  const preceding = text.slice(0, start).trimEnd();
+
+  return STEP_MARKER.test(text.slice(start, end)) && (!preceding || /[.!?:;]$/.test(preceding));
+}
+
+/**
+ * Where the quote prints values: every unit-bearing specification and
+ * viscosity grade, and -- only when the quote carries a unit header -- every
+ * bare number that is not a name. Without a header a bare number is a count
+ * or a step ("remove the 4 bolts"), never a table cell.
+ */
+function rowValueSpans(text) {
+  const spans = spansOf(text, [...SPEC_REGEXES, VISCOSITY_REGEX]);
+
+  if (headerUnitsIn(text).length) {
+    const names = spansOf(text, [
+      ENGINE_DESIGNATION_REGEX,
+      SPELLED_HEADER_UNIT_REGEX,
+      SYMBOL_HEADER_UNIT_REGEX,
+    ]);
+    const valueSpans = [...spans];
+
+    for (const number of signedNumbers(text)) {
+      if (
+        !insideSpans(valueSpans, number.index) &&
+        !insideSpans(names, number.index) &&
+        !isNonValueNumber(text, number)
+      ) {
+        spans.push([number.index, number.index + number.raw.length]);
+      }
+    }
+  }
+
+  return spans.sort((left, right) => left[0] - right[0]);
+}
+
+/** Does only glue -- units, punctuation, "to", "and", "or" -- stand between two values? */
+function isRowGlue(gap) {
+  return gap
+    .replace(SPELLED_HEADER_UNIT_REGEX, " ")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .every((word) => ROW_GLUE_WORDS.has(word.toLowerCase()));
+}
+
+/** A value's end, moved past a threshold printed after it ("or less"). */
+function endOverThreshold(source, end) {
+  const tail = source.slice(end).match(THRESHOLD_TAIL);
+
+  return tail ? end + tail[0].length : end;
+}
+
+/**
+ * The rows of a quote, in order: each row's label (the text since the previous
+ * row's values, or since the start for the first), the [start, end) span of
+ * its values, and their text -- which includes a threshold printed after them.
+ * Exported for the row_mismatch eval probe.
+ *
+ * @returns {Array<{ label: string, labelStart: number, start: number, end: number, values: string }>}
+ */
+export function quoteRows(text) {
+  const source = String(text || "");
+  const rows = [];
+
+  for (const [start, end] of rowValueSpans(source)) {
+    const last = rows[rows.length - 1];
+
+    if (last && (start <= last.end || isRowGlue(source.slice(last.end, start)))) {
+      last.end = endOverThreshold(source, Math.max(last.end, end));
+      continue;
+    }
+
+    const labelStart = last ? last.end : 0;
+    rows.push({
+      label: source.slice(labelStart, start),
+      labelStart,
+      start,
+      end: endOverThreshold(source, end),
+    });
+  }
+
+  return rows.map((row) => ({ ...row, values: source.slice(row.start, row.end) }));
+}
+
+/** Where the evidence prints one claimed figure, by position. */
+function claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
+  if (spec.unit === "viscosity") {
+    const grade = collapseGrade(spec.raw);
+
+    return evidenceSpecs
+      .filter((evidenceSpec) => evidenceSpec.unit === "viscosity" && collapseGrade(evidenceSpec.raw) === grade)
+      .map(({ index }) => index);
+  }
+
+  return evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits).map(({ index }) => index);
+}
+
+/** Subject tokens of a label, without the column-header units it carries. */
+function labelTokens(label) {
+  return subjectTokens(String(label || "").replace(SPELLED_HEADER_UNIT_REGEX, " "));
+}
+
+/**
+ * Does the first row's label hold a SHARED header naming the subject -- the
+ * subject followed by more of that row's own label? "Engine oil capacity Oil
+ * change with filter 4.5 liters" does; "Drain plug 40 N*m" does not, because
+ * there "drain plug" is the first row's part, not a header over the next row.
+ */
+function headerNamesSubject(firstLabel, subject) {
+  const tokens = labelTokens(firstLabel);
+
+  for (let start = 0; start + subject.length <= tokens.length; start += 1) {
+    if (
+      subject.every((token, offset) => tokens[start + offset] === token) &&
+      tokens.slice(start + subject.length).some((token) => !HEADER_GLUE_WORDS.has(token))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** The condition words of a row: its label and any threshold after its values. */
+function rowConditionWords(row) {
+  return conditionWords(`${row.label} ${row.values}`);
+}
+
+/**
+ * Does a row carry a condition -- with/without, front/rear, a limit, a
+ * threshold, a designation? Only such a row is a SUB-row a shared header can
+ * carry over to: "Oil change without filter" under "Engine oil capacity". A row
+ * naming neither a part nor a condition is not recognizably the header's.
+ */
+function rowCarriesCondition(row) {
+  return [...rowConditionWords(row)].some(
+    (word) => ROW_CONDITION_WORDS.has(word) || /^no\d+$/.test(word)
+  );
+}
+
+/**
+ * Does a later row's label name something the claim does not -- a different
+ * part? Condition words are judged by rowConditionsAgree instead.
+ */
+function labelNamesOtherPart(label, claimText) {
+  const claimTokens = new Set(subjectTokens(claimText));
+
+  return labelTokens(label).some(
+    (token) =>
+      !ROW_NON_PART_WORDS.has(token) && !ROW_CONDITION_WORDS.has(token) && !claimTokens.has(token)
+  );
+}
+
+/** Does row `r` name the subject, itself or through a shared header it may inherit? */
+function rowNamesSubject(rows, r, subject, claimText) {
+  if (textNamesSubject(rows[r].label, subject)) {
+    return true;
+  }
+
+  return (
+    r > 0 &&
+    rowCarriesCondition(rows[r]) &&
+    headerNamesSubject(rows[0].label, subject) &&
+    !labelNamesOtherPart(rows[r].label, claimText)
+  );
+}
+
+/**
+ * Lowercase words of a text, plus each part designation ("no1") and each
+ * threshold ("orless") as one word.
+ */
+function conditionWords(text) {
+  const source = String(text || "");
+  const words = new Set(source.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+
+  for (const match of source.matchAll(DESIGNATION_REGEX)) {
+    words.add(`no${match[1]}`);
+  }
+
+  for (const match of source.matchAll(THRESHOLD_REGEX)) {
+    words.add(`or${match[1].toLowerCase()}`);
+  }
+
+  return words;
+}
+
+/**
+ * Is row `k` about the same part as row `r`? It names the subject itself, or it
+ * is a sibling sub-row under the same shared header: it carries a condition
+ * and names no part word that row `r` or the claim does not also name ("Oil
+ * change with filter" beside "Oil change without filter").
+ */
+function rowIsSamePart(rows, k, r, subject, claimText) {
+  if (textNamesSubject(rows[k].label, subject)) {
+    return true;
+  }
+
+  if (k === 0 || !rowCarriesCondition(rows[k]) || !headerNamesSubject(rows[0].label, subject)) {
+    return false;
+  }
+
+  const known = new Set([...labelTokens(rows[r].label), ...subjectTokens(claimText)]);
+
+  return labelTokens(rows[k].label).every(
+    (token) => ROW_NON_PART_WORDS.has(token) || ROW_CONDITION_WORDS.has(token) || known.has(token)
+  );
+}
+
+/**
+ * Does the claim agree with every condition that sets row `r` apart from the
+ * other rows about the same part? A condition another part's row prints ("No.
+ * 2" on a different bracket) says nothing about which of this part's rows the
+ * claim means. With no parsed subject every row counts, the cautious reading.
+ */
+function rowConditionsAgree(rows, r, claimText, subject) {
+  const claimWords = conditionWords(claimText);
+  const rowWords = rowConditionWords(rows[r]);
+  const otherRowWords = rows
+    .filter(
+      (_, index) =>
+        index !== r && (!subject.length || rowIsSamePart(rows, index, r, subject, claimText))
+    )
+    .map((row) => rowConditionWords(row));
+  const designations = [
+    ...new Set([claimWords, rowWords, ...otherRowWords].flatMap((words) => [...words].filter((word) => /^no\d+$/.test(word)))),
+  ].map((word) => [word]);
+  const groups = designations.length ? [...ROW_CONDITION_GROUPS, designations] : ROW_CONDITION_GROUPS;
+
+  for (const group of groups) {
+    const present = (words) =>
+      group.flatMap((spellings, alternative) =>
+        spellings.some((spelling) => words.has(spelling)) ? [alternative] : []
+      );
+    const inRow = present(rowWords);
+
+    if (!inRow.length) {
+      continue;
+    }
+
+    const inClaim = present(claimWords);
+    const rowIsUnmarked = inRow.some((alternative) =>
+      group[alternative].some((spelling) => UNMARKED_CONDITION_WORDS.has(spelling))
+    );
+    const agrees =
+      inClaim.some((alternative) => inRow.includes(alternative)) ||
+      (!inClaim.length && rowIsUnmarked);
+    const tellsRowsApart = otherRowWords.some((words) =>
+      present(words).some((alternative) => !inRow.includes(alternative))
+    );
+
+    if ((inClaim.length || tellsRowsApart) && !agrees) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Row-aware check: one row of the quote must print every figure of the claim,
+ * name its part, and carry no condition the claim contradicts or leaves out
+ * where that condition tells the rows apart.
+ *
+ * The part may come from the row's own label, or from a shared header over the
+ * table when the row's label names no other part ("Engine oil capacity" over
+ * "Oil change without filter"). Units printed only in a column header verify a
+ * row's bare numbers as before (printedSpecFor) -- but only that row's.
+ *
+ * Applies only to claims stating a specification, and only to quotes printing
+ * two or more rows; anything else is unchecked here and judged as before. Like
+ * the subject check it is lexical: it cannot read a condition worded
+ * differently from the page, and it prefers a safe rejection to a guess.
+ *
+ * @returns {{ grounded: boolean, checked: boolean, detail: "" | "figures_split" | "subject_not_in_row" | "condition_mismatch" }}
+ */
+export function checkClaimRow(claimText, evidenceText) {
+  const specs = extractSpecNumbers(claimText);
+  const evidence = String(evidenceText || "");
+  const rows = quoteRows(evidence);
+
+  if (!specs.length || rows.length < 2) {
+    return { grounded: true, checked: false, detail: "" };
+  }
+
+  const evidenceNumbers = allNumbersIn(evidence);
+  const evidenceSpecs = readSpecs(evidence);
+  const headerUnits = headerUnitsIn(evidence);
+  const rowOf = (index) => rows.findIndex((row) => index >= row.start && index < row.end);
+  const figureRows = specs.map(
+    (spec) =>
+      new Set(
+        claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
+          .map(rowOf)
+          .filter((row) => row >= 0)
+      )
+  );
+  const holding = rows
+    .map((_, row) => row)
+    .filter((row) => figureRows.every((figureRow) => figureRow.has(row)));
+
+  if (!holding.length) {
+    return { grounded: false, checked: true, detail: "figures_split" };
+  }
+
+  const subject = parseClaimSubject(claimText);
+  const named = holding.filter(
+    (row) => !subject.length || rowNamesSubject(rows, row, subject, claimText)
+  );
+
+  if (!named.length) {
+    return { grounded: false, checked: true, detail: "subject_not_in_row" };
+  }
+
+  if (!named.some((row) => rowConditionsAgree(rows, row, claimText, subject))) {
+    return { grounded: false, checked: true, detail: "condition_mismatch" };
+  }
+
+  return { grounded: true, checked: true, detail: "" };
 }
 
 function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote }) {
@@ -1551,6 +2015,7 @@ export const ASK_REJECTION_REASONS = Object.freeze([
   "numeric_anomaly",
   "unrecognized_figure",
   "subject_mismatch",
+  "row_mismatch",
   "unsourced_specification",
   "unsourced_gap_specification",
 ]);
@@ -1696,6 +2161,26 @@ export function verifyEvidence(validated, chunks) {
       });
       gaps.push(
         `Unverified (the cited text does not name the same part): ${gapClaimText(
+          claim.claim,
+          claim.evidenceQuote
+        )}`
+      );
+      continue;
+    }
+
+    // The part and the figure are both in the quote; in a multi-row quote they
+    // must also be in the SAME row, under the claim's condition (S1).
+    const row = checkClaimRow(claim.claim, claim.evidenceQuote);
+
+    if (!row.grounded) {
+      rejected.push({
+        ...origin,
+        claim: claim.claim,
+        reason: "row_mismatch",
+        detail: row.detail,
+      });
+      gaps.push(
+        `Unverified (the cited table prints that figure in another row or condition): ${gapClaimText(
           claim.claim,
           claim.evidenceQuote
         )}`

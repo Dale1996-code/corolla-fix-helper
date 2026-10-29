@@ -16,14 +16,18 @@ import {
 } from "../src/evals/answerRejectionProbes.js";
 import { verifyEvidence } from "../src/services/askEvidenceContract.js";
 
+// Two invented table rows follow the drain-plug sentence, so every probe --
+// the row probe included -- runs over a page printing more than one row, as
+// real torque and capacity pages do.
+const TABLE_ROWS = "Oil filter cap 25 Nm Oil pan bolt 10 Nm";
+
 const chunk = () => ({
   documentId: 748,
   documentTitle: "Oil and Oil Filter Replacement",
   originalFilename: "oil.pdf",
   pageNumber: 1,
   chunkIndex: 0,
-  chunkText:
-    "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf)",
+  chunkText: `Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf) ${TABLE_ROWS}`,
 });
 
 async function runProbe(name) {
@@ -102,7 +106,7 @@ test("on a chunk longer than the quote bound, every probe still trips its own re
   const long = {
     ...chunk(),
     chunkText:
-      "Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf). " +
+      `Clean and install the oil drain plug with a new gasket. Torque : 37 Nm (377 kgf-cm, 27 ft-lbf). ${TABLE_ROWS}. Then ` +
       filler.repeat(8),
   };
 
@@ -257,5 +261,36 @@ test("the sentinel part name is one no quote can contain", async () => {
     verified.rejected[0].reason,
     "subject_mismatch",
     "the probe must still reject on a page that names several parts"
+  );
+});
+
+// ---- S1: the row probe ----
+
+test("the row probe is rejected for the ROW, having cleared the subject and numeric checks", async () => {
+  // Its part and its figure are both really in the quote -- the shape the
+  // subject and numeric checks each passed before S1.
+  const chunks = [chunk()];
+  const reply = await createRejectionProbe("row_mismatch")({ chunks });
+  const claim = reply.documentSupported[0];
+
+  assert.ok(chunk().chunkText.includes(claim.evidenceQuote), "the quote is not verbatim");
+  assert.equal(claim.claim, "The Oil filter cap torque is 10 Nm.");
+  assert.equal(claim.evidenceQuote, TABLE_ROWS);
+
+  const verified = verifyEvidence(reply, chunks);
+
+  assert.equal(verified.documentSupported.length, 0);
+  assert.equal(verified.rejected.length, 1);
+  assert.equal(verified.rejected[0].reason, "row_mismatch");
+  assert.doesNotMatch(verified.gaps.join(" "), /10 Nm/);
+});
+
+test("the row probe fails loudly when no retrieved page prints two rows", async () => {
+  await assert.rejects(
+    () =>
+      createRejectionProbe("row_mismatch")({
+        chunks: [{ ...chunk(), chunkText: "Clean and install the oil drain plug. Torque : 37 Nm" }],
+      }),
+    /no two-row table in the retrieved evidence/
   );
 });

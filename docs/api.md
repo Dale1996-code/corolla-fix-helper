@@ -377,11 +377,12 @@ Server-side verification, in order:
 2. Each `sourceId` (`S1`..`Sn`, prompt-local; never a database row id) must map to a retrieved chunk.
 3. The `evidenceQuote` must be a genuine substring of that chunk (whitespace- and case-insensitive), starting and ending on token boundaries: never inside a word and never inside a number, so `torque 10` is not a quote of `torque 103`.
 4. A claim that states no unit-bearing figure must quote at least three words (`quote_too_short`).
-5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units. Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
+5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units (`lmp.`, a lowercase-L spelling of `Imp.` found in one page's text layer, is the Imperial unit). Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
 6. Every other number in the claim — a figure in a unit the detector does not know, a count, a step number — must itself be printed in the quote (`unrecognized_figure`). Only names are exempt: codes, connectors, and pins (`P0420`, `B9-1`), engine codes (`2ZR-FE`), ordinals, Toyota part numbers, and model years. An unknown unit is compared by its number only, so this is a floor, not a unit check.
 7. For recognized specification wording, the complete normalized part name from the claim must also occur in the quote (see the boundary below). This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
-8. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
-9. `status` is derived by the server from what actually verified — never taken from the model.
+8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both.
+9. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
+10. `status` is derived by the server from what actually verified — never taken from the model.
 
 Anything failing a step is removed from the answer and becomes a gap. **Gap text
 never reprints the failing value**, so an ungrounded specification cannot render
@@ -408,9 +409,23 @@ quote: "X of the Y" also reads as "Y X", the table label "standard" may sit
 anywhere, and the words "system" and "installation" may be left out. Every other
 word of the part name must still be present, unbroken and in order.
 
+**Table rows.** When the quote prints two or more table rows — runs of values,
+each with the label before it — one row must hold every figure the claim states,
+name its part (in its own label, or through a shared header over a sub-row that
+names no other part), and carry no condition the claim contradicts or omits
+where that condition tells the part's rows apart: with/without, front/rear,
+left/right, upper/lower, inner/outer, intake/exhaust, hot/cold, new/used,
+released/depressed, standard/minimum/maximum/limit, "or more"/"or less", and
+designations such as No. 1/No. 2. A claim saying no limit means the standard
+value. Otherwise the claim is rejected as `row_mismatch`. A quote printing one
+row is judged as before; a condition printed in a different sentence from the
+figure is a different row, so such a claim must be split; and conditions outside
+that list are not seen.
+
 "Verified" means a claimed figure is **printed in the cited quote, in the same
-unit** — not that it is right for this car, and not that it belongs to the part
-named when one quote names several. A model that converts or rounds a correct
+unit** — not that it is right for this car. In a multi-row quote it also means
+the figure's own row names the part, but within a row the check is still
+lexical. A model that converts or rounds a correct
 figure gets `partial` or `not_found` instead of `answered`; that refusal is
 intended. A figure in a unit the detector does not know is checked by its number
 alone, and the header-table fallback cannot tell which column a bare number came
@@ -537,7 +552,7 @@ unrecognized and the two enums below have drifted from the verifier.
 | `unsupportedSpecCount` | integer | How many unit-bearing specifications in the item were not supported by its evidence — a count only, never the values. |
 
 `reason` is one of `unknown_source`, `quote_not_in_source`, `quote_too_short`,
-`numeric_anomaly`, `unrecognized_figure`, `subject_mismatch`,
+`numeric_anomaly`, `unrecognized_figure`, `subject_mismatch`, `row_mismatch`,
 `unsourced_specification`, or `unsourced_gap_specification`, matching the
 verification steps listed earlier. For `unrecognized_figure`,
 `unsupportedSpecCount` counts the unreadable figures that were not printed.
