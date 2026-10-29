@@ -19,6 +19,8 @@ export const searchRouter = Router();
 
 const PROCEDURE_SEARCH_PAGE_SIZE = 25;
 const PROCEDURE_SEARCH_MAX_PAGE_SIZE = 100;
+const SYMPTOM_SEARCH_PAGE_SIZE = 25;
+const SYMPTOM_SEARCH_MAX_PAGE_SIZE = 100;
 
 function getQueryValue(request, name, fallback = "") {
   return typeof request.query[name] === "string" ? request.query[name] : fallback;
@@ -73,10 +75,33 @@ searchRouter.get("/symptoms", (request, response) => {
     sort: getQueryValue(request, "sort", "relevance"),
   });
 
+  // Unbounded unless asked: the Ask AI page's symptom card reads the whole
+  // result set. A `limit` (the symptom pickers on the Procedures, Notes, and
+  // Repair Checklists pages) returns one page of it, with `total` still counting
+  // every match -- and no `filters`: the pickers never read them, and building
+  // them would scan every symptom a second time on each picker request.
+  if (request.query.limit === undefined) {
+    response.json({
+      results,
+      total: results.length,
+      filters: getSymptomFilterOptions(),
+    });
+    return;
+  }
+
+  const limit = parsePageLimit(request.query.limit, {
+    defaultLimit: SYMPTOM_SEARCH_PAGE_SIZE,
+    maxLimit: SYMPTOM_SEARCH_MAX_PAGE_SIZE,
+  });
+  const offset = parsePageOffset(request.query.offset);
+  const page = results.slice(offset, offset + limit);
+
   response.json({
-    results,
+    results: page,
     total: results.length,
-    filters: getSymptomFilterOptions(),
+    limit,
+    offset,
+    hasMore: offset + page.length < results.length,
   });
 });
 
@@ -89,8 +114,8 @@ searchRouter.get("/procedures", (request, response) => {
   });
 
   // Unbounded unless asked: the Ask AI page's procedure card reads the whole
-  // result set. A `limit` (the Symptoms page's procedure picker) returns one
-  // page of it, with `total` still counting every match.
+  // result set. A `limit` (the procedure pickers on the Symptoms and Notes
+  // pages) returns one page of it, with `total` still counting every match.
   if (request.query.limit === undefined) {
     response.json({
       results,

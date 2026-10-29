@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ErrorBanner } from "../feedback/Banner";
 import { formatResultRange } from "../../lib/resultRange";
 import { useRecordSearch } from "../../lib/useRecordSearch";
@@ -9,6 +10,21 @@ import { useRecordSearch } from "../../lib/useRecordSearch";
 // What is already selected is listed first whether or not it is in the current
 // results, so a link can always be seen and unticked -- the selection is the
 // caller's (`selected`), not whatever page happens to be loaded.
+//
+// `multiple={false}` makes it a radio group for a single link (a note's one
+// linked record); `onToggle` then receives the record chosen.
+
+// The picker sits inside its host page's submit form, and Enter in a text field
+// submits the form around it -- which would save a half-finished record (or
+// record a repair) while the owner is only searching. The search already runs
+// as typing pauses, so Enter has nothing else to do. An Enter that confirms an
+// IME composition is left alone; browsers never submit on that one.
+function preventImplicitSubmit(event) {
+  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+    event.preventDefault();
+  }
+}
+
 export function RecordPicker({
   legend,
   endpoint,
@@ -23,8 +39,10 @@ export function RecordPicker({
   emptyLibraryText,
   disabled = false,
   footer = null,
+  multiple = true,
 }) {
   const search = useRecordSearch(endpoint, { cache });
+  const radioGroupName = useId();
   const selectedIds = new Set(selected.map((record) => record.id));
   const shownIds = new Set(search.results.map((record) => record.id));
   const rows = [
@@ -68,6 +86,7 @@ export function RecordPicker({
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-500"
           value={search.draftQuery}
           onChange={(event) => search.setDraftQuery(event.target.value)}
+          onKeyDown={preventImplicitSubmit}
           placeholder={searchPlaceholder}
         />
       </label>
@@ -79,7 +98,8 @@ export function RecordPicker({
         {rows.map((record) => (
           <label key={record.id} className="flex items-start gap-2 text-sm text-slate-700">
             <input
-              type="checkbox"
+              type={multiple ? "checkbox" : "radio"}
+              name={multiple ? undefined : radioGroupName}
               checked={selectedIds.has(record.id)}
               disabled={disabled}
               onChange={() => onToggle(record)}

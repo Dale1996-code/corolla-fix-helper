@@ -7,29 +7,102 @@ import {
   getNote,
   getNoteRecord,
   getRelatedEntityForVehicle,
+  listNotePage,
   listNotes,
+  listNoteTypes,
+  NOTE_LIST_SORT_KEYS,
   normalizeNoteType,
   normalizeRelatedEntityId,
   normalizeRelatedEntityType,
   updateNoteFields,
 } from "../services/noteService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt } from "../utils/http.js";
+import { parsePageLimit, parsePageOffset, parsePositiveInt } from "../utils/http.js";
 
 export const notesRouter = Router();
 
-notesRouter.get("/", (_request, response) => {
+const NOTE_RELATED_ENTITY_FILTERS = ["none", "document", "symptom", "procedure"];
+
+// Only plain strings count: Express parses `?noteType=a&noteType=b` into an array.
+function getQueryString(request, name) {
+  return typeof request.query[name] === "string" ? request.query[name] : "";
+}
+
+notesRouter.get("/", (request, response) => {
   try {
     const vehicleId = getVehicleId();
-    const notes = listNotes(vehicleId);
 
-    response.json({
-      notes,
-      total: notes.length,
+    // Backward compatible: with no `limit` query, return every note and ignore
+    // any filter. With `limit`, return one filtered, ordered page -- what the
+    // Notes page asks for (N7).
+    if (request.query.limit === undefined) {
+      const notes = listNotes(vehicleId);
+
+      response.json({
+        notes,
+        total: notes.length,
+      });
+      return;
+    }
+
+    const limit = parsePageLimit(request.query.limit, { defaultLimit: 25, maxLimit: 100 });
+    const offset = parsePageOffset(request.query.offset);
+    const relatedEntityType = getQueryString(request, "relatedEntityType");
+    const sort = getQueryString(request, "sort");
+    const page = listNotePage(vehicleId, {
+      // A note type is free text the owner chose, so it is matched exactly.
+      noteType: getQueryString(request, "noteType"),
+      relatedEntityType: NOTE_RELATED_ENTITY_FILTERS.includes(relatedEntityType)
+        ? relatedEntityType
+        : "",
+      sort: NOTE_LIST_SORT_KEYS.includes(sort) ? sort : "newest",
+      limit,
+      offset,
     });
+
+    // `total` is every note; `matched` is how many the filters leave.
+    response.json({ ...page, limit, offset });
   } catch (error) {
     response.status(500).json({
       error: error.message || "Could not load notes.",
+    });
+  }
+});
+
+// The choices the page's Note type filter offers, from every note rather than
+// from the loaded page. Declared before `/:id` so it is never read as an id.
+notesRouter.get("/filter-options", (_request, response) => {
+  try {
+    response.json({ noteTypes: listNoteTypes(getVehicleId()) });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not load note filters.",
+    });
+  }
+});
+
+// One note, for a selection that is not on the page the list loaded (a deep
+// link, or a note just created that the filters hide).
+notesRouter.get("/:id", (request, response) => {
+  const noteId = parsePositiveInt(request.params.id);
+
+  if (noteId === null) {
+    response.status(400).json({ error: "Note ID must be a positive number." });
+    return;
+  }
+
+  try {
+    const note = getNote(getVehicleId(), noteId);
+
+    if (!note) {
+      response.status(404).json({ error: "Note not found." });
+      return;
+    }
+
+    response.json({ note });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not load note.",
     });
   }
 });

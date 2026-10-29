@@ -2110,13 +2110,20 @@ function everyRejection() {
           sourceId: "S1",
           evidenceQuote: "Clean and install the oil drain plug with a new gasket.",
         },
+        // row_mismatch -- the part and the figure are both in the quote, but
+        // the figure is printed in another part's row.
+        {
+          claim: "The drain plug torque is 25 N*m.",
+          sourceId: "S2",
+          evidenceQuote: "Drain plug 40 N*m Filter cap 25 N*m",
+        },
       ],
       // unsourced_specification
       generalGuidance: ["Tighten it to about 40 Nm."],
       // unsourced_gap_specification
       gaps: ["The manual does not give the 12 Nm sensor torque."],
     }),
-    [chunk()]
+    [chunk(), chunk({ chunkText: "Drain plug 40 N*m Filter cap 25 N*m" })]
   );
 }
 
@@ -2315,4 +2322,288 @@ test('"this" is ignored like the other determiners', () => {
   assert.equal(checkClaimSubject(claim, quote).subject, "bolt");
   assert.equal(result.rejected.length, 0);
   assert.equal(result.documentSupported.length, 1);
+});
+
+// ---- Row-aware verification (S1) and the "lmp." Imperial spelling (F3) ----
+//
+// Every table below is INVENTED text shaped like the flattened ALLDATA tables
+// these checks exist for. The repository is public, so no fixture here may be
+// copied from a manual.
+
+/** The verdict on one claim citing one quote: "accepted" or the rejection reason. */
+function verdictOf(claim, quote) {
+  const result = verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText: quote })]
+  );
+
+  return result.documentSupported.length ? "accepted" : result.rejected[0].reason;
+}
+
+/** The rejection detail on one claim citing one quote. */
+function rowDetailOf(claim, quote) {
+  return verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText: quote })]
+  ).rejected[0]?.detail;
+}
+
+// Two capacity rows under one header, the shape a model quotes whole.
+const OIL_ROWS =
+  "Engine oil capacity Item Specified Oil change with filter 4.5 liters (4.8 US qts, 4.0 Imp. qts) " +
+  "Oil change without filter 4.1 liters (4.3 US qts, 3.6 Imp. qts)";
+const OIL_ROWS_REVERSED =
+  "Engine oil capacity Item Specified Oil change without filter 4.1 liters (4.3 US qts, 3.6 Imp. qts) " +
+  "Oil change with filter 4.5 liters (4.8 US qts, 4.0 Imp. qts)";
+// The diagnosed false pass, in invented words: a grade row names "engine oil",
+// then two capacity rows follow. The part is in the quote, the wrong row's
+// figure is in the quote, and before S1 the claim pairing them verified.
+const GRADE_THEN_OIL_ROWS =
+  "Recommended grade synthetic blend engine oil 0W-16 5W-16 Fill amounts Specified " +
+  "Oil change with filter 4.5 liters (4.8 US qts, 4.0 lmp. qts) Oil change without filter 4.1 liters";
+const TORQUE_ROWS =
+  "Part Tightened N*m kgf*cm ft.*lbf Widget bracket x Block 21 214 16 " +
+  "Gadget cover x Head 10 102 7 Sprocket x Shaft 54 551 40";
+const SUB_ROWS = "Chain damper bolt torque With SST 25 N*m Without SST 30 N*m";
+
+test("S1: the correct oil-capacity row is accepted from a quote holding both rows", () => {
+  // Named with the row's own words, or with the shared header and the row's
+  // condition -- both name the row that prints the figure.
+  assert.equal(
+    verdictOf("The oil change with filter capacity is 4.5 liters (4.8 US quarts).", OIL_ROWS),
+    "accepted"
+  );
+  assert.equal(verdictOf("The engine oil capacity with a filter change is 4.5 liters.", OIL_ROWS), "accepted");
+  assert.equal(
+    verdictOf("The engine oil capacity without a filter change is 4.1 liters.", OIL_ROWS),
+    "accepted"
+  );
+  assert.equal(
+    verdictOf("The engine oil capacity without a filter change is 4.1 liters.", OIL_ROWS_REVERSED),
+    "accepted"
+  );
+});
+
+test("S1: the wrong oil-capacity row is rejected even when the quote holds both rows", () => {
+  for (const quote of [OIL_ROWS, OIL_ROWS_REVERSED]) {
+    // The other row's figure under this row's condition.
+    assert.equal(
+      verdictOf("The engine oil capacity with a filter change is 4.1 liters.", quote),
+      "row_mismatch",
+      quote
+    );
+    assert.equal(
+      verdictOf("The engine oil capacity without a filter change is 4.5 liters.", quote),
+      "row_mismatch",
+      quote
+    );
+    // No condition at all, where the condition is what tells the rows apart.
+    assert.equal(verdictOf("The engine oil capacity is 4.1 liters.", quote), "row_mismatch", quote);
+  }
+
+  assert.equal(
+    verdictOf("The engine oil capacity with an oil filter change is 4.1 liters.", GRADE_THEN_OIL_ROWS),
+    "row_mismatch"
+  );
+
+  // The figure is redacted from the gap like every other rejected figure.
+  const result = verifyEvidence(
+    payload({
+      documentSupported: [
+        {
+          claim: "The engine oil capacity with a filter change is 4.1 liters.",
+          sourceId: "S1",
+          evidenceQuote: OIL_ROWS,
+        },
+      ],
+    }),
+    [chunk({ chunkText: OIL_ROWS })]
+  );
+  assert.doesNotMatch(result.gaps.join(" "), /4\.1/);
+  assert.equal(
+    rowDetailOf("The engine oil capacity with a filter change is 4.1 liters.", OIL_ROWS),
+    "condition_mismatch"
+  );
+});
+
+test("S1: one claim cannot take its figures from two rows", () => {
+  const claim = "The sprocket x shaft torque is 54 N·m (7 ft·lbf).";
+
+  assert.equal(verdictOf(claim, TORQUE_ROWS), "row_mismatch");
+  assert.equal(rowDetailOf(claim, TORQUE_ROWS), "figures_split");
+});
+
+test("S1: shared header units still verify a row's bare numbers, and only that row's", () => {
+  // The units are printed once, in the header; each row prints bare numbers.
+  assert.equal(
+    verdictOf("The gadget cover x head torque is 10 N·m (102 kgf·cm, 7 ft·lbf).", TORQUE_ROWS),
+    "accepted"
+  );
+  assert.equal(verdictOf("The sprocket x shaft torque is 54 N·m.", TORQUE_ROWS), "accepted");
+  // A real part and a real figure -- printed in the gadget cover's row.
+  assert.equal(verdictOf("The widget bracket x block torque is 10 N·m.", TORQUE_ROWS), "row_mismatch");
+  assert.equal(
+    rowDetailOf("The widget bracket x block torque is 10 N·m.", TORQUE_ROWS),
+    "subject_not_in_row"
+  );
+  // One row under its header is judged as before.
+  assert.equal(
+    verdictOf(
+      "The gadget cover x head torque is 10 N·m.",
+      "Part Tightened N*m kgf*cm ft.*lbf Gadget cover x Head 10 102 7"
+    ),
+    "accepted"
+  );
+});
+
+test("S1: a part named in a shared header carries to its sub-rows, and the condition picks the row", () => {
+  assert.equal(verdictOf("The chain damper bolt torque without SST is 30 N·m.", SUB_ROWS), "accepted");
+  assert.equal(verdictOf("The chain damper bolt torque with SST is 25 N·m.", SUB_ROWS), "accepted");
+  assert.equal(verdictOf("The chain damper bolt torque with SST is 30 N·m.", SUB_ROWS), "row_mismatch");
+  assert.equal(verdictOf("The chain damper bolt torque is 30 N·m.", SUB_ROWS), "row_mismatch");
+  // Without the sub-row's own words ("SST") the header cannot be carried to it.
+  assert.equal(rowDetailOf("The chain damper bolt torque is 30 N·m.", SUB_ROWS), "subject_not_in_row");
+});
+
+test("S1: a designation tells rows apart like a condition", () => {
+  const pulleys = "No. 1 idler pulley bolt 43 N*m No. 2 idler pulley bolt 52 N*m";
+
+  assert.equal(verdictOf("The No. 2 idler pulley bolt torque is 52 N·m.", pulleys), "accepted");
+  assert.equal(verdictOf("The No. 1 idler pulley bolt torque is 52 N·m.", pulleys), "row_mismatch");
+});
+
+test("S1: a shared header never carries over a row that names a different part", () => {
+  assert.equal(
+    verdictOf(
+      "The engine oil capacity is 6.2 liters.",
+      "Engine oil capacity: Oil change with filter 4.5 liters Coolant 6.2 liters"
+    ),
+    "row_mismatch"
+  );
+  // The first row's label is that row's part, not a header for the next one.
+  assert.equal(verdictOf("The drain plug torque is 25 N*m.", "Drain plug 40 N*m Filter cap 25 N*m"), "row_mismatch");
+  assert.equal(verdictOf("The filter cap torque is 25 N*m.", "Drain plug 40 N*m Filter cap 25 N*m"), "accepted");
+});
+
+test("S1: claims verified before from multi-row quotes still verify", () => {
+  const brakes = "Front brake disc thickness 25.0 mm Rear brake pad thickness 1.0 mm";
+  assert.equal(verdictOf("The front brake disc thickness is 25.0 mm.", brakes), "accepted");
+  assert.equal(verdictOf("The rear brake pad thickness is 1.0 mm.", brakes), "accepted");
+
+  const meters = "Standard current: 10 A or less Standard voltage: 13.2 to 14.8 V";
+  assert.equal(verdictOf("The standard voltage is 13.2 to 14.8 V.", meters), "accepted");
+
+  // Every spelling of one figure belongs to one row.
+  assert.equal(verdictOf("The oil drain plug torque is 27 ft-lbf.", chunk().chunkText), "accepted");
+  assert.equal(verdictOf("The oil drain plug torque is 37 Nm (27 ft-lbf).", chunk().chunkText), "accepted");
+});
+
+test("S1: a quote printing one row is judged exactly as before", () => {
+  // A count and a step number are not values: without a unit header, a bare
+  // number does not start a row.
+  assert.equal(verdictOf("The bolt torque is 37 N·m.", "Install the 4 bolts. 2. Torque: 37 N*m"), "accepted");
+  assert.equal(
+    verdictOf(
+      "The standard voltage is 13.2 to 14.8 V.",
+      "Check the charging circuit. 1. Standard voltage: 13.2 to 14.8 V"
+    ),
+    "accepted"
+  );
+  // The figure's own sentence is one row however long the quote before it is.
+  assert.equal(
+    verdictOf(
+      "The oil drain plug torque is 37 Nm.",
+      "Remove the oil filler cap. Clean and install the oil drain plug with a new gasket. Torque : 37 Nm"
+    ),
+    "accepted"
+  );
+});
+
+test("S1: a condition printed in another sentence's row is not the figure's condition", () => {
+  // Deliberately fail-closed. The rpm row and the voltage row are separate
+  // statements; a claim joining them asserts more than either row prints.
+  // Two claims, one per row, each verify.
+  const prose =
+    "While holding the engine speed at 2000 rpm, read the meters. Standard voltage: 13.2 to 14.8 V";
+
+  assert.equal(verdictOf("The standard voltage at 2000 rpm is 13.2 to 14.8 V.", prose), "row_mismatch");
+  assert.equal(verdictOf("The standard voltage is 13.2 to 14.8 V.", prose), "accepted");
+  assert.equal(
+    verdictOf(
+      "The meters are read while holding the engine speed at 2000 rpm.",
+      "While holding the engine speed at 2000 rpm, read the meters."
+    ),
+    "accepted"
+  );
+});
+
+test('F3: the OCR spelling "lmp." reads as the Imperial unit, never as the US one', () => {
+  assert.deepEqual(extractSpecNumbers("3.6 lmp. qts"), [{ value: 3.6, raw: "3.6 lmp. qts", unit: "lmp. qts" }]);
+
+  const row = "Oil change without filter 4.1 liters (4.3 US qts, 3.6 lmp. qts)";
+  assert.equal(verdictOf("The oil change without filter capacity is 3.6 Imperial quarts.", row), "accepted");
+  assert.equal(verdictOf("The oil change without filter capacity is 3.6 Imp. qts.", row), "accepted");
+  assert.equal(verdictOf("The oil change without filter capacity is 3.6 US quarts.", row), "numeric_anomaly");
+  assert.equal(verdictOf("The oil change without filter capacity is 3.6 quarts.", row), "numeric_anomaly");
+  // The US figure printed beside it is still the US quart.
+  assert.equal(verdictOf("The oil change without filter capacity is 4.3 US quarts.", row), "accepted");
+  assert.equal(
+    verdictOf("The oil change without filter capacity is 4.3 Imperial quarts.", row),
+    "numeric_anomaly"
+  );
+
+  // Narrow: only "lmp." with its period, and only before a volume unit.
+  assert.deepEqual(extractSpecNumbers("3 lamps"), []);
+  assert.equal(
+    extractSpecNumbers("3.6 lmp qts").some((spec) => /lmp/i.test(spec.unit)),
+    false
+  );
+  // A gap may not reprint it.
+  assert.doesNotMatch(redactSpecNumbers("The 3.6 lmp. qts figure"), /3\.6/);
+});
+
+test("S1: only rows about the same part make a condition required", () => {
+  // "No. 2" on a different part's row says nothing about this part's rows.
+  const mixed = "No. 1 evaporator x Expansion valve 5.4 N*m No. 2 panel brace 8.0 N*m";
+  assert.equal(verdictOf("The expansion valve torque is 5.4 N·m.", mixed), "accepted");
+
+  // The same part in two designated rows: which one must be said.
+  const pulleys = "No. 1 idler pulley bolt 43 N*m No. 2 idler pulley bolt 52 N*m";
+  assert.equal(verdictOf("The idler pulley bolt torque is 52 N·m.", pulleys), "row_mismatch");
+});
+
+test("S1: a pedal-state condition picks its row", () => {
+  const pedal = "Accelerator pedal sensor voltage Pedal released 0.5 to 1.1 V Pedal depressed 2.6 to 4.5 V";
+
+  assert.equal(
+    verdictOf("The accelerator pedal sensor voltage with the pedal released is 0.5 to 1.1 V.", pedal),
+    "accepted"
+  );
+  assert.equal(
+    verdictOf("The accelerator pedal sensor voltage with the pedal depressed is 2.6 to 4.5 V.", pedal),
+    "accepted"
+  );
+  assert.equal(
+    verdictOf("The accelerator pedal sensor voltage with the pedal depressed is 0.5 to 1.1 V.", pedal),
+    "row_mismatch"
+  );
+  assert.equal(verdictOf("The accelerator pedal sensor voltage is 2.6 to 4.5 V.", pedal), "row_mismatch");
+});
+
+test("S1: a threshold printed after a value belongs to that value's row", () => {
+  // "or more" ends the first row; read as the next row's label it once made the
+  // second row look condition-free and the first row's threshold vanish.
+  const thresholds = "Signal voltage Malfunction high 4.8 V or more Malfunction low 0.2 V or less";
+
+  assert.equal(verdictOf("The signal voltage is 4.8 V or more.", thresholds), "accepted");
+  assert.equal(verdictOf("The signal voltage is 4.8 V or less.", thresholds), "row_mismatch");
+});
+
+test("S1: a table's minimum does not pass as its standard value", () => {
+  const disc = "Disc thickness Standard 25.0 mm Minimum 23.0 mm";
+
+  assert.equal(verdictOf("The disc thickness is 25.0 mm.", disc), "accepted");
+  assert.equal(verdictOf("The disc thickness minimum is 23.0 mm.", disc), "accepted");
+  assert.equal(verdictOf("The disc thickness is 23.0 mm.", disc), "row_mismatch");
+  assert.equal(rowDetailOf("The disc thickness is 23.0 mm.", disc), "condition_mismatch");
 });

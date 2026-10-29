@@ -1,5 +1,6 @@
 import { db } from "../database.js";
 import { normalizeText } from "../utils/text.js";
+import { distinctSorted, LIST_COMPARATORS, sliceInOrder } from "../utils/listOrder.js";
 
 const allowedNoteTypes = new Set(["general", "observation", "repair_log", "reminder"]);
 const allowedRelatedEntityTypes = new Set(["none", "document", "symptom", "procedure"]);
@@ -211,6 +212,40 @@ export function listNotes(vehicleId) {
     .all(vehicleId);
 
   return noteRows.map((row) => mapNoteRow(row));
+}
+
+export const NOTE_LIST_SORT_KEYS = ["newest", "oldest"];
+
+/**
+ * One page of the Notes page's list, filtered and ordered over every note the
+ * vehicle has, with the rules the page used to apply in the browser: `noteType`
+ * is exact, and `relatedEntityType` is exact with an unlinked note counting as
+ * `none`. Empty means "no filter". `total` counts every note, `matched` the
+ * ones the filters leave.
+ *
+ * @returns {{ notes: object[], matched: number, total: number }}
+ */
+export function listNotePage(
+  vehicleId,
+  { noteType = "", relatedEntityType = "", sort = "newest", limit, offset = 0 }
+) {
+  const notes = listNotes(vehicleId);
+  const { page, matched } = sliceInOrder(notes, {
+    keep: (note) =>
+      (!noteType || note.noteType === noteType) &&
+      (!relatedEntityType || (note.relatedEntityType || "none") === relatedEntityType),
+    compare: LIST_COMPARATORS[sort] || LIST_COMPARATORS.newest,
+    limit,
+    offset,
+  });
+
+  return { notes: page, matched, total: notes.length };
+}
+
+// Every note type the owner has used, for the page's Note type filter, from the
+// whole list so a filtered or paged view never shrinks its choices.
+export function listNoteTypes(vehicleId) {
+  return distinctSorted(listNotes(vehicleId), "noteType");
 }
 
 // A single mapped note, or undefined when it does not belong to the vehicle.

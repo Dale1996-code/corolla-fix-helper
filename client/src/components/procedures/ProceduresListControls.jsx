@@ -1,5 +1,6 @@
-import { formatResultRange } from "../../lib/resultRange";
-
+// The range line, the pager, and Clear filters describe the page the server
+// last sent (N7), so the caller passes them in: this component no longer knows
+// how many procedures there are.
 export function ProceduresListControls({
   searchValue,
   onSearchChange,
@@ -12,8 +13,9 @@ export function ProceduresListControls({
   sortBy,
   onSortByChange,
   systems,
-  totalCount,
-  visibleCount,
+  rangeText,
+  fetchingText = "",
+  pager = null,
   hasActiveFilters,
   onClearFilters,
 }) {
@@ -88,32 +90,28 @@ export function ProceduresListControls({
         </label>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
-        {/* The whole filtered list is on screen (procedures do not page), so
-            the range runs first row to last. The library total lives in the
-            banner above this card, so it is not restated here. */}
-        <p className="text-sm text-slate-600">
-          {formatResultRange({
-            from: 1,
-            to: visibleCount,
-            total: visibleCount,
-            noun: "procedure",
-            nounPlural: "procedures",
-            emptyText: totalCount
-              ? "No procedures match these filters."
-              : "No procedures yet.",
-          })}
+      <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        {/* The library total lives in the banner above this card, so it is not
+            restated here. */}
+        <p className="text-sm text-slate-600" role="status">
+          {rangeText}
+          {fetchingText ? (
+            <span className="ml-2 text-xs text-slate-500">{fetchingText}</span>
+          ) : null}
         </p>
 
-        {hasActiveFilters ? (
-          <button
-            type="button"
-            onClick={onClearFilters}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-          >
-            Clear filters
-          </button>
-        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {pager}
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              Clear filters
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );

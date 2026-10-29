@@ -596,7 +596,9 @@ test("linked procedures outside the picker's page stay visible, and Show more pa
   expect(screen.getByRole("checkbox", { name: /Procedure 07/ })).toBeInTheDocument();
   // What is already linked stays listed, so it can still be unticked.
   expect(screen.getByRole("checkbox", { name: /Procedure 30/ })).toBeChecked();
-});
+  // Several debounced picker searches in a row: about 3 s alone, over the
+  // default 5 s when the whole client suite runs in parallel.
+}, 10000);
 
 test("selecting another symptom reuses the procedure picker's first page", async () => {
   const api = await renderSymptoms();

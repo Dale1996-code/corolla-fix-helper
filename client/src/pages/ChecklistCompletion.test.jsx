@@ -96,8 +96,10 @@ function stubChecklistsApi({ checklists = [buildChecklist()], onComplete, holdCo
       return jsonResponse({ checklists, total: checklists.length });
     }
 
-    if (url === "/api/symptoms" && method === "GET") {
-      return jsonResponse({ symptoms: SYMPTOMS, total: SYMPTOMS.length });
+    // The symptom picker searches a page at a time (N7); nothing asks for the
+    // whole symptom collection.
+    if (String(url).startsWith("/api/search/symptoms?") && method === "GET") {
+      return jsonResponse({ results: SYMPTOMS, total: SYMPTOMS.length, hasMore: false });
     }
 
     if (String(url).endsWith("/complete") && method === "POST") {
@@ -162,6 +164,17 @@ function completionForm() {
   return screen.getByRole("heading", { level: 3, name: "Record completed repair" }).closest("form");
 }
 
+// The status region announcing this text. An open completion form's symptom
+// picker has a status line of its own ("Showing 1–2 of 2 symptoms."), so the
+// first status on the page is not necessarily the one under test.
+function findStatus(text) {
+  return waitFor(() => {
+    const status = screen.getAllByRole("status").find((node) => node.textContent.includes(text));
+    expect(status).toBeTruthy();
+    return status;
+  });
+}
+
 function completionRequests(fetchMock) {
   return fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/complete"));
 }
@@ -195,7 +208,7 @@ test("the completion form asks only for facts the server cannot derive", async (
   expect(within(form).getByLabelText(/Repair date/)).toBeInTheDocument();
   expect(within(form).getByLabelText(ODOMETER_LABEL)).toBeInTheDocument();
   expect(within(form).getByLabelText("Outcome")).toBeInTheDocument();
-  expect(within(form).getByLabelText("Symptom")).toBeInTheDocument();
+  expect(within(form).getByRole("group", { name: "Symptom" })).toBeInTheDocument();
   expect(within(form).getByLabelText("What was done")).toBeInTheDocument();
   expect(within(form).getByLabelText("Follow-up")).toBeInTheDocument();
 
@@ -280,7 +293,7 @@ test("sends exactly the historical facts, and nothing the server owns", async ()
     target: { value: "183456" },
   });
   fireEvent.change(within(form).getByLabelText("Outcome"), { target: { value: "fixed" } });
-  fireEvent.change(within(form).getByLabelText("Symptom"), { target: { value: "5" } });
+  fireEvent.click(await within(form).findByRole("radio", { name: /Pulsating brake pedal/ }));
   fireEvent.change(within(form).getByLabelText("What was done"), {
     target: { value: "New pads and rotors." },
   });
@@ -393,7 +406,7 @@ test("a successful completion updates the checklist and offers the new record", 
   });
   fireEvent.submit(form);
 
-  expect(await screen.findByRole("status")).toHaveTextContent("Repair recorded.");
+  expect(await findStatus("Repair recorded.")).toHaveTextContent("Repair recorded.");
   expect(screen.getByText("Recorded in Repair History")).toBeInTheDocument();
 
   // The link is built from the id the server returned, never manufactured.
@@ -435,7 +448,7 @@ test("an already-recorded response is treated as recorded, not as an error", asy
 
   // 200 + created:false is an answer -- one checklist is one repair -- so it is
   // reported as a status, never as an alert.
-  expect(await screen.findByRole("status")).toHaveTextContent(
+  expect(await findStatus("already recorded")).toHaveTextContent(
     "This checklist was already recorded as a repair."
   );
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -520,27 +533,75 @@ test("marking a checklist done through the edit form records no repair", async (
   expect(screen.getByRole("button", { name: "Record completed repair" })).toBeInTheDocument();
 });
 
-test("the symptom selector is optional and loaded from the existing Symptoms API", async () => {
+test("the symptom picker is optional, searched a page at a time, and loaded only when the form opens", async () => {
   const fetchMock = await renderChecklists();
+  const symptomRequests = () =>
+    fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("symptoms"));
 
   // Not fetched until the form is opened: an optional link should not cost
   // every visit to this page a second request.
-  expect(fetchMock.mock.calls.some(([url]) => url === "/api/symptoms")).toBe(false);
+  expect(symptomRequests()).toEqual([]);
 
   await openCompletionForm();
-  await waitFor(() =>
-    expect(fetchMock.mock.calls.some(([url]) => url === "/api/symptoms")).toBe(true)
-  );
+  const form = within(completionForm());
 
-  const symptomField = within(completionForm()).getByLabelText("Symptom");
-
-  await waitFor(() => expect(symptomField.options.length).toBe(3));
-  expect([...symptomField.options].map((option) => option.textContent)).toEqual([
-    "No symptom linked",
-    "Pulsating brake pedal",
-    "Coolant smell",
+  expect(await form.findByText("No symptom linked.")).toBeInTheDocument();
+  expect(form.getAllByRole("radio").map((radio) => radio.closest("label").textContent)).toEqual([
+    expect.stringContaining("Pulsating brake pedal"),
+    expect.stringContaining("Coolant smell"),
   ]);
-  expect(symptomField.value).toBe("");
+  expect(form.getAllByRole("radio").some((radio) => radio.checked)).toBe(false);
+
+  // One bounded page, never the whole collection (N7).
+  expect(symptomRequests().length).toBeGreaterThan(0);
+  for (const url of symptomRequests()) {
+    expect(url).toMatch(/^\/api\/search\/symptoms\?.*limit=25/);
+  }
+});
+
+test("Enter in the symptom search box searches and does not record the repair", async () => {
+  // The form is valid as soon as the date is filled, so an unguarded Enter in
+  // "Find symptoms" would record the repair on the spot -- without the symptom
+  // being chosen and with the form gone, so the entry could not be finished.
+  const fetchMock = await renderChecklists();
+  await openCompletionForm();
+
+  const form = completionForm();
+
+  fireEvent.change(within(form).getByLabelText(/Repair date/), {
+    target: { value: "2026-08-20" },
+  });
+  const searchBox = within(form).getByLabelText("Find symptoms");
+  fireEvent.change(searchBox, { target: { value: "brake" } });
+
+  // What a browser does with Enter in a form's text field, which jsdom does not:
+  // submit the form unless the keystroke was cancelled.
+  if (fireEvent.keyDown(searchBox, { key: "Enter", code: "Enter" })) {
+    form.requestSubmit();
+  }
+
+  await within(form).findByRole("radio", { name: /Pulsating brake pedal/ });
+  expect(completionRequests(fetchMock)).toEqual([]);
+  expect(completionForm()).toBe(form);
+});
+
+test("a chosen symptom can be cleared back to no symptom", async () => {
+  const fetchMock = await renderChecklists();
+  await openCompletionForm();
+
+  const form = completionForm();
+
+  fireEvent.change(within(form).getByLabelText(/Repair date/), {
+    target: { value: "2026-08-20" },
+  });
+  fireEvent.click(await within(form).findByRole("radio", { name: /Coolant smell/ }));
+  expect(within(form).getByText("Linked to Coolant smell.")).toBeInTheDocument();
+  fireEvent.click(within(form).getByRole("button", { name: "No symptom" }));
+  expect(within(form).getByText("No symptom linked.")).toBeInTheDocument();
+  fireEvent.submit(form);
+
+  await waitFor(() => expect(completionBody(fetchMock)).not.toBeNull());
+  expect(completionBody(fetchMock).symptomId).toBeNull();
 });
 
 // --- Whose completion is this? --------------------------------------------
@@ -671,7 +732,7 @@ test("a second completion is refused while one is still being recorded, and says
   fireEvent.submit(completionForm());
 
   await waitFor(() => expect(completionRequests(fetchMock)).toHaveLength(2));
-  expect(await screen.findByRole("status")).toHaveTextContent("Repair recorded.");
+  expect(await findStatus("Repair recorded.")).toHaveTextContent("Repair recorded.");
   expect(completionRequests(fetchMock)[1][0]).toBe("/api/repair-checklists/32/complete");
 });
 

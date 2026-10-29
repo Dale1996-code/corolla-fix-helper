@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AttachmentPanel } from "../components/AttachmentPanel";
 import { PageHeader } from "../components/PageHeader";
 import { ListDetailLayout } from "../components/ListDetailLayout";
+import { ListPager } from "../components/ListPager";
 import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import {
   SelectField,
@@ -10,9 +11,10 @@ import {
   TextAreaField,
   TextField,
 } from "../components/forms/FormFields";
+import { RecordPicker } from "../components/forms/RecordPicker";
 import { setProcedureSymptoms } from "../lib/apiClient";
-import { formatDate, getSortTimestamp } from "../lib/formatDate";
-import { formatLibraryTotal } from "../lib/resultRange";
+import { formatDate } from "../lib/formatDate";
+import { formatLibraryTotal, formatResultRange } from "../lib/resultRange";
 import { labelize } from "../lib/labelize";
 import { buildEntityLink } from "../lib/navigation";
 import { mergeSuggestionValues } from "../lib/suggestionUtils";
@@ -20,14 +22,24 @@ import { useScrollToHash } from "../lib/useScrollToHash";
 import { ProceduresListControls } from "../components/procedures/ProceduresListControls";
 import { ProceduresList } from "../components/procedures/ProceduresList";
 import {
+  buildProceduresListQuery,
+  countProcedurePages,
+  PROCEDURES_PER_PAGE,
+} from "../lib/proceduresQuery";
+import {
   clearFilterUpdates,
+  DEFAULT_PAGE,
   filterValueUpdates,
+  pageParamValue,
   readFilterValues,
   readIdParam,
-  resolveSelectedRecord,
+  readPageParam,
   useDraftTextParam,
   useViewParamWriter,
 } from "../lib/urlState";
+
+// A committed keyword starts its results from page 1.
+const PAGE_KEYS = ["page"];
 
 const emptyProcedureForm = {
   title: "",
@@ -39,7 +51,9 @@ const emptyProcedureForm = {
   steps: "",
   notes: "",
   confidence: "medium",
-  linkedDocumentIds: [],
+  // Records, not ids: the picker lists what is linked even when it is not on
+  // the page of results it has loaded.
+  linkedDocuments: [],
 };
 
 // The filters that materially decide which procedures are on screen, and so
@@ -56,80 +70,63 @@ const PROCEDURE_FILTERS = {
   sort: { default: "newest", options: ["newest", "oldest", "title"] },
 };
 
-function compareProcedures(firstProcedure, secondProcedure, sortBy) {
-  if (sortBy === "oldest") {
-    return getSortTimestamp(firstProcedure) - getSortTimestamp(secondProcedure);
-  }
-
-  if (sortBy === "title") {
-    return firstProcedure.title.localeCompare(secondProcedure.title);
-  }
-
-  return getSortTimestamp(secondProcedure) - getSortTimestamp(firstProcedure);
+function describeDocument(document) {
+  return `${document.system || "No system"} - ${document.documentType || "No type"}`;
 }
 
-function matchesSearch(procedure, query) {
-  if (!query) {
-    return true;
-  }
-
-  const searchableFields = [
-    procedure.title,
-    procedure.system,
-    procedure.toolsNeeded,
-    procedure.partsNeeded,
-    procedure.notes,
-    procedure.steps,
-  ];
-
-  return searchableFields.some((value) => value?.toLowerCase().includes(query));
+function describeSymptom(symptom) {
+  return `${symptom.system || "No system"} - ${labelize(symptom.status)}`;
 }
 
-function LinkedDocumentsSelector({
-  documents,
-  selectedIds,
-  onToggle,
-  disabled = false,
-}) {
+function toLinkedDocument(document) {
+  return {
+    id: document.id,
+    title: document.title,
+    system: document.system || "",
+    documentType: document.documentType || "",
+  };
+}
+
+function toLinkedSymptom(symptom) {
+  return {
+    id: symptom.id,
+    title: symptom.title,
+    system: symptom.system || "",
+    status: symptom.status,
+  };
+}
+
+function toggleRecord(records, record, toLinkedRecord) {
+  return records.some((current) => current.id === record.id)
+    ? records.filter((current) => current.id !== record.id)
+    : [...records, toLinkedRecord(record)];
+}
+
+// Searches the library a page at a time instead of listing every document,
+// which on a real library is over a thousand checkboxes downloaded on every
+// visit (N7).
+function LinkedDocumentsSelector({ selectedDocuments, onToggle, pickerCache, disabled = false }) {
   return (
-    <fieldset className="grid gap-2 text-sm text-slate-700">
-      <legend className="font-medium text-slate-900">Linked documents</legend>
-
-      {documents.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          No documents available yet. Upload a PDF on the Documents page first.
-        </p>
-      ) : (
-        <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-          {documents.map((document) => {
-            const checked = selectedIds.includes(document.id);
-
-            return (
-              <label key={document.id} className="flex items-start gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={disabled}
-                  onChange={() => onToggle(document.id)}
-                />
-                <span>
-                  <span className="font-medium text-slate-900">{document.title}</span>
-                  <span className="block text-xs text-slate-500">
-                    {document.system} - {document.documentType}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </fieldset>
+    <RecordPicker
+      legend="Linked documents"
+      endpoint="/api/search/documents"
+      cache={pickerCache}
+      selected={selectedDocuments}
+      onToggle={onToggle}
+      describe={describeDocument}
+      noun="document"
+      nounPlural="documents"
+      searchLabel="Find documents"
+      searchPlaceholder="Search titles, systems, or text"
+      emptyLibraryText="No documents available yet. Upload a PDF on the Documents page first."
+      disabled={disabled}
+    />
   );
 }
 
 function ProcedureCreateForm({
   form,
-  documents,
+  pickerCache,
   systemSuggestions,
   creating,
   createMessage,
@@ -231,9 +228,9 @@ function ProcedureCreateForm({
         />
 
         <LinkedDocumentsSelector
-          documents={documents}
-          selectedIds={form.linkedDocumentIds}
+          selectedDocuments={form.linkedDocuments}
           onToggle={onToggleDocument}
+          pickerCache={pickerCache}
           disabled={creating}
         />
 
@@ -262,7 +259,7 @@ function ProcedureCreateForm({
 
 function ProcedureEditForm({
   form,
-  documents,
+  pickerCache,
   systemSuggestions,
   saveState,
   onChange,
@@ -318,9 +315,9 @@ function ProcedureEditForm({
       <TextAreaField label="Notes" name="notes" value={form.notes} onChange={onChange} />
 
       <LinkedDocumentsSelector
-        documents={documents}
-        selectedIds={form.linkedDocumentIds}
+        selectedDocuments={form.linkedDocuments}
         onToggle={onToggleDocument}
+        pickerCache={pickerCache}
         disabled={saveState.saving}
       />
 
@@ -352,25 +349,26 @@ function ProcedureEditForm({
 }
 
 // Manual symptom links for one procedure (the mirror of SymptomProcedurePanel).
-function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
+function ProcedureSymptomPanel({ procedure, pickerCache, onProcedureUpdated }) {
   const linkedSymptoms = procedure.linkedSymptoms || [];
-  const [selectedIds, setSelectedIds] = useState(procedure.linkedSymptomIds || []);
+  const [selectedSymptoms, setSelectedSymptoms] = useState(() =>
+    linkedSymptoms.map(toLinkedSymptom)
+  );
   const [saveState, setSaveState] = useState({ saving: false, message: "", error: "" });
 
-  function toggleSymptom(symptomId) {
-    setSelectedIds((current) =>
-      current.includes(symptomId)
-        ? current.filter((id) => id !== symptomId)
-        : [...current, symptomId]
-    );
+  function toggleSymptom(symptom) {
+    setSelectedSymptoms((current) => toggleRecord(current, symptom, toLinkedSymptom));
   }
 
   async function handleSaveLinks() {
     try {
       setSaveState({ saving: true, message: "", error: "" });
-      const payload = await setProcedureSymptoms(procedure.id, selectedIds);
+      const payload = await setProcedureSymptoms(
+        procedure.id,
+        selectedSymptoms.map((symptom) => symptom.id)
+      );
       onProcedureUpdated(payload.procedure);
-      setSelectedIds(payload.procedure.linkedSymptomIds || []);
+      setSelectedSymptoms((payload.procedure.linkedSymptoms || []).map(toLinkedSymptom));
       setSaveState({ saving: false, message: "Linked symptoms saved.", error: "" });
     } catch (error) {
       setSaveState({
@@ -409,55 +407,41 @@ function ProcedureSymptomPanel({ procedure, symptoms, onProcedureUpdated }) {
         <p className="mt-2 text-slate-700">No linked symptoms yet.</p>
       )}
 
-      <fieldset className="mt-3 grid gap-2 text-sm text-slate-700">
-        <legend className="font-medium text-slate-900">Link symptoms</legend>
-
-        {symptoms.length === 0 ? (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            No symptoms available yet. Create one on the Symptoms page first.
-          </p>
-        ) : (
-          <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-            {symptoms.map((symptom) => (
-              <label
-                key={symptom.id}
-                className="flex items-start gap-2 text-sm text-slate-700"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(symptom.id)}
+      <div className="mt-3">
+        <RecordPicker
+          legend="Link symptoms"
+          endpoint="/api/search/symptoms"
+          cache={pickerCache}
+          selected={selectedSymptoms}
+          onToggle={toggleSymptom}
+          describe={describeSymptom}
+          noun="symptom"
+          nounPlural="symptoms"
+          searchLabel="Find symptoms"
+          searchPlaceholder="Search titles, systems, or causes"
+          emptyLibraryText="No symptoms available yet. Create one on the Symptoms page first."
+          disabled={saveState.saving}
+          footer={
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveLinks}
                   disabled={saveState.saving}
-                  onChange={() => toggleSymptom(symptom.id)}
-                />
-                <span>
-                  <span className="font-medium text-slate-900">{symptom.title}</span>
-                  <span className="block text-xs text-slate-500">
-                    {symptom.system || "No system"} - {labelize(symptom.status)}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
+                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
+                >
+                  {saveState.saving ? "Saving..." : "Save linked symptoms"}
+                </button>
+                {saveState.message ? (
+                  <span className="text-sm text-emerald-700">{saveState.message}</span>
+                ) : null}
+              </div>
 
-        {symptoms.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleSaveLinks}
-              disabled={saveState.saving}
-              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-600"
-            >
-              {saveState.saving ? "Saving..." : "Save linked symptoms"}
-            </button>
-            {saveState.message ? (
-              <span className="text-sm text-emerald-700">{saveState.message}</span>
-            ) : null}
-          </div>
-        ) : null}
-
-        {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
-      </fieldset>
+              {saveState.error ? <ErrorBanner>{saveState.error}</ErrorBanner> : null}
+            </>
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -466,8 +450,7 @@ function ProcedureDetails({
   procedure,
   isEditing,
   editForm,
-  documents,
-  symptoms,
+  pickerCache,
   systemSuggestions,
   saveState,
   deleteState,
@@ -604,7 +587,7 @@ function ProcedureDetails({
         <ProcedureSymptomPanel
           key={procedure.id}
           procedure={procedure}
-          symptoms={symptoms}
+          pickerCache={pickerCache}
           onProcedureUpdated={onProcedureUpdated}
         />
 
@@ -614,7 +597,7 @@ function ProcedureDetails({
       {isEditing ? (
         <ProcedureEditForm
           form={editForm}
-          documents={documents}
+          pickerCache={pickerCache}
           systemSuggestions={systemSuggestions}
           saveState={saveState}
           onChange={onEditChange}
@@ -644,8 +627,27 @@ function toProcedurePayload(form) {
     steps: form.steps,
     notes: form.notes,
     confidence: form.confidence,
-    linkedDocumentIds: form.linkedDocumentIds,
+    linkedDocumentIds: form.linkedDocuments.map((document) => document.id),
   };
+}
+
+// Mirrors the Symptoms page (N7): the server filters, sorts, counts, and slices
+// the list, so this page holds one page of rows and never the whole library.
+function ProcedureLookupError({ procedureId, message, onRetry }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <ErrorBanner title={`Could not load procedure #${procedureId}.`}>
+        {message} The link to it is kept, so you can try again.
+        <button
+          type="button"
+          className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+          onClick={onRetry}
+        >
+          Try again
+        </button>
+      </ErrorBanner>
+    </section>
+  );
 }
 
 export function ProceduresPage() {
@@ -653,12 +655,42 @@ export function ProceduresPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedProcedureId = readIdParam(searchParams, "procedureId");
+  const requestedPage = readPageParam(searchParams);
+  // `procedures` is the ONE PAGE the server last sent -- never the whole list.
+  // The server also owns the counts: `matchedCount` is how many procedures the
+  // current filters leave; `libraryTotal` is every procedure.
   const [procedures, setProcedures] = useState([]);
-  const [documents, setDocuments] = useState([]);
-  const [symptoms, setSymptoms] = useState([]);
-  const [savedCommonSystems, setSavedCommonSystems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [matchedCount, setMatchedCount] = useState(0);
+  const [libraryTotal, setLibraryTotal] = useState(0);
+  // Which request the rows above answer. Anything that reasons about "this view"
+  // (clamping the page, resolving the selection) waits until it equals the
+  // current request, so a stale page can never be mistaken for the new one.
+  const [settledQuery, setSettledQuery] = useState(null);
+  // The page the rows on screen belong to; the counter and pager describe THESE
+  // rows while a new page loads or after it failed to.
+  const [settledPage, setSettledPage] = useState(DEFAULT_PAGE);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const latestListRequest = useRef(0);
+  // The System filter's choices, from every procedure rather than the loaded page.
+  const [filterSystems, setFilterSystems] = useState([]);
+  const [optionsToken, setOptionsToken] = useState(0);
+  const [savedCommonSystems, setSavedCommonSystems] = useState([]);
+  // The selected procedure when its row is not on the current page (a deep link,
+  // a procedure just created that a filter hides).
+  const [fetchedProcedure, setFetchedProcedure] = useState(null);
+  // A by-id lookup that failed for a reason other than "no such procedure":
+  // `{ procedureId, message }`.
+  const [lookupFailure, setLookupFailure] = useState(null);
+  // A selection this page made before the URL has caught up with it.
+  const [pinnedProcedureId, setPinnedProcedureId] = useState(null);
+  // Shared by every picker on the page, so opening another procedure or the
+  // edit form does not ask for the same first page again.
+  const pickerCache = useRef(new Map()).current;
+  // Procedures this page deleted: a lookup for one could only answer 404.
+  const deletedProcedureIds = useRef(new Set());
 
   const [createForm, setCreateForm] = useState(emptyProcedureForm);
   const [creating, setCreating] = useState(false);
@@ -676,194 +708,390 @@ export function ProceduresPage() {
     deletingId: null,
     error: "",
   });
-  // Filters read from the URL, so Back returns to the filtered list rather than
-  // to an unfiltered one. The keyword box types locally and lands in the URL a
-  // beat later (see useDraftTextParam), so typing does not fill up history.
+  // One writer for every URL change this page makes, so two writes close
+  // together (the keyword box committing as a filter changes, a delete clearing
+  // `procedureId`, then the refetch clamping `page`) both land.
+  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
+
   const {
+    q: committedSearch,
     system: systemFilter,
     difficulty: difficultyFilter,
     confidence: confidenceFilter,
     sort: sortBy,
   } = readFilterValues(searchParams, PROCEDURE_FILTERS);
-  // One writer for every URL change this page makes -- including the keyword
-  // box's commit -- so two writes close together both land.
-  const updateViewParams = useViewParamWriter(searchParams, setSearchParams);
+  // The keyword box types into local state and lands in the URL a beat later, so
+  // "brake" is one view and one request rather than five.
   const [searchValue, setSearchValue] = useDraftTextParam("q", {
     searchParams,
     writeParams: updateViewParams,
+    clearOnCommit: PAGE_KEYS,
   });
+  // The pin outranks the URL: it only exists while a selection this page made
+  // has not reached the URL yet.
+  const selectionId = pinnedProcedureId ?? requestedProcedureId;
 
+  // The request is a pure function of the view state in the URL, and that string
+  // is the only thing the fetch effect depends on.
+  const listQuery = buildProceduresListQuery({
+    q: committedSearch,
+    system: systemFilter,
+    difficulty: difficultyFilter,
+    confidence: confidenceFilter,
+    sort: sortBy,
+    page: requestedPage,
+  });
+  const dataIsCurrent = settledQuery === listQuery;
+  const totalPages = countProcedurePages(matchedCount);
+  const currentPage = Math.min(settledPage, totalPages);
+  const loadingAnotherPage = isFetching && !dataIsCurrent && requestedPage !== currentPage;
+
+  // Changing a filter is a navigation step the owner should be able to undo, so
+  // it pushes -- and it drops `page`, because page 4 of the old filter says
+  // nothing about the new one.
   function handleFilterChange(key, value) {
-    updateViewParams(filterValueUpdates({ [key]: value }, PROCEDURE_FILTERS));
+    updateViewParams({
+      ...filterValueUpdates({ [key]: value }, PROCEDURE_FILTERS),
+      page: null,
+    });
   }
 
-  const availableSystems = useMemo(
-    () =>
-      Array.from(new Set(procedures.map((procedure) => procedure.system).filter(Boolean))).sort(
-        (a, b) => a.localeCompare(b)
-      ),
-    [procedures]
-  );
-
-  const filteredProcedures = useMemo(() => {
-    const normalizedQuery = searchValue.trim().toLowerCase();
-
-    return [...procedures]
-      .filter((procedure) => {
-        if (!matchesSearch(procedure, normalizedQuery)) {
-          return false;
-        }
-
-        if (systemFilter !== "all" && procedure.system !== systemFilter) {
-          return false;
-        }
-
-        if (difficultyFilter !== "all" && procedure.difficulty !== difficultyFilter) {
-          return false;
-        }
-
-        if (confidenceFilter !== "all" && procedure.confidence !== confidenceFilter) {
-          return false;
-        }
-
-        return true;
-      })
-      .sort((firstProcedure, secondProcedure) =>
-        compareProcedures(firstProcedure, secondProcedure, sortBy)
-      );
-  }, [procedures, searchValue, systemFilter, difficultyFilter, confidenceFilter, sortBy]);
-
-  const hasActiveFilters =
-    searchValue.trim() !== "" ||
-    systemFilter !== "all" ||
-    difficultyFilter !== "all" ||
-    confidenceFilter !== "all" ||
-    sortBy !== "newest";
-
-  // Derived from the URL and the list rather than stored. No `procedureId`
-  // means the page's existing default (see resolveSelectedRecord), now spelled
-  // as an absent parameter so an untouched list keeps a clean `/procedures`.
-  const selectedProcedure = useMemo(
-    () => resolveSelectedRecord(requestedProcedureId, procedures, filteredProcedures),
-    [requestedProcedureId, procedures, filteredProcedures]
-  );
-  const selectedProcedureId = selectedProcedure?.id ?? null;
-
-  const systemSuggestions = useMemo(() => {
-    return mergeSuggestionValues([
-      ...savedCommonSystems,
-      ...procedures.map((procedure) => procedure.system),
-    ]);
-  }, [savedCommonSystems, procedures]);
-
-  function toggleLinkedDocument(selectedIds, documentId) {
-    if (selectedIds.includes(documentId)) {
-      return selectedIds.filter((id) => id !== documentId);
-    }
-
-    return [...selectedIds, documentId];
-  }
-
-  // Keep the list and detail panel in sync after a symptom link change.
-  function handleProcedureUpdated(updatedProcedure) {
-    if (!updatedProcedure) {
+  // Previous/Next act on the page the owner can see. When that lands on the page
+  // the URL already asks for -- its load is in flight or just failed -- ask the
+  // server again rather than navigating nowhere.
+  function goToPage(targetPage) {
+    if (targetPage === requestedPage) {
+      if (!isFetching) {
+        reloadList();
+      }
       return;
     }
+
+    updateViewParams({ page: pageParamValue(targetPage) });
+  }
+
+  const systemSuggestions = useMemo(
+    () => mergeSuggestionValues([...savedCommonSystems, ...filterSystems]),
+    [savedCommonSystems, filterSystems]
+  );
+
+  const hasActiveFilters =
+    committedSearch.trim() !== "" ||
+    systemFilter !== "all" ||
+    difficultyFilter !== "all" ||
+    confidenceFilter !== "all";
+
+  // The selected procedure is derived, not stored. No `procedureId` means "the
+  // first procedure" -- the first row of the page on screen -- spelled as the
+  // absence of a parameter. A `procedureId` whose row is not on this page is
+  // fetched on its own below, so a deep link opens its record under any filter
+  // or page.
+  const rowProcedure = selectionId
+    ? procedures.find((procedure) => procedure.id === selectionId)
+    : null;
+  const fetchedMatch =
+    selectionId && fetchedProcedure?.id === selectionId ? fetchedProcedure : null;
+  const selectedProcedure = selectionId
+    ? rowProcedure || fetchedMatch || null
+    : procedures[0] || null;
+  const selectedProcedureId = selectedProcedure?.id ?? null;
+  const selectionLookupFailure =
+    selectionId && !selectedProcedure && lookupFailure?.procedureId === selectionId
+      ? lookupFailure
+      : null;
+
+  // Normalization only, so it replaces rather than pushing. Waits until the rows
+  // on screen answer THIS request -- before that, the page count belongs to
+  // another view.
+  useEffect(() => {
+    if (!dataIsCurrent || loadError) {
+      return;
+    }
+
+    const canonicalPage = pageParamValue(
+      Math.min(Math.max(requestedPage, DEFAULT_PAGE), totalPages)
+    );
+
+    if ((searchParams.get("page") ?? null) !== canonicalPage) {
+      updateViewParams({ page: canonicalPage }, { replace: true });
+    }
+  }, [dataIsCurrent, loadError, requestedPage, totalPages, searchParams, updateViewParams]);
+
+  // An unusable `procedureId` ("abc", "0") names nothing, so it drops out of the
+  // URL. Only that parameter is touched; the filters stay as they are.
+  useEffect(() => {
+    if (!dataIsCurrent || !searchParams.has("procedureId") || requestedProcedureId) {
+      return;
+    }
+
+    updateViewParams({ procedureId: null }, { replace: true });
+  }, [dataIsCurrent, requestedProcedureId, searchParams, updateViewParams]);
+
+  // A well-formed `procedureId` whose row is not on this page is looked up by
+  // id. The server's 404 is what says it does not exist -- deleted, or
+  // hand-typed -- and only then does the parameter drop out of the URL. A
+  // procedure that exists but that the filters hide keeps its parameter.
+  const requestedRowIsOnPage = Boolean(rowProcedure);
+  useEffect(() => {
+    if (
+      !selectionId ||
+      !dataIsCurrent ||
+      requestedRowIsOnPage ||
+      fetchedProcedure?.id === selectionId ||
+      lookupFailure?.procedureId === selectionId
+    ) {
+      return undefined;
+    }
+
+    // Deleted here, so the server would only say 404: answer that without asking.
+    if (deletedProcedureIds.current.has(selectionId)) {
+      setPinnedProcedureId(null);
+      updateViewParams({ procedureId: null }, { replace: true });
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function lookUpProcedure() {
+      try {
+        const response = await fetch(`/api/procedures/${selectionId}`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (cancelled) {
+          return;
+        }
+
+        if (response.status === 404) {
+          setFetchedProcedure(null);
+          setPinnedProcedureId(null);
+          updateViewParams({ procedureId: null }, { replace: true });
+          return;
+        }
+
+        if (!response.ok || !payload.procedure) {
+          throw new Error(payload.error || "The server could not load it.");
+        }
+
+        setFetchedProcedure(payload.procedure);
+      } catch (error) {
+        if (!cancelled) {
+          setLookupFailure({
+            procedureId: selectionId,
+            message:
+              error instanceof TypeError
+                ? "The server could not be reached."
+                : error.message || "The server could not load it.",
+          });
+        }
+      }
+    }
+
+    lookUpProcedure();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectionId,
+    dataIsCurrent,
+    requestedRowIsOnPage,
+    fetchedProcedure,
+    lookupFailure,
+    updateViewParams,
+  ]);
+
+  // A failed lookup is remembered only for the visit it failed on.
+  useEffect(() => {
+    setLookupFailure(null);
+  }, [selectionId]);
+
+  // The pin's job is done once the URL names a procedure itself, and it never
+  // outlives the view it was made in.
+  useEffect(() => {
+    setPinnedProcedureId(null);
+  }, [requestedProcedureId, listQuery]);
+
+  // An edit form belongs to the procedure it was opened on. Moving the selection
+  // any other way closes it instead of leaving it armed for another record.
+  useEffect(() => {
+    setEditingProcedureId((currentId) =>
+      currentId && currentId !== selectedProcedureId ? null : currentId
+    );
+  }, [selectedProcedureId]);
+
+  // One request per view. The fetch depends on the request string alone, so a
+  // filter, sort, keyword, or page change is exactly one fetch, a selection
+  // change within the page is none. Rows from the previous view stay on screen
+  // until the new ones arrive.
+  useEffect(() => {
+    const requestId = latestListRequest.current + 1;
+    latestListRequest.current = requestId;
+
+    async function loadProcedures() {
+      setIsFetching(true);
+      // Set when this answer hands over to another request instead of settling.
+      let handedOff = false;
+
+      try {
+        const response = await fetch(`/api/procedures?${listQuery}`);
+        const payload = await response.json();
+
+        // A newer view has been asked for since: this answer is stale.
+        if (requestId !== latestListRequest.current) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Could not load procedures.");
+        }
+
+        const nextProcedures = Array.isArray(payload.procedures) ? payload.procedures : [];
+        const nextMatched = Number.isFinite(payload.matched)
+          ? payload.matched
+          : nextProcedures.length;
+        const offset = Number(new URLSearchParams(listQuery).get("offset")) || 0;
+
+        // A page past the end (a hand-typed `page=9`, or the last page after its
+        // only row was deleted) answers with no rows while procedures do match.
+        // That empty answer is never shown as the list: the URL moves to the
+        // last real page, and that request's answer is the one that settles.
+        if (!nextProcedures.length && nextMatched > 0 && offset >= nextMatched) {
+          handedOff = true;
+          updateViewParams(
+            { page: pageParamValue(countProcedurePages(nextMatched)) },
+            { replace: true }
+          );
+          return;
+        }
+
+        setProcedures(nextProcedures);
+        setSettledPage(Math.floor(offset / PROCEDURES_PER_PAGE) + 1);
+        setMatchedCount(nextMatched);
+        setLibraryTotal(Number.isFinite(payload.total) ? payload.total : nextMatched);
+        setSettledQuery(listQuery);
+        setLoadError("");
+        setHasLoaded(true);
+      } catch (error) {
+        if (requestId === latestListRequest.current) {
+          setLoadError(
+            error instanceof TypeError
+              ? "The server could not be reached."
+              : error.message || "Could not load procedures."
+          );
+        }
+      } finally {
+        if (requestId === latestListRequest.current && !handedOff) {
+          setIsFetching(false);
+        }
+      }
+    }
+
+    loadProcedures();
+
+    // Leaving the page, or asking for another view, makes this answer stale.
+    return () => {
+      latestListRequest.current += 1;
+    };
+  }, [listQuery, reloadToken, updateViewParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilterOptions() {
+      try {
+        const response = await fetch("/api/procedures/filter-options");
+        const payload = await response.json();
+
+        if (cancelled || !response.ok) {
+          return;
+        }
+
+        setFilterSystems(Array.isArray(payload.systems) ? payload.systems : []);
+      } catch {
+        // The dropdown keeps what it had; the list does not depend on it.
+      }
+    }
+
+    loadFilterOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [optionsToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSettings() {
+      try {
+        const response = await fetch("/api/settings");
+        const payload = await response.json();
+
+        if (!cancelled && response.ok) {
+          setSavedCommonSystems(payload.documentDefaults?.commonSystems || []);
+        }
+      } catch {
+        // Suggestions only; the page works without them.
+      }
+    }
+
+    loadSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Re-ask the server for the page on screen after something changed it. The
+  // rows stay put meanwhile, so a save does not flash the list away.
+  function reloadList({ options = false } = {}) {
+    setReloadToken((token) => token + 1);
+
+    if (options) {
+      setOptionsToken((token) => token + 1);
+    }
+  }
+
+  // A saved procedure reaches its row and the by-id copy immediately; the
+  // reload that follows lets the server decide whether it still belongs here.
+  //
+  // Every save bumps `updated_at`, so a sort by last update reorders the page.
+  // When the selection is only implicit (the page's first row), that reorder
+  // would hand the panel to a different procedure, so the one ON DISPLAY is
+  // pinned into the URL first and kept as the by-id copy.
+  function applyUpdatedProcedure(updatedProcedure) {
+    const displayedProcedure = selectedProcedure;
+    const isDisplayed = updatedProcedure.id === displayedProcedure?.id;
+    const pinDisplayed = Boolean(displayedProcedure) && !requestedProcedureId;
 
     setProcedures((currentProcedures) =>
       currentProcedures.map((procedure) =>
         procedure.id === updatedProcedure.id ? updatedProcedure : procedure
       )
     );
-  }
-
-  async function loadData() {
-    try {
-      setLoadError("");
-      setLoading(true);
-
-      const [proceduresResponse, documentsResponse] = await Promise.all([
-        fetch("/api/procedures"),
-        fetch("/api/documents"),
-      ]);
-
-      const proceduresPayload = await proceduresResponse.json();
-      const documentsPayload = await documentsResponse.json();
-
-      if (!proceduresResponse.ok) {
-        throw new Error(proceduresPayload.error || "Could not load procedures.");
+    setFetchedProcedure((currentProcedure) => {
+      if (isDisplayed || currentProcedure?.id === updatedProcedure.id) {
+        return updatedProcedure;
       }
 
-      if (!documentsResponse.ok) {
-        throw new Error(documentsPayload.error || "Could not load documents.");
-      }
+      return pinDisplayed ? displayedProcedure : currentProcedure;
+    });
 
-      const nextProcedures = Array.isArray(proceduresPayload.procedures)
-        ? proceduresPayload.procedures
-        : [];
-      const nextDocuments = Array.isArray(documentsPayload.documents)
-        ? documentsPayload.documents
-        : [];
-
-      setProcedures(nextProcedures);
-      setDocuments(nextDocuments);
-
-      // Symptoms power the manual link selector; a failure here should not
-      // block the procedure list, so it loads on its own.
-      try {
-        const symptomsResponse = await fetch("/api/symptoms");
-        const symptomsPayload = await symptomsResponse.json();
-
-        if (symptomsResponse.ok) {
-          setSymptoms(
-            Array.isArray(symptomsPayload.symptoms) ? symptomsPayload.symptoms : []
-          );
-        }
-      } catch {
-        setSymptoms([]);
-      }
-
-      try {
-        const settingsResponse = await fetch("/api/settings");
-        const settingsPayload = await settingsResponse.json();
-
-        if (settingsResponse.ok) {
-          setSavedCommonSystems(settingsPayload.documentDefaults?.commonSystems || []);
-        }
-      } catch {
-        setSavedCommonSystems([]);
-      }
-    } catch (error) {
-      setLoadError(error.message || "Could not load procedure data.");
-    } finally {
-      setLoading(false);
+    if (pinDisplayed) {
+      setPinnedProcedureId(displayedProcedure.id);
+      updateViewParams({ procedureId: displayedProcedure.id }, { replace: true });
     }
   }
 
-  // Loaded once. Filtering, sorting, and picking a procedure all work on this
-  // list, so URL changes -- including Back and Forward -- never refetch.
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  // A `procedureId` for a procedure that is not in the library -- deleted, or
-  // hand-typed, well-formed or not -- drops out of the URL so the address stops
-  // naming a record that does not exist. A procedure that exists but is hidden
-  // by the current filter keeps its parameter: the filter is doing the hiding,
-  // and loosening it should bring the owner's selection back.
-  useEffect(() => {
-    if (loading || loadError || !searchParams.has("procedureId")) {
+  // Keep the list and detail panel in sync after a symptom link change. Links do
+  // not touch the procedure's own row, so the page needs no reload for them.
+  function handleProcedureUpdated(updatedProcedure) {
+    if (!updatedProcedure) {
       return;
     }
 
-    const namesALoadedProcedure =
-      requestedProcedureId &&
-      procedures.some((procedure) => procedure.id === requestedProcedureId);
-
-    if (!namesALoadedProcedure) {
-      updateViewParams({ procedureId: null }, { replace: true });
-    }
-  }, [loading, loadError, requestedProcedureId, procedures, searchParams, updateViewParams]);
+    applyUpdatedProcedure(updatedProcedure);
+  }
 
   function handleCreateFormChange(event) {
     const { name, value } = event.target;
@@ -874,10 +1102,10 @@ export function ProceduresPage() {
     }));
   }
 
-  function handleToggleCreateDocument(documentId) {
+  function handleToggleCreateDocument(document) {
     setCreateForm((currentForm) => ({
       ...currentForm,
-      linkedDocumentIds: toggleLinkedDocument(currentForm.linkedDocumentIds, documentId),
+      linkedDocuments: toggleRecord(currentForm.linkedDocuments, document, toLinkedDocument),
     }));
   }
 
@@ -910,10 +1138,15 @@ export function ProceduresPage() {
 
       const newProcedure = payload.procedure;
 
-      setProcedures((currentProcedures) => [newProcedure, ...currentProcedures]);
+      // The new procedure is shown at once from the server's answer, whether or
+      // not the current filters and page will include its row; the reload then
+      // brings the list (and its counts) up to date.
+      setFetchedProcedure(newProcedure);
+      setPinnedProcedureId(newProcedure.id);
       // Replace, not push: opening the procedure just created is part of
       // creating it, not a step to press Back through.
       updateViewParams({ procedureId: newProcedure.id }, { replace: true });
+      reloadList({ options: true });
       setCreateForm(emptyProcedureForm);
       setCreateMessage("Procedure saved.");
       setEditingProcedureId(null);
@@ -941,7 +1174,7 @@ export function ProceduresPage() {
       steps: procedure.steps || "",
       notes: procedure.notes || "",
       confidence: procedure.confidence || "medium",
-      linkedDocumentIds: procedure.linkedDocumentIds || [],
+      linkedDocuments: (procedure.linkedDocuments || []).map(toLinkedDocument),
     });
     setSaveState({
       saving: false,
@@ -973,10 +1206,10 @@ export function ProceduresPage() {
     }));
   }
 
-  function handleToggleEditDocument(documentId) {
+  function handleToggleEditDocument(document) {
     setEditForm((currentForm) => ({
       ...currentForm,
-      linkedDocumentIds: toggleLinkedDocument(currentForm.linkedDocumentIds, documentId),
+      linkedDocuments: toggleRecord(currentForm.linkedDocuments, document, toLinkedDocument),
     }));
   }
 
@@ -1017,13 +1250,8 @@ export function ProceduresPage() {
         throw new Error(payload.error || "Could not update procedure.");
       }
 
-      const updatedProcedure = payload.procedure;
-
-      setProcedures((currentProcedures) =>
-        currentProcedures.map((procedure) =>
-          procedure.id === updatedProcedure.id ? updatedProcedure : procedure
-        )
-      );
+      applyUpdatedProcedure(payload.procedure);
+      reloadList({ options: true });
       setSaveState({
         saving: false,
         message: "Changes saved.",
@@ -1064,12 +1292,22 @@ export function ProceduresPage() {
         throw new Error(payload.error || "Could not delete procedure.");
       }
 
-      // Dropping the row is enough: the deleted id no longer matches anything,
-      // so the detail panel falls back to the first remaining procedure and the
-      // normalization effect clears the stale `procedureId` from the URL.
+      deletedProcedureIds.current.add(procedure.id);
+      // The row goes at once; the reload refills the page from the server (and
+      // steps back a page when this was the last row on the last one). A URL
+      // that named the deleted procedure stops naming it, so the panel falls
+      // back to the first row rather than looking up a record that is gone.
       setProcedures((currentProcedures) =>
         currentProcedures.filter((currentProcedure) => currentProcedure.id !== procedure.id)
       );
+      setFetchedProcedure((current) => (current?.id === procedure.id ? null : current));
+      setPinnedProcedureId((current) => (current === procedure.id ? null : current));
+
+      if (requestedProcedureId === procedure.id) {
+        updateViewParams({ procedureId: null }, { replace: true });
+      }
+
+      reloadList({ options: true });
 
       if (editingProcedureId === procedure.id) {
         cancelEditingProcedure();
@@ -1087,6 +1325,20 @@ export function ProceduresPage() {
     }
   }
 
+  const rangeText = formatResultRange({
+    from: (currentPage - 1) * PROCEDURES_PER_PAGE + 1,
+    to: (currentPage - 1) * PROCEDURES_PER_PAGE + procedures.length,
+    total: matchedCount,
+    noun: "procedure",
+    nounPlural: "procedures",
+    emptyText: libraryTotal ? "No procedures match these filters." : "No procedures yet.",
+  });
+  const fetchingText = isFetching
+    ? loadingAnotherPage
+      ? `Loading page ${requestedPage}...`
+      : "Updating..."
+    : "";
+
   return (
     <>
       <PageHeader
@@ -1097,7 +1349,7 @@ export function ProceduresPage() {
       <div className="space-y-6">
         <ProcedureCreateForm
           form={createForm}
-          documents={documents}
+          pickerCache={pickerCache}
           systemSuggestions={systemSuggestions}
           creating={creating}
           createMessage={createMessage}
@@ -1107,8 +1359,8 @@ export function ProceduresPage() {
           onSubmit={handleCreateProcedure}
         />
 
-        <div id="procedure-library" className="space-y-6">
-          {loading ? (
+        <div id="procedure-library" className="space-y-6" aria-busy={isFetching}>
+          {!hasLoaded && !loadError ? (
             <section className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
               Loading procedures...
             </section>
@@ -1117,14 +1369,22 @@ export function ProceduresPage() {
           {loadError ? (
             <ErrorBanner title="Could not load procedures." className="shadow-sm">
               {loadError}
+              {hasLoaded ? " The procedures below are the last ones that loaded." : null}
+              <button
+                type="button"
+                className="mt-3 block min-h-11 rounded-md border border-red-300 bg-white px-4 text-sm font-medium text-red-800 hover:bg-red-100"
+                onClick={() => reloadList()}
+              >
+                Try again
+              </button>
             </ErrorBanner>
           ) : null}
 
-          {!loading && !loadError ? (
+          {hasLoaded ? (
             <>
               <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
                 {formatLibraryTotal({
-                  total: procedures.length,
+                  total: libraryTotal,
                   noun: "procedure",
                   nounPlural: "procedures",
                 })}
@@ -1147,15 +1407,23 @@ export function ProceduresPage() {
                 }
                 sortBy={sortBy}
                 onSortByChange={(event) => handleFilterChange("sort", event.target.value)}
-                systems={availableSystems}
-                totalCount={procedures.length}
-                visibleCount={filteredProcedures.length}
-                hasActiveFilters={hasActiveFilters}
+                systems={filterSystems}
+                rangeText={rangeText}
+                fetchingText={fetchingText}
+                pager={
+                  <ListPager
+                    label="Procedures pages"
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onGoToPage={goToPage}
+                  />
+                }
+                hasActiveFilters={hasActiveFilters || searchValue.trim() !== ""}
                 onClearFilters={() => {
                   setSearchValue("");
-                  // Clears only the filters this page owns; a `procedureId`
-                  // deep link (or anything else in the URL) survives.
-                  updateViewParams(clearFilterUpdates(PROCEDURE_FILTERS));
+                  // Clears only the filters this page owns (and the page they
+                  // were on); a `procedureId` deep link survives.
+                  updateViewParams({ ...clearFilterUpdates(PROCEDURE_FILTERS), page: null });
                 }}
               />
 
@@ -1163,31 +1431,39 @@ export function ProceduresPage() {
                 selectedId={selectedProcedureId}
                 list={
                   <ProceduresList
-                    procedures={filteredProcedures}
-                    totalProcedures={procedures.length}
+                    procedures={procedures}
+                    totalProcedures={libraryTotal}
                     hasActiveFilters={hasActiveFilters}
                     selectedProcedureId={selectedProcedureId}
                     onSelectProcedure={(procedureId) => updateViewParams({ procedureId })}
                   />
                 }
                 detail={
-                  <ProcedureDetails
-                    procedure={selectedProcedure}
-                    isEditing={editingProcedureId === selectedProcedureId}
-                    editForm={editForm}
-                    documents={documents}
-                    symptoms={symptoms}
-                    systemSuggestions={systemSuggestions}
-                    saveState={saveState}
-                    deleteState={deleteState}
-                    onStartEdit={startEditingProcedure}
-                    onCancelEdit={cancelEditingProcedure}
-                    onEditChange={handleEditFormChange}
-                    onToggleEditDocument={handleToggleEditDocument}
-                    onSaveEdit={handleSaveProcedure}
-                    onDelete={handleDeleteProcedure}
-                    onProcedureUpdated={handleProcedureUpdated}
-                  />
+                  selectionLookupFailure ? (
+                    <ProcedureLookupError
+                      procedureId={selectionLookupFailure.procedureId}
+                      message={selectionLookupFailure.message}
+                      // Clearing the failure is what lets the lookup run again.
+                      onRetry={() => setLookupFailure(null)}
+                    />
+                  ) : (
+                    <ProcedureDetails
+                      procedure={selectedProcedure}
+                      isEditing={editingProcedureId === selectedProcedureId}
+                      editForm={editForm}
+                      pickerCache={pickerCache}
+                      systemSuggestions={systemSuggestions}
+                      saveState={saveState}
+                      deleteState={deleteState}
+                      onStartEdit={startEditingProcedure}
+                      onCancelEdit={cancelEditingProcedure}
+                      onEditChange={handleEditFormChange}
+                      onToggleEditDocument={handleToggleEditDocument}
+                      onSaveEdit={handleSaveProcedure}
+                      onDelete={handleDeleteProcedure}
+                      onProcedureUpdated={handleProcedureUpdated}
+                    />
+                  )
                 }
               />
             </>

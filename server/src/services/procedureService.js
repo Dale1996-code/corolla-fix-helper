@@ -2,6 +2,7 @@ import { db, withTransaction } from "../database.js";
 import { clearNoteLinksTo } from "./noteService.js";
 import { buildProcedureSymptomLinksMap } from "./symptomProcedureService.js";
 import { normalizeText } from "../utils/text.js";
+import { distinctSorted, LIST_COMPARATORS, sliceInOrder } from "../utils/listOrder.js";
 
 const allowedConfidenceValues = new Set(["low", "medium", "high"]);
 const allowedDifficultyValues = new Set(["beginner", "intermediate", "advanced"]);
@@ -130,6 +131,50 @@ export function listProcedures(vehicleId) {
   return procedureRows.map((row) =>
     mapProcedureRow(row, documentLinksMap, symptomLinksMap)
   );
+}
+
+export const PROCEDURE_LIST_SORT_KEYS = ["newest", "oldest", "title"];
+
+// The fields the Procedures page's keyword box searched in the browser.
+const PROCEDURE_SEARCH_FIELDS = ["title", "system", "toolsNeeded", "partsNeeded", "notes", "steps"];
+
+/**
+ * One page of the Procedures page's list, filtered and ordered over every
+ * procedure the vehicle has, with the rules the page used to apply in the
+ * browser: `query` is a case-insensitive substring of the title, system, tools,
+ * parts, notes, or steps; `system`, `difficulty`, and `confidence` are exact.
+ * Empty means "no filter". `total` counts every procedure, `matched` the ones
+ * the filters leave.
+ *
+ * @returns {{ procedures: object[], matched: number, total: number }}
+ */
+export function listProcedurePage(
+  vehicleId,
+  { query = "", system = "", difficulty = "", confidence = "", sort = "newest", limit, offset = 0 }
+) {
+  const procedures = listProcedures(vehicleId);
+  const normalizedQuery = normalizeText(query).toLowerCase();
+  const { page, matched } = sliceInOrder(procedures, {
+    keep: (procedure) =>
+      (!system || procedure.system === system) &&
+      (!difficulty || procedure.difficulty === difficulty) &&
+      (!confidence || procedure.confidence === confidence) &&
+      (!normalizedQuery ||
+        PROCEDURE_SEARCH_FIELDS.some((field) =>
+          String(procedure[field] || "").toLowerCase().includes(normalizedQuery)
+        )),
+    compare: LIST_COMPARATORS[sort] || LIST_COMPARATORS.newest,
+    limit,
+    offset,
+  });
+
+  return { procedures: page, matched, total: procedures.length };
+}
+
+// Every system name the vehicle's procedures use, for the page's System filter,
+// from the whole list so a filtered or paged view never shrinks its choices.
+export function listProcedureSystems(vehicleId) {
+  return distinctSorted(listProcedures(vehicleId), "system");
 }
 
 // A single mapped procedure, or undefined when it does not belong to the

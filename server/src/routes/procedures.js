@@ -7,29 +7,84 @@ import {
   deleteProcedure,
   getProcedure,
   getProcedureRecord,
+  listProcedurePage,
   listProcedures,
+  listProcedureSystems,
   normalizeConfidence,
   normalizeDifficulty,
+  PROCEDURE_LIST_SORT_KEYS,
   replaceProcedureDocumentLinks,
   updateProcedureFields,
 } from "../services/procedureService.js";
 import { hasOwnField, normalizeText } from "../utils/text.js";
-import { parsePositiveInt, parsePositiveIntArray } from "../utils/http.js";
+import {
+  parsePageLimit,
+  parsePageOffset,
+  parsePositiveInt,
+  parsePositiveIntArray,
+} from "../utils/http.js";
 
 export const proceduresRouter = Router();
 
-proceduresRouter.get("/", (_request, response) => {
+const PROCEDURE_DIFFICULTY_FILTERS = ["beginner", "intermediate", "advanced"];
+const PROCEDURE_CONFIDENCE_FILTERS = ["low", "medium", "high"];
+
+// Only plain strings count: Express parses `?system=a&system=b` into an array.
+function getQueryString(request, name) {
+  return typeof request.query[name] === "string" ? request.query[name] : "";
+}
+
+proceduresRouter.get("/", (request, response) => {
   try {
     const vehicleId = getVehicleId();
-    const procedures = listProcedures(vehicleId);
 
-    response.json({
-      procedures,
-      total: procedures.length,
+    // Backward compatible: with no `limit` query, return every procedure and
+    // ignore any filter. With `limit`, return one filtered, ordered page -- what
+    // the Procedures page asks for (N7).
+    if (request.query.limit === undefined) {
+      const procedures = listProcedures(vehicleId);
+
+      response.json({
+        procedures,
+        total: procedures.length,
+      });
+      return;
+    }
+
+    const limit = parsePageLimit(request.query.limit, { defaultLimit: 25, maxLimit: 100 });
+    const offset = parsePageOffset(request.query.offset);
+    const difficulty = getQueryString(request, "difficulty");
+    const confidence = getQueryString(request, "confidence");
+    const sort = getQueryString(request, "sort");
+    const page = listProcedurePage(vehicleId, {
+      query: getQueryString(request, "q"),
+      system: getQueryString(request, "system"),
+      // An unknown value is no filter rather than an error, the same way an
+      // unknown sort is the default order.
+      difficulty: PROCEDURE_DIFFICULTY_FILTERS.includes(difficulty) ? difficulty : "",
+      confidence: PROCEDURE_CONFIDENCE_FILTERS.includes(confidence) ? confidence : "",
+      sort: PROCEDURE_LIST_SORT_KEYS.includes(sort) ? sort : "newest",
+      limit,
+      offset,
     });
+
+    // `total` is every procedure; `matched` is how many the filters leave.
+    response.json({ ...page, limit, offset });
   } catch (error) {
     response.status(500).json({
       error: error.message || "Could not load procedures.",
+    });
+  }
+});
+
+// The choices the page's System filter offers, from every procedure rather than
+// from the loaded page. Declared before `/:id` so it is never read as an id.
+proceduresRouter.get("/filter-options", (_request, response) => {
+  try {
+    response.json({ systems: listProcedureSystems(getVehicleId()) });
+  } catch (error) {
+    response.status(500).json({
+      error: error.message || "Could not load procedure filters.",
     });
   }
 });

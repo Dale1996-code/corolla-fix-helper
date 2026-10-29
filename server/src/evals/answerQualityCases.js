@@ -789,6 +789,27 @@ export const answerQualityCases = [
     verified: true,
   },
   {
+    id: "reject-figure-from-another-row",
+    question: "What is the engine oil capacity with a filter change?",
+    category: "verifier",
+    system: "Engine",
+    expect: "rejected",
+    expectedStatus: "not_found",
+    requiredRejectedReasons: ["row_mismatch"],
+    rejectionProbe: "row_mismatch",
+    // The false pass diagnosed 2026-10-28: a quote spanning two table rows
+    // names the part in one row and prints the claimed figure in the other, so
+    // the subject and numeric checks each find what they look for. The probe
+    // builds that pairing out of whatever two-row table retrieval returns --
+    // for this question, the capacity rows of the oil-change page -- so only
+    // the row check (S1) can stop it.
+    //
+    // NOT verified: this path has never run end to end. It stays false until
+    // one live run confirms the probe finds a table and the reason survives
+    // source mapping, status derivation, and the metrics sanitizer.
+    verified: false,
+  },
+  {
     id: "reject-fabricated-quote",
     question: "What is the oil drain plug torque?",
     category: "verifier",

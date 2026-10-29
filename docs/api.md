@@ -97,7 +97,7 @@ Returns the vehicle profile, summary counts, and recent lists in one call (all l
 
 ### `GET /api/documents`
 
-With no `limit`, returns **every** document, newest created first. The Symptoms, Procedures, and Notes pages still rely on this; the Documents page does not.
+With no `limit`, returns **every** document, newest created first. It is kept for API compatibility: no page asks for it any more, because every document link picker (Symptoms, Procedures, Notes) searches `GET /api/search/documents` a page at a time, and the Documents page pages this route.
 
 ```json
 { "documents": [ ... ], "total": 42, "matched": 42 }
@@ -203,8 +203,10 @@ All search endpoints are `GET`, share the shape `{ "results": [...], "total": n,
 | Endpoint | Query params |
 | --- | --- |
 | `GET /api/search` and `GET /api/search/documents` | `q`, `system`, `documentType`, `favorite`, `bookmarked`, `tag`, `sort`, `limit`, `offset` |
-| `GET /api/search/symptoms` | `q`, `system`, `status`, `sort` |
+| `GET /api/search/symptoms` | `q`, `system`, `status`, `sort`, optional `limit`, `offset` |
 | `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort`, optional `limit`, `offset` |
+
+`GET /api/search/symptoms` and `GET /api/search/procedures` return every match when no `limit` is sent (the Ask AI page's cards read the whole set). With a `limit` (default 25, at most 100) they return one page plus `limit`, `offset`, and `hasMore`, with `total` still counting every match; that is what the link pickers on the Symptoms, Procedures, Notes, and Repair Checklists pages ask for. A paged symptom search omits `filters`, which only the unpaged Ask AI card uses.
 | `GET /api/search/notes` | `q`, `noteType`, `relatedEntityType`, `sort` |
 
 Document search covers metadata, notes, extracted text (including OCR text), and tags.
@@ -377,11 +379,12 @@ Server-side verification, in order:
 2. Each `sourceId` (`S1`..`Sn`, prompt-local; never a database row id) must map to a retrieved chunk.
 3. The `evidenceQuote` must be a genuine substring of that chunk (whitespace- and case-insensitive), starting and ending on token boundaries: never inside a word and never inside a number, so `torque 10` is not a quote of `torque 103`.
 4. A claim that states no unit-bearing figure must quote at least three words (`quote_too_short`).
-5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units. Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
+5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units (`lmp.`, a lowercase-L spelling of `Imp.` found in one page's text layer, is the Imperial unit). Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
 6. Every other number in the claim — a figure in a unit the detector does not know, a count, a step number — must itself be printed in the quote (`unrecognized_figure`). Only names are exempt: codes, connectors, and pins (`P0420`, `B9-1`), engine codes (`2ZR-FE`), ordinals, Toyota part numbers, and model years. An unknown unit is compared by its number only, so this is a floor, not a unit check.
 7. For recognized specification wording, the complete normalized part name from the claim must also occur in the quote (see the boundary below). This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
-8. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
-9. `status` is derived by the server from what actually verified — never taken from the model.
+8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both.
+9. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
+10. `status` is derived by the server from what actually verified — never taken from the model.
 
 Anything failing a step is removed from the answer and becomes a gap. **Gap text
 never reprints the failing value**, so an ungrounded specification cannot render
@@ -408,9 +411,23 @@ quote: "X of the Y" also reads as "Y X", the table label "standard" may sit
 anywhere, and the words "system" and "installation" may be left out. Every other
 word of the part name must still be present, unbroken and in order.
 
+**Table rows.** When the quote prints two or more table rows — runs of values,
+each with the label before it — one row must hold every figure the claim states,
+name its part (in its own label, or through a shared header over a sub-row that
+names no other part), and carry no condition the claim contradicts or omits
+where that condition tells the part's rows apart: with/without, front/rear,
+left/right, upper/lower, inner/outer, intake/exhaust, hot/cold, new/used,
+released/depressed, standard/minimum/maximum/limit, "or more"/"or less", and
+designations such as No. 1/No. 2. A claim saying no limit means the standard
+value. Otherwise the claim is rejected as `row_mismatch`. A quote printing one
+row is judged as before; a condition printed in a different sentence from the
+figure is a different row, so such a claim must be split; and conditions outside
+that list are not seen.
+
 "Verified" means a claimed figure is **printed in the cited quote, in the same
-unit** — not that it is right for this car, and not that it belongs to the part
-named when one quote names several. A model that converts or rounds a correct
+unit** — not that it is right for this car. In a multi-row quote it also means
+the figure's own row names the part, but within a row the check is still
+lexical. A model that converts or rounds a correct
 figure gets `partial` or `not_found` instead of `answered`; that refusal is
 intended. A figure in a unit the detector does not know is checked by its number
 alone, and the header-table fallback cannot tell which column a bare number came
@@ -537,7 +554,7 @@ unrecognized and the two enums below have drifted from the verifier.
 | `unsupportedSpecCount` | integer | How many unit-bearing specifications in the item were not supported by its evidence — a count only, never the values. |
 
 `reason` is one of `unknown_source`, `quote_not_in_source`, `quote_too_short`,
-`numeric_anomaly`, `unrecognized_figure`, `subject_mismatch`,
+`numeric_anomaly`, `unrecognized_figure`, `subject_mismatch`, `row_mismatch`,
 `unsourced_specification`, or `unsourced_gap_specification`, matching the
 verification steps listed earlier. For `unrecognized_figure`,
 `unsupportedSpecCount` counts the unreadable figures that were not printed.
@@ -668,12 +685,27 @@ Allowed values — `difficulty`: `beginner` | `intermediate` (default) | `advanc
 
 | Endpoint | Notes |
 | --- | --- |
-| `GET /api/procedures` | `{ "procedures": [...], "total": n }` — each includes `linkedDocuments` and `linkedSymptoms` |
+| `GET /api/procedures` | `{ "procedures": [...], "total": n }` — every procedure; each includes `linkedDocuments` and `linkedSymptoms`. With `limit`, one filtered, sorted page (below) |
+| `GET /api/procedures/filter-options` | `{ "systems": [...] }` — every system name in use, A–Z, for the page's System filter |
 | `GET /api/procedures/:id` | `{ "procedure": {...} }` |
 | `POST /api/procedures` | body: `title` (required), `system`, `difficulty`, `confidence`, `toolsNeeded`, `partsNeeded`, `safetyNotes`, `steps`, `notes`, `linkedDocumentIds` (array). `201` → `{ "message", "procedure" }` |
 | `PUT /api/procedures/:id` | same fields; partial update |
 | `PUT /api/procedures/:id/symptoms` | body `{ "symptomIds": [3] }` — replaces the whole linked set |
 | `DELETE /api/procedures/:id` | also removes links and image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
+
+**Paged list (`GET /api/procedures?limit=…`).** The Procedures page asks for one page at a time. The answer is `{ "procedures": [...], "matched": n, "total": n, "limit", "offset" }`: `total` is every procedure, `matched` how many the filters leave.
+
+| Param | Meaning |
+| --- | --- |
+| `limit` | page size; defaults to 25, capped at 100 |
+| `offset` | rows to skip; defaults to 0. Past the end, `procedures` is empty while `matched` still counts the matches |
+| `q` | case-insensitive substring of the title, system, tools, parts, steps, or notes |
+| `system` | exact system name |
+| `difficulty` | `beginner`, `intermediate`, or `advanced` |
+| `confidence` | `low`, `medium`, or `high` |
+| `sort` | `newest` (default, latest update first), `oldest`, or `title` (A–Z, `localeCompare` order) |
+
+An unknown `difficulty`, `confidence`, or `sort`, or a repeated parameter, is ignored. Ties keep the base order (latest update, then highest id), so a page boundary never repeats or skips a procedure.
 
 ---
 
@@ -683,12 +715,16 @@ Allowed values — `noteType`: `general` (default) | `observation` | `repair_log
 
 | Endpoint | Notes |
 | --- | --- |
-| `GET /api/notes` | `{ "notes": [...], "total": n }` — linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure` |
+| `GET /api/notes` | `{ "notes": [...], "total": n }` — every note; linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure`. With `limit`, one filtered, sorted page (below) |
+| `GET /api/notes/filter-options` | `{ "noteTypes": [...] }` — every note type in use, A–Z, for the page's Note type filter |
+| `GET /api/notes/:id` | `{ "note": {...} }`, or `404` — how the page opens a note that is not on the page it loaded |
 | `POST /api/notes` | body: `title` (required), `content`, `noteType`, `relatedEntityType`, `relatedEntityId`. If `relatedEntityType` is not `none`, `relatedEntityId` is required and must point at an existing record. `201` → `{ "message", "note" }` |
 | `PUT /api/notes/:id` | same fields; partial update. A link to a missing record is a `400` only when the edit asks for a **new** link. If the note already pointed at a record that has since been deleted, and the edit keeps that link (or omits it), the dead link is cleared and the edit is saved |
 | `DELETE /api/notes/:id` | also removes the note's image attachments |
 
 A note links to **at most one** related record.
+
+**Paged list (`GET /api/notes?limit=…`).** The Notes page asks for one page at a time. The answer is `{ "notes": [...], "matched": n, "total": n, "limit", "offset" }`: `total` is every note, `matched` how many the filters leave. `limit` defaults to 25 and is capped at 100; `offset` defaults to 0 (past the end, `notes` is empty while `matched` still counts the matches). `noteType` is an exact note type; `relatedEntityType` is `none`, `document`, `symptom`, or `procedure` (an unlinked note counts as `none`); `sort` is `newest` (default) or `oldest`. An unknown `relatedEntityType` or `sort`, or a repeated parameter, is ignored.
 
 ---
 

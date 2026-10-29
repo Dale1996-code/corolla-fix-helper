@@ -86,10 +86,13 @@ state a plan imagined.
   hand-reviewed live runs during Stage 5-E2 are the planner's only live check: all five came
   back `partial`, mainly because no run established its tools, and readiness never went
   above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)).
-- **Two pages still download whole collections.** Procedures and Notes each fetch every
-  record with no limit (Notes fetches four collections). Ask AI's document card, the
-  Documents page, and the Symptoms page now page on the server (the first two slices of
-  N7); these were not.
+- **No page downloads a whole library any more, but nothing measures speed or import.**
+  Documents, Symptoms, Procedures, Notes, and Ask AI's document card page on the server, and
+  every link picker (including the Repair Checklists completion form's symptom choice)
+  searches a page at a time; N7's payload budgets are tests
+  (`server/test/payloadBudgets.test.js`). A page's response time and the importer's
+  throughput have no budget, because a threshold on either depends on the machine running
+  it and would be a coin flip in CI.
 - **Electrical symbols are recognized in their standard written form only.** `V`, `mV`,
   `Ω`, and `kΩ` are detected (N4's second slice), so are `A` and `mA`, and since Stage 2 of
   the 2026-10-18 audit so are `kV`, `mΩ`, and `MΩ`, but case-sensitively: a lowercase `v`
@@ -197,7 +200,7 @@ this alone.
 | N4 | Close the two named evidence gaps | High — in progress | Slight increase |
 | N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0, P1 done; classification only) | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
-| N7 | Stop the four pages downloading the whole library | High | Slight increase |
+| N7 | Stop the four pages downloading the whole library | **Done**, except two unset budgets (response time, import throughput) | Slight increase |
 | N8 | Document-health report | High | Slight increase |
 
 **N0 — Recover the zero-chunk corpus. Done, August 2026.**
@@ -534,6 +537,35 @@ is finishing that job on the pages it skipped.
 and it is felt most on the device you actually use while working.
 *Also set budgets* for payload size, response time, and import throughput, so the next
 regression is caught rather than absorbed.
+*Status: done, October 2026, except two budgets.* Four slices:
+
+- **Documents (#162) and Symptoms (#163)** page their lists on the server and search their
+  link pickers.
+- **Procedures and Notes link pickers.** Their document, symptom, and procedure pickers
+  search `/api/search/*` 25 at a time (a note's single link is a radio picker), and
+  `/api/search/symptoms` pages when asked.
+- **Procedures and Notes lists.** Each page asks `GET /api/procedures` / `GET /api/notes`
+  for one filtered, sorted page (`limit`, `offset`, and the page's filters), reads
+  `/filter-options` for its dropdown, and opens a record that is not on the page through
+  `GET /api/<kind>/:id`. Notes gained that by-id route. The shared order and slice rules
+  are in `server/src/utils/listOrder.js`. A selection a filter hides is now kept and still
+  shown, as on Documents and Symptoms, where Procedures used to jump to another row.
+- **The Repair Checklists completion form** chooses its symptom through the same
+  picker instead of listing every symptom.
+
+Measured on a copy of the owner's library, by the requests each page makes on opening:
+a Procedures visit went from 4 requests and 1,241.5 KiB to 5 requests and 30.0 KiB; a
+Notes visit from 1,240.1 KiB to 0.1 KiB, or 27.2 KiB once a link type of Document is
+chosen. The Repair Checklists change is a scaling fix, not a saving today: the owner has
+2 symptoms, so that form's request is 0.9 KiB against 0.7 before. The lists themselves
+hold 1 procedure and 0 notes, so their paging is also insurance for the day they grow.
+
+The payload budgets are tests: a page of rows must be no bigger at 1,500 records than at
+100, and every page's first load has a byte budget about 1.5 times what it measured
+(`server/test/payloadBudgets.test.js`; a probe that re-adds the whole document request to
+Procedures reads 793.6 KiB against its 100 KiB budget). *Still open:* the response-time
+and import-throughput budgets, which need a measured baseline on the owner's hardware
+before a threshold means anything.
 
 **N8 — Document-health report.**
 *Problem it solves:* there is no way to answer "why didn't Ask find that?" Flag documents

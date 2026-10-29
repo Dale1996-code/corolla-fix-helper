@@ -227,6 +227,13 @@ Check:
 - The saved content appears in the detail panel.
 - Linked documents open correctly.
 - Saved Settings system suggestions appear in create or edit fields.
+- The document and symptom pickers show one page (`Showing 1–25 of …`); typing in
+  **Find documents** reaches a document past that page, and editing a procedure still
+  lists and ticks a linked document the first page does not show.
+- With more than 25 procedures, the list shows 25 at a time with **Previous** / **Next**
+  and `?page=` in the address; a filter or keyword narrows across every procedure and
+  starts again from page 1. A pasted `?procedureId=` link opens a procedure on another
+  page.
 
 ## 11. Notes
 
@@ -241,6 +248,12 @@ Check:
 - The note appears in the list.
 - The detail panel shows the linked item.
 - The linked item opens from the note detail panel.
+- Choosing **Document**, **Symptom**, or **Procedure** shows a searchable list of one
+  page with one choice (radio buttons), not every record; editing a note keeps its
+  linked record selected, and changing the link type clears it.
+- With more than 25 notes, the list pages the same way (**Previous** / **Next**, `?page=`);
+  the Note type and Linked item filters apply to every note, and the counter says
+  `Filtered from N in your library`.
 
 ## 12. Image Attachments
 
