@@ -91,10 +91,11 @@ documentsRouter.get("/", (request, response) => {
   const total = countDocuments();
   const options = readDocumentListOptions(request);
 
-  // Backward compatible: with no `limit` query, return every document (the
-  // Symptoms, Procedures, and Notes pages still rely on this). When `limit` is
-  // supplied, page through with a sane cap so a huge library cannot be pulled
-  // at once.
+  // Backward compatible: with no `limit` query, return every document. No page
+  // asks for that any more -- since N7 every link picker searches
+  // `/api/search/documents` a page at a time -- but API clients and the smoke
+  // test still may. When `limit` is supplied, page through with a sane cap so a
+  // huge library cannot be pulled at once.
   if (request.query.limit === undefined) {
     const documents = listDocuments(options);
     response.json({ documents, total, matched: documents.length });

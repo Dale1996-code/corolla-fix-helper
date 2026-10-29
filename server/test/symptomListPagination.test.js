@@ -282,6 +282,45 @@ test("the paged search for procedures is bounded; without limit it is unchanged"
   assert.equal((await request(app).get("/api/search/procedures?limit=500")).body.limit, 100);
 });
 
+test("the symptom search pages only when asked, for the symptom pickers", async () => {
+  // Unbounded with no `limit`, because the Ask AI page's symptom card reads the
+  // whole result set; with one, a page in the same order (N7, Procedures).
+  for (let index = 1; index <= 31; index += 1) {
+    addSymptom({
+      title: `Picker symptom ${String(index).padStart(2, "0")}`,
+      updatedAt: `2026-02-${String(index % 28 || 28).padStart(2, "0")} 09:00:00`,
+    });
+  }
+
+  const unpaged = await request(app).get("/api/search/symptoms");
+  assert.equal(unpaged.status, 200);
+  assert.ok(unpaged.body.results.length > 25);
+  assert.equal(unpaged.body.total, unpaged.body.results.length);
+  assert.equal(unpaged.body.hasMore, undefined);
+
+  const first = await request(app).get("/api/search/symptoms?limit=25");
+  assert.equal(first.body.results.length, 25);
+  assert.equal(first.body.total, unpaged.body.total);
+  assert.equal(first.body.hasMore, true);
+  assert.deepEqual(
+    first.body.results.map((symptom) => symptom.id),
+    unpaged.body.results.slice(0, 25).map((symptom) => symptom.id)
+  );
+
+  const rest = unpaged.body.total - 25;
+  const second = await request(app).get("/api/search/symptoms?limit=25&offset=25");
+  assert.equal(second.body.results.length, Math.min(25, rest));
+  assert.equal(second.body.hasMore, rest > 25);
+
+  const searched = await request(app).get("/api/search/symptoms?limit=5&q=picker%20symptom%2007");
+  assert.deepEqual(
+    searched.body.results.map((symptom) => symptom.title),
+    ["Picker symptom 07"]
+  );
+
+  assert.equal((await request(app).get("/api/search/symptoms?limit=500")).body.limit, 100);
+});
+
 // Sorting and the keyword's case rules on a small, separate vehicle-wide set.
 // They run last and replace the fixture, so the earlier tests keep theirs.
 test("sorting and keyword matching follow the page's old browser rules", async () => {

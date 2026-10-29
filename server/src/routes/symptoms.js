@@ -45,8 +45,10 @@ export function createSymptomsRouter({
       const vehicleId = getVehicleId();
 
       // Backward compatible: with no `limit` query, return every symptom and
-      // ignore any filter (the Procedures, Notes, and Repair Checklists pages
-      // still rely on this). With `limit`, return one filtered, ordered page.
+      // ignore any filter. No page asks for that any more -- since N7 the
+      // Symptoms page pages this route and every symptom picker searches
+      // `/api/search/symptoms` -- but API clients may. With `limit`, return one
+      // filtered, ordered page.
       if (request.query.limit === undefined) {
         const symptoms = listSymptoms(vehicleId);
 

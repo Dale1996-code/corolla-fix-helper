@@ -97,7 +97,7 @@ Returns the vehicle profile, summary counts, and recent lists in one call (all l
 
 ### `GET /api/documents`
 
-With no `limit`, returns **every** document, newest created first. The Symptoms, Procedures, and Notes pages still rely on this; the Documents page does not.
+With no `limit`, returns **every** document, newest created first. It is kept for API compatibility: no page asks for it any more, because every document link picker (Symptoms, Procedures, Notes) searches `GET /api/search/documents` a page at a time, and the Documents page pages this route.
 
 ```json
 { "documents": [ ... ], "total": 42, "matched": 42 }
@@ -203,8 +203,10 @@ All search endpoints are `GET`, share the shape `{ "results": [...], "total": n,
 | Endpoint | Query params |
 | --- | --- |
 | `GET /api/search` and `GET /api/search/documents` | `q`, `system`, `documentType`, `favorite`, `bookmarked`, `tag`, `sort`, `limit`, `offset` |
-| `GET /api/search/symptoms` | `q`, `system`, `status`, `sort` |
+| `GET /api/search/symptoms` | `q`, `system`, `status`, `sort`, optional `limit`, `offset` |
 | `GET /api/search/procedures` | `q`, `system`, `difficulty`, `sort`, optional `limit`, `offset` |
+
+`GET /api/search/symptoms` and `GET /api/search/procedures` return every match when no `limit` is sent (the Ask AI page's cards read the whole set). With a `limit` (default 25, at most 100) they return one page plus `limit`, `offset`, and `hasMore`, with `total` still counting every match; that is what the link pickers on the Symptoms, Procedures, Notes, and Repair Checklists pages ask for.
 | `GET /api/search/notes` | `q`, `noteType`, `relatedEntityType`, `sort` |
 
 Document search covers metadata, notes, extracted text (including OCR text), and tags.
@@ -683,12 +685,27 @@ Allowed values — `difficulty`: `beginner` | `intermediate` (default) | `advanc
 
 | Endpoint | Notes |
 | --- | --- |
-| `GET /api/procedures` | `{ "procedures": [...], "total": n }` — each includes `linkedDocuments` and `linkedSymptoms` |
+| `GET /api/procedures` | `{ "procedures": [...], "total": n }` — every procedure; each includes `linkedDocuments` and `linkedSymptoms`. With `limit`, one filtered, sorted page (below) |
+| `GET /api/procedures/filter-options` | `{ "systems": [...] }` — every system name in use, A–Z, for the page's System filter |
 | `GET /api/procedures/:id` | `{ "procedure": {...} }` |
 | `POST /api/procedures` | body: `title` (required), `system`, `difficulty`, `confidence`, `toolsNeeded`, `partsNeeded`, `safetyNotes`, `steps`, `notes`, `linkedDocumentIds` (array). `201` → `{ "message", "procedure" }` |
 | `PUT /api/procedures/:id` | same fields; partial update |
 | `PUT /api/procedures/:id/symptoms` | body `{ "symptomIds": [3] }` — replaces the whole linked set |
 | `DELETE /api/procedures/:id` | also removes links and image attachments, and unlinks any note that pointed at it (the note is kept, now with `relatedEntityType: "none"`) |
+
+**Paged list (`GET /api/procedures?limit=…`).** The Procedures page asks for one page at a time. The answer is `{ "procedures": [...], "matched": n, "total": n, "limit", "offset" }`: `total` is every procedure, `matched` how many the filters leave.
+
+| Param | Meaning |
+| --- | --- |
+| `limit` | page size; defaults to 25, capped at 100 |
+| `offset` | rows to skip; defaults to 0. Past the end, `procedures` is empty while `matched` still counts the matches |
+| `q` | case-insensitive substring of the title, system, tools, parts, steps, or notes |
+| `system` | exact system name |
+| `difficulty` | `beginner`, `intermediate`, or `advanced` |
+| `confidence` | `low`, `medium`, or `high` |
+| `sort` | `newest` (default, latest update first), `oldest`, or `title` (A–Z, `localeCompare` order) |
+
+An unknown `difficulty`, `confidence`, or `sort`, or a repeated parameter, is ignored. Ties keep the base order (latest update, then highest id), so a page boundary never repeats or skips a procedure.
 
 ---
 
@@ -698,12 +715,16 @@ Allowed values — `noteType`: `general` (default) | `observation` | `repair_log
 
 | Endpoint | Notes |
 | --- | --- |
-| `GET /api/notes` | `{ "notes": [...], "total": n }` — linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure` |
+| `GET /api/notes` | `{ "notes": [...], "total": n }` — every note; linked records come back expanded as `linkedDocument` / `linkedSymptom` / `linkedProcedure`. With `limit`, one filtered, sorted page (below) |
+| `GET /api/notes/filter-options` | `{ "noteTypes": [...] }` — every note type in use, A–Z, for the page's Note type filter |
+| `GET /api/notes/:id` | `{ "note": {...} }`, or `404` — how the page opens a note that is not on the page it loaded |
 | `POST /api/notes` | body: `title` (required), `content`, `noteType`, `relatedEntityType`, `relatedEntityId`. If `relatedEntityType` is not `none`, `relatedEntityId` is required and must point at an existing record. `201` → `{ "message", "note" }` |
 | `PUT /api/notes/:id` | same fields; partial update. A link to a missing record is a `400` only when the edit asks for a **new** link. If the note already pointed at a record that has since been deleted, and the edit keeps that link (or omits it), the dead link is cleared and the edit is saved |
 | `DELETE /api/notes/:id` | also removes the note's image attachments |
 
 A note links to **at most one** related record.
+
+**Paged list (`GET /api/notes?limit=…`).** The Notes page asks for one page at a time. The answer is `{ "notes": [...], "matched": n, "total": n, "limit", "offset" }`: `total` is every note, `matched` how many the filters leave. `limit` defaults to 25 and is capped at 100; `offset` defaults to 0 (past the end, `notes` is empty while `matched` still counts the matches). `noteType` is an exact note type; `relatedEntityType` is `none`, `document`, `symptom`, or `procedure` (an unlinked note counts as `none`); `sort` is `newest` (default) or `oldest`. An unknown `relatedEntityType` or `sort`, or a repeated parameter, is ignored.
 
 ---
 

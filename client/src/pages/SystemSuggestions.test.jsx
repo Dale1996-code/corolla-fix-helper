@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { ProceduresPage } from "./ProceduresPage";
 import { SymptomsPage } from "./SymptomsPage";
+import { buildProcedure, createProceduresApi } from "../test/proceduresApiMock";
 import { createSymptomsApi } from "../test/symptomsApiMock";
 
 function jsonResponse(payload, ok = true) {
@@ -88,55 +89,32 @@ test("SymptomsPage shows saved system suggestions from Settings in create and ed
 }, 10000);
 
 test("ProceduresPage shows saved system suggestions from Settings in create and edit forms", async () => {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/procedures") {
-      return jsonResponse({
-        procedures: [
-          {
-            id: 21,
-            title: "Spark plug replacement",
-            system: "Ignition",
-            difficulty: "intermediate",
-            toolsNeeded: "",
-            partsNeeded: "",
-            safetyNotes: "",
-            steps: "",
-            notes: "",
-            confidence: "medium",
-            createdAt: "2026-04-15T10:00:00.000Z",
-            updatedAt: "2026-04-17T09:00:00.000Z",
-            linkedDocumentIds: [],
-            linkedDocuments: [],
-          },
-        ],
-      });
+  // The page asks the server for one page of procedures, and the document picker
+  // searches a page at a time (N7); only Settings is overridden here.
+  const api = createProceduresApi(
+    {
+      procedures: [
+        buildProcedure(21, {
+          title: "Spark plug replacement",
+          system: "Ignition",
+          difficulty: "intermediate",
+          createdAt: "2026-04-15T10:00:00.000Z",
+          updatedAt: "2026-04-17T09:00:00.000Z",
+        }),
+      ],
+      documents: [
+        { id: 11, title: "Tune-up notes", system: "Ignition", documentType: "Procedure" },
+      ],
+    },
+    {
+      extra: (url) =>
+        url === "/api/settings"
+          ? jsonResponse({ documentDefaults: { commonSystems: ["Engine", "Cooling"] } })
+          : undefined,
     }
+  );
 
-    if (url === "/api/documents") {
-      return jsonResponse({
-        documents: [
-          {
-            id: 11,
-            title: "Tune-up notes",
-            system: "Ignition",
-            documentType: "Procedure",
-          },
-        ],
-      });
-    }
-
-    if (url === "/api/settings") {
-      return jsonResponse({
-        documentDefaults: {
-          commonSystems: ["Engine", "Cooling"],
-        },
-      });
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
 
   const { container } = render(
     <MemoryRouter initialEntries={["/procedures"]}>

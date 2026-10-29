@@ -74,7 +74,7 @@ function applyListRequest(state, params) {
   };
 }
 
-function applySearchRequest(records, params, fields) {
+export function applySearchRequest(records, params, fields) {
   const query = (params.get("q") || "").trim().toLowerCase();
   const matching = records.filter(
     (record) =>

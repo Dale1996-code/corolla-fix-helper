@@ -1,86 +1,69 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { ProceduresPage } from "./ProceduresPage";
+import { buildProcedure, createProceduresApi } from "../test/proceduresApiMock";
 
-function jsonResponse(payload, ok = true) {
-  return Promise.resolve({
-    ok,
-    json: async () => payload,
-  });
-}
-
-function getCountTextMatcher(expectedText) {
-  return (_content, element) =>
-    element?.tagName === "P" && element.textContent === expectedText;
-}
+// The Procedures page asks the server for one filtered, ordered page at a time
+// (N7), so these tests run it against a stand-in that applies the same request.
+// Paging, deep links, and writes are covered in ProceduresPagination.test.jsx.
+// Every record here is synthetic.
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-test("ProceduresPage shows clickable linked documents in the detail panel", async () => {
-  const proceduresPayload = {
-    procedures: [
-      {
-        id: 31,
-        title: "Throttle body cleaning",
-        system: "Engine",
-        difficulty: "beginner",
-        toolsNeeded: "",
-        partsNeeded: "",
-        safetyNotes: "",
-        steps: "Remove intake tube and clean the throttle plate.",
-        notes: "",
-        confidence: "medium",
-        createdAt: "2026-04-18T10:00:00.000Z",
-        updatedAt: "2026-04-18T12:00:00.000Z",
-        linkedDocumentIds: [11],
-        linkedDocuments: [
-          {
-            id: 11,
-            title: "Throttle body reference",
-            system: "Engine",
-            documentType: "Reference",
-          },
-        ],
-      },
-    ],
-    total: 1,
-  };
+function getCountTextMatcher(expectedText) {
+  return (_content, element) =>
+    element?.tagName === "P" && element.textContent === expectedText;
+}
 
-  const documentsPayload = {
-    documents: [
-      {
-        id: 11,
-        title: "Throttle body reference",
-        system: "Engine",
-        documentType: "Reference",
-      },
-    ],
-    total: 1,
-  };
+const SEARCH_PLACEHOLDER = "Search title, system, tools, parts, steps, or notes";
 
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
+const THROTTLE = buildProcedure(31, {
+  title: "Throttle body cleaning",
+  system: "Engine",
+  difficulty: "beginner",
+  toolsNeeded: "Socket set",
+  steps: "Clean throttle plate.",
+  confidence: "medium",
+  createdAt: "2026-04-18T10:00:00.000Z",
+  updatedAt: "2026-04-18T12:00:00.000Z",
+});
 
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
+const REAR_BRAKES = buildProcedure(32, {
+  title: "Rear brake pad replacement",
+  system: "Brakes",
+  difficulty: "advanced",
+  toolsNeeded: "Caliper tool",
+  partsNeeded: "Brake pads",
+  steps: "Service rear brakes.",
+  confidence: "high",
+  createdAt: "2026-04-19T10:00:00.000Z",
+  updatedAt: "2026-04-19T12:00:00.000Z",
+});
 
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+function renderProcedures(library, entry = "/procedures") {
+  const api = createProceduresApi(library);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
 
   render(
-    <MemoryRouter initialEntries={["/procedures"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <ProceduresPage />
     </MemoryRouter>
   );
+
+  return api;
+}
+
+test("ProceduresPage shows clickable linked documents in the detail panel", async () => {
+  renderProcedures({
+    procedures: [buildProcedure(31, { title: "Throttle body cleaning", linkedDocumentIds: [11] })],
+    documents: [
+      { id: 11, title: "Throttle body reference", system: "Engine", documentType: "Reference" },
+    ],
+  });
 
   expect(await screen.findByRole("heading", { name: "Throttle body cleaning" })).toBeInTheDocument();
   expect(
@@ -89,77 +72,23 @@ test("ProceduresPage shows clickable linked documents in the detail panel", asyn
 });
 
 test("ProceduresPage supports search, filters, and filtered count in the list area", async () => {
-  const proceduresPayload = {
-    procedures: [
-      {
-        id: 31,
-        title: "Throttle body cleaning",
-        system: "Engine",
-        difficulty: "beginner",
-        toolsNeeded: "Socket set",
-        partsNeeded: "",
-        safetyNotes: "",
-        steps: "Clean throttle plate.",
-        notes: "",
-        confidence: "medium",
-        createdAt: "2026-04-18T10:00:00.000Z",
-        updatedAt: "2026-04-18T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-      {
-        id: 32,
-        title: "Rear brake pad replacement",
-        system: "Brakes",
-        difficulty: "advanced",
-        toolsNeeded: "Caliper tool",
-        partsNeeded: "Brake pads",
-        safetyNotes: "",
-        steps: "Service rear brakes.",
-        notes: "",
-        confidence: "high",
-        createdAt: "2026-04-19T10:00:00.000Z",
-        updatedAt: "2026-04-19T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-    ],
-    total: 2,
-  };
+  const api = renderProcedures({ procedures: [THROTTLE, REAR_BRAKES] });
 
-  const documentsPayload = {
-    documents: [],
-    total: 0,
-  };
+  expect(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER)).toBeInTheDocument();
+  expect(
+    await screen.findByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))
+  ).toBeInTheDocument();
 
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(
-    <MemoryRouter initialEntries={["/procedures"]}>
-      <ProceduresPage />
-    </MemoryRouter>
-  );
-
-  expect(await screen.findByPlaceholderText("Search title, system, tools, parts, steps, or notes")).toBeInTheDocument();
-  expect(screen.getByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))).toBeInTheDocument();
-
-  fireEvent.change(screen.getByPlaceholderText("Search title, system, tools, parts, steps, or notes"), {
+  // The keyword goes to the server once typing pauses, and the list is what the
+  // server answers with.
+  fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
     target: { value: "brake" },
   });
 
-  expect(screen.getByText(getCountTextMatcher("Showing 1–1 of 1 procedure."))).toBeInTheDocument();
+  expect(
+    await screen.findByText(getCountTextMatcher("Showing 1–1 of 1 procedure."))
+  ).toBeInTheDocument();
+  expect(api.listRequests.at(-1).get("q")).toBe("brake");
   expect(screen.getAllByText("Rear brake pad replacement").length).toBeGreaterThan(0);
   expect(screen.queryAllByText("Throttle body cleaning")).toHaveLength(0);
 
@@ -170,9 +99,11 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
   // Zero matches gets a sentence, never an impossible "Showing 1-0 of 0". The
   // counter in the filter bar and the list's own empty state both say it, so
   // this asserts the pair rather than a single node.
-  expect(
-    screen.getAllByText(getCountTextMatcher("No procedures match these filters."))
-  ).toHaveLength(2);
+  await waitFor(() =>
+    expect(
+      screen.getAllByText(getCountTextMatcher("No procedures match these filters."))
+    ).toHaveLength(2)
+  );
   // The empty state names a control that really exists in the filter bar.
   expect(
     await screen.findByText(
@@ -181,171 +112,46 @@ test("ProceduresPage supports search, filters, and filtered count in the list ar
   ).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-  expect(await screen.findByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))).toBeInTheDocument();
-  // Both panels can name it now: with the selection living in the URL, clearing
-  // the filters (which only clears filter parameters) leaves no `procedureId`,
-  // so the detail panel falls back to the default record while the list row is
-  // back too. Assert it is on screen, not which panel it is in.
-  expect((await screen.findAllByText("Throttle body cleaning")).length).toBeGreaterThan(0);
-});
-
-test("ProceduresPage keeps the detail panel on a visible procedure when filters hide the current selection", async () => {
-  const proceduresPayload = {
-    procedures: [
-      {
-        id: 31,
-        title: "Throttle body cleaning",
-        system: "Engine",
-        difficulty: "beginner",
-        toolsNeeded: "Socket set",
-        partsNeeded: "",
-        safetyNotes: "",
-        steps: "Clean throttle plate.",
-        notes: "",
-        confidence: "medium",
-        createdAt: "2026-04-18T10:00:00.000Z",
-        updatedAt: "2026-04-18T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-      {
-        id: 32,
-        title: "Rear brake pad replacement",
-        system: "Brakes",
-        difficulty: "advanced",
-        toolsNeeded: "Caliper tool",
-        partsNeeded: "Brake pads",
-        safetyNotes: "",
-        steps: "Service rear brakes.",
-        notes: "",
-        confidence: "high",
-        createdAt: "2026-04-19T10:00:00.000Z",
-        updatedAt: "2026-04-19T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-    ],
-    total: 2,
-  };
-
-  const documentsPayload = {
-    documents: [],
-    total: 0,
-  };
-
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(
-    <MemoryRouter initialEntries={["/procedures"]}>
-      <ProceduresPage />
-    </MemoryRouter>
-  );
-
   expect(
-    await screen.findByRole("heading", { name: "Throttle body cleaning" })
+    await screen.findByText(getCountTextMatcher("Showing 1–2 of 2 procedures."))
   ).toBeInTheDocument();
+  expect((await screen.findAllByText("Throttle body cleaning")).length).toBeGreaterThan(0);
+}, 10000);
 
-  fireEvent.click(screen.getByText("Rear brake pad replacement"));
+test("ProceduresPage keeps showing the procedure the owner chose when a filter hides its row", async () => {
+  const api = renderProcedures({ procedures: [THROTTLE, REAR_BRAKES] });
 
+  // Newest first, so the rear brakes are the page's first row and the default.
   expect(
     await screen.findByRole("heading", { name: "Rear brake pad replacement" })
   ).toBeInTheDocument();
 
-  fireEvent.change(
-    screen.getByPlaceholderText("Search title, system, tools, parts, steps, or notes"),
-    {
-      target: { value: "throttle" },
-    }
-  );
+  fireEvent.click(screen.getByText("Throttle body cleaning"));
+  expect(
+    await screen.findByRole("heading", { name: "Throttle body cleaning" })
+  ).toBeInTheDocument();
+
+  fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
+    target: { value: "brake" },
+  });
+
+  await waitFor(() => expect(api.listRequests.at(-1).get("q")).toBe("brake"));
+  expect(
+    await screen.findByText(getCountTextMatcher("Showing 1–1 of 1 procedure."))
+  ).toBeInTheDocument();
+  // The filter hides the throttle row from the list, not from the panel: the
+  // owner chose it, so loosening the filter finds them where they were.
+  expect(screen.getByRole("heading", { name: "Throttle body cleaning" })).toBeInTheDocument();
+  expect(api.lookups).toContain("/api/procedures/31");
+}, 10000);
+
+test("ProceduresPage selects the requested procedure from the URL when the id exists", async () => {
+  renderProcedures({ procedures: [THROTTLE, REAR_BRAKES] }, "/procedures?procedureId=31");
 
   expect(
     await screen.findByRole("heading", { name: "Throttle body cleaning" })
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("heading", { name: "Rear brake pad replacement" })
-  ).not.toBeInTheDocument();
-});
-
-test("ProceduresPage selects the requested procedure from the URL when the id exists", async () => {
-  const proceduresPayload = {
-    procedures: [
-      {
-        id: 31,
-        title: "Throttle body cleaning",
-        system: "Engine",
-        difficulty: "beginner",
-        toolsNeeded: "Socket set",
-        partsNeeded: "",
-        safetyNotes: "",
-        steps: "Clean throttle plate.",
-        notes: "",
-        confidence: "medium",
-        createdAt: "2026-04-18T10:00:00.000Z",
-        updatedAt: "2026-04-18T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-      {
-        id: 32,
-        title: "Rear brake pad replacement",
-        system: "Brakes",
-        difficulty: "advanced",
-        toolsNeeded: "Caliper tool",
-        partsNeeded: "Brake pads",
-        safetyNotes: "",
-        steps: "Service rear brakes.",
-        notes: "",
-        confidence: "high",
-        createdAt: "2026-04-19T10:00:00.000Z",
-        updatedAt: "2026-04-19T12:00:00.000Z",
-        linkedDocumentIds: [],
-        linkedDocuments: [],
-      },
-    ],
-    total: 2,
-  };
-
-  const documentsPayload = {
-    documents: [],
-    total: 0,
-  };
-
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/procedures") {
-      return jsonResponse(proceduresPayload);
-    }
-
-    if (url === "/api/documents") {
-      return jsonResponse(documentsPayload);
-    }
-
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
-
-  render(
-    <MemoryRouter initialEntries={["/procedures?procedureId=32"]}>
-      <ProceduresPage />
-    </MemoryRouter>
-  );
-
-  expect(
-    await screen.findByRole("heading", { name: "Rear brake pad replacement" })
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("heading", { name: "Throttle body cleaning" })
   ).not.toBeInTheDocument();
 });

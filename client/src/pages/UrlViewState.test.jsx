@@ -8,6 +8,7 @@ import { NotesPage } from "./NotesPage";
 import { RepairChecklistsPage } from "./RepairChecklistsPage";
 import { RepairHistoryPage } from "./RepairHistoryPage";
 import { createDocumentsApi } from "../test/documentsApiMock";
+import { createNotesApi } from "../test/notesApiMock";
 import { createSymptomsApi } from "../test/symptomsApiMock";
 
 // H7: filters, pagination, and the selected record are query-string state, so
@@ -498,21 +499,15 @@ const NOTES = [
 ];
 
 async function renderNotes(entry = "/notes") {
-  const fetchMock = vi.fn((url) => {
-    if (url === "/api/notes") return jsonResponse({ notes: NOTES, total: NOTES.length });
-    if (url === "/api/documents") return jsonResponse({ documents: [], total: 0 });
-    if (url === "/api/symptoms") return jsonResponse({ symptoms: [], total: 0 });
-    if (url === "/api/procedures") return jsonResponse({ procedures: [], total: 0 });
-    if (url.startsWith("/api/attachments")) return jsonResponse({ attachments: [], total: 0 });
+  // The server filters, sorts, and pages the list (N7); the stand-in applies the
+  // same request the page sends.
+  const api = createNotesApi({ notes: NOTES });
 
-    throw new Error(`Unexpected fetch call: ${url}`);
-  });
-
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", vi.fn(api.fetch));
   renderPage(NotesPage, [entry]);
   await screen.findByRole("combobox", { name: "Linked item" });
 
-  return fetchMock;
+  return api;
 }
 
 test("Notes rebuilds its filter and selection from a deep link", async () => {

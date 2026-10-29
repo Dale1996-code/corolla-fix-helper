@@ -3,7 +3,8 @@ import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ProceduresPage } from "./ProceduresPage";
 import { SymptomsPage } from "./SymptomsPage";
-import { buildSymptom, createSymptomsApi, jsonResponse } from "../test/symptomsApiMock";
+import { createProceduresApi } from "../test/proceduresApiMock";
+import { buildSymptom, createSymptomsApi } from "../test/symptomsApiMock";
 
 // Issue #164 on the two pages that have a keyword box: the box's debounced URL
 // commit and a filter change in the same moment must both survive, in either
@@ -356,18 +357,9 @@ const PROCEDURES = [
 const SEARCH_LABEL = "Search title, system, tools, parts, steps, or notes";
 
 async function renderProcedures(entry = "/procedures") {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((url) => {
-      if (url === "/api/procedures") {
-        return jsonResponse({ procedures: PROCEDURES, total: PROCEDURES.length });
-      }
-      if (url === "/api/documents") {
-        return jsonResponse({ documents: [], total: 0 });
-      }
-      throw new Error(`Unexpected fetch call: ${url}`);
-    })
-  );
+  // The server filters, sorts, and pages the list (N7); the stand-in applies the
+  // same request the page sends.
+  vi.stubGlobal("fetch", vi.fn(createProceduresApi({ procedures: PROCEDURES }).fetch));
 
   render(
     <MemoryRouter initialEntries={[entry]}>

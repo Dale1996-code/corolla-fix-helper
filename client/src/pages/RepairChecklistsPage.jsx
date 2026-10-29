@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { ListDetailLayout } from "../components/ListDetailLayout";
-import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
+import { ErrorBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
+import { RecordPicker } from "../components/forms/RecordPicker";
 import { formatDate, getSortTimestamp } from "../lib/formatDate";
 import { formatLibraryTotal } from "../lib/resultRange";
 import { buildEntityLink } from "../lib/navigation";
@@ -54,7 +55,13 @@ const emptyCompletionForm = {
   summary: "",
   followUp: "",
   symptomId: "",
+  // The chosen symptom itself, so the picker shows it whatever page it loaded.
+  symptom: null,
 };
+
+function describeSymptom(symptom) {
+  return [symptom.system, symptom.status].filter(Boolean).join(" - ") || "No details";
+}
 
 // Tagged with the checklist it describes. A completion request can outlive the
 // screen that sent it -- the owner selects another checklist, opens its form --
@@ -494,10 +501,10 @@ function RecordedRepairPanel({ repairHistoryId, linkRef }) {
 // `POST /api/repair-checklists/:id/complete`.
 function ChecklistCompletionForm({
   form,
-  symptomOptions,
-  symptomsError,
+  pickerCache,
   completionState,
   onChange,
+  onSymptomChange,
   onSubmit,
   onCancel,
 }) {
@@ -558,21 +565,45 @@ function ChecklistCompletionForm({
           onChange={onChange}
           options={REPAIR_OUTCOME_OPTIONS}
         />
-        <SelectField
-          label="Symptom"
-          name="symptomId"
-          value={form.symptomId}
-          onChange={onChange}
-          options={symptomOptions}
-          emptyOption="No symptom linked"
-        />
       </div>
 
-      {symptomsError ? (
-        <InfoBanner tone="amber">
-          {symptomsError} You can still record the repair without linking a symptom.
-        </InfoBanner>
-      ) : null}
+      {/* Optional, and one at most: a radio picker that searches the symptoms a
+          page at a time rather than downloading all of them (N7). It mounts
+          with the form, so a visit that never opens the form fetches nothing.
+          A failed search says so inside the picker; the repair can still be
+          recorded without a symptom. */}
+      <RecordPicker
+        multiple={false}
+        legend="Symptom"
+        endpoint="/api/search/symptoms"
+        cache={pickerCache}
+        selected={form.symptom ? [form.symptom] : []}
+        onToggle={(symptom) =>
+          onSymptomChange({ id: symptom.id, title: symptom.title, system: symptom.system, status: symptom.status })
+        }
+        describe={describeSymptom}
+        noun="symptom"
+        nounPlural="symptoms"
+        searchLabel="Find symptoms"
+        searchPlaceholder="Search titles, systems, or causes"
+        emptyLibraryText="No symptoms saved yet. The repair can be recorded without one."
+        disabled={completionState.saving}
+        footer={
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+            <span>{form.symptom ? `Linked to ${form.symptom.title}.` : "No symptom linked."}</span>
+            {form.symptom ? (
+              <button
+                type="button"
+                onClick={() => onSymptomChange(null)}
+                disabled={completionState.saving}
+                className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                No symptom
+              </button>
+            ) : null}
+          </div>
+        }
+      />
 
       <TextAreaField
         label="What was done"
@@ -730,10 +761,10 @@ function ChecklistDetails({
       {completionProps.isOpen && !checklist.repairHistoryId ? (
         <ChecklistCompletionForm
           form={completionProps.form}
-          symptomOptions={completionProps.symptomOptions}
-          symptomsError={completionProps.symptomsError}
+          pickerCache={completionProps.pickerCache}
           completionState={completionProps.state}
           onChange={completionProps.onChange}
+          onSymptomChange={completionProps.onSymptomChange}
           onSubmit={completionProps.onSubmit}
           onCancel={completionProps.onCancel}
         />
@@ -813,12 +844,10 @@ export function RepairChecklistsPage() {
   const [completingChecklistId, setCompletingChecklistId] = useState(null);
   const [completionForm, setCompletionForm] = useState(emptyCompletionForm);
   const [completionState, setCompletionState] = useState(emptyCompletionState);
-  const [symptomOptions, setSymptomOptions] = useState([]);
-  const [symptomsError, setSymptomsError] = useState("");
-  // Symptoms are fetched once, and only when a completion form is first opened.
-  // The link is optional, so making every visit to this page pay for a second
-  // request would be a cost for a field most owners will leave blank.
-  const symptomsRequested = useRef(false);
+  // The symptom picker searches only once a completion form is open, and this
+  // cache lets a second form reuse its first page. The link is optional, so a
+  // visit that never opens the form makes no symptom request at all.
+  const pickerCache = useRef(new Map()).current;
   // The checklist whose completion request is in flight, or null. It doubles as
   // the re-entrancy guard -- one completion at a time -- but it is an id rather
   // than a boolean because every answer this request gives has to be checked
@@ -1227,37 +1256,6 @@ export function RepairChecklistsPage() {
 
   // --- Completion actions ---------------------------------------------------
 
-  async function loadSymptomOptions() {
-    if (symptomsRequested.current) {
-      return;
-    }
-
-    symptomsRequested.current = true;
-
-    try {
-      setSymptomsError("");
-
-      const response = await fetch("/api/symptoms");
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Could not load symptoms.");
-      }
-
-      const symptoms = Array.isArray(payload.symptoms) ? payload.symptoms : [];
-
-      setSymptomOptions(
-        symptoms.map((symptom) => ({ value: String(symptom.id), label: symptom.title }))
-      );
-    } catch (error) {
-      // A failed symptom list is not a failed completion: the link is optional,
-      // so the form stays usable and says so rather than blocking the record.
-      symptomsRequested.current = false;
-      setSymptomOptions([]);
-      setSymptomsError(error.message || "Could not load symptoms.");
-    }
-  }
-
   function startCompletingChecklist(checklist) {
     // Pin the checklist being completed into the URL, for the same reason
     // editing does: a successful completion re-sorts the list by newest
@@ -1269,7 +1267,6 @@ export function RepairChecklistsPage() {
     setCompletingChecklistId(checklist.id);
     setCompletionForm(emptyCompletionForm);
     setCompletionState(emptyCompletionState);
-    loadSymptomOptions();
   }
 
   function closeCompletionForm({ returnFocus = false } = {}) {
@@ -1291,6 +1288,15 @@ export function RepairChecklistsPage() {
   function handleCompletionFormChange(event) {
     const { name, value } = event.target;
     setCompletionForm((currentForm) => ({ ...currentForm, [name]: value }));
+  }
+
+  // `null` clears the link: the symptom is optional.
+  function handleCompletionSymptomChange(symptom) {
+    setCompletionForm((currentForm) => ({
+      ...currentForm,
+      symptom,
+      symptomId: symptom ? String(symptom.id) : "",
+    }));
   }
 
   async function handleCompleteChecklist(event) {
@@ -1424,12 +1430,12 @@ export function RepairChecklistsPage() {
     isOpen: completingChecklistId !== null && completingChecklistId === selectedChecklistId,
     form: completionForm,
     state: completionStateForSelection,
-    symptomOptions,
-    symptomsError,
+    pickerCache,
     openButtonRef: recordButtonRef,
     recordedRepairLinkRef,
     onStart: startCompletingChecklist,
     onChange: handleCompletionFormChange,
+    onSymptomChange: handleCompletionSymptomChange,
     onSubmit: handleCompleteChecklist,
     onCancel: cancelCompletingChecklist,
   };
