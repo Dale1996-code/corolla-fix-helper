@@ -77,7 +77,10 @@ function addFrontendRoutes(app, clientDistDir) {
       return next();
     }
 
-    return response.sendFile(indexFile);
+    // Relative to `root`, so `send` looks for dot segments only inside the build.
+    // Given the absolute path, it refused any install under a dot-folder
+    // (`~/.local/...`, `.claude/worktrees/...`) and every deep link was a 404.
+    return response.sendFile("index.html", { root: clientDistDir });
   });
 }
 
