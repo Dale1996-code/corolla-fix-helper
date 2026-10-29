@@ -35,7 +35,8 @@
     "test:client": "npm --prefix client run test",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "start": "npm --prefix server run start",
-    "install:all": "npm install && npm install --prefix server && npm install --prefix client"
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build && npm run smoke"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
