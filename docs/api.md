@@ -382,7 +382,7 @@ Server-side verification, in order:
 5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units (`lmp.`, a lowercase-L spelling of `Imp.` found in one page's text layer, is the Imperial unit). Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
 6. Every other number in the claim — a figure in a unit the detector does not know, a count, a step number — must itself be printed in the quote (`unrecognized_figure`). Only names are exempt: codes, connectors, and pins (`P0420`, `B9-1`), engine codes (`2ZR-FE`), ordinals, Toyota part numbers, and model years. An unknown unit is compared by its number only, so this is a floor, not a unit check.
 7. For recognized specification wording, the complete normalized part name from the claim must also occur in the quote (see the boundary below). This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
-8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both.
+8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both. For every quote, one row or many, the conditions a figure holds under must also match between the claim and the sentence printing that figure, and the cited chunk must not leave an unlabelled figure ambiguous (`row_mismatch`; see **Conditions belong to the figure** below). This rejects a wear limit presented as the normal specification.
 9. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
 10. `status` is derived by the server from what actually verified — never taken from the model.
 
@@ -419,14 +419,58 @@ where that condition tells the part's rows apart: with/without, front/rear,
 left/right, upper/lower, inner/outer, intake/exhaust, hot/cold, new/used,
 released/depressed, standard/minimum/maximum/limit, "or more"/"or less", and
 designations such as No. 1/No. 2. A claim saying no limit means the standard
-value. Otherwise the claim is rejected as `row_mismatch`. A quote printing one
-row is judged as before; a condition printed in a different sentence from the
-figure is a different row, so such a claim must be split; and conditions outside
-that list are not seen.
+value. Otherwise the claim is rejected as `row_mismatch`. A condition printed in
+a different sentence from the figure is a different row, so such a claim must be
+split; and conditions outside that list are not seen.
+
+**Conditions belong to the figure.** For every quote, including a one-row quote,
+the sentence that prints the claim's figure is compared with the claim, using
+the same condition list except designations (also `row_mismatch`):
+
+- Every condition the claim states for its figure must be printed in that
+  sentence. The same word elsewhere in the quote does not count: "Use a new
+  gasket" does not support "the torque for a new drain plug".
+- Every condition that sentence prints, other than "standard", must be stated by
+  the claim, so a limited figure is never presented as if it always held:
+  "Minimum lining thickness: 1.0 mm" does not support "the lining thickness is
+  1.0 mm".
+- When another row of the **cited chunk**, not only the quote, gives the same
+  part a condition the figure's sentence lacks, the unlabelled figure is
+  ambiguous and is rejected. Nothing printed makes an unlabelled row the standard
+  value; it may as well be the limit.
+- A figure under a bare heading ("Torque: 37 N·m") also reads the sentence just
+  before it, when that sentence names the claim's part. That sentence can
+  support a condition the claim states but never requires one, since its words
+  may qualify another noun ("install the drain plug with a new gasket").
+- A row listed under a heading — a part name and a colon, then rows labelled
+  only by conditions: "Minimum lining thickness: Front 1.0 mm Rear 1.5 mm" —
+  holds under the heading's conditions as well as its own, so the Rear row is a
+  minimum too: "the minimum lining thickness for the rear" is supported and "the
+  lining thickness for the rear" is not. The heading reaches only the rows that
+  follow it up to the first row naming a part of its own, and it is only the
+  phrase just before its colon, after any earlier colon or spaced dash: in a
+  data list, "…fully depressed - Pedal sensor voltage: Min.: … Max.: …", the
+  previous item's "depressed" belongs to neither row.
+- Only rows that name the claim's part are compared, itself or through such a
+  heading: another part's row printing the same figure ("Rotor minimum thickness
+  25.0 mm. Pad thickness 25.0 mm") does not support "the rotor thickness is
+  25.0 mm".
+- "with" counts as a condition only where "without" is printed for the part or
+  stated in the claim; otherwise it is ordinary English ("tightened with a
+  torque wrench").
+
+These checks are lexical: a listed condition word in the figure's sentence is
+taken to qualify the figure even when it modifies another noun, a label printed
+only in another chunk is not seen, and conditions outside the list ("at idle")
+are not seen. A condition printed after its figure ("0.19 mm (cold)") is read as
+the next row's. A heading without a colon, or cut out of the quote, governs
+nothing. A claim whose part name the parser cannot read is compared with every
+row printing its figure, and one passing row is enough.
 
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
-the figure's own row names the part, but within a row the check is still
+the figure's own row names the part, and in any quote that the claim and the
+figure's sentence agree on the listed conditions, but the checks are still
 lexical. A model that converts or rounds a correct
 figure gets `partial` or `not_found` instead of `answered`; that refusal is
 intended. A figure in a unit the detector does not know is checked by its number
