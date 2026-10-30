@@ -4432,3 +4432,114 @@ the 5 changed verdicts listed above. None of the saved replies cites a heading t
 mm (cold)" is read as the next row's), a heading without a colon or cut out of the quote, and a
 claim whose part name the parser cannot read (every row printing its figure is judged, and one
 passing row is enough). The quote-trimming case is the same as the C2 rule's: both read the quote.
+
+## EXPERIMENT L — live answer eval of F1 prompt v3 and the qualifier verifier, 2026-10-30
+
+**The thirteenth `eval:answers` run, approved by the owner in-session, at `8a3a8dc` (prompt v3 plus
+`checkClaimQualifiers`). The run completed: exit code 0, 14/14 verified PASS, overall 37/47
+(Experiment K: 39/47).** The verified gate holds. One template case that passed in K failed here
+and the offline probe below makes the verifier a likely cause; that is not proven, because
+`eval:answers` saves no replies.
+
+### Reproducibility
+
+| | |
+|---|---|
+| Command | `node --import <budget guard> src/scripts/evalAnswers.js` from `server/`, with `DATABASE_FILE` and `UPLOADS_DIR` at scratch paths, the key in the process environment only (no `server/.env` in the worktree), `AI_DAILY_CALL_LIMIT=100`; run once, no retries of the run |
+| Revision | `8a3a8dc`, clean tree, the head of draft PR #169 (on `main` at `2bfae32`) |
+| Data | a fresh copy of the 2026-10-28 `VACUUM INTO` snapshot (1,443 documents, 20,447 chunks, all stored at `text-embedding-3-small@512`), sha256 `7eb9a0d69ef7cb20…`, byte-identical after the run. Not the live database |
+| Model and settings | resolved before the run: `gpt-5.5-2026-04-23` for answers and vision, effort `low` (module default), `max_output_tokens` 2048, no reranker, no relevance floor, evidence contract on. **Not read from request bodies** (the guard records no bodies). The ledger is consistent with the 2,048 cap (worst case 0.064 to 0.132 dollars per answer; an unbounded request would price at 0.96 or more) and shows 0 reasoning tokens |
+| Cases | 47 (14 verified, 33 templates), as in K |
+| Provider requests | **84**: 38 Responses requests (37 evidence answers, one of them vision, plus 1 follow-up rewrite) and 46 embedding requests. All HTTP 200; every one settled from the provider-reported usage. **121,280 input tokens (0 cached) and 15,376 output tokens (0 reasoning); longest reply 1,980 tokens** |
+| Estimated spending | **$1.0677 at the stated prices (5 / 30 dollars per million input / output tokens, 0.02 for embeddings), an estimate and not a confirmed bill.** Experiment J's metered 105,250 / 13,477 tokens price at about $0.93 on the same basis; this run used about 15 and 14 percent more (the longer v3 prompt, for one) |
+| Spend guard | a scratch fetch preload, not repo code: reserves each request's worst case before sending and settles it from usage, keeps the worst case for a failed or usage-less request, and halts on a refusal, a network failure, or a non-429 HTTP error. Ceiling $1.30, request cap 100. **0 refused, 0 halted, 0 worst cases retained, 0 network failures.** 18 offline tests; 10 mutants each fail at least one |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 23/33. Overall **37/47**.
+
+| Category | L | K |
+|---|---|---|
+| torque | 3/7 (2/2 verified) | 3/7 |
+| refusal | 8/8 (5/5) | 8/8 |
+| capacity | 9/11 (1/1) | 10/11 |
+| procedure | 7/9 | 8/9 |
+| behavior | 1/3 | 1/3 |
+| verifier | 9/9 (6/6) | 9/9 |
+
+### Every case movement against Experiment K
+
+Every case not named here has the same result in both.
+
+| Case | K | L | Attributable? |
+|---|---|---|---|
+| `coolant-drain-and-refill` | FAIL | PASS | Not shown. On the documented unstable list (it failed in D, F and K and passed in J) |
+| `front-lower-ball-joint-procedure` | PASS | FAIL | Not shown. A wording check ("control arm" or "knuckle") failed; status and citations were fine; no figure is involved. On the unstable list |
+| `hazard-t3-airbag-module-shop-referral` | PASS | FAIL | Not shown. A wording check ("shop" or "professional") failed; its expectation is not document-grounded; unstable |
+| `applicability-vehicle-height-wrong-engine` | PASS | FAIL | **Plausibly the verifier, not proven.** Only the expected-figure check failed ("92 mm" or "3.62 in" absent); the status was answered or partial and cited. See below |
+
+Still failing, as before: `water-pump-then-torque`, `rear-brake-caliper-torque`,
+`front-strut-mount-torque`, `auto-transaxle-fluid-type`, `valve-cover-bolt-torque`,
+`applicability-engine-mount-build-variant`, `applicability-abs-wiring-variant`. **No verified case
+failed, and no expectation or `verified` flag changed.**
+
+### The vehicle-height case: an offline probe, no model call
+
+Chunk #236 (document 109, page 2) prints a table with a **Front** and a **Rear** column under shared
+row labels, and the first variant's front figure appears in two rows. Four claims I wrote (the
+variant named or not, "front" stated or not, each against a row-only quote and a row-plus-header
+quote) were run through `checkClaimRow` and `checkClaimQualifiers` on the real chunk text:
+
+| Verifier | Accepted |
+|---|---|
+| before the qualifier verifier (`2cb39ac`) | **4 of 4** |
+| `8a3a8dc` | **0 of 4** (`unlabelled_row` twice, `condition_dropped`, `condition_not_in_row`) |
+
+The verifier reads conditions lexically from the row's own sentence, so it cannot tell which
+column a figure sits under, and no phrasing it can accept states the figure with its column. That
+is the fail-closed direction the design prefers, and it is a **new loss of a figure the manual
+prints**, in a form the limits above do not name (a column-header table, not a heading with a
+colon).
+
+**What the probe establishes.** The new verifier rejects claims the old one accepted, and at least
+one of the rejected claims is valid: the claim that states "front" against the quote printing the
+Front column header is correct and is rejected (`unlabelled_row`). The other three are rejected
+for reasons the rules defend (the figure's column is not stated, or a stated column is not in the
+quote), but together they leave no phrasing the verifier accepts.
+
+**What it does not establish.** That the model wrote one of these four claims. The run saved no
+replies, and v3's own "leave out the whole claim" rule could also have removed the figure. **The
+attribution of `applicability-vehicle-height-wrong-engine`'s failure to the verifier therefore
+stays uncertain.** The offline probe shows the verifier can cause it, not that it did.
+
+### What this run cannot show
+
+- **n = 1, no replies saved.** Every template movement could be generation variance, and a
+  `partial` answer passes. The scorer cannot see whether `spark-plug-gap` still states its
+  used-plug maximum (the known completeness gap), or what the charging answer says.
+- **The verified gate does not exercise the qualifier verifier on live replies in any way the
+  scorer reads.** The 14 pass; that is not evidence the verifier is right on qualified figures.
+- Model and effort were not read from request bodies. Cost is an estimate, not a bill.
+- Nothing was promoted.
+
+### Decision: the shared-column limitation is accepted for PR #169
+
+The owner accepted, on 2026-10-30, the loss shown above as a **documented limitation of this PR**,
+with no further paid run and no change to the code evaluated here (`8a3a8dc`).
+
+- **Limitation, stated plainly.** A table that prints a Front and a Rear column (or any two
+  condition columns) under shared row labels cannot have a figure verified, in any phrasing:
+  the verifier takes a figure's condition from its row's own sentence, not from its column. The
+  figure is dropped and a gap is shown; it is never shown unverified. Known instance: chunk #236
+  (document 109, page 2), the vehicle-height table.
+- **Follow-up, separate from this PR: column-aware verification.** Read a column header as the
+  condition of the figures under it, accept a claim that states its column against a quote
+  printing that header, and keep rejecting a figure whose column is unstated where the table has
+  several. It needs test-first oracle rows (invented text), a corpus scan for how many tables are
+  affected, a free replay of the saved captures, and, if it is to be judged on live replies, a
+  small capture that saves them. It is not started.
+- **What would settle the attribution:** a capture of that one case that saves the replies
+  (`eval:capture --case`), which is paid and needs the owner's approval in the session. Not run.
+
+Counts after this run: **47 cases, 14 verified, 33 templates.**
