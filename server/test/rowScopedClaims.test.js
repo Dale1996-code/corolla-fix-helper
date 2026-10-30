@@ -88,7 +88,27 @@ const ROW_SCOPE_RULES = [
   ],
   [
     "words: nothing is added from a heading or from memory",
-    /do not add it from a heading or from memory/i,
+    /never add one from a heading or from memory/i,
+  ],
+  [
+    "conditions: a separate condition claim comes from the figure's own source",
+    /is printed in a different row or sentence of the SAME source/i,
+  ],
+  [
+    "missing qualifier: the WHOLE figure claim is left out",
+    /leave out the WHOLE figure claim/i,
+  ],
+  [
+    "missing qualifier: the figure is never stated without its qualifier",
+    /do not drop the qualifier and state the figure alone/i,
+  ],
+  [
+    "missing qualifier: text from two sources is never joined into one quote",
+    /do not join text from two sources into one quote, even two pages of one document/i,
+  ],
+  [
+    "missing qualifier: the missing support is recorded in gaps, without the number",
+    /add a gap saying which figure the sources do not tie to its condition, without the number/i,
   ],
 ];
 
@@ -111,6 +131,26 @@ test("F1 prompt: the wording that made the first capture's charging claim fail i
 
   assert.match(conditions, /in words only/);
   assert.match(conditions, /never repeat the condition's number or unit/i);
+});
+
+test("F1 prompt: no instruction lets a figure lose a qualifier it depends on", () => {
+  const text = promptText();
+
+  // v2 said "If the quote does not print it, leave it out", where "it" was the
+  // qualifier. A model obeying that keeps the figure and drops "used" or
+  // "maximum", which reads as the plain specification -- and the verifier does
+  // not compare non-numeric words (see the KNOWN LIMIT test below). The other
+  // way out, splicing the qualifier in from the previous page, is refused by
+  // the verifier and lost a claim in the second capture.
+  assert.doesNotMatch(text, /if the quote does not print it, leave it out/i);
+
+  // What replaces it drops the claim, not the qualifier, and says so in gaps.
+  const missing = text.slice(text.search(/Missing qualifier:/), text.search(/generalGuidance:/));
+
+  assert.ok(text.search(/Words and figures:/) < text.search(/Missing qualifier:/));
+  assert.match(missing, /leave out the WHOLE figure claim/);
+  assert.match(missing, /gap/);
+  assert.doesNotMatch(missing, /leave (?:it|the qualifier) out/i);
 });
 
 test("F1 prompt: the subject rule offers a shape, not just a ban", () => {
@@ -371,4 +411,86 @@ test("a claim that names its row is checked against that row; a generic claim is
   // rule exists to keep the model from writing such a claim; if the verifier ever
   // learns to refuse one, this assertion should flip and this test be updated.
   assert.equal(verdictAgainst(genericClaim), ACCEPTED);
+});
+
+// ---------------------------------------------------------------------------
+// The missing-qualifier rule, seen from the verifier.
+//
+// The prompt tests above pin WORDING only. What the server enforces is pinned
+// here, on invented text (a "gizmo" plug whose used-plug limit is printed on a
+// page after its label, the shape of the second capture's spark-plug claim):
+// splicing the label onto the figure is refused, but a figure stripped of its
+// qualifier is accepted. Only the prompt asks the model not to write the
+// second; nothing here shows that a model complies.
+// ---------------------------------------------------------------------------
+
+const SPLIT_LABEL_CHUNKS = [
+  {
+    documentId: 901,
+    documentTitle: "Synthetic gizmo plug inspection",
+    originalFilename: "synthetic-gizmo-plug.pdf",
+    pageNumber: 5,
+    chunkIndex: 0,
+    chunkText: "Inspect the gizmo plug electrode. Maximum gizmo plug gap for a used plug:",
+  },
+  {
+    documentId: 901,
+    documentTitle: "Synthetic gizmo plug inspection",
+    originalFilename: "synthetic-gizmo-plug.pdf",
+    pageNumber: 6,
+    chunkIndex: 0,
+    chunkText: "2.4 mm (0.094 in.) New gizmo plug gap 1.8 to 1.9 mm (0.071 to 0.075 in.)",
+  },
+];
+
+function verifySplitLabel(reply) {
+  return verifyEvidence({ documentSupported: [], generalGuidance: [], gaps: [], ...reply }, SPLIT_LABEL_CHUNKS);
+}
+
+test("verifier ENFORCES: a quote splicing a label from one source onto a figure from another is refused", () => {
+  const result = verifySplitLabel({
+    documentSupported: [
+      {
+        claim: "The maximum gizmo plug gap for a used plug is 2.4 mm.",
+        sourceId: "S2",
+        evidenceQuote: "Maximum gizmo plug gap for a used plug: 2.4 mm (0.094 in.)",
+      },
+    ],
+  });
+
+  assert.equal(result.documentSupported.length, 0);
+  assert.equal(result.rejected[0].reason, "quote_not_in_source");
+});
+
+test("verifier does NOT enforce: a figure stripped of its qualifier is accepted (KNOWN LIMIT)", () => {
+  // The used-plug MAXIMUM, claimed as if it were the plug gap. Its quote is
+  // real, the figure is printed in it, and "gap" is not a guarded subject noun,
+  // so every check passes. The Missing qualifier prompt rule is the only thing
+  // asking the model not to write this. If the verifier ever learns to refuse
+  // it, flip this assertion and say so in the iteration log.
+  const result = verifySplitLabel({
+    documentSupported: [
+      {
+        claim: "The gizmo plug gap is 2.4 mm.",
+        sourceId: "S2",
+        evidenceQuote: "2.4 mm (0.094 in.) New gizmo plug gap",
+      },
+    ],
+  });
+
+  assert.equal(result.documentSupported.length, 1);
+  assert.deepEqual(result.rejected, []);
+});
+
+test("the gap the rule asks for is shown as written; a gap that repeats the figure is redacted", () => {
+  const result = verifySplitLabel({
+    gaps: [
+      "The sources print a used gizmo plug gap limit, but not with its condition on the same page.",
+      "The used gizmo plug gap limit of 2.4 mm is not printed with its condition.",
+    ],
+  });
+
+  assert.equal(result.gaps[0], "The sources print a used gizmo plug gap limit, but not with its condition on the same page.");
+  assert.match(result.gaps[1], /^Unverified gap: /);
+  assert.doesNotMatch(result.gaps[1], /2\.4/);
 });

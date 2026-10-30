@@ -4163,3 +4163,77 @@ or `verified` flag changed.**
   promoting it is the owner's call.
 
 Counts after this run: **47 cases, 14 verified, 33 templates.**
+
+## F1 correction after review: the missing-qualifier rule (prompt v3, 2026-10-30) — not run live
+
+**No model was called for this section. Experiment K above ran on v2 and does not cover v3.**
+
+### Why
+
+A review of the PR at `d07c7fc` found that v2's "Words and figures" rule ended "If the quote
+does not print it, leave it out", where "it" was the qualifier. A model obeying that keeps the
+figure and drops "used" or "maximum", so a wear limit reads as the plain specification. The
+verifier accepts that claim (pinned below on invented text). The model's other way out, splicing
+the qualifier in from the previous page, is refused by the verifier, and it is what cost
+`spark-plug-gap` a claim in the second capture.
+
+### Change (prompt text only)
+
+- **Words and figures** no longer says "leave it out". It still requires every number and every
+  stated qualifier to be printed in the claim's own quote, added from no heading or memory.
+- **Missing qualifier** (new): when a figure holds only under a qualifier and neither its own
+  quote nor a condition claim from the same source prints that qualifier, the model must leave out
+  the **whole** figure claim. It must not drop the qualifier and state the figure alone, and must
+  not join text from two sources into one quote, even two pages of one document. It adds a gap
+  naming the figure it could not tie to its condition, without the number.
+- **Conditions** now covers a condition printed in another row or sentence **of the same source**.
+  A condition claim from another source, linked to the figure by words alone, would be a splice
+  the server cannot check. In both F1 captures charging's condition and figure claims cite one
+  source, so the case F1 fixed is inside the narrowed rule.
+
+The verifier, D1, S1, the viscosity rule, retrieval, chunking, the schema, the model and every
+evaluation expectation are unchanged.
+
+### What the tests show, and what they do not
+
+`rowScopedClaims.test.js` grows from 30 to 39 tests.
+
+- **Prompt wording (6 new tests, 1 changed regex).** They fail on v2 (8 failures, counting the
+  changed regex and the placement test that covers every rule) and pass on v3. They pin the
+  text sent to the model. They say nothing about what a model writes.
+- **Verifier behavior (3 new tests, invented "gizmo" text whose used-plug limit is printed on the
+  page after its label).** These pass on v2 and v3 alike, because the verifier is unchanged:
+  - **Enforced:** a quote splicing the label from one source onto the figure from another is
+    refused, `quote_not_in_source`.
+  - **Not enforced (KNOWN LIMIT):** the same figure stripped of its qualifier is **accepted**.
+    Its quote is real, the figure is printed in it, and `gap` is not a guarded subject noun. The
+    new rule is the only thing asking the model not to write this claim. **This change does not
+    close the verifier's qualifier gap.**
+  - A gap without the figure is shown as written, and a gap repeating it is redacted
+    (`Unverified gap:`), as before.
+
+### Offline checks on saved evidence (no provider requests)
+
+- **Replay (the verifier, not the model).** Seven saved files replay byte-identically on `d07c7fc`
+  and on v3: both F1 captures (0 of 14, 0 of 10 verdicts changed), the three diagnosis captures
+  (1 of 18, 5 of 11, 3 of 6, as recorded above) and both invented fixtures (0 of 12, 0 of 9).
+  A prompt-only change cannot move these, so this shows the verifier is untouched and nothing
+  more.
+- **Unquoted-qualifier scan (heuristic).** A throwaway script listed accepted claims that state a
+  qualifier word (new, used, maximum, minimum, with, without, idle, rpm, load, front, rear,
+  standard, …) that their own quote does not print. First F1 capture (v1): 2 of 10, the charging
+  "without load" and the spark-plug "maximum, used" claims already described above. Second
+  capture (v2): 0 of 8. Diagnosis captures: 0 of 5. This measures what earlier replies did. No
+  v3 reply exists, so it says nothing about compliance with v3. A fixed word list also misses a
+  qualifier spelled differently.
+
+### Not established, and what stays open
+
+- **v3 has not been run live.** Whether a model follows the new rule, and whether it now omits
+  claims that v2 kept, is unknown. In the spark-plug case, compliance moves the used-plug maximum
+  from a refused claim to an explicit gap; the figure is out of the answer either way.
+- **A fresh `eval:answers` on v3 is required before merge** (the rule for any answer-prompting
+  change). It is paid and needs the owner's approval in the session; it was not run.
+- Unchanged and still open: the verifier's qualifier gap (above), the spark-plug completeness
+  regression, the oil claim's part identity resting on the citation, the `charging-system-voltage`
+  "at idle" expectation (O2), the 12× unit false accept, and F2.
