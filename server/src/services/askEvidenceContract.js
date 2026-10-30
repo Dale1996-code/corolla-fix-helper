@@ -104,6 +104,33 @@ export function buildEvidencePromptLines({ question, originalQuestion, hasImage 
     "    For a specification, include the named part and its value in the quote;",
     "    a value by itself is not enough to prove which part it belongs to.",
     "    Never paraphrase a quote. Never combine text from two sources into one quote.",
+    "  - Row scope: quote ONLY the one table row or sentence that prints the figure",
+    "    you claim -- not the table around it, and not the rows before or after it.",
+    "    A long quote lets one row's figure sit beside another row's part name.",
+    "  - Subject: begin the claim with a subject made of the words that SAME row or",
+    "    sentence prints: its part or row label, then what is measured (for example",
+    "    'ROW LABEL capacity'). Never use words from a heading or from another row.",
+    "    A bare 'the capacity is ...' or 'the torque is ...' names nothing, so the",
+    "    server cannot check it. If the row prints no part name, use its own label",
+    "    as the subject, even if that reads stiffly.",
+    "  - Conditions: if a condition that changes the figure (engine speed, with or",
+    "    without a filter, front or rear, new or used) is printed in a different row",
+    "    or sentence of the SAME source, give that condition its own claim with its",
+    "    own quote and put it first. The figure claim may point back to it in words",
+    "    only ('for that check'); never repeat the condition's number or unit there,",
+    "    because the figure's own quote does not print it. Never state a figure as if",
+    "    it always held when the source prints it only under a condition.",
+    "  - Words and figures: use only what the claim's own quote prints. Every number",
+    "    in the claim must be printed there, and so must every qualifier you state --",
+    "    a load, speed, temperature, filter, or any other condition. Never add one",
+    "    from a heading or from memory.",
+    "  - Missing qualifier: if a figure holds only under a qualifier (new or used,",
+    "    minimum or maximum, with or without, an engine speed or load) and neither",
+    "    the figure's own quote nor a condition claim from the SAME source prints it,",
+    "    leave out the WHOLE figure claim. Do not drop the qualifier and state the",
+    "    figure alone, and do not join text from two sources into one quote, even two",
+    "    pages of one document. Instead add a gap saying which figure the sources do",
+    "    not tie to its condition, without the number.",
     "generalGuidance: general mechanical advice NOT found in the sources. Never put",
     "  a torque figure, capacity, pressure, clearance, or other specification here.",
     "gaps: what the sources do not cover, so the owner knows what to look up.",
@@ -1917,21 +1944,7 @@ export function checkClaimRow(claimText, evidenceText) {
     return { grounded: true, checked: false, detail: "" };
   }
 
-  const evidenceNumbers = allNumbersIn(evidence);
-  const evidenceSpecs = readSpecs(evidence);
-  const headerUnits = headerUnitsIn(evidence);
-  const rowOf = (index) => rows.findIndex((row) => index >= row.start && index < row.end);
-  const figureRows = specs.map(
-    (spec) =>
-      new Set(
-        claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
-          .map(rowOf)
-          .filter((row) => row >= 0)
-      )
-  );
-  const holding = rows
-    .map((_, row) => row)
-    .filter((row) => figureRows.every((figureRow) => figureRow.has(row)));
+  const holding = rowsHoldingFigures(specs, rows, evidence);
 
   if (!holding.length) {
     return { grounded: false, checked: true, detail: "figures_split" };
@@ -1951,6 +1964,265 @@ export function checkClaimRow(claimText, evidenceText) {
   }
 
   return { grounded: true, checked: true, detail: "" };
+}
+
+/** Indexes of the rows that print every figure the claim states. */
+function rowsHoldingFigures(specs, rows, evidence) {
+  const evidenceNumbers = allNumbersIn(evidence);
+  const evidenceSpecs = readSpecs(evidence);
+  const headerUnits = headerUnitsIn(evidence);
+  const rowOf = (index) => rows.findIndex((row) => index >= row.start && index < row.end);
+  const figureRows = specs.map(
+    (spec) =>
+      new Set(
+        claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
+          .map(rowOf)
+          .filter((row) => row >= 0)
+      )
+  );
+
+  return rows
+    .map((_, row) => row)
+    .filter((row) => figureRows.every((figureRow) => figureRow.has(row)));
+}
+
+// A row's label runs back to the previous figure, so it can hold another
+// sentence ("...less than the minimum, replace the rotor. Standard rotor
+// thickness:"). Only the sentence that prints the figure ties a word to it.
+// "No. 1" is a designation, not a sentence end.
+const SENTENCE_END_REGEX = /(?<!\b[Nn]o)[.;!?]["')\]]*\s+/;
+const CLAUSE_END_REGEX = /;\s+|(?<!\b[Nn]o)[.!?]\s+(?=[A-Z])/;
+const WITH_GROUP = ROW_CONDITION_GROUPS.find((group) => group[0][0] === "with");
+// Where a heading's phrase starts within its sentence: after another field's
+// colon or a spaced dash. A data list prints one item's condition column
+// straight into the next item's name ("...fully depressed - Pedal sensor
+// voltage: Min.:"), and that condition is not the heading's.
+const HEADING_START_REGEX = /:|\s[-–—]\s/;
+
+/** A label naming no part, only conditions: "Rear", "Exhaust", "Used". */
+function isConditionOnly(text) {
+  return (
+    !partTokens(text).length &&
+    [...conditionWords(text)].some((word) => ROW_CONDITION_WORDS.has(word))
+  );
+}
+
+/**
+ * A sentence opening a table, "Minimum lining thickness: Front", split into
+ * its heading and the first row's own label -- or null when the text before
+ * the colon names no part or the text after it is not only conditions.
+ */
+function splitHeading(sentence) {
+  const text = sentence.replace(/[\s:]+$/, "");
+  const colon = text.lastIndexOf(":");
+  const heading = text.slice(0, colon).split(HEADING_START_REGEX).at(-1) || "";
+  const label = text.slice(colon + 1);
+
+  return colon >= 0 && partTokens(heading).length && isConditionOnly(label) ? { heading, label } : null;
+}
+
+/**
+ * The heading a row is listed under, or "". "Minimum lining thickness: Front
+ * 1.0 mm Rear 1.5 mm" lists Front and Rear under "Minimum lining thickness":
+ * a heading ending in a colon, followed by rows whose own labels are only
+ * conditions. The first row naming a part of its own ("... 1.5 mm. Shoe
+ * clearance: Front ...") ends the heading's reach.
+ */
+function headingOver(rows, index) {
+  for (let k = index; k >= 1; k -= 1) {
+    if (!isConditionOnly(rows[k].label.split(SENTENCE_END_REGEX).at(-1) || "")) {
+      return "";
+    }
+
+    const previous = rows[k - 1].label.split(SENTENCE_END_REGEX).at(-1) || "";
+
+    if (previous.replace(/[\s:]+$/, "").includes(":")) {
+      return splitHeading(previous)?.heading ?? "";
+    }
+  }
+
+  return "";
+}
+
+function figureSentence(rows, index, subject) {
+  const row = rows[index];
+  const sentences = row.label.split(SENTENCE_END_REGEX);
+  const ownLabel = sentences.at(-1) || "";
+  const heading = headingOver(rows, index);
+
+  // A row listed under a heading holds under the heading's conditions as well
+  // as its own -- required, not just allowed, since the heading explicitly
+  // governs it. (A row printing another alternative of the heading's group,
+  // "new belt: Standard 5 mm Used 7 mm", is already held apart by the row
+  // check, which reads the row's own label.)
+  if (heading) {
+    const words = conditionWords(`${heading} ${ownLabel} ${row.values}`);
+
+    return { label: `${heading} ${ownLabel}`, words, ownWords: words };
+  }
+
+  // The row opening such a table is read the same way, as its heading and its
+  // own label, so a condition run in before the heading belongs to neither.
+  const opening = index + 1 < rows.length && headingOver(rows, index + 1) ? splitHeading(ownLabel) : null;
+
+  if (opening) {
+    const words = conditionWords(`${opening.heading} ${opening.label} ${row.values}`);
+
+    return { label: `${opening.heading} ${opening.label}`, words, ownWords: words };
+  }
+
+  let label = ownLabel;
+
+  // A figure under a bare heading ("Install a new drain plug. Torque : 37 Nm")
+  // takes its part -- and that part's conditions -- from the sentence just
+  // before, but only when that sentence names the claim's own part: "Use a new
+  // gasket. Torque : 37 Nm" lends the drain plug nothing.
+  if (
+    !partTokens(label).length &&
+    sentences.length > 1 &&
+    subject.length &&
+    textNamesSubject(sentences.at(-2), subject)
+  ) {
+    label = `${sentences.at(-2)} ${label}`;
+  }
+
+  return {
+    label,
+    words: conditionWords(`${label} ${row.values}`),
+    // The figure's sentence alone. A borrowed sentence may also qualify another
+    // noun ("install the drain plug with a new gasket"), so it can support a
+    // condition the claim states but never impose one.
+    ownWords: conditionWords(`${ownLabel} ${row.values}`),
+  };
+}
+
+function partTokens(label) {
+  return labelTokens(label).filter(
+    (token) => !ROW_NON_PART_WORDS.has(token) && !ROW_CONDITION_WORDS.has(token)
+  );
+}
+
+function alternativesIn(words, group) {
+  return group.flatMap((spellings, alternative) =>
+    spellings.some((spelling) => words.has(spelling)) ? [alternative] : []
+  );
+}
+
+function normalizeRowValues(values) {
+  return values.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function judgeFigureRow(rows, index, claimWords, sourceRows, subject) {
+  const row = rows[index];
+  const own = figureSentence(rows, index, subject);
+  const part = partTokens(own.label);
+  // Other rows of the source for the same part: their own sentence names it.
+  // A row printing the same figure cannot make this one ambiguous.
+  const siblings = part.length
+    ? sourceRows
+        .flatMap((other, otherIndex) =>
+          normalizeRowValues(other.values) !== normalizeRowValues(row.values)
+            ? [figureSentence(sourceRows, otherIndex, subject)]
+            : []
+        )
+        .filter((other) => containsTokenSequence(partTokens(other.label), part))
+        .map((other) => other.words)
+    : [];
+  // "with" is a condition only where the source contrasts it with "without";
+  // otherwise it is ordinary English ("tightened with a torque wrench").
+  const withIsCondition = [claimWords, own.words, ...siblings].some((words) => words.has("without"));
+
+  for (const group of ROW_CONDITION_GROUPS) {
+    if (group === WITH_GROUP && !withIsCondition) {
+      continue;
+    }
+
+    const printed = alternativesIn(own.words, group);
+    const stated = alternativesIn(claimWords, group);
+
+    if (stated.some((alternative) => !printed.includes(alternative))) {
+      return "condition_not_in_row";
+    }
+
+    // The figure's own sentence limits it (minimum, used, cold, without, or
+    // less, ...): a claim leaving that out states the figure as if it always
+    // held. Only the unmarked default (standard) goes without saying.
+    if (
+      !stated.length &&
+      alternativesIn(own.ownWords, group).some(
+        (alternative) =>
+          !group[alternative].some((spelling) => UNMARKED_CONDITION_WORDS.has(spelling))
+      )
+    ) {
+      return "condition_dropped";
+    }
+
+    // Nothing printed marks an unlabelled row as the standard value: beside a
+    // labelled row for the same part it may be the limit (the v3 capture's own
+    // page), so a claim cannot say which it is.
+    if (!printed.length && siblings.some((words) => alternativesIn(words, group).length)) {
+      return "unlabelled_row";
+    }
+  }
+
+  return "";
+}
+
+/**
+ * F1v3: a condition must be printed WITH the part and figure it qualifies.
+ *
+ * Three rules, on the sentence of the quote that prints the claim's figures:
+ *   - every condition the claim's figure clause states (used, maximum, hot,
+ *     standard, ...) is printed in that sentence -- the same word elsewhere in
+ *     the quote does not count (`condition_not_in_row`);
+ *   - every condition that sentence prints, other than the unmarked standard,
+ *     is stated by the claim, so a limited figure is never presented as if it
+ *     always held (`condition_dropped`);
+ *   - when another row of the cited SOURCE for the same part carries a
+ *     condition the figure's own sentence lacks, the unlabelled figure is
+ *     ambiguous and no claim can rest on it (`unlabelled_row`).
+ *
+ * Reads the source as well as the quote, because a one-row quote shows no
+ * sibling. Lexical like the row check: conditions outside ROW_CONDITION_GROUPS
+ * ("at idle") are not seen, a condition word in the figure's sentence is taken
+ * to qualify the figure, and a label printed only in another chunk is out of
+ * reach.
+ *
+ * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" }}
+ */
+export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
+  const clauses = String(claimText || "")
+    .split(CLAUSE_END_REGEX)
+    .filter((clause) => extractSpecNumbers(clause).length);
+  const specs = extractSpecNumbers(claimText);
+  const evidence = String(evidenceText || "");
+  const rows = quoteRows(evidence);
+  const holding = specs.length && rows.length ? rowsHoldingFigures(specs, rows, evidence) : [];
+
+  if (!clauses.length || !holding.length) {
+    return { grounded: true, checked: false, detail: "" };
+  }
+
+  const claimWords = conditionWords(clauses.join(" "));
+  const sourceRows = quoteRows(String(sourceText ?? evidence));
+  const subject = parseClaimSubject(claimText);
+  // Only the claimed part's rows can support it: another part's row printing
+  // the same figure ("Rotor minimum thickness 25.0 mm. Pad thickness 25.0 mm")
+  // says nothing about the rotor. When no row names the part (a subject the
+  // parser cannot read, a part printed after its figure) every row is judged,
+  // which is never looser than before.
+  const named = subject.length
+    ? holding.filter((row) => rowNamesSubject(rows, row, subject, claimText))
+    : [];
+  const details = (named.length ? named : holding).map((row) =>
+    judgeFigureRow(rows, row, claimWords, sourceRows, subject)
+  );
+
+  if (details.includes("")) {
+    return { grounded: true, checked: true, detail: "" };
+  }
+
+  return { grounded: false, checked: true, detail: /** @type {any} */ (details[0]) };
 }
 
 function createEvidenceId({ documentId, pageNumber, chunkIndex, evidenceQuote }) {
@@ -2172,12 +2444,18 @@ export function verifyEvidence(validated, chunks) {
     // must also be in the SAME row, under the claim's condition (S1).
     const row = checkClaimRow(claim.claim, claim.evidenceQuote);
 
-    if (!row.grounded) {
+    // ...and a condition the claim states must be printed with that part and
+    // figure, which the source must not leave ambiguous (F1v3).
+    const qualifiers = row.grounded
+      ? checkClaimQualifiers(claim.claim, claim.evidenceQuote, mapped.chunk.chunkText)
+      : row;
+
+    if (!qualifiers.grounded) {
       rejected.push({
         ...origin,
         claim: claim.claim,
         reason: "row_mismatch",
-        detail: row.detail,
+        detail: qualifiers.detail,
       });
       gaps.push(
         `Unverified (the cited table prints that figure in another row or condition): ${gapClaimText(

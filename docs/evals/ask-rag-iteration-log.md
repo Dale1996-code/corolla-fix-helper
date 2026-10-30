@@ -3851,3 +3851,695 @@ are separate and not started.
 (that is F1) is unknown. The new eval case `reject-figure-from-another-row`
 (`row_mismatch` probe) is `verified: false`. Offline on the snapshot it selects
 doc 748 p4 c0 and is rejected as `row_mismatch`, but it has never run end to end.
+
+## F1 row-scoped claims prompt — one targeted live capture (2026-10-29)
+
+**This is an `eval:capture`, not an `eval:answers` run.** It records what the model wrote
+for six cases and what the verifier decided. Its pass/fail column comes from feeding the
+captured replies through `evaluateAnswerCase` (a throwaway script), so it is
+capture-derived. The gate (`eval:answers`) had not been run when this capture was taken;
+it was run afterwards on prompt v2 (Experiment K, below).
+
+**Change.** Prompt only: 14 lines added to `buildEvidencePromptLines`
+(`askEvidenceContract.js`), three rule groups. *Row scope*: quote only the one table row
+or sentence that prints the figure, and name the part with that row's own words. *Conditions*:
+a condition printed in another row or sentence is its own claim, put first, and the figure
+claim must refer to it. *Figures*: every number in a claim must be printed in that claim's
+own quote. No verifier, retrieval, chunking, schema, or model change.
+
+### Reproducibility
+
+| | |
+|---|---|
+| Code | `2bfae32` (`origin/main` after #166, #167, #168) plus the uncommitted F1 prompt change; the capture header says `dirty: true`. Diff of `askEvidenceContract.js`: sha256 `95c699caf5ff01ce…` |
+| Capture | `server/data/captures/2026-10-29T16-09-05Z-2bfae32.jsonl` (gitignored; quotes real manual text), sha256 `8021a759f6826ef7…` |
+| Model | `gpt-5.5-2026-04-23`, effort `low` (the module default), `max_output_tokens` 2048, evidence contract on, rerank and relevance floor off |
+| Data | a copy of the 2026-10-28 `VACUUM INTO` snapshot of the live DB (migrations 1–7; 1,443 documents; 20,447 chunks, all embedded at `text-embedding-3-small@512`). Not the live database |
+| Cases | `engine-oil-capacity`, `charging-system-voltage`, `valve-cover-bolt-torque` (the three targets) and the verified canaries `oil-drain-plug-torque`, `spark-plug-gap`, `refuse-turbo-boost-pressure` |
+| Provider requests | 12 (6 answers, 6 embeddings); no retries logged. Captures do not record token usage, so **cost was not metered**; estimated about $0.15 from Experiment I's per-answer usage |
+| Sample size | one reply per case |
+
+### Result
+
+| Case | Before (`41ed0d4` capture) | After | Capture-derived check |
+|---|---|---|---|
+| `engine-oil-capacity` | `not_found`, `numeric_anomaly` | **`answered`**, 1 of 1 claims accepted | PASS (unverified template case) |
+| `charging-system-voltage` | `not_found`, `subject_mismatch` + `numeric_anomaly` | **`partial`**: the condition claim accepted, the voltage claim `numeric_anomaly` | FAIL, as before: the voltage is not in the answer |
+| `valve-cover-bolt-torque` | `not_found`, `numeric_anomaly` | `not_found`, `numeric_anomaly` | FAIL, as before |
+| `oil-drain-plug-torque` (verified) | not in the old capture | `answered`, 2 of 2 accepted | PASS |
+| `spark-plug-gap` (verified) | not in the old capture | `answered`, 6 of 6 accepted; new and used limits both qualified | PASS |
+| `refuse-turbo-boost-pressure` (verified) | not in the old capture | `not_found`, no claims, one accepted gap | PASS |
+
+The three canaries have no earlier sample in a capture, so "unchanged" for them means they
+pass now, not that a before/after pair was measured. Every status the pipeline returned
+equals the status judged from the captured reply.
+
+### Did the model follow the new rules?
+
+- **Row scope: yes, in all four claims of the three target cases.** Each `evidenceQuote` is
+  one row or one sentence (`quoteRows` is 1, or 0 for the valve-cover row, whose bare numbers
+  count as a row only with a unit header in the quote; 6 to 16 words). The canaries' quotes are
+  the same shape (6 to 19 words, no more than one row). Before F1 the oil and valve-cover replies were not this shape.
+- **Condition split: yes, once.** The charging reply made the speed condition (doc 717 p4 c0)
+  its own claim and the voltage a second claim.
+- **Figures in the claim's own quote: no, once, and it cost the answer.** The charging voltage
+  claim repeated the condition's number, which its own quote does not print, so it failed
+  `numeric_anomaly`. The same claim without the repeated number verifies, and so does the
+  wording hand-written for variant R2 ("…for that check…"), tested offline on the captured quote.
+  The prompt's second rule ("make the figure claim refer to that condition") and third rule
+  (no number the quote lacks) pull against each other, and the model satisfied the first by
+  breaking the second. A refinement written after this capture (prompt v2, below) has not
+  been run live.
+
+### What F1 does not change, and what it trades
+
+- **Valve cover stays blocked, now by the header alone.** The reply is the shape F1 asks for
+  (a nine-word, one-row quote; the subject check passes), and it fails `numeric_anomaly`
+  because the row prints bare numbers and the unit header is not in the quote. The table's
+  header is in doc 1269 p3 c0 (#18772, words 2 to 4); the row is in c1 (#18773) at its word 59,
+  about 218 words after the header, and c1 carries no column header. The chunker uses
+  200-word windows with a 40-word overlap, so c0 cannot reach c1's row. The model was not
+  shown c0.
+- **The oil claim is generic.** It reads "the capacity…" under the row's own wording, because
+  the row does not print the part. The subject check had nothing to check
+  (`checked: false`), and the same claim also verifies against an invented quote about a
+  different part with the same figures. Part identity rests on the citation (the oil change
+  page), not on the claim. The verifier has always worked this way; F1 makes such claims
+  likelier.
+- **The charging condition claim says "without load".** The quote does not print it; the
+  chunk's heading does. Non-numeric wording is outside what the verifier checks.
+- **A latent false pass, found while reading the header logic and unrelated to F1.** On
+  invented text, a quote that ends just before a row's trailing `in.*lbf` unit lets the row's
+  bare "48" verify as 48 ft·lbf from the header's third column. With the unit inside the
+  quote it is rejected. Not fixed here; any change that takes a header unit from outside
+  the quote would need to close it first.
+
+### Free replay (verifier regression, not model behavior)
+
+The three diagnosis captures replay identically on `main` and on the F1 branch (1 of 18,
+5 of 11 and 3 of 6 verdicts changed against their recorded verdicts, same as before),
+and the invented-text fixture `synthetic-row-scoped-capture.jsonl` replays 0 of 8. The H3 and H4
+"(no such item)" lines come from hand-edited records that carry stale recorded verdicts; they
+are not verifier changes.
+
+### Not established
+
+One reply per case cannot separate non-compliance from run-to-run variance. This capture
+did not run `eval:answers`, so the other verified cases (`oil-drain-plug-torque-citation-support`,
+`refuse-timing-belt-interval`, the three fictional refusals) were untested under the new
+prompt when it was taken (they were tested under v2 afterwards: Experiment K, below); the six
+`reject-*` probes replace the model reply and cannot be affected by it.
+Reach of the header problem, measured offline on the snapshot: 10 chunks in 6 documents
+(docs 88, 739, 740, 1269, 1400, 1401) have a bare-number row whose column header is only in
+the previous chunk of the page, and none have it two or more chunks back. The count assumes
+a row of three bare numbers, so it is approximate.
+
+### Refinement after this capture (prompt v2) — not yet run live
+
+The capture exposed three ways a model can obey the row-scope rules and still lose the
+answer. Prompt v2 rewrites the rule block (prompt text only; the verifier, D1, S1 and the
+viscosity rule are untouched, and no evaluation expectation changed):
+
+1. **Charging.** The figure claim may point back to its condition *in words only* ("for that
+   check"), and must never repeat the condition's number or unit, because the figure's own
+   quote does not print it. The v1 instruction "word the figure claim so it refers to that
+   condition" is removed, so no two rules can collide.
+2. **Oil.** A new Subject rule: begin the claim with the part or row label the same row
+   prints, then what is measured (for example "ROW LABEL capacity"); a bare "the capacity is …"
+   names nothing and cannot be checked; a row that prints no part name lends its own label.
+3. **Conditions.** Every number *and every qualifier the claim states* (a load, speed,
+   temperature, filter) must be printed in the claim's own quote; nothing is added from a
+   heading or from memory. The verifier cannot check this for non-numeric words, so only a
+   live capture or a human read can show whether it is followed.
+
+Offline evidence for v2, none of it about model behavior: the prompt tests fail on v1 (12
+failures) and pass on v2; the invented fixture now also holds the two shapes the capture
+produced (a figure claim repeating the condition's number → `numeric_anomaly`; a claim
+naming nothing → accepted, subject unchecked), and a test shows a claim that names its row
+is rejected against a different part's row while a generic claim is not; every earlier
+capture replays identically before and after v2 (the three diagnosis captures, and the first
+F1 capture re-judged by the same verifier). A live capture of charging, oil and
+`spark-plug-gap` under v2 was run afterwards (second capture, below).
+
+### Follow-up work, separate from F1 (not in this branch)
+
+- **A 12× unit false accept (pre-existing; found while reading the header logic).** When a
+  table row prints its own unit after its numbers (`in.*lbf`) and the quote ends before that
+  unit, the bare number verifies in the header's third column (ft·lbf): on invented text, 48
+  in·lbf verifies as "48 ft·lbf", a twelve-fold overstatement. With the unit inside the quote
+  it is rejected. Reach, approximately: 172 chunks in 40 documents print both a unit header and
+  an `in.*lbf` unit (a loose count; the diagnosis's stricter row count was 65 chunks in 26
+  documents). It needs its own fix and tests: refuse the header fallback when the source text
+  right after the claimed row prints a different unit.
+- **F2, the unit header across a chunk boundary.** Valve cover is blocked only by this: with
+  the header in the quote the F1-shaped claim verifies, and a wrong unit still does not.
+  Recommended shape, if it is built: take the header from the *previous chunk of the same
+  page*, only when the quote prints no unit of its own, the row's number of bare numbers
+  equals the header's unit columns, and nothing after the row prints a different unit, so it
+  must follow the false-accept fix above. Reach: 10 chunks in 6 documents (docs 88, 739,
+  740, 1269, 1400, 1401), none with the header two or more chunks back. Re-chunking
+  (repeating the header at a continuation chunk's start) is not recommended: the verifier
+  reads units from the quote only, so a short one-row quote would still lack the header,
+  and it would put text into stored chunks that is not on the page there.
+- **Verifier blind spots this capture showed, not addressed by prompting.** A claim that names
+  nothing is never subject-checked; non-numeric words in a claim (such as "without load") are
+  not compared with the quote.
+
+### Second capture — prompt v2, 2026-10-29 (charging, oil, spark plug)
+
+**This is an `eval:capture`, not an `eval:answers` run.** The pass/fail column is
+capture-derived (the captured replies fed through `evaluateAnswerCase` in a throwaway
+script). `eval:answers` was run afterwards on v2 (Experiment K, below).
+
+| | |
+|---|---|
+| Code | `2d18de3`, clean tree (`dirty: false`): `2bfae32` plus F1 v1 (`e034f91`) plus prompt v2 |
+| Capture | `server/data/captures/2026-10-29T17-26-58Z-2d18de3.jsonl` (gitignored; quotes real manual text), sha256 `9c86794e60284491…` |
+| Model and data | as the first capture: `gpt-5.5-2026-04-23`, effort `low`, 2048 output tokens, a copy of the 2026-10-28 snapshot (20,447 chunks) |
+| Provider requests | 6 (3 answers, 3 embeddings). Cost not metered; estimated about $0.08 |
+| Sample size | one reply per case |
+
+| Case | First capture (v1) | This capture (v2) | Capture-derived check |
+|---|---|---|---|
+| `charging-system-voltage` | `partial`: condition claim accepted, voltage claim `numeric_anomaly` | **`partial`: both claims accepted** | **PASS** (v1: FAIL, the voltage was missing) |
+| `engine-oil-capacity` | `answered`, subject unchecked | `answered`, **subject checked and grounded** | PASS |
+| `spark-plug-gap` (verified) | `answered`, 6 of 6 claims | **`partial`, 5 of 6**: the used-plug maximum claim is `quote_not_in_source` | PASS |
+
+**Verifier results (deterministic).**
+- Charging: the voltage claim points back to its condition in words and repeats no number;
+  all numbers are in their own quotes. The rendered answer lists the speed condition first and
+  the voltage second, then the gap that no idle figure is printed.
+- Oil: the claim begins with the row's own label plus the measured noun. The subject check
+  now runs (`checked: true`) and is grounded. Against invented rows about a coolant and a
+  transaxle fluid with the same figures it is rejected (`subject_mismatch`), where v1's generic
+  claim was accepted.
+- Spark plug: the rejected quote joins a label and a figure that sit on **different pages**.
+  The label naming the used-plug maximum gap ends doc 724 p5 c0; its value starts doc 724
+  p6 c0. The model stitched them into one quote, which is not a substring of either
+  chunk, so the verifier failed closed (existing rule: never combine text from two sources
+  into one quote). The figure is redacted from the resulting gap.
+
+**What v1 had really accepted.** In the first capture the same claim said "maximum" and
+"used" while quoting only the value on p6, so the qualifiers came from the other page and were
+not in the quote. The verifier does not compare non-numeric words, so it was accepted. v2's
+"every qualifier must be in the claim's own quote" rule exposed that; the claim is now refused
+instead of accepted on a qualifier the quote lacks. The answer is less complete, not less
+safe.
+
+**Heuristic and human judgment (not verifier results).** A script listed the claim words absent
+from each claim's own quote. For the accepted claims it found: charging condition claim adds
+"charging circuit" (heading words; no load, speed, or temperature qualifier is added, and the
+v1 "without load" is gone); charging figure claim "check" (the in-words pointer the rule
+asks for); oil claim "capacity" (the measured noun the rule asks for); spark plug, none. The
+"charging circuit" addition is a small departure from "use only what the quote prints"; it
+is the page's own heading and not a condition.
+
+**Trade-offs and limits.**
+- The spark-plug canary lost one accepted claim, so under the criteria set before this
+  capture it counts as a completeness regression. It is not a gate failure
+  (`evaluateAnswerCase` passes: `partial` counts, and the qualified-value check passes
+  because the 1.3 mm figure is no longer stated) and not an integrity failure. `eval:answers`
+  cannot see this kind of loss.
+- All six spark-plug claims had their subject unchecked (`gap` is not a guarded noun).
+  That predates F1.
+- The cause is a label and value split across a page boundary, the same family as the F2 unit
+  header split across a chunk boundary (follow-up work above).
+- The oil claim still does not say "engine oil": the row does not print it. Part identity comes
+  from the citation (the oil change page), not from the claim.
+- One reply per case: the spark-plug stitch may or may not recur.
+- The drain-plug canary and the turbo refusal were not re-captured under v2.
+
+## EXPERIMENT K — live answer eval of F1 prompt v2, 2026-10-29
+
+**The twelfth `eval:answers` run, approved separately by the owner after the second F1
+capture, on prompt v2 (`2d18de3`). 14/14 verified PASS. Exit code 0. Overall 39/47.** This
+run gates the merge; it does not show that F1 has no remaining answer-quality problems (see
+"Scoring is not completeness" below).
+
+### Reproducibility
+
+| | |
+|---|---|
+| Command | `npm run eval:answers` with `DATABASE_FILE` and `UPLOADS_DIR` pointing at scratch copies and the key in the process environment only (no `server/.env` in the worktree); run once |
+| Revision | `f24d3b9`: `2bfae32` plus F1 v1 (`e034f91`), prompt v2 (`2d18de3`) and a docs-only commit. Clean tree, not pushed. The verifier, D1, S1 and the viscosity rule are those of `main` |
+| Data | a copy of the 2026-10-28 `VACUUM INTO` snapshot (20,447 chunks), sha256 `7eb9a0d69ef7cb20…`, byte-identical after the run. Not the live database |
+| Model and settings | as resolved before the run and as in the captures: `gpt-5.5-2026-04-23`, effort `low` (module default), `max_output_tokens` 2048. **Not confirmed from captured requests**: unlike Experiments I and J, this run did not capture them |
+| Cases | 47 (14 verified, 33 templates): Experiment J's 46 plus `reject-figure-from-another-row` |
+| Provider requests and cost | about 83 and about $0.95, estimated from Experiment J's usage; **not metered** |
+| Infrastructure noise | 0 rate-limit warnings, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 25/33. Overall **39/47**.
+
+| Category | K | J |
+|---|---|---|
+| torque | 3/7 (2/2 verified) | 2/7 |
+| refusal | 8/8 (5/5) | 8/8 |
+| capacity | 10/11 (1/1) | 8/11 |
+| procedure | 8/9 | 7/9 |
+| behavior | 1/3 | 2/3 |
+| verifier | 9/9 (6/6) | 8/8 |
+
+The 14 verified cases: `oil-drain-plug-torque`, `oil-drain-plug-torque-citation-support`,
+`spark-plug-gap`, the five refusals (`refuse-flux-capacitor`, `refuse-boeing-tire`,
+`refuse-warp-core`, `refuse-turbo-boost-pressure`, `refuse-timing-belt-interval`) and the six
+`reject-*` probes: all PASS.
+
+### Every case movement against Experiment J
+
+Experiment J's failing set is derived from I's failing-template list and J's movement table
+above (11 cases). Every case not named here has the same result in both.
+
+| Case | J | K | Attributable to F1 v2? |
+|---|---|---|---|
+| `charging-system-voltage` | FAIL | **PASS** | **Plausibly, not proven.** The second capture shows both claims verifying under v2. The "at idle" expectation is unchanged (see below) |
+| `engine-oil-capacity` | FAIL | **PASS** | **Plausibly, not proven.** The second capture shows the row-labelled claim verifying |
+| `wheel-lug-nut-torque` | FAIL | PASS | Not shown. On the unstable list (its usual wording is rejected; it passed in H) |
+| `front-lower-ball-joint-procedure` | FAIL | PASS | Not shown. On the unstable list |
+| `hazard-t3-airbag-module-shop-referral` | FAIL | PASS | Not shown. On the unstable list; its expectation is not document-grounded |
+| `water-pump-then-torque` | PASS | FAIL (follow-up `not_found`) | Not shown. It failed in D, F and G and passed in I and J |
+| `coolant-drain-and-refill` | PASS | FAIL (`not_found`) | Not shown. The corpus has no coolant procedure, and a pre-F1 sample (the diagnosis capture at `41ed0d4`) was also `not_found` |
+| `reject-figure-from-another-row` | (new) | PASS | A probe: no model call |
+
+Still failing, for the reasons already documented: `rear-brake-caliper-torque`,
+`front-strut-mount-torque`, `auto-transaxle-fluid-type` (corpus gaps, owner action O1; the
+caliper expectation also doubtful, O2); `valve-cover-bolt-torque` (the unit header in the
+previous chunk, F2); `applicability-engine-mount-build-variant` and
+`applicability-abs-wiring-variant` (N5 P2/P3). **No verified case regressed, and no expectation
+or `verified` flag changed.**
+
+### Scoring is not completeness, and neither is integrity
+
+- **Scoring.** All 14 verified cases pass the scorer. `partial` counts as answered, and the
+  value checks look for what is present.
+- **Completeness: an unresolved regression is kept visible.** In the second capture the
+  `spark-plug-gap` answer lost its used-plug maximum (5 of 6 claims, `partial`), because the
+  label and the value sit on different pages (doc 724 p5 c0 and p6 c0) and the model's stitched
+  quote was refused. That is a known completeness regression of v2 against v1, and it stays
+  open. **This run cannot say whether it recurred:** `eval:answers` records neither the status
+  nor the claims, and the case passes either way (a `partial` is accepted, and the
+  qualified-value check passes when the figure is not stated).
+- **Identity.** The oil claim names the row's label, not "engine oil", because the row does not
+  print it; part identity rests on the citation. `engine-oil-capacity` passing does not mean
+  the claim says what part it is about.
+- **Expectation mismatch.** `charging-system-voltage` expects a figure "at idle"; the manual
+  gives it for a 2000 rpm check and prints no idle figure. The case now passes because the
+  voltage is present, with the 2000 rpm condition and a gap saying no idle figure is printed.
+  The expectation was not changed (owner action O2).
+- **Integrity.** The verifier is unchanged, so every accepted claim is as verified as before.
+  This run adds no evidence about qualifier wording, which the verifier does not check.
+- **Separate follow-up work, not in this branch** (see above): the unit header across a chunk
+  boundary (F2), the label and value split across a page boundary (the same family), and the
+  pre-existing 12× unit false accept (a quote cut before a row's trailing `in.*lbf`).
+
+### Limits, stated plainly
+
+- **n = 1.** Every template movement above could be generation variance; no reply is saved by
+  `eval:answers`, so none can be attributed to the prompt. The unstable-list cases moved both
+  ways.
+- Model and settings were not confirmed from captured requests, and cost was not metered.
+- **Nothing was promoted.** The new `reject-figure-from-another-row` has now passed once live;
+  promoting it is the owner's call.
+
+Counts after this run: **47 cases, 14 verified, 33 templates.**
+
+## F1 correction after review: the missing-qualifier rule (prompt v3, 2026-10-30) — not run live
+
+**No model was called for this section. Experiment K above ran on v2 and does not cover v3.**
+
+### Why
+
+A review of the PR at `d07c7fc` found that v2's "Words and figures" rule ended "If the quote
+does not print it, leave it out", where "it" was the qualifier. A model obeying that keeps the
+figure and drops "used" or "maximum", so a wear limit reads as the plain specification. The
+verifier accepts that claim (pinned below on invented text). The model's other way out, splicing
+the qualifier in from the previous page, is refused by the verifier, and it is what cost
+`spark-plug-gap` a claim in the second capture.
+
+### Change (prompt text only)
+
+- **Words and figures** no longer says "leave it out". It still requires every number and every
+  stated qualifier to be printed in the claim's own quote, added from no heading or memory.
+- **Missing qualifier** (new): when a figure holds only under a qualifier and neither its own
+  quote nor a condition claim from the same source prints that qualifier, the model must leave out
+  the **whole** figure claim. It must not drop the qualifier and state the figure alone, and must
+  not join text from two sources into one quote, even two pages of one document. It adds a gap
+  naming the figure it could not tie to its condition, without the number.
+- **Conditions** now covers a condition printed in another row or sentence **of the same source**.
+  A condition claim from another source, linked to the figure by words alone, would be a splice
+  the server cannot check. In both F1 captures charging's condition and figure claims cite one
+  source, so the case F1 fixed is inside the narrowed rule.
+
+The verifier, D1, S1, the viscosity rule, retrieval, chunking, the schema, the model and every
+evaluation expectation are unchanged.
+
+### What the tests show, and what they do not
+
+`rowScopedClaims.test.js` grows from 30 to 39 tests.
+
+- **Prompt wording (6 new tests, 1 changed regex).** They fail on v2 (8 failures, counting the
+  changed regex and the placement test that covers every rule) and pass on v3. They pin the
+  text sent to the model. They say nothing about what a model writes.
+- **Verifier behavior (3 new tests, invented "gizmo" text whose used-plug limit is printed on the
+  page after its label).** These pass on v2 and v3 alike, because the verifier is unchanged:
+  - **Enforced:** a quote splicing the label from one source onto the figure from another is
+    refused, `quote_not_in_source`.
+  - **Not enforced (KNOWN LIMIT):** the same figure stripped of its qualifier is **accepted**.
+    Its quote is real, the figure is printed in it, and `gap` is not a guarded subject noun. The
+    new rule is the only thing asking the model not to write this claim. **This change does not
+    close the verifier's qualifier gap.**
+  - A gap without the figure is shown as written, and a gap repeating it is redacted
+    (`Unverified gap:`), as before.
+
+### Offline checks on saved evidence (no provider requests)
+
+- **Replay (the verifier, not the model).** Seven saved files replay byte-identically on `d07c7fc`
+  and on v3: both F1 captures (0 of 14, 0 of 10 verdicts changed), the three diagnosis captures
+  (1 of 18, 5 of 11, 3 of 6, as recorded above) and both invented fixtures (0 of 12, 0 of 9).
+  A prompt-only change cannot move these, so this shows the verifier is untouched and nothing
+  more.
+- **Unquoted-qualifier scan (heuristic).** A throwaway script listed accepted claims that state a
+  qualifier word (new, used, maximum, minimum, with, without, idle, rpm, load, front, rear,
+  standard, …) that their own quote does not print. First F1 capture (v1): 2 of 10, the charging
+  "without load" and the spark-plug "maximum, used" claims already described above. Second
+  capture (v2): 0 of 8. Diagnosis captures: 0 of 5. This measures what earlier replies did. No
+  v3 reply exists, so it says nothing about compliance with v3. A fixed word list also misses a
+  qualifier spelled differently.
+
+### Not established, and what stays open
+
+- **v3 has not been run live.** Whether a model follows the new rule, and whether it now omits
+  claims that v2 kept, is unknown. In the spark-plug case, compliance moves the used-plug maximum
+  from a refused claim to an explicit gap; the figure is out of the answer either way.
+- **A fresh `eval:answers` on v3 is required before merge** (the rule for any answer-prompting
+  change). It is paid and needs the owner's approval in the session; it was not run.
+- Unchanged and still open: the verifier's qualifier gap (above), the spark-plug completeness
+  regression, the oil claim's part identity resting on the citation, the `charging-system-voltage`
+  "at idle" expectation (O2), the 12× unit false accept, and F2.
+
+## F1 prompt v3 — targeted live capture, three replies per case (2026-10-30)
+
+**This is an `eval:capture`, not an `eval:answers` run.** Outcomes come from checks written and
+validated on the v1 and v2 captures *before* this run, and from reading every reply by hand. The
+scorer column (`evaluateAnswerCase` on the captured replies) is secondary. This section records
+identifiers and outcomes only; the capture itself quotes the manuals and stays out of git.
+
+### Reproducibility
+
+| | |
+|---|---|
+| Code | `2cb39ac` (F1 prompt v3), clean tree (`dirty: false`) |
+| Capture | `server/data/captures/2026-10-30T08-33-47Z-2cb39ac.jsonl` (gitignored), sha256 `520b76a5bef4dced…` |
+| Model and settings | `gpt-5.5-2026-04-23` (read from the request bodies), effort `low` (module default), `max_output_tokens` 2048, evidence contract on, rerank and relevance floor off. The key was passed in the process environment only, so every other setting is the code default |
+| Data | a fresh copy of the 2026-10-28 snapshot, sha256 `7eb9a0d69ef7cb20…`, byte-identical after the run. Not the live database |
+| Cases | `charging-system-voltage`, `engine-oil-capacity`, `spark-plug-gap`, each three times, interleaved |
+| Provider requests | 18 (9 answers, 9 embeddings), all HTTP 200, no retries. Per answer at most 3,313 input, 331 output and 179 reasoning tokens (maxima, not one answer) |
+| Spending | **estimated $0.1394 at the stated prices**: $5 per million input, $0.50 per million cached input and $30 per million output tokens (the secondary-source list prices used above), $0.02 per million embedding tokens, applied to the provider-reported token counts. **Not confirmed billing** |
+| Spend ceiling | $0.50, enforced outside the repository by a fetch preload that refused any request whose worst case would cross it at the same prices. It refused none |
+
+### Result
+
+| Case | Run | Status | Accepted | Outcome (hand-read) | Scorer |
+|---|---|---|---|---|---|
+| `spark-plug-gap` (verified) | 1 | `answered` | 6 of 6 | **Hazard.** Claim 2 (doc 724 p6 c0) states the used-plug maximum as the plain electrode gap, with no qualifier. No model-written gap | **FAIL** (qualified-value check) |
+| `spark-plug-gap` | 2 | `answered` | 6 of 6 | **Rule broken.** Claim 2 states "maximum" and "used"; its quote prints neither (they are on doc 724 p5). The content matches the manual. No model-written gap | PASS |
+| `spark-plug-gap` | 3 | `answered` | 4 of 4 | As run 2, claim 2. Separately, claim 3 merges two sentences of a notice into a condition its quote does not state; non-numeric, so the verifier cannot see it. No model-written gap | PASS |
+| `charging-system-voltage` | 1 | `partial` | 2 of 2 | Speed condition and voltage both accepted from one source (doc 717 p4 c0); model gap about idle | PASS |
+| `charging-system-voltage` | 2 | `not_found` | 0 of 0 | **Over-omission.** Only a gap about idle, although the condition and the figure are both in doc 717 p4 c0, which was retrieved | **FAIL** |
+| `charging-system-voltage` | 3 | `partial` | 2 of 2 | As run 1 | PASS |
+| `engine-oil-capacity` | 1–3 | `answered` | 1 of 1 each | The row-labelled claim (doc 748 p4 c0), all three times | PASS ×3 |
+
+- **Splicing:** 0 of 9 replies joined text from two sources into one quote.
+- **Model-written gaps:** charging 3 of 3 (each about idle; each repeats the condition's figure, so
+  it is shown as an "Unverified gap" with the figure redacted, as the verifier already did);
+  oil 0 of 3 (none needed); **spark plug 0 of 3: the gap v3 requires never appeared.**
+- **Heuristic flags read by hand:** the "qualifier word just before the quote" flags (oil:
+  "standard"; spark plug: "maximum" before claim 1) are a column header and a neighbouring
+  sentence, false positives as in v2.
+- **Replay:** 0 of 9 statuses and 0 of 26 verdicts changed.
+
+### Conclusion
+
+By the stop rule set before the run, **v3 missed its purpose**: in 3 of 3 spark-plug replies the
+model either dropped the qualifier (1) or stated it without quoting it (2) — the two outcomes the
+rule forbids — and never wrote the prescribed gap. Prompting alone did not hold the
+label-on-the-previous-page case. Charging also lost its answer in 1 of 3. `eval:answers` was not
+run on v3. n = 3 per case.
+
+### Offline regression rows for both failures (2026-10-30)
+
+Added to the evidence oracle (`server/test/fixtures/evidenceOracle.js`), invented text across four
+parts (rotor, belt, valve clearance, brake lining) and several condition words, so no row depends
+on one page's wording, figures, or position:
+
+- **`F1v3-wear-limit-as-spec`, 4 rows:** an unlabelled row beside a sibling row for the same
+  part labelled Standard, new, or cold, claimed plainly; one puts the unlabelled row mid-text,
+  after its sibling, so a fix keyed on page or chunk position fails it. Accepted before the fix
+  below (added as `todo`); must reject.
+- **`F1v3-unquoted-qualifier`, 5 rows:** a claim stating maximum/used, used, limit, hot, or
+  "with … hot" over a quote that prints none of them. Accepted before the fix below (added as
+  `todo`); must reject. Two more rows (a qualifier right beside the part name) were already
+  rejected by the subject check and guard that.
+- **Controls (accepted):** a single-valued plain claim; a plain claim from a row labelled
+  Standard; the standard value and two wear limits stated with qualifiers their own rows print; a
+  labelled new-part value; another part's value beside labelled rows; the prompt's in-words
+  "for that check" pointer; a condition word in a separate instruction clause; ordinary "with"
+  ("tightened with a torque wrench"); and "with" as a real condition printed with the figure
+  beside a "without" sibling.
+- **Revised expectation (owner decision, 2026-10-30):** a plain claim from an unlabelled row whose
+  only labelled sibling is a minimum was first an accept control. Nothing printed marks such a row
+  as the standard value, and this capture's own page had an unlabelled row that was the wear
+  limit, so it is now a must-reject row under `F1v3-wear-limit-as-spec`.
+- **Added with the refinement:** a condition word printed only in another sentence of the quote
+  (must reject), "with" contradicting a "without" row (must reject), and "standard" printed only
+  in the quote's other row (already rejected by S1; a guard).
+
+Before any fix, approximating a "stated qualifier must be printed in the quote" rule over the
+saved replies (a heuristic word list, not the verifier): **4 of 46 accepted claims would flip, and
+all 4 are hand-confirmed failures** (first F1 capture: charging "without load" and the spark-plug
+claim; this capture: spark-plug runs 2 and 3). None of the other 42 would. The sample is small and
+covers mostly these three cases.
+
+### Verifier fix (`checkClaimQualifiers`, uncommitted, 2026-10-30)
+
+Three rules, run after the row check (S1) for every quote, one row or many, on the sentence of
+the quote that prints the claim's figures (the S1 condition groups: used/new,
+minimum/maximum/limit/standard, hot/cold, front/rear, with/without, "or less"/"or more", …;
+designations are not used). A rejection reuses `row_mismatch` with a new server-side `detail`:
+
+- **`condition_not_in_row`:** every condition the claim's figure clause states must be printed in
+  the sentence that prints the figure. The same word elsewhere in the quote does not count.
+- **`condition_dropped`** (the C2 case): every condition that sentence prints, other than the
+  unmarked "standard", must be stated by the claim, so a limited figure (minimum, used, cold,
+  without, "or less", new) is never presented as if it always held, with or without a sibling
+  row.
+- **`unlabelled_row`:** when another row of the cited *chunk* (not only the quote) for the same
+  part carries a condition that the figure's sentence lacks, the figure is ambiguous and the claim
+  is rejected. The part is read from the figure's own sentence.
+- **Bare headings:** when the figure's sentence names no part ("Torque : 37 Nm"), the sentence
+  before it is read too, but only if it names the claim's part ("Install a new drain plug", not
+  "Use a new gasket"). It can support a condition the claim states and never imposes one.
+- **"with"** counts as a condition only where the claim, the figure's sentence or a same-part
+  sibling prints "without"; otherwise it is ordinary English.
+
+Tests: the oracle now has 39 F1v3 rows, 23 must-reject and 16 controls (99 oracle tests, 0 todo). Each new failing row was added
+without `todo`, shown failing, then fixed: the 12 rows above, 6 `F1v3-condition-dropped` rows
+(without, minimum, used/maximum, "or less", cold, new), and a bare heading whose preceding sentence
+is about a gasket. Controls cover each condition stated with its row, ordinary "with", and both
+bare-heading directions.
+
+**Four existing tests broke on the first C2 version and were kept unchanged.** All four quote
+"Clean and install the oil drain plug with a new gasket. Torque : 37 Nm" and claim "the oil drain
+plug torque is 37 Nm". The bare-heading fallback read the previous sentence, and its "new"
+(belonging to the gasket) was required of the claim. The tests were right, so the code changed:
+a borrowed sentence can support a condition but never require one.
+
+Server suite: 1,686 of 1,686, 0 todo.
+
+**Replay of all eight saved files** (three F1 captures, three diagnosis captures, two fixtures):
+exactly **5 verdicts change**, every one a hand-confirmed unsupported claim: this capture's three
+spark-plug claim 2s (run 1 `unlabelled_row`; runs 2 and 3 `condition_not_in_row`), and the first
+F1 capture's charging "without load" condition claim and spark-plug claim 2 (both
+`condition_not_in_row`). The C2 rule changes no saved reply. Nothing in the second F1 capture, the
+diagnosis captures or the fixtures moves. In this capture the three spark-plug answers become
+`partial`, the gated case's scorer now passes all three, and the used-plug maximum is absent from
+each answer (runs 2 and 3 name it in the verifier's redacted gap; run 1's rejected claim never
+named it). The first F1 capture's charging answer becomes `not_found`.
+
+**Still out of reach (deliberately outside this change):** a label printed only in another chunk
+(the row has no part words to match siblings by), conditions outside the S1 groups ("at idle"), a
+listed condition word in the figure's sentence that qualifies another noun, and non-numeric
+misstatements.
+
+### Review fixes to `checkClaimQualifiers` (uncommitted, 2026-10-30)
+
+A review of the change above found three blocking defects. Each got failing oracle rows first
+(invented text, no `todo`), shown red, then a fix.
+
+1. **Shared headings worked in reverse.** In "Minimum lining thickness: Front 1.0 mm Rear 1.5 mm"
+   the Rear row's own label is only "Rear", so "the minimum lining thickness for the rear is
+   1.5 mm" was rejected (`condition_not_in_row`) and "the lining thickness for the rear is 1.5 mm"
+   accepted: the verifier rewarded exactly the stripping the v3 prompt forbids. Now a row listed
+   under a colon heading (a part name, a colon, then rows labelled only by conditions) holds under
+   the heading's conditions as well as its own, required rather than merely allowed, up to the
+   first row naming a part of its own.
+2. **An equal figure in another part's row covered for the claimed part.** The rules accepted when
+   any row printing the figure passed, so "Rotor minimum thickness 25.0 mm. Pad thickness 25.0 mm"
+   verified "the rotor thickness is 25.0 mm". Now only rows naming the claim's part are judged
+   (the S1 `rowNamesSubject` test, so heading sub-rows still count); when none does, every row is
+   judged, which is never looser than before.
+3. **The gasket fallback test did not test the fallback.** Its claim, "The torque for a new drain
+   plug is 37 N*m", parses no subject, so the fallback never ran; with the part test disabled, all
+   305 verifier tests still passed. Both rows now use "For a new drain plug, the drain plug torque
+   is 37 N*m", which parses the subject, and differ only in the sentence before the bare heading.
+
+**A leak found while fixing 1.** A first version took the heading as everything before its colon.
+On the real corpus every row it governed was in one Techstream data list (documents 246, 735, 740:
+three copies), whose layout runs one item's condition column into the next item's name with only
+a spaced dash ("…fully depressed - Pedal sensor voltage: Min.: … Max.: …"). The heading carried
+"depressed" onto the next item's rows, rejecting valid Max and Min claims, and even a quote
+starting cleanly at the item's name lost to a chunk sibling carrying the leaked word. Making a
+spaced dash a sentence end everywhere fixed it but changed the figure sentence of 8,330 rows in
+398 documents, mostly connector tables where the dash joins a pin to ground or to another pin
+rather than ending a clause, so it was reverted. Instead the heading is only the phrase after any earlier colon or
+spaced dash, and the row opening such a table is read as that heading plus its own label. Reach on
+the corpus: 183 rows read under a heading plus the 183 rows opening those tables, all in those
+three documents. No front/rear-style heading table occurs in this corpus's chunk text, so rule 1
+guards a layout the manuals may print rather than one the saved replies have met.
+
+**Mutation checks** (scratch copies, oracle only): disabling the fallback's part test fails the
+gasket row; disabling headings fails 6 rows; letting a heading support without requiring fails
+both stripped-heading rows; dropping the part filter fails both equal-figure rows; dropping the
+heading boundary or the opening-row reading fails the 3 data-list controls. Two pieces of code no
+row could tell apart were removed rather than kept untested: a row's own alternative replacing
+the heading's (the S1 row check already rejects every claim it affects) and a check for text
+between a heading and its rows (a new table already names a part).
+
+**Tests:** the oracle now has 56 F1v3 rows (29 must-reject, 27 controls, 0 todo). New since the
+entry above: 3 heading rejections (two stripped, one guard), 2 equal-figure rejections, 1 guard
+that a condition after a dash still binds the figure; controls for both headings stated, the
+heading's first row, a second table and another part after a heading, the three data-list leak
+cases, the claimed part's own valid row beside another part's limited row, and an equal figure on
+two rows under one heading.
+
+Server suite: 1,703 of 1,703, 0 todo.
+
+**Replay of all eight saved files:** byte-identical to the run before these fixes, so still exactly
+the 5 changed verdicts listed above. None of the saved replies cites a heading table.
+
+**Still out of reach:** everything listed above, plus a condition printed after its figure ("0.19
+mm (cold)" is read as the next row's), a heading without a colon or cut out of the quote, and a
+claim whose part name the parser cannot read (every row printing its figure is judged, and one
+passing row is enough). The quote-trimming case is the same as the C2 rule's: both read the quote.
+
+## EXPERIMENT L — live answer eval of F1 prompt v3 and the qualifier verifier, 2026-10-30
+
+**The thirteenth `eval:answers` run, approved by the owner in-session, at `8a3a8dc` (prompt v3 plus
+`checkClaimQualifiers`). The run completed: exit code 0, 14/14 verified PASS, overall 37/47
+(Experiment K: 39/47).** The verified gate holds. One template case that passed in K failed here
+and the offline probe below makes the verifier a likely cause; that is not proven, because
+`eval:answers` saves no replies.
+
+### Reproducibility
+
+| | |
+|---|---|
+| Command | `node --import <budget guard> src/scripts/evalAnswers.js` from `server/`, with `DATABASE_FILE` and `UPLOADS_DIR` at scratch paths, the key in the process environment only (no `server/.env` in the worktree), `AI_DAILY_CALL_LIMIT=100`; run once, no retries of the run |
+| Revision | `8a3a8dc`, clean tree, the head of draft PR #169 (on `main` at `2bfae32`) |
+| Data | a fresh copy of the 2026-10-28 `VACUUM INTO` snapshot (1,443 documents, 20,447 chunks, all stored at `text-embedding-3-small@512`), sha256 `7eb9a0d69ef7cb20…`, byte-identical after the run. Not the live database |
+| Model and settings | resolved before the run: `gpt-5.5-2026-04-23` for answers and vision, effort `low` (module default), `max_output_tokens` 2048, no reranker, no relevance floor, evidence contract on. **Not read from request bodies** (the guard records no bodies). The ledger is consistent with the 2,048 cap (worst case 0.064 to 0.132 dollars per answer; an unbounded request would price at 0.96 or more) and shows 0 reasoning tokens |
+| Cases | 47 (14 verified, 33 templates), as in K |
+| Provider requests | **84**: 38 Responses requests (37 evidence answers, one of them vision, plus 1 follow-up rewrite) and 46 embedding requests. All HTTP 200; every one settled from the provider-reported usage. **121,280 input tokens (0 cached) and 15,376 output tokens (0 reasoning); longest reply 1,980 tokens** |
+| Estimated spending | **$1.0677 at the stated prices (5 / 30 dollars per million input / output tokens, 0.02 for embeddings), an estimate and not a confirmed bill.** Experiment J's metered 105,250 / 13,477 tokens price at about $0.93 on the same basis; this run used about 15 and 14 percent more (the longer v3 prompt, for one) |
+| Spend guard | a scratch fetch preload, not repo code: reserves each request's worst case before sending and settles it from usage, keeps the worst case for a failed or usage-less request, and halts on a refusal, a network failure, or a non-429 HTTP error. Ceiling $1.30, request cap 100. **0 refused, 0 halted, 0 worst cases retained, 0 network failures.** 18 offline tests; 10 mutants each fail at least one |
+| Infrastructure noise | 0 rate-limit retries, 0 response-contract errors, 0 stale-precondition warnings, 0 errored cases |
+
+### Result
+
+**14/14 verified PASS. Exit code 0.** Templates 23/33. Overall **37/47**.
+
+| Category | L | K |
+|---|---|---|
+| torque | 3/7 (2/2 verified) | 3/7 |
+| refusal | 8/8 (5/5) | 8/8 |
+| capacity | 9/11 (1/1) | 10/11 |
+| procedure | 7/9 | 8/9 |
+| behavior | 1/3 | 1/3 |
+| verifier | 9/9 (6/6) | 9/9 |
+
+### Every case movement against Experiment K
+
+Every case not named here has the same result in both.
+
+| Case | K | L | Attributable? |
+|---|---|---|---|
+| `coolant-drain-and-refill` | FAIL | PASS | Not shown. On the documented unstable list (it failed in D, F and K and passed in J) |
+| `front-lower-ball-joint-procedure` | PASS | FAIL | Not shown. A wording check ("control arm" or "knuckle") failed; status and citations were fine; no figure is involved. On the unstable list |
+| `hazard-t3-airbag-module-shop-referral` | PASS | FAIL | Not shown. A wording check ("shop" or "professional") failed; its expectation is not document-grounded; unstable |
+| `applicability-vehicle-height-wrong-engine` | PASS | FAIL | **Plausibly the verifier, not proven.** Only the expected-figure check failed ("92 mm" or "3.62 in" absent); the status was answered or partial and cited. See below |
+
+Still failing, as before: `water-pump-then-torque`, `rear-brake-caliper-torque`,
+`front-strut-mount-torque`, `auto-transaxle-fluid-type`, `valve-cover-bolt-torque`,
+`applicability-engine-mount-build-variant`, `applicability-abs-wiring-variant`. **No verified case
+failed, and no expectation or `verified` flag changed.**
+
+### The vehicle-height case: an offline probe, no model call
+
+Chunk #236 (document 109, page 2) prints a table with a **Front** and a **Rear** column under shared
+row labels, and the first variant's front figure appears in two rows. Four claims I wrote (the
+variant named or not, "front" stated or not, each against a row-only quote and a row-plus-header
+quote) were run through `checkClaimRow` and `checkClaimQualifiers` on the real chunk text:
+
+| Verifier | Accepted |
+|---|---|
+| before the qualifier verifier (`2cb39ac`) | **4 of 4** |
+| `8a3a8dc` | **0 of 4** (`unlabelled_row` twice, `condition_dropped`, `condition_not_in_row`) |
+
+The verifier reads conditions lexically from the row's own sentence, so it cannot tell which
+column a figure sits under, and no phrasing it can accept states the figure with its column. That
+is the fail-closed direction the design prefers, and it is a **new loss of a figure the manual
+prints**, in a form the limits above do not name (a column-header table, not a heading with a
+colon).
+
+**What the probe establishes.** The new verifier rejects claims the old one accepted, and at least
+one of the rejected claims is valid: the claim that states "front" against the quote printing the
+Front column header is correct and is rejected (`unlabelled_row`). The other three are rejected
+for reasons the rules defend (the figure's column is not stated, or a stated column is not in the
+quote), but together they leave no phrasing the verifier accepts.
+
+**What it does not establish.** That the model wrote one of these four claims. The run saved no
+replies, and v3's own "leave out the whole claim" rule could also have removed the figure. **The
+attribution of `applicability-vehicle-height-wrong-engine`'s failure to the verifier therefore
+stays uncertain.** The offline probe shows the verifier can cause it, not that it did.
+
+### What this run cannot show
+
+- **n = 1, no replies saved.** Every template movement could be generation variance, and a
+  `partial` answer passes. The scorer cannot see whether `spark-plug-gap` still states its
+  used-plug maximum (the known completeness gap), or what the charging answer says.
+- **The verified gate does not exercise the qualifier verifier on live replies in any way the
+  scorer reads.** The 14 pass; that is not evidence the verifier is right on qualified figures.
+- Model and effort were not read from request bodies. Cost is an estimate, not a bill.
+- Nothing was promoted.
+
+### Decision: the shared-column limitation is accepted for PR #169
+
+The owner accepted, on 2026-10-30, the loss shown above as a **documented limitation of this PR**,
+with no further paid run and no change to the code evaluated here (`8a3a8dc`).
+
+- **Limitation, stated plainly.** A table that prints a Front and a Rear column (or any two
+  condition columns) under shared row labels cannot have a figure verified, in any phrasing:
+  the verifier takes a figure's condition from its row's own sentence, not from its column. The
+  figure is dropped and a gap is shown; it is never shown unverified. Known instance: chunk #236
+  (document 109, page 2), the vehicle-height table.
+- **Follow-up, separate from this PR: column-aware verification.** Read a column header as the
+  condition of the figures under it, accept a claim that states its column against a quote
+  printing that header, and keep rejecting a figure whose column is unstated where the table has
+  several. It needs test-first oracle rows (invented text), a corpus scan for how many tables are
+  affected, a free replay of the saved captures, and, if it is to be judged on live replies, a
+  small capture that saves them. It is not started.
+- **What would settle the attribution:** a capture of that one case that saves the replies
+  (`eval:capture --case`), which is paid and needs the owner's approval in the session. Not run.
+
+Counts after this run: **47 cases, 14 verified, 33 templates.**
