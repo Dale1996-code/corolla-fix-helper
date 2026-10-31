@@ -382,7 +382,7 @@ Server-side verification, in order:
 5. Every unit-bearing number in the claim must equal a number printed in the quote **in the same unit** (owner decision D1, 2026-10-19). Numbers compare as parsed values, so `12.40 Ω` matches `12.4 Ω` and `1500 rpm` matches `1,500 rpm` (a comma before three digits groups thousands; before one or two it is a decimal mark). Spellings of one unit match each other — `N·m`/`Nm`/`N*m`, `ft-lbs`/`ft.*lbf`/`lb-ft`, `L`/`liters`, `°C`/`deg C`, `V`/`volts` — but nothing converts between units and there is no tolerance: `27 ft-lbf` is not supported by a quote printing only `37 N·m`, `4.7 L` is not supported by `4.2 L`, and `mV`/`V`, `kΩ`/`Ω`, `mA`/`A`, and US/Imperial quarts stay different units (`lmp.`, a lowercase-L spelling of `Imp.` found in one page's text layer, is the Imperial unit). Both ends of a range (`10.5 to 14 V`) are checked, a claim stating either printed end of a range is supported, and a leading minus is part of the value. `kgf/cm2` is a pressure. A quote with no unit-bearing figure at all may support a claim through its bare numbers only when it carries a header unit in the claim's unit (`Torque (N·m): 37`), and then only for the printed number itself. Symbols are case-sensitive, and `A` followed by `/` (`A/C`, `A/F`) is not a current. A current figure in the quote, such as a fuse rating, counts only for a claim stating a current; it never changes how any other unit is checked. Likewise a bare litre symbol in the quote (`2 L`, usually a gear position or a wire colour in these manuals) counts only for a claim stating a volume, and an engine designation (`L4 1.8L 2ZR-FE`, `(2.4L)`) is a name, not a capacity.
 6. Every other number in the claim — a figure in a unit the detector does not know, a count, a step number — must itself be printed in the quote (`unrecognized_figure`). Only names are exempt: codes, connectors, and pins (`P0420`, `B9-1`), engine codes (`2ZR-FE`), ordinals, Toyota part numbers, and model years. An unknown unit is compared by its number only, so this is a floor, not a unit check.
 7. For recognized specification wording, the complete normalized part name from the claim must also occur in the quote (see the boundary below). This rejects an oil-filter-cap claim that cites an oil-drain-plug passage carrying the same torque value.
-8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both. For every quote, one row or many, the conditions a figure holds under must also match between the claim and the sentence printing that figure, and the cited chunk must not leave an unlabelled figure ambiguous (`row_mismatch`; see **Conditions belong to the figure** below). This rejects a wear limit presented as the normal specification.
+8. When the quote prints two or more table rows, the claim's figures, part, and conditions must all belong to one row (`row_mismatch`; see **Table rows** below). This rejects the with-filter oil capacity claimed from the without-filter row of a quote holding both. For every quote, one row or many, the conditions a figure holds under must also match between the claim and the sentence printing that figure, and the cited chunk must not leave an unlabelled figure ambiguous (`row_mismatch`; see **Conditions belong to the figure** below). This rejects a wear limit presented as the normal specification. A figure in a table that prints its column header once must also name the column its cell sits under (`row_mismatch`; see **Columns** below), which rejects "the rear height" claimed from a cell printed under Front.
 9. The server assigns a deterministic `evidenceId` from the document/page/chunk location and normalized verified quote, and copies that ID to the matching citation. The model cannot choose it.
 10. `status` is derived by the server from what actually verified — never taken from the model.
 
@@ -467,6 +467,122 @@ the next row's. A heading without a colon, or cut out of the quote, governs
 nothing. A claim whose part name the parser cannot read is compared with every
 row printing its figure, and one passing row is enough.
 
+**Columns.** A table that prints its column header once ("Front Rear") and then
+rows of cells is read by position. When the cited **chunk's** row ends its label
+in a header of two or more words from one condition group (front/rear,
+left/right, released/depressed, …) and prints exactly one cell per column, each
+figure the claim states is placed under the column of its cell. A figure and its
+alternate-unit rendering share a cell ("310 mm (12.2 in.)"), and a value with its
+tolerance ("1.5° +/- 0.3°") is one cell. The claim must then name that column, and
+the quote must still print the column word with the figure (`row_mismatch`):
+
+- naming a different column is `wrong_column`;
+- naming none is `column_unstated`, and that holds **even when the quote left the
+  header out**, because the table has several columns and the figure could be any
+  of them. It holds for every quote the verifier can tie to the table: a quote
+  that starts at the row's first cell or carries the row's label (the row is
+  singled out and its column attributed), and any quote that cannot be tied to a
+  single chunk row but prints a clean column row's cells (it starts at a later
+  cell, starts inside a cell, starts at a first cell two rows share, or repeats a
+  row the chunk prints twice; labelled or not). Those are read as `possible`: no
+  column is attributed, but one must be named. It does not hold for the cases
+  listed under *What the column reading does not cover*;
+- figures under different columns in one claim are `column_unresolved` — the
+  claim is true but cannot be attributed figure by figure, so it must be split.
+
+A row whose cell count does not match its header (a footnoted extra cell, a
+stacked table, a part name whose words merely look like a header) is **not read**
+and the older rules judge it. A rule rejecting a claim that names a column of
+such a header was built and measured on the real corpus: it newly rejected one
+legitimate torque specification and protected no row, so it was removed.
+
+The header and the cell count come from the chunk's row, so a quote that begins
+inside the header cannot move a cell to another column, and a quote cut after the
+first cell has that cell placed under its column.
+
+**A cut quote is still rejected when the row's label carries a condition word the
+quote leaves out** (`unlabelled_row`, exactly as before this feature), even when
+that word is unrelated to the figure: the vehicle-height table's label sentence
+runs back through an unrelated "lower …", so a cut quote of its row is rejected
+although the claim is right. Letting a cut quote's own row stop counting as a
+sibling would verify it, but it also verified quotes that drop a real "Minimum",
+"Reused", "without" or a trailing "or less" (see the iteration log), and no
+narrower rule could be shown safe. The verifier prefers to lose the correct claim.
+A quote that keeps every cell and the label is not affected.
+
+**What the column reading does not cover.** The verifier is **not** fail-closed
+for tables in general, and a verified figure from a table is not column-checked
+unless the rules above apply:
+
+- *A header printed only above a table's first row* governs the rows after it,
+  but the verifier reads a header only from a row's own label. For those rows a
+  claim naming the wrong column is usually rejected (the column word is not in the
+  row's sentence) and so is a correct one, but **a claim that names no column is
+  accepted**, and a wrong-column claim is accepted when the row's own label prints
+  a column word ("Wagon (rear-wheel drive) …"). This is a remaining false accept,
+  not a verified safe case; in the saved corpus nearly every column row has such
+  rows after it.
+- A row printing a single value, a row whose cell count does not match its header,
+  a header whose words repeat inside the header ("Front Rear Front axle"), and two
+  groups' words side by side give **no reading**: the older rules judge them, and a
+  wrong-column claim whose quote prints both header words is still accepted
+  there. Two identical rows in one chunk are read as `possible`: a claim naming no
+  column is rejected, a wrong-column claim still passes. **The single-value case is
+  common, not a corner:** a column row cut by the end of its chunk prints one value
+  (an overlapping chunk ends mid-row), so it is not read. In the saved corpus the
+  accelerator-pedal header row is printed by 42 chunks in 10 documents, and 21 of
+  them end that way: the wrong-column claim is rejected for the other 21 and
+  **still accepted for these**, and every one of the 10 documents has at least one
+  such chunk.
+- *Shapes that are not column headers to the verifier:* a with/without header (the
+  word "with" is ordinary English, so that group is never a header); a threshold
+  printed after each cell ("1.0 mm or more 1.5 mm or more"), where the "or" joins
+  both values into one cell; and an alternate unit printed without parentheses
+  ("310 mm 12.2 in."), which is counted as a second cell and placed under the
+  second column, so a correct claim for the first column gets `wrong_column`
+  while a wrong claim for the second passes. A wrong-column claim can also pass
+  on the first two, as it did before this feature.
+- *A part name holding both words of a group* ("Rear … x Front …") can read as a
+  header. When the row prints exactly as many numbers as there are "columns", the
+  row is read as a table and a correct claim naming the part gets `wrong_column`.
+  When it prints a different count (the real engine-mount torque row prints three
+  numbers) it is not read, and the claim stands. No row of the first kind exists in
+  the saved corpus.
+- A label-less quote of cells that are not printed inside the column row (a later
+  row that relies on the header above it) is tied to nothing, and the older rules
+  judge it.
+
+**Correct claims that can now be rejected.** The checks above only add
+rejections, so nothing is verified that was not verified before, but some correct,
+well-qualified claims are lost. None lets a wrong figure through:
+
+- *A column word anywhere in the figure's clause counts as naming that column,
+  negated or not.* With 0.6 to 1.2 V under "Fully Released" (an invented sensor
+  table), the claim "The sensor alpha voltage with the pedal **not depressed** is
+  0.6 to 1.2 V" names *depressed* and gets `wrong_column`; so does a figure clause
+  that mentions the other column in passing ("…and it rises as the pedal is
+  depressed"). The same shape was reproduced on a real accelerator-pedal data
+  list. Name only the figure's own column.
+- *A claim naming no column* against a quote that lands inside a column row is
+  rejected by design, including a quote that starts at a later cell, inside a
+  cell (at the alternate unit), or at a first cell two rows share.
+- *A labelled row the chunk prints twice*, beside a column table whose cell holds
+  the same figure, is rejected when the claim names no column (`column_unstated`).
+  No instance exists in the saved corpus.
+- *An alternate unit printed without parentheses* ("310 mm 12.2 in.") is counted
+  as a second cell, so a correct claim for the first column gets `wrong_column`.
+- *A part name holding both words of a group* ("Rear … x Front …"), when the row
+  prints as many numbers as there are columns, is read as a header and a correct
+  claim gets `wrong_column`.
+
+Separately, a cut quote of a row whose label sentence carries an unrelated
+condition word stays rejected (`unlabelled_row`); the old verifier rejects it too.
+- A header printed only in the previous chunk is not seen.
+- A table with several header rows or merged cells is only as reliable as the
+  cell count: a coincidental match would place a cell under the wrong column.
+  Column order is the order of the extracted text, the same assumption every
+  other check makes.
+
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
 the figure's own row names the part, and in any quote that the claim and the
@@ -475,7 +591,7 @@ lexical. A model that converts or rounds a correct
 figure gets `partial` or `not_found` instead of `answered`; that refusal is
 intended. A figure in a unit the detector does not know is checked by its number
 alone, and the header-table fallback cannot tell which column a bare number came
-from.
+from unless the column rules above can read the row.
 
 **`printedFigures`** (owner decision D1). Each verified claim lists, for every
 unit-bearing figure it states, the quote's own text for the figure that matched —

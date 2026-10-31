@@ -49,6 +49,152 @@
  * @property {string} note
  */
 
+// ---- F4 (column headers): shared SYNTHETIC tables ----
+// Invented for this table; nothing here is manual text. Each chunk prints its
+// column header once, then rows of cells. Quote shapes cut from F4_RIDE:
+//   FULL      the header and both cells of the first row
+//   CUT       the header and only the first cell (the shape that used to be
+//             rejected, because the chunk's own full row read as a sibling)
+//   HDRCUT    starts inside the header, so it prints only "Rear"
+//   STRIPPED  the row without any header
+//   TWO_ROW   FULL plus the next row, whose label carries no header of its own
+const F4_RIDE =
+  "Strut mount adjustment. Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) " +
+  "Wagon 320 mm (12.6 in.) 305 mm (12.0 in.) Add 10 mm for the winter package.";
+const F4_RIDE_FULL = "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.)";
+const F4_RIDE_CUT = "Front Rear Sedan 310 mm (12.2 in.)";
+const F4_RIDE_HDRCUT = "Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.)";
+const F4_RIDE_STRIPPED = "Sedan 310 mm (12.2 in.) 295 mm (11.6 in.)";
+const F4_RIDE_VALUES_ONLY = "310 mm (12.2 in.) 295 mm (11.6 in.)";
+const F4_RIDE_TWO_ROW =
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) " +
+  "Wagon 320 mm (12.6 in.) 305 mm (12.0 in.)";
+// The label sentence runs back through unrelated words: a foreign "lower", and
+// "Rear" printed again before the real header (a reference-marks list).
+const F4_RIDE_PRELUDE =
+  "Reference marks: A lower link pin offset B Rear subframe pin offset " +
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) " +
+  "Wagon 320 mm (12.6 in.) 305 mm (12.0 in.)";
+// A third cell under two headers: a footnoted value the verifier cannot place.
+const F4_RIDE_FOOT =
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) 290 mm (11.4 in.)*. " +
+  "* Winter package.";
+const F4_RIDE_FOOT_QUOTE =
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) 290 mm (11.4 in.)";
+// Both columns print the same figure.
+const F4_TIRE =
+  "Tire service data. Tire pressure: Front Rear 230 kPa (33 psi) 230 kPa (33 psi). Check the tires cold.";
+const F4_TIRE_FULL = "Tire pressure: Front Rear 230 kPa (33 psi) 230 kPa (33 psi)";
+// Ranges as cells, under a released/depressed header.
+const F4_PEDAL =
+  "Reference (normal condition): Pedal Fully Released Pedal Fully Depressed " +
+  "Sensor Alpha 0.6 to 1.2 V 3.4 to 4.8 V Sensor Beta 2.2 to 3.2 V 4.7 to 5.1 V";
+const F4_PEDAL_ROW1 = "Pedal Fully Released Pedal Fully Depressed Sensor Alpha 0.6 to 1.2 V 3.4 to 4.8 V";
+// A torque noun, so the claim's subject IS parsed and the subject check runs.
+const F4_HUB =
+  "Hub assembly. Hub nut torque: Front Rear Sedan 120 N*m (89 ft.*lbf) 90 N*m (66 ft.*lbf) " +
+  "Wagon 130 N*m (96 ft.*lbf) 95 N*m (70 ft.*lbf)";
+const F4_HUB_TWO_ROW =
+  "Hub nut torque: Front Rear Sedan 120 N*m (89 ft.*lbf) 90 N*m (66 ft.*lbf) " +
+  "Wagon 130 N*m (96 ft.*lbf) 95 N*m (70 ft.*lbf)";
+// Not a column table: the scope guard for the same-row sibling exclusion.
+const F4_ROTOR =
+  "Rotor service. Minimum rotor thickness: 23.0 mm (0.906 in.) Replace the rotor below this.";
+// The row name begins with a header word ("Front axle bracket"), so the nearest
+// "Front"/"Rear" occurrences to the values read as Rear, Front: the wrong order.
+const F4_AXLE =
+  "Ride height (unloaded): Front Rear Front axle bracket 310 mm (12.2 in.) 295 mm (11.6 in.)";
+// Two rows share a first cell: only the label tells them apart.
+const F4_RIDE_SAME =
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) " +
+  "Coupe 310 mm (12.2 in.) 290 mm (11.4 in.)";
+// An earlier SENTENCE prints "front and rear" too; it is not part of the header.
+const F4_RIDE_TIRES =
+  "Check the front and rear tires. Ride height: Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.)";
+const F4_RIDE_TIRES_QUOTE = "Ride height: Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.)";
+// A column table followed by a non-column row whose LAST cell, "10 mm", also occurs
+// inside the column row's "310 mm". A quote of just that cell is tied to no row.
+const F4_RIDE_SPACER =
+  "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) Spacer thickness 5 mm 10 mm";
+// A PART NAME that contains both words of a group ("Rear ... x Front ..."): read as a
+// header it would turn a correct torque claim into a wrong-column or unresolved one.
+const F4_MOUNT_QUOTE = "Rear mount insulator x Front crossmember bolt 55 N*m 561 kgf*cm 41 ft.*lbf";
+const F4_MOUNT = `Engine mount torque. ${F4_MOUNT_QUOTE}. Next item.`;
+const F4_MOUNT_TWO_UNITS_QUOTE = "Rear mount insulator x Front crossmember bolt 55 N*m 41 ft.*lbf";
+const F4_MOUNT_TWO_UNITS = `Engine mount torque. ${F4_MOUNT_TWO_UNITS_QUOTE}. Next item.`;
+// Other groups and a four-alternative header (standard / minimum / maximum / limit).
+const F4_DISC =
+  "Brake service. Disc thickness Standard Minimum Maximum 25.0 mm 23.0 mm 26.0 mm Replace the disc below the minimum.";
+const F4_DISC_QUOTE = "Disc thickness Standard Minimum Maximum 25.0 mm 23.0 mm 26.0 mm";
+const F4_VALVE = "Valve service. Valve clearance: Intake Exhaust 0.19 mm 0.30 mm. Adjust if outside the range.";
+const F4_VALVE_QUOTE = "Valve clearance: Intake Exhaust 0.19 mm 0.30 mm";
+// The column row is NOT the first row of the chunk.
+const F4_RIDE_SECOND = `Spacer thickness 5 mm 10 mm. ${F4_RIDE}`;
+// Bare numbers under a unit header ("(N*m)"): the cells carry no unit of their own.
+const F4_HUB_BARE = "Hub nut torque (N*m): Front Rear Sedan 120 90 Wagon 130 95";
+const F4_HUB_BARE_QUOTE = "Hub nut torque (N*m): Front Rear Sedan 120 90";
+// A tolerance, "1.5° +/- 0.3°", is ONE value: split at the "+/-" it reads as two
+// cells under the two-word header "left and right", and a claim stating the
+// tolerance would then name figures under different columns.
+const F4_CAMBER =
+  "Camber check. Difference between left and right camber: 1.5° +/- 0.3° (1°30'). " +
+  "Adjust the cam bolt if it is outside this range.";
+const F4_CAMBER_QUOTE = "Difference between left and right camber: 1.5° +/- 0.3°";
+// Prose that merely CONTAINS both words of a group, followed by one value: not a
+// table at all. A rule that treated "a header run but not one cell per column" as
+// a table the verifier cannot read would reject these legitimate specifications.
+const F4_RACK =
+  "Boot inspection. Height difference between the right and left strut caps: 2.0 mm (0.079 in.) or less. " +
+  "If the difference is greater, replace the cap.";
+const F4_RACK_QUOTE = "Height difference between the right and left strut caps: 2.0 mm (0.079 in.) or less";
+const F4_SPEED =
+  "Wheel speed check. Difference between front and rear wheel speed: 2 km/h (1.2 mph) or less. " +
+  "Inspect the sensors if it is greater.";
+const F4_SPEED_QUOTE = "Difference between front and rear wheel speed: 2 km/h (1.2 mph) or less";
+
+/** The synthetic F4 tables, shared with columnAwareClaims.test.js so neither copy can drift. */
+export const F4_TABLES = {
+  ride: F4_RIDE,
+  rideFull: F4_RIDE_FULL,
+  rideCut: F4_RIDE_CUT,
+  rideHeaderCut: F4_RIDE_HDRCUT,
+  rideStripped: F4_RIDE_STRIPPED,
+  rideValuesOnly: F4_RIDE_VALUES_ONLY,
+  rideTwoRow: F4_RIDE_TWO_ROW,
+  ridePrelude: F4_RIDE_PRELUDE,
+  rideFoot: F4_RIDE_FOOT,
+  rideFootQuote: F4_RIDE_FOOT_QUOTE,
+  rideSame: F4_RIDE_SAME,
+  rideSpacer: F4_RIDE_SPACER,
+  rideSecond: F4_RIDE_SECOND,
+  mount: F4_MOUNT,
+  mountQuote: F4_MOUNT_QUOTE,
+  mountTwoUnits: F4_MOUNT_TWO_UNITS,
+  mountTwoUnitsQuote: F4_MOUNT_TWO_UNITS_QUOTE,
+  disc: F4_DISC,
+  discQuote: F4_DISC_QUOTE,
+  valve: F4_VALVE,
+  valveQuote: F4_VALVE_QUOTE,
+  rideTires: F4_RIDE_TIRES,
+  rideTiresQuote: F4_RIDE_TIRES_QUOTE,
+  tire: F4_TIRE,
+  tireFull: F4_TIRE_FULL,
+  pedal: F4_PEDAL,
+  pedalRow1: F4_PEDAL_ROW1,
+  hub: F4_HUB,
+  hubTwoRow: F4_HUB_TWO_ROW,
+  hubBare: F4_HUB_BARE,
+  hubBareQuote: F4_HUB_BARE_QUOTE,
+  rotor: F4_ROTOR,
+  axle: F4_AXLE,
+  camber: F4_CAMBER,
+  camberQuote: F4_CAMBER_QUOTE,
+  rack: F4_RACK,
+  rackQuote: F4_RACK_QUOTE,
+  speed: F4_SPEED,
+  speedQuote: F4_SPEED_QUOTE,
+};
+
 /** @type {EvidenceOracleRow[]} */
 export const ASK_ORACLE = [
   // ---- 1A-01: the max(0.51, 2%) floor is applied in canonical mm and litres ----
@@ -1174,6 +1320,713 @@ export const ASK_ORACLE = [
     expect: "accept",
     finding: "control",
     note: "Both rows print 1.0 mm and both are the lining's; the rear row, named through the heading, supports the claim.",
+  },
+
+  // ---- F4: a figure belongs to the column its cell sits under ----
+  // A table prints its Front/Rear header once and then rows of cells. The
+  // verifier read the header words as conditions of the whole row, so a quote
+  // printing the header and both cells supported the right column's claim AND
+  // the wrong column's: "the rear height is 310 mm" against a front cell. The
+  // header is read from the cited chunk's row, the claim's figure is placed in
+  // its cell by position, and the claim must name that cell's column.
+  {
+    id: "F4-A1-rear-claims-the-front-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "310 mm is the first cell, under Front. The quote prints both header words, which used to satisfy any column the claim named.",
+  },
+  {
+    id: "F4-A2-front-claims-the-rear-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the front ride height is 295 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "295 mm is the second cell, under Rear.",
+  },
+  {
+    id: "F4-A3-cut-quote-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_CUT,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "The quote stops after the first cell, but the chunk's row says that cell is Front: a cut quote does not make the column ambiguous.",
+  },
+  {
+    id: "F4-A4-header-cut-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_HDRCUT,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "The quote starts inside the header, so it prints only 'Rear' and a rear claim looked printed. 310 mm is still the first cell, Front.",
+  },
+  {
+    id: "F4-A5-swapped-columns-in-one-claim",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the ride height is 295 mm at the front and 310 mm at the rear.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "Both figures are printed and both column words are named, but each is under the other column. No single column states both figures.",
+  },
+  {
+    id: "F4-A6-data-list-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_PEDAL,
+    quote: F4_PEDAL_ROW1,
+    claim: "The sensor alpha voltage with the pedal fully depressed is 0.6 to 1.2 V.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "0.6 to 1.2 V is the Fully Released cell; Fully Depressed is 3.4 to 4.8 V. Ranges are one cell each.",
+  },
+  {
+    id: "F4-A7-two-row-quote-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_TWO_ROW,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "A longer quote that also holds the wagon row does not change which column the sedan's first cell is under.",
+  },
+  {
+    id: "F4-A8-torque-table-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_HUB,
+    quote: F4_HUB_TWO_ROW,
+    claim: "The hub nut torque for the sedan rear is 120 N*m.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "A torque noun makes the subject check run, and it passes; 120 N*m (89 ft.*lbf) is one cell, under Front.",
+  },
+  {
+    id: "F4-A9-unaligned-row-names-a-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_FOOT,
+    quote: F4_RIDE_FOOT_QUOTE,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-unaligned-column",
+    todo: "F4-unaligned-column",
+    note: "Three cells under two headers: no cell can be placed under a column, so a claim naming one has nothing to stand on. 310 mm is the first cell, Front. KNOWN LIMIT, pinned on purpose: a rule rejecting such claims was measured on the real corpus at one legitimate torque row newly rejected (a part name whose words Rear and Front read as a header) and no row newly protected, so it was removed; a footnoted or stacked table under a header can still pass a wrong-column claim, exactly as it did before.",
+  },
+  {
+    id: "F4-A10-bare-number-table-wrong-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_HUB_BARE,
+    quote: F4_HUB_BARE_QUOTE,
+    claim: "The hub nut torque for the sedan rear is 120 N*m.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "The cells are bare numbers under a '(N*m)' header unit; 120 is the first cell, under Front.",
+  },
+  {
+    id: "F4-B1-stripped-header-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_STRIPPED,
+    claim: "The ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "The chunk prints a Front/Rear header over this row; a figure that names no column is ambiguous even when the quote left the header out.",
+  },
+  {
+    id: "F4-B2-values-only-quote-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_VALUES_ONLY,
+    claim: "The ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "The quote is the cells alone; the chunk's row identifies them and the table has two columns.",
+  },
+  {
+    id: "F4-C1-cut-quote-right-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_PRELUDE,
+    quote: F4_RIDE_CUT,
+    claim: "For the sedan, the front ride height is 310 mm.",
+    expect: "accept",
+    finding: "F4-cut-quote",
+    todo: "F4-cut-quote",
+    note: "Correct: the first cell is Front and the quote prints the header. It is rejected because the chunk's own full row, whose sentence runs back through 'lower link pin', reads as a sibling labelled 'lower'. KNOWN LIMIT, pinned on purpose: letting a cut quote's own row stop counting as a sibling fixed this but also hid a condition the quote dropped (F4-S1..S5), and no narrower rule could be shown safe, so the exclusion was removed.",
+  },
+  {
+    id: "control-F4-bare-number-table-no-column-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_HUB_BARE,
+    quote: F4_HUB_BARE_QUOTE,
+    claim: "The hub nut torque for the sedan is 120 N*m.",
+    expect: "reject",
+    finding: "control",
+    note: "Two columns of bare numbers and the claim names neither; the header is in the quote, so this was already rejected.",
+  },
+  {
+    id: "control-F4-bare-number-table-right-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_HUB_BARE,
+    quote: F4_HUB_BARE_QUOTE,
+    claim: "The hub nut torque for the sedan rear is 90 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "90 is the second cell, under Rear.",
+  },
+  {
+    id: "control-F4-full-row-front-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the front ride height is 310 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The first cell is Front and the quote prints the header.",
+  },
+  {
+    id: "control-F4-full-row-rear-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the rear ride height is 295 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The second cell is Rear.",
+  },
+  {
+    id: "control-F4-cut-quote-front-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_CUT,
+    claim: "For the sedan, the front ride height is 310 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "A quote that stops after the first cell still places that cell under Front.",
+  },
+  {
+    id: "control-F4-full-row-no-column-still-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "The table has two columns and the claim names neither; this was already rejected.",
+  },
+  {
+    id: "control-F4-stripped-header-column-still-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_STRIPPED,
+    claim: "For the sedan, the front ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "True, but the quote prints no 'Front': a condition must be printed with its figure.",
+  },
+  {
+    id: "control-F4-header-cut-right-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_HDRCUT,
+    claim: "For the sedan, the rear ride height is 295 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The second cell is Rear and the quote prints 'Rear'; the missing 'Front' header word changes nothing for this cell.",
+  },
+  {
+    id: "control-F4-two-row-quote-front-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_TWO_ROW,
+    claim: "For the sedan, the front ride height is 310 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The sedan row carries the header in its own label; the wagon row after it does not matter.",
+  },
+  {
+    id: "control-F4-two-row-quote-rear-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_TWO_ROW,
+    claim: "For the sedan, the rear ride height is 295 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The second cell of the sedan row is Rear.",
+  },
+  {
+    id: "control-F4-torque-table-rear-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_HUB,
+    quote: F4_HUB_TWO_ROW,
+    claim: "The hub nut torque for the sedan rear is 90 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "90 N*m (66 ft.*lbf) is the second cell, under Rear.",
+  },
+  {
+    id: "control-F4-equal-figures-front-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_TIRE,
+    quote: F4_TIRE_FULL,
+    claim: "The tire pressure for the front is 230 kPa.",
+    expect: "accept",
+    finding: "control",
+    note: "Both cells print 230 kPa; Front is one of the columns that does.",
+  },
+  {
+    id: "control-F4-equal-figures-rear-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_TIRE,
+    quote: F4_TIRE_FULL,
+    claim: "The tire pressure for the rear is 230 kPa.",
+    expect: "accept",
+    finding: "control",
+    note: "Rear is the other column that prints 230 kPa.",
+  },
+  {
+    id: "control-F4-equal-figures-no-column-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_TIRE,
+    quote: F4_TIRE_FULL,
+    claim: "The tire pressure is 230 kPa.",
+    expect: "reject",
+    finding: "control",
+    note: "Equal figures do not make a claim that names no column unambiguous: the table still has two columns.",
+  },
+  {
+    id: "control-F4-data-list-released-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_PEDAL,
+    quote: F4_PEDAL_ROW1,
+    claim: "The sensor alpha voltage with the pedal fully released is 0.6 to 1.2 V.",
+    expect: "accept",
+    finding: "control",
+    note: "The range is the first cell, under Fully Released.",
+  },
+  {
+    id: "control-F4-data-list-depressed-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_PEDAL,
+    quote: F4_PEDAL_ROW1,
+    claim: "The sensor alpha voltage with the pedal fully depressed is 3.4 to 4.8 V.",
+    expect: "accept",
+    finding: "control",
+    note: "The range is the second cell, under Fully Depressed.",
+  },
+  {
+    id: "control-F4-non-column-cut-quote-label-dropped-still-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_ROTOR,
+    quote: "rotor thickness: 23.0 mm",
+    claim: "The rotor thickness is 23.0 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "Scope guard. This is not a column table: the quote drops 'Minimum' and cuts the value, so the chunk's full row is a labelled sibling and must keep counting as one. Only a column row stops treating its own full row as a sibling.",
+  },
+
+  {
+    id: "control-F4-row-name-repeats-a-header-word-right-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_AXLE,
+    quote: F4_AXLE,
+    claim: "The front ride height for the axle bracket is 310 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "Correct: 310 mm is under Front. Reading the nearest header words as the header put Rear first and rejected this claim as the wrong column; an ambiguous header must be left unread, not misread.",
+  },
+  {
+    id: "control-F4-tolerance-beside-left-and-right-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_CAMBER,
+    quote: F4_CAMBER_QUOTE,
+    claim: "The difference between left and right camber is 1.5° +/- 0.3°.",
+    expect: "accept",
+    finding: "control",
+    note: "Scope guard. '+/-' joins a value and its tolerance into one cell, so this is one value after prose, not two cells under Left and Right. Splitting the tolerance made a legitimate alignment specification name figures under different columns.",
+  },
+  {
+    id: "control-F4-prose-right-and-left-one-value-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RACK,
+    quote: F4_RACK_QUOTE,
+    claim: "The height difference between the right and left strut caps is 2.0 mm or less.",
+    expect: "accept",
+    finding: "control",
+    note: "Scope guard. 'right and left' is prose and one value follows it: there is no row of cells to place under columns, so restating the words is not naming a column the verifier cannot read.",
+  },
+  {
+    id: "control-F4-prose-front-and-rear-one-value-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_SPEED,
+    quote: F4_SPEED_QUOTE,
+    claim: "The difference between the front and rear wheel speed is 2 km/h or less.",
+    expect: "accept",
+    finding: "control",
+    note: "Scope guard, a second group. The claim names both words of Front/Rear because the manual's sentence does.",
+  },
+
+  // ---- F4: a quote that cannot be tied to ONE chunk row still hits a column table ----
+  // A quote of cells alone is matched to the chunk row whose values start with it.
+  // Starting at a later cell, or at a first cell two rows share, it matches no
+  // single row, and the claim then escaped the column rules: a no-column claim was
+  // accepted although the cells are printed in a two-column table.
+  {
+    id: "F4-D1-quote-starts-at-the-second-cell-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: "295 mm (11.6 in.)",
+    claim: "The ride height is 295 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "295 mm is the second cell, under Rear; the quote starts there, so it is the prefix of no row's values. The table still has two columns and the claim names neither.",
+  },
+  {
+    id: "F4-D2-cut-first-cell-shared-by-two-rows-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SAME,
+    quote: "310 mm (12.2 in.)",
+    claim: "The ride height is 310 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "The Sedan and Coupe rows both start with this cell, so the quote matches two rows and none is singled out; the figure still sits under a column header.",
+  },
+  {
+    id: "F4-D3-quote-starts-inside-a-cell-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: "12.2 in.",
+    claim: "The ride height is 12.2 in.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "12.2 in. is the alternate-unit rendering inside the first cell, under Front. Quoting only it leaves the column unnamed.",
+  },
+  {
+    id: "control-F4-later-cell-of-a-non-column-row-beside-a-column-table-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SPACER,
+    quote: "10 mm",
+    claim: "The value is 10 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "Scope guard for the 'tied to no single row' rule: 10 mm is the last cell of the spacer row, not of the column row. It is inside '310 mm' only as digits, which are not a token of that cell, so the column table does not claim it.",
+  },
+  {
+    id: "control-F4-unrelated-figure-in-a-chunk-with-a-column-table-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: "Add 10 mm for the winter package",
+    claim: "The winter package adds 10 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "Scope guard: a figure that is not printed inside the column row is unaffected by the column table elsewhere in the chunk ('10 mm' is not inside '310 mm').",
+  },
+
+  // ---- F4: controls that pin the rules above against silent loosening ----
+  {
+    id: "control-F4-two-columns-named-in-one-claim-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_FULL,
+    claim: "For the sedan, the front and rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "310 mm is under Front only. Naming both columns for one figure is wrong for Rear; every named column must be the figure's own.",
+  },
+  {
+    id: "control-F4-unaligned-cut-quote-no-column-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_FOOT,
+    quote: "Sedan 310 mm (12.2 in.)",
+    claim: "For the sedan, the ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "A cut quote's own full row counts as a sibling like any other row: here it prints no condition the quote lacks, but the row has three cells under two headers and no column can be read, so only the older rules judge it. The claim names no column and the quote drops the header; this was already rejected.",
+  },
+  {
+    id: "control-F4-label-picks-the-row-among-rows-sharing-a-first-cell",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SAME,
+    quote: "Sedan 310 mm (12.2 in.)",
+    claim: "For the sedan, the ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "The Sedan and Coupe rows both start with 310 mm; the label 'Sedan' singles out the row, whose chunk header makes a claim naming no column ambiguous.",
+  },
+  {
+    id: "control-F4-label-and-header-pick-the-row-wrong-column-rejected",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SAME,
+    quote: "Front Rear Sedan 310 mm (12.2 in.)",
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "Two rows start with 310 mm; the label 'Sedan' singles out one, so its cell is placed under Front and 'rear' is wrong. Matching rows by values alone would see two and read no column, letting the wrong column through.",
+  },
+  {
+    id: "control-F4-earlier-sentence-does-not-spoil-the-header",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_TIRES,
+    quote: F4_RIDE_TIRES_QUOTE,
+    claim: "For the sedan, the rear ride height is 310 mm.",
+    expect: "reject",
+    finding: "control",
+    note: "An earlier sentence ('front and rear tires') is not part of the header; reading it would make the header ambiguous and let the wrong column through.",
+  },
+
+  // ---- F4: a cut quote must not hide a condition it dropped ----
+  // A cut quote's own full chunk row stopped counting as a sibling, to end a false
+  // reject (a foreign word in the label sentence). That row was also the only
+  // thing that saw a condition the quote LEFT OUT: "Minimum" before the part, a
+  // "without" before the header, an "or less" after the last cell. Each of these
+  // was rejected before the exclusion existed and must stay rejected.
+  {
+    id: "F4-S1-cut-quote-drops-a-leading-minimum",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Brake service. Minimum disc thickness Front Rear 23.0 mm (0.906 in.) 9.0 mm (0.354 in.) Replace the disc below this.",
+    quote: "disc thickness Front Rear 23.0 mm (0.906 in.)",
+    claim: "The disc thickness at the front is 23.0 mm.",
+    expect: "reject",
+    finding: "F4-sibling-exclusion",
+    note: "The quote starts after 'Minimum', so the figure reads as the nominal thickness; 23.0 mm is the minimum.",
+  },
+  {
+    id: "F4-S2-cut-quote-drops-a-leading-reused",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "Reused bolt torque Front Rear Sedan 120 N*m (89 ft.*lbf) 90 N*m (66 ft.*lbf)",
+    quote: "bolt torque Front Rear Sedan 120 N*m (89 ft.*lbf)",
+    claim: "The bolt torque for the sedan front is 120 N*m.",
+    expect: "reject",
+    finding: "F4-sibling-exclusion",
+    note: "'Reused' qualifies the whole row; the quote starts after it, so the claim presents a reused-bolt torque as the general one.",
+  },
+  {
+    id: "F4-S3-cut-quote-contradicts-a-dropped-without",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Capacity. Drain and refill without filter Front Rear 4.2 liters (4.4 US qts) 3.9 liters (4.1 US qts)",
+    quote: "filter Front Rear 4.2 liters (4.4 US qts)",
+    claim: "With filter, the front capacity is 4.2 liters.",
+    expect: "reject",
+    finding: "F4-sibling-exclusion",
+    note: "The row says 'without filter'; the quote starts after 'without' and the claim says 'with'. The claim contradicts the source.",
+  },
+  {
+    id: "F4-S4-cut-quote-drops-a-trailing-threshold",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Disc service. Disc runout Front Rear 0.05 mm (0.0020 in.) 0.07 mm (0.0028 in.) or less",
+    quote: "Disc runout Front Rear 0.05 mm (0.0020 in.)",
+    claim: "The front disc runout is 0.05 mm.",
+    expect: "reject",
+    finding: "F4-sibling-exclusion",
+    note: "'or less' follows the last cell and qualifies the row; the quote stops before it, so a limit reads as a fixed value.",
+  },
+  {
+    id: "F4-S5-quote-keeps-every-cell-but-drops-the-trailing-threshold",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Disc service. Disc runout Front Rear 0.05 mm (0.0020 in.) 0.07 mm (0.0028 in.) or less",
+    quote: "Disc runout Front Rear 0.05 mm (0.0020 in.) 0.07 mm (0.0028 in.)",
+    claim: "The front disc runout is 0.05 mm.",
+    expect: "reject",
+    finding: "F4-sibling-exclusion",
+    note: "Every cell is quoted, only the trailing 'or less' is cut. This was already rejected before the exclusion existed.",
+  },
+
+  // ---- F4: a part name that holds both words of a group is not a header ----
+  // "Rear mount insulator x Front crossmember bolt" has Rear and Front four words
+  // apart, so it can read as a header. With a cell count that matches no header the
+  // row is not read, and the correct claim stands.
+  {
+    id: "control-F4-part-name-with-two-header-words-three-cells-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_MOUNT,
+    quote: F4_MOUNT_QUOTE,
+    claim: "The rear mount insulator x front crossmember bolt torque is 55 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "A real torque row looks like this: a part name containing Rear and Front, then three bare numbers (N*m, kgf*cm, ft.*lbf). The words are the part's name, not columns; rejecting this claim lost a correct torque on the owner's engine.",
+  },
+  {
+    id: "F4-L3-part-name-with-two-header-words-two-cells",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_MOUNT_TWO_UNITS,
+    quote: F4_MOUNT_TWO_UNITS_QUOTE,
+    claim: "The rear mount insulator x front crossmember bolt torque is 55 N*m.",
+    expect: "accept",
+    finding: "F4-part-name-header",
+    todo: "F4-part-name-header",
+    note: "KNOWN LIMIT, pinned: the same part name with exactly as many numbers as there are 'columns' (two units) reads as an aligned table, and the correct claim, which names both words, gets wrong_column. No such row exists in the corpus.",
+  },
+
+  // ---- F4: the other header groups, and a four-alternative header ----
+  {
+    id: "F4-E1-minimum-column-claims-the-standard-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (minimum) is 25.0 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "25.0 mm is under Standard; the minimum is 23.0 mm. This is the group where a wear limit can be claimed under the wrong column.",
+  },
+  {
+    id: "F4-E2-maximum-column-claims-the-minimum-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (maximum) is 23.0 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "Three columns: 23.0 mm is under Minimum, not Maximum.",
+  },
+  {
+    id: "control-F4-minimum-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (minimum) is 23.0 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "23.0 mm is under Minimum.",
+  },
+  {
+    id: "control-F4-maximum-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (maximum) is 26.0 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "26.0 mm is under Maximum, the third column.",
+  },
+  {
+    id: "F4-E3-exhaust-claims-the-intake-clearance",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_VALVE,
+    quote: F4_VALVE_QUOTE,
+    claim: "The valve clearance for the exhaust is 0.19 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "0.19 mm is under Intake; Exhaust is 0.30 mm.",
+  },
+  {
+    id: "control-F4-exhaust-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_VALVE,
+    quote: F4_VALVE_QUOTE,
+    claim: "The valve clearance for the exhaust is 0.30 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "0.30 mm is under Exhaust.",
+  },
+  {
+    id: "F4-E4-column-row-is-second-in-the-chunk-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SECOND,
+    quote: "295 mm (11.6 in.)",
+    claim: "The ride height is 295 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "The column row is not the first row of the chunk; the cells-only quote must still be found inside it.",
+  },
+
+  // ---- F4: known limit, pinned (header inheritance is out of scope) ----
+  // A header printed only above the first row governs the rows after it, but
+  // the verifier reads a header only from a row's own label sentence. These two
+  // rows state what the manual means; the verifier gets both wrong today and
+  // after the F4 fix, so the gap stays visible by ID. Rows after the first are
+  // NOT fail-closed: a claim that names no column is accepted.
+  {
+    id: "F4-L1-inherited-header-right-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_TWO_ROW,
+    claim: "For the wagon, the front ride height is 320 mm.",
+    expect: "accept",
+    finding: "F4-inherited-header",
+    todo: "F4-inherited-header",
+    note: "320 mm is the wagon row's first cell, under the Front header printed above the sedan row. The wagon row's own label prints no header, so the column cannot be read and the claim is rejected.",
+  },
+  {
+    id: "F4-L2-inherited-header-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE,
+    quote: F4_RIDE_TWO_ROW,
+    claim: "For the wagon, the ride height is 320 mm.",
+    expect: "reject",
+    finding: "F4-inherited-header-unstated",
+    todo: "F4-inherited-header-unstated",
+    note: "The wagon row sits under a two-column header, so this figure is as ambiguous as the sedan's, but the verifier cannot see the inherited header and accepts it.",
   },
 ];
 

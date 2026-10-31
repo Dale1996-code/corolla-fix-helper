@@ -4543,3 +4543,263 @@ with no further paid run and no change to the code evaluated here (`8a3a8dc`).
   (`eval:capture --case`), which is paid and needs the owner's approval in the session. Not run.
 
 Counts after this run: **47 cases, 14 verified, 33 templates.**
+
+## COLUMN-AWARE VERIFICATION (F4) — free validation, 2026-10-31
+
+**Offline only: no paid call was made, no `eval:answers`, no `eval:capture`.** Branch
+`claude/column-aware-verification`, from `origin/main` `9caaa2c` (PR #169 merged), draft PR #170. This
+is the follow-up Experiment L left open ("column-aware verification"). Nothing here measures live model
+behaviour; see "What this does not show". Two independent reviews (read-only Opus agents) found
+problems in earlier versions of this change; this section records the final design, what each review
+found, and what changed. Read "What the earlier versions got wrong" before relying on any earlier number.
+
+### Correction to Experiment L's offline probe
+
+Experiment L concluded that, for the vehicle-height table (chunk #236, document 109, page 2), "no
+phrasing it can accept states the figure with its column." **That is wrong for a quote that prints the
+header and the whole first row**: the verifier at `8a3a8dc`/`9caaa2c` accepts the right claim there. Its
+probe cut every quote at `row start + 40` characters, which lands inside the row, and a quote cut
+after the first cell was rejected for a reason unrelated to columns (below). The loss was narrower
+than recorded (cut quotes) and the hazard larger: the same verifier also accepted the **wrong**
+column. Experiment L's own text is left as written.
+
+### What the verifier did before (all reproduced on the real chunk and on invented text)
+
+| # | Behaviour on `9caaa2c` | Direction |
+|---|---|---|
+| M1 | No column concept: a quote with the header and both cells supports "the rear height is 310 mm" against a cell printed under Front, and a swapped two-figure claim. Same on a real accelerator-pedal data list | false accept |
+| M2 | A right claim on a quote cut after the first cell is rejected (`unlabelled_row`): the chunk's own full row is a "sibling", and its label sentence runs back through unrelated words (a part name containing "lower"), which read as a condition | false reject, **kept** (see below) |
+| M3 | A claim naming a column against a quote with no header is rejected (`condition_not_in_row`) | correct, kept |
+| M4 | A claim naming no column against a header-stripped quote is accepted | false accept |
+| M5 | A quote starting inside the header prints one header word, so a claim naming it passes | false accept |
+| M6 | A row with a header and an extra (footnoted) cell accepts wrong-column claims | false accept, **kept** (see below) |
+| M7 | A label-less quote of cells that starts at a later cell, inside a cell, or at a first cell two rows share is tied to no single row, so a claim naming no column is accepted | false accept |
+
+### What changed
+
+`columnHeaderRun`, `quoteRowCells` (both exported for tests and probes) and private `columnReading`
+and `possibleColumnRow` read a column **by position**, from the cited **chunk's** row: its label
+sentence must end in a clean header (two different words of one condition group, none repeated inside
+the cluster, within 4 words of each other and ending within 8 words of the values) and it must print
+exactly as many cells as the header has columns. A figure and its alternate-unit rendering are one
+cell, so are a value and its tolerance (`+/-`, dash, tilde, slash) and values joined by "to", "and",
+"or", "at". Each figure the claim states is placed under its cell's column; the claim's columns are
+the **intersection** across its figures. Three `row_mismatch` details, no new reason or client string:
+`wrong_column`, `column_unstated`, `column_unresolved` (figures under different columns in one claim).
+The existing rule still requires the column word to be printed in the quote. A quote tied to no single
+chunk row (M7) that prints a clean column row's cells (token-bounded containment) is read as
+`possible`: no column is attributed, but a claim naming none is `column_unstated`; this applies to
+labelled quotes too (for example, a row the chunk prints twice). A row whose cell count does not match
+its header, or that prints fewer than two cells, is **not read**.
+
+**The change can only add rejections.** It deletes five lines from the verifier (a signature, a
+comment line, a JSDoc union, a `sourceRows` line and a call site), adds early `return` branches at the
+top of `judgeFigureRow`, and leaves the body after them byte-identical to `origin/main` (checked with
+comments stripped). `checkClaimQualifiers` accepts only when some row returns `""`, and a row that
+returns `""` returns exactly what it did before. So every claim the final verifier accepts, the old one
+accepted too. That holds for any input, not only the ones tried.
+
+Owner decisions (2026-10-31): include cut quotes; reject a figure that names no column when the
+chunk's row is a clean column row, even if the quote omitted the header; remove the same-row exclusion
+(below); implement the M7 rule, in the cell-boundary form the owner was shown (the shipped rule is
+broader: see "Scope of the label-less-quote rule"); remove the unaligned rule (below). Mine, open to
+overrule: a claim spanning two columns is rejected and must be split; header inheritance is out of scope.
+
+### Scope of the label-less-quote (M7) rule: what was approved and what shipped
+
+**Chronology.** After the first review the owner chose "Fix the docs, defer behavior" for M7 and also
+instructed that M7 be investigated separately and, if the no-column requirement could not be met without
+significant new risk, that the tradeoff be explained rather than silently weakened. I investigated,
+stopped, and asked again with a measured prototype footprint: "if a quote's values sit at a cell
+boundary inside a clean column row and the claim names no column, reject", with 33 claims newly rejected
+in the two real column tables, 12 more in the vehicle-height table's later rows, and 0 in unrelated
+tables. The owner then chose "Implement it". So the rule was authorized in-session after the footprint
+was shown, and the earlier "defer" was superseded by that second answer.
+
+**What shipped is broader than the wording the owner was shown, and the widening was not separately
+approved.** `possibleColumnRow` uses token-bounded containment of the quote's values inside a clean
+column row, not a cell-boundary start, and applies to any quote row tied to no single chunk row,
+labelled or not:
+
+| Difference | Effect |
+|---|---|
+| A quote that starts **inside** a cell (at the alternate unit, or the second end of a range) is caught too | Widens. Measured on the corpus (every word start inside a cell to the cell's end, claim "The value is F."): **120 claims in 27 chunks / 13 docs** in the two column tables plus **36 claims in 6 chunks / 4 docs** in the vehicle-height table's later rows; 0 in unrelated tables; 0 newly accepted. (A reviewer's different enumeration counted 81 and 12.) |
+| A **labelled** quote that matches two or more chunk rows (a row printed twice) is caught too | Widens. 0 instances in the corpus; one invented false reject (below) |
+| A quote tied to a non-column row is never caught, even if its values occur inside a column row | Narrows |
+| The chunk row must print exactly one cell per column | As shown |
+
+The 33 + 12 + 0 figure the owner saw covers only quotes that start and end at cell boundaries. I
+reported the footprint as unchanged without flagging the first two rows as differences; that was an
+omission. The widened cases are all no-column claims in the same two tables, and they are rejected by
+the same rule for the same reason, but the owner may require the rule to be narrowed back to the
+cell-boundary wording.
+
+### What the earlier versions got wrong, and how it was found
+
+**First review (the first commit newly accepted incorrect claims).** The first commit let a cut quote's
+own full chunk row stop counting as a sibling, to cure M2. That row was also the only thing that saw a
+condition the quote **left out**: "Minimum" or "Reused" before the part, "without" before the header, an
+"or less" after the last cell. The review reproduced four incorrect claims newly accepted that the old
+verifier rejected; I reproduced all four and found a fifth. They are permanent invented oracle rows
+`F4-S1`..`S5`, written before the fix and red on that commit. The reviewer's narrowing (read only the
+words after the label's last colon) was fuzzed before being adopted, on **120,744** invented cases:
+
+| Variant | Incorrect claims newly accepted vs `9caaa2c` |
+|---|---|
+| first commit | 792 |
+| narrowed exclusion | **72**, all with the condition before the last colon |
+| exclusion removed | **0** |
+
+The narrowing could not be made safe, so on the owner's instruction the exclusion was removed. Cost,
+measured: a cut quote on a label that carries an unrelated condition word is rejected again (M2). On
+the real corpus that is the vehicle-height table only (chunks #236, #2141, #8277). It is pinned as
+`F4-C1` (a `todo`) and in a unit test.
+
+**Second review (no newly accepted claim, but a real specification newly rejected).** The review
+confirmed the subset property above and found nothing the final verifier accepts that the old one
+rejected. It also found that the **unaligned rule** (reject a claim naming a column of a header whose
+cells do not line up) newly rejects a legitimate torque on the owner's engine: chunk #18768, the
+2ZR-FE engine-mount insulator row, whose part name "Rear … x Front …" read as a header followed by
+three bare numbers. This contradicted a figure written here earlier ("on this corpus the rule newly
+rejects 0 claims"): that measurement built claims only from cells carrying their own unit, and torque
+tables print bare numbers under a unit header. The full population of rows with a header and two or
+more cells on the corpus is:
+
+| Rows with a header run and at least two cells | Rows | Specifications? |
+|---|---|---|
+| aligned, unit-bearing cells | 27 (two tables, 13 docs) | yes — read and protected |
+| aligned, bare-number cells | 3 | door-lock and seat-belt wiring pins |
+| unaligned, bare-number cells | 3 | **1 legitimate torque row**, 2 wiring |
+
+Measured effect of the unaligned rule: one legitimate specification newly rejected, no row newly
+protected. On the owner's decision it was removed. The same part-name problem can still arise when
+such a row prints exactly as many numbers as there are "columns" (a correct claim then gets
+`wrong_column`); the corpus has no such row, and it is pinned as `F4-L3`. The review's other findings
+were documentation errors (corrected below), eight mutants no test pinned (now pinned), and one
+fragment of a real label in a code comment (replaced).
+
+The earlier unaligned rule was also quantified before the second review: as first built it newly
+rejected **238** synthetic claims in 46 chunks / 21 documents, among them alignment, steering-test,
+fuel-sender, climate and throttle specifications (prose containing both words of a group followed by
+one value was counted as a table), which led to the two-cells requirement. That measurement missed the
+bare-number rows above.
+
+### Results (final tree)
+
+- **Oracle:** 60 `F4` rows in a table that grew from 114 to 174: 23 that fix a verdict, 32 controls, and
+  5 pinned limits kept as `todo` (`F4-A9` footnoted extra cell, `F4-C1` cut quote on a label with a
+  foreign condition word, `F4-L1`/`L2` header inheritance, `F4-L3` part-name header). Written first and
+  run red each time. On the `9caaa2c` verifier **21 rows fail** (18 fix rows and 3 controls that pin
+  wrong-column handling); the five `S` rows pass there and failed only on the first commit. 34 tests in
+  `columnAwareClaims.test.js`. No pre-existing test or oracle row was removed, edited or given a `todo`.
+- **Server suite:** `9caaa2c` 1,703 / 0 fail / 0 todo; now **1,797 tests, 1,792 pass, 0 fail, 5 todo**.
+  Lint, typecheck, build and smoke (13/13) pass.
+- **Client suite:** this branch changes no client file. Full runs of the same client code: 539/539 twice,
+  and twice a run with a few 5 s timeouts under load (27 failed of 539 at 96% CPU / 1.6 GB free, then 4
+  failed of 539 at 73 s against 39 s). Every failing file passed when run alone each time (the last
+  round: `DocumentsPagination` 27/27, `SymptomsPagination` 23/23, `UrlViewState` 25/25). A clean full
+  local run of the final tree was not obtained; CI on the clean runner is the arbiter.
+- **Mutation checks** (scratch copy, oracle plus new tests): **28 mutants, 28 killed, 0 survivors.**
+  Along the way mutation analysis found a header rule that reverses the columns for "Front Rear Front
+  axle", two checks no input could reach, one check made redundant by the unaligned rule's removal, and
+  controls that never reached the code they were meant to pin; each was fixed, removed or rewritten.
+- **Fuzz, final tree: 402,384 invented cases** (4 header groups, 7 condition settings, 6 placements of the
+  condition relative to the last colon, subject-less claims, label-less quotes) scored against ground
+  truth, old verifier against the final one: **0 incorrect claims newly accepted** (this holds for every
+  input, by the diff argument above), and **0 correct claims newly rejected within the fuzz's own claim
+  vocabulary only** — not a general result: see "Correct claims the final verifier now rejects" for
+  correct claims outside that vocabulary that are lost. 8,824 incorrect claims newly rejected. The first
+  commit newly accepted **4,754**.
+- **`eval:replay`, 8 files** (three real captures, three variant captures, two invented fixtures): **8 of
+  8 byte-identical** to the `9caaa2c` output.
+- **Corpus differential** (20,447 chunks; the 2026-10-28 snapshot copy, sha256 `7eb9a0d69ef7cb20…`,
+  unchanged after, read-only), against the old verifier: **0 claims newly accepted anywhere.** On the
+  27 unit-bearing column rows (the vehicle-height row and the throttle-position row of an accelerator
+  data list, hand-checked), 105 wrong-column and 54 no-column synthetic claims are newly rejected and,
+  within those three claim templates (right column, other column, no column), nothing else changes. The
+  real engine-mount torque claim is accepted again, as before.
+- **The M7 rule's footprint, cell-boundary shapes** (every start and end cell of every row, in the 30
+  chunks holding a column row): 33 claims newly rejected in the column rows and 12 in the vehicle-height
+  table's later rows (6 chunks / 4 docs), **none** in an unrelated table. **Quotes starting inside a
+  cell add 120 claims (27 chunks / 13 docs) and 36 (6 chunks / 4 docs)**, again only in those two tables
+  (see "Scope of the label-less-quote rule"). The corpus holds only two distinct column tables, so how
+  it generalizes is unmeasured. The second review also found one invented false reject on a labelled
+  quote repeated in a chunk (see below); the corpus has no instance.
+
+### Correct claims the final verifier now rejects (introduced by this change; the safe direction)
+
+Each case below is a correct, well-qualified claim that the old verifier accepted and the final one
+rejects. They cost an answer; none lets a wrong figure through. The earlier statement "0 correct claims
+newly rejected" is true only of the fuzz's own claim vocabulary.
+
+- **A column word anywhere in the figure's clause counts as naming that column, negated or not.** On
+  real chunk #6218 (the accelerator-pedal data list) a correct claim for the Released cell that adds
+  "with the pedal **not depressed**", or "…and it rises as the pedal is depressed", gets `wrong_column`
+  from the new verifier and is accepted by the old one, while the same claim naming only Released is
+  accepted by both. Invented analogue, same behaviour (a table with 0.6 to 1.2 V under Fully Released):
+  "The sensor alpha voltage with the pedal not depressed is 0.6 to 1.2 V." The real chunk's own wording
+  and figures are deliberately not reproduced here. **Not pinned by a test.**
+- **A claim naming no column, against a quote that lands inside a column row** (intended, this is the
+  no-column rule): cells alone, a quote starting at a later cell, at a first cell two rows share, or
+  inside a cell. Counts in "Scope of the label-less-quote rule".
+- **A labelled row printed twice beside a column table**, whose value occurs inside a cell. Invented
+  repro: a chunk with a Front/Rear row "… 310 mm (12.2 in.) 295 mm …" and "Spacer plate thickness
+  12.2 in." printed twice; the quote "Spacer plate thickness 12.2 in." with the claim "The spacer plate
+  thickness is 12.2 in." is `column_unstated`, and accepted when the row is printed once. Reproduced on
+  invented text; no corpus instance; **not pinned by a test**.
+- **An alternate unit printed without parentheses** ("310 mm 12.2 in."): counted as a second cell, so a
+  correct claim for the first column gets `wrong_column`. Invented; no corpus instance; not pinned.
+- **A part name holding both words of a group** when the row prints exactly as many numbers as columns:
+  the correct claim gets `wrong_column`. Pinned as `F4-L3`; no corpus instance.
+
+Not an introduced loss: a cut quote on the vehicle-height label, whose sentence carries an unrelated
+condition word. The old verifier rejects it too (`F4-C1`).
+
+- **A quote that drops a leading condition while keeping every cell** (the old "quote trimming" limit):
+  **2,796** of the 402,384 invented cases, all also accepted by the old verifier, each a quote that
+  dropped a condition word before the part ("Minimum", "Used", "Without", …) with the claim omitting or
+  contradicting it. This change neither introduces nor fixes it, and it is the largest remaining false
+  accept in these tables.
+- **Header inheritance.** A header printed only above a table's first row governs the rows after it; the
+  verifier reads a header only from a row's own label. For those rows a claim naming the wrong column is
+  usually rejected and so is a correct one, but **a claim naming no column is accepted** (`F4-L2`), and a
+  wrong-column claim is accepted when the row's own label prints a column word ("Wagon (rear-wheel
+  drive) …"). Nearly every aligned row has such rows after it (26 of the 27 in the first scan). The
+  evidence prompt's own "Conditions" rule tells the model to name a front/rear condition in a separate
+  claim and point back to it without repeating it, which produces exactly a no-column figure claim.
+- **A column row cut by the end of its chunk** prints one value and is not read. For the accelerator-pedal
+  header row, 42 chunks in 10 documents print it: **21 are read and 21 are not, and every one of the 10
+  documents has an unread chunk**, so a wrong-column claim still passes against those.
+- **No reading, so the older rules' wrong-column accepts stand:** a single-value row, a row whose cell
+  count does not match its header (a footnoted extra cell — `F4-A9`), a header whose words repeat inside
+  it, two groups' words side by side, a with/without header ("with" is ordinary English), and a
+  threshold after each cell ("1.0 mm or more 1.5 mm or more", where "or" joins both values into one
+  cell). An alternate unit printed without parentheses is counted as a second cell: a correct claim for
+  the first column then gets `wrong_column` and a wrong claim for the second passes.
+- A part name holding both words of a group can read as a header when the row prints exactly as many
+  numbers as columns (`F4-L3`; none in the corpus). A header in the previous chunk (F2) is not seen.
+  Column order is the extracted text's order; a table with merged or multiple header rows is only as
+  reliable as the cell count.
+
+### What this does not show
+
+Nothing here measures what a model writes. Experiment L saved no replies, so whether the
+vehicle-height case failed because of the verifier or because v3's "omit the whole figure claim" and
+"quote ONLY the row" rules kept the model from quoting the header is still unsettled. With the
+no-column rule a row-only answer is now rejected where it was accepted, and a cut quote of the
+vehicle-height row is still rejected, so that case may fail until the prompt asks for the header and the
+full row. A capture of that case that saves replies (paid, needs the owner's approval in the session)
+would show it; it is not part of this change.
+
+### Follow-up work
+
+1. **Quote trimming:** a quote that drops a leading condition while keeping every cell (the largest
+   remaining false accept; needs a chunk-level condition check with its own fuzz).
+2. **Header inheritance** — read a header for the rows that rely on it, which needs the table's extent;
+   the prompt's "Conditions" rule makes the no-column inherited-row claim likely.
+3. A column row cut by the end of its chunk (21 of 42 pedal-table chunks).
+4. A guard so a part name holding both words of a group is not read as a header.
+5. A prompt change asking for the header words and the whole row in the quote, judged by a paid capture.
+6. The optional paid capture of `applicability-vehicle-height-wrong-engine` that saves replies.
+7. F2 (header in the previous chunk), the 12× `in.*lbf` unit false accept, and applicability (build
+   variant) remain separate and unstarted.

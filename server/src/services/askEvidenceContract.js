@@ -2112,12 +2112,343 @@ function normalizeRowValues(values) {
   return values.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function judgeFigureRow(rows, index, claimWords, sourceRows, subject) {
+// ---------------------------------------------------------------------------
+// Column headers (F4)
+// ---------------------------------------------------------------------------
+//
+// A table prints its column header once ("Front Rear") and then rows of cells.
+// The condition checks above read the header words as conditions of the whole
+// row, so a quote printing the header and both cells supported the right
+// column's claim AND the wrong column's: "the rear height is 310 mm" against a
+// cell printed under Front. They also could not tell a quote cut after the first
+// cell from a different row (see columnReading).
+//
+// A column is read the only way a flattened table allows: by POSITION. The
+// cited chunk's row must end its label in a clean header run and print exactly
+// as many cells as the run has columns; cell i is then under header i. Anything
+// the verifier cannot align -- a footnoted extra cell, a stacked table, a blank
+// cell, a header printed only above the first row -- is not a column row and is
+// judged as before. (A rule rejecting a claim that names a column of a header it
+// could not align was built and measured: on the real corpus it newly rejected
+// one legitimate torque row and protected none, so it was removed.) Words of a
+// group inside a PART NAME ("Rear ... x Front ...") can still read as a header
+// when the row happens to print one cell per "column"; that is a known limit.
+
+// "with" is ordinary English, so with/without is never a printed column header.
+// (The "or less" / "or more" group needs no exclusion: its tokens are
+// synthesized from two words and never occur as a word of a label.)
+const COLUMN_GROUPS = ROW_CONDITION_GROUPS.filter((group) => group !== WITH_GROUP);
+
+// Measured on the real tables, not tuned: they print their header words 2 to 3
+// words apart and 4 to 5 words before the first value. Looser bounds would read
+// prose ("front brake pads wear faster than the rear ones ...") as a header.
+const COLUMN_HEADER_MAX_GAP = 4;
+const COLUMN_HEADER_MAX_TAIL = 8;
+
+/**
+ * The column header a row's label ends in, or null.
+ *
+ * Takes the last sentence of the label and, for one condition group at a time,
+ * the cluster of its words nearest the values: header words from the end
+ * backwards, no more than COLUMN_HEADER_MAX_GAP words apart. A label that
+ * wanders through earlier text ("... B Rear subframe pin ... C Front link pin
+ * ... Front 1 - A Rear 2 - B") still yields its real header, because the earlier
+ * words are too far back to join the cluster. The run needs two DIFFERENT
+ * alternatives of ONE group and must end within COLUMN_HEADER_MAX_TAIL words of
+ * the values. It yields none when the reading is ambiguous: an alternative
+ * repeated inside the cluster, or two groups each with a run (Front/Rear beside
+ * Inner/Outer). Exported for tests and probes.
+ *
+ * @param {string} label
+ * @returns {{ group: string[][], alternatives: number[] } | null} the group and
+ *   the alternative printed first, second, ... (the column order)
+ */
+export function columnHeaderRun(label) {
+  const sentence = String(label || "").split(SENTENCE_END_REGEX).at(-1) || "";
+  const words = sentence.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const runs = [];
+
+  for (const group of COLUMN_GROUPS) {
+    const hits = words.flatMap((word, position) => {
+      const alternative = group.findIndex((spellings) => spellings.includes(word));
+
+      return alternative >= 0 ? [{ position, alternative }] : [];
+    });
+    const seen = new Set();
+    /** @type {Array<{ position: number, alternative: number }>} */
+    const run = [];
+    let ambiguous = false;
+
+    for (let index = hits.length - 1; index >= 0; index -= 1) {
+      const hit = hits[index];
+
+      // A hit this far back starts an earlier cluster: not part of this header.
+      if (run.length && run[0].position - hit.position - 1 > COLUMN_HEADER_MAX_GAP) {
+        break;
+      }
+
+      // The same alternative twice inside one cluster ("Front Rear Front axle"):
+      // the nearest occurrences would read as Rear, Front and reverse every
+      // column, and the words cannot say which occurrence is the header.
+      if (seen.has(hit.alternative)) {
+        ambiguous = true;
+        break;
+      }
+
+      seen.add(hit.alternative);
+      run.unshift(hit);
+    }
+
+    if (
+      !ambiguous &&
+      run.length >= 2 &&
+      words.length - 1 - run[run.length - 1].position <= COLUMN_HEADER_MAX_TAIL
+    ) {
+      runs.push({ group, alternatives: run.map((hit) => hit.alternative) });
+    }
+  }
+
+  return runs.length === 1 ? runs[0] : null;
+}
+
+/**
+ * The cells of one row, as [start, end) spans in `text`. A figure and its
+ * alternate-unit rendering are ONE cell -- "310 mm (12.2 in.)", "37 N*m (377
+ * kgf*cm, 27 ft.*lbf)" -- because a value inside an unclosed parenthesis belongs
+ * to the cell before it; so does a value linked to it by "to", "and", "or" or
+ * "at" (the words quoteRows already treats as glue inside one row: "10 mm or 12
+ * mm", "12 mm at 20 °C") or by a dash, tilde or slash ("1.5° +/- 0.3°": a value
+ * and its tolerance are one value, not two columns). A range ("0.6 to 1.2 V") is
+ * one value, so one cell.
+ * Otherwise each value starts a new cell: two adjacent same-unit values are two
+ * cells, and an extra or missing cell shows up as a count that does not match
+ * the header's. Exported for tests and probes.
+ *
+ * @param {string} text
+ * @param {{ start: number, end: number }} row a row of quoteRows(text)
+ * @returns {Array<[number, number]>}
+ */
+export function quoteRowCells(text, row) {
+  const source = String(text || "");
+  /** @type {Array<[number, number]>} */
+  const cells = [];
+  let previousEnd = -1;
+
+  for (const [start, end] of rowValueSpans(source)) {
+    if (start < row.start || start >= row.end) {
+      continue;
+    }
+
+    if (!cells.length) {
+      cells.push([start, end]);
+      previousEnd = end;
+      continue;
+    }
+
+    const opened = source.slice(row.start, start);
+    const depth = (opened.match(/\(/g) || []).length - (opened.match(/\)/g) || []).length;
+    const gap = source.slice(previousEnd, start);
+    const linked =
+      gap.split(/[^A-Za-z]+/).some((word) => ROW_GLUE_WORDS.has(word.toLowerCase())) ||
+      /[-–~/]/.test(gap);
+
+    if (depth > 0 || start < previousEnd || linked) {
+      const last = cells[cells.length - 1];
+
+      last[1] = Math.max(last[1], end);
+    } else {
+      cells.push([start, end]);
+    }
+
+    previousEnd = Math.max(previousEnd, end);
+  }
+
+  return cells;
+}
+
+/**
+ * Which row of the cited chunk is this quote row? The chunk's row whose label
+ * ENDS with the quote row's label (the quote may start inside it) and whose
+ * values START with the quote row's values (the quote may stop inside them).
+ * Exactly one such row, or -1: two identical rows in one chunk cannot be told
+ * apart, so no column is read and the older rules decide.
+ */
+function sourceRowIndex(quoteRow, sourceRows) {
+  const label = normalizeForMatch(quoteRow.label);
+  const values = normalizeForMatch(quoteRow.values);
+  const candidates = sourceRows.flatMap((row, index) =>
+    normalizeForMatch(row.label).endsWith(label) && normalizeForMatch(row.values).startsWith(values)
+      ? [index]
+      : []
+  );
+
+  return candidates.length === 1 ? candidates[0] : -1;
+}
+
+/**
+ * A quote row that cannot be tied to ONE chunk row -- it starts at a later cell,
+ * starts inside a cell, or starts at a first cell two rows share -- may still
+ * print the cells of a column row. When its values are printed inside a clean
+ * column row of the chunk (a header run and one cell per column, on token
+ * boundaries), the figure sits in a table with several columns even though no
+ * column can be attributed to it. Returns { status: "possible", group } for the
+ * first such row, or null. It can only make a claim fail, never pass.
+ */
+function possibleColumnRow(quoteRow, sourceRows, sourceText) {
+  for (const candidate of sourceRows) {
+    const run = columnHeaderRun(candidate.label);
+
+    if (!run) {
+      continue;
+    }
+
+    const cells = quoteRowCells(sourceText, candidate);
+
+    // A header run always has at least two columns, so one cell per column is
+    // already two cells or more.
+    if (
+      cells.length === run.alternatives.length &&
+      quoteAppearsInChunk(quoteRow.values, candidate.values)
+    ) {
+      return { status: "possible", group: run.group };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Where the claim's figures sit in the table: null when the row is not a
+ * column row at all, otherwise
+ *   { status: "aligned", group, columnsOf }
+ *     the cited chunk's row ends its label in a clean header run and prints
+ *     exactly as many cells as the run has columns, and every figure the claim
+ *     states was found in a cell. `columnsOf` holds the columns (alternative
+ *     numbers) under which EVERY figure is printed -- the intersection, so a
+ *     figure printed in both columns of a row can be stated by either, and two
+ *     figures under different columns can be stated by neither;
+ *   { status: "possible", group }
+ *     the quote is tied to no single chunk row but prints a column row's cells
+ *     (possibleColumnRow): no column is attributed, but one must be named.
+ *
+ * The header and the cell count come from the CHUNK's row, not the quote: a
+ * quote cut after the first cell still has that cell under the first column,
+ * and a quote starting inside the header cannot move a cell to another column.
+ * A row printing fewer than two cells, or a cell count that does not match the
+ * header's, is not read at all (see the guards below): a sentence that merely
+ * contains both words of a group is never a table, and a footnoted or stacked
+ * row is left to the older rules.
+ */
+function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
+  const row = rows[index];
+  const sourceIndex = sourceRowIndex(row, sourceRows);
+
+  if (sourceIndex < 0) {
+    return possibleColumnRow(row, sourceRows, sourceText);
+  }
+
+  const run = columnHeaderRun(sourceRows[sourceIndex].label);
+
+  if (!run) {
+    return null;
+  }
+
+  const sourceCells = quoteRowCells(sourceText, sourceRows[sourceIndex]);
+  const quoteCells = quoteRowCells(evidence, row);
+
+  // One cell per column, or no reading. A header always has two columns or more,
+  // so this also covers one value after a pair of group words, which is a
+  // sentence and not a row of cells ("Height difference between the right and
+  // left strut caps: 2.0 mm or less"): there is nothing to place under a column,
+  // and a claim restating those words is judged as before. A count that does not
+  // match (a genuine column row with a blank cell, a footnoted extra cell, a
+  // stacked table, a part name whose words only look like a header followed by
+  // bare numbers) is left to the older rules too. Rejecting a claim that names a
+  // column there was measured on the real corpus: real alignment, steering,
+  // fuel-sender, climate and torque specifications newly rejected, no row
+  // protected. These are documented limits.
+  if (sourceCells.length !== run.alternatives.length) {
+    return null;
+  }
+
+  // The quote's cells are the chunk row's first cells, cell for cell: the row was
+  // matched by label suffix and values prefix (sourceRowIndex), so the quote has
+  // the same value spans, cut at most inside the last one. A figure's position
+  // therefore lies in a cell of the quote row, and cell i is under header i. One
+  // caveat: when the chunk prints a header unit the quote lacks ("(N*m)"), bare
+  // numbers are values only in the chunk, the two texts differ, and no row is
+  // matched at all, so there is no reading rather than a wrong one.
+  const evidenceNumbers = allNumbersIn(evidence);
+  const evidenceSpecs = readSpecs(evidence);
+  const headerUnits = headerUnitsIn(evidence);
+  const cellAt = (position) =>
+    quoteCells.findIndex(([start, end]) => position >= start && position < end);
+  /** @type {Set<number> | null} */
+  let columnsOf = null;
+
+  for (const spec of specs) {
+    // The row holds every figure (rowsHoldingFigures chose it) and everything
+    // inside a row's span is inside a value span, so each position is in a cell.
+    // Were that ever false the figure would be printed under no column, so
+    // `columnsOf` would not contain the column a claim names and it would be
+    // rejected: the failure direction is the safe one.
+    const printedUnder = new Set(
+      claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
+        .filter((position) => position >= row.start && position < row.end)
+        .map((position) => run.alternatives[cellAt(position)])
+    );
+
+    columnsOf = columnsOf
+      ? new Set([...columnsOf].filter((alternative) => printedUnder.has(alternative)))
+      : printedUnder;
+  }
+
+  return { status: "aligned", group: run.group, columnsOf: columnsOf || new Set() };
+}
+
+function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null) {
   const row = rows[index];
   const own = figureSentence(rows, index, subject);
+
+  // The column the claim's figures sit under (F4). Three early rejections; the
+  // loop below then still requires the claim's column word to be PRINTED in the
+  // figure's own sentence, as it always did.
+  if (reading) {
+    const stated = alternativesIn(claimWords, reading.group);
+
+    if (reading.status === "possible") {
+      // The quote prints a column row's cells but cannot be tied to ONE row, so
+      // no column can be attributed. The table still has several, and a figure
+      // that names none could be under any of them.
+      if (!stated.length) {
+        return "column_unstated";
+      }
+    } else {
+      if (!reading.columnsOf.size) {
+        return "column_unresolved";
+      }
+
+      // A figure in a table with several columns must say which one, whether or
+      // not the quote kept the header.
+      if (!stated.length) {
+        return "column_unstated";
+      }
+
+      if (stated.some((alternative) => !reading.columnsOf.has(alternative))) {
+        return "wrong_column";
+      }
+    }
+  }
+
   const part = partTokens(own.label);
   // Other rows of the source for the same part: their own sentence names it.
-  // A row printing the same figure cannot make this one ambiguous.
+  // A row printing the same figure cannot make this one ambiguous. The chunk's
+  // own full row counts when this quote is a CUT of it, deliberately: it is the
+  // only thing that sees a condition the quote left out ("Minimum" before the
+  // part, "without" before the header, an "or less" after the last cell). Letting
+  // it stop counting cured a false reject (a foreign condition word in the same
+  // label sentence) but newly accepted exactly those quotes, so that case is a
+  // pinned limit instead.
   const siblings = part.length
     ? sourceRows
         .flatMap((other, otherIndex) =>
@@ -2188,7 +2519,16 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject) {
  * to qualify the figure, and a label printed only in another chunk is out of
  * reach.
  *
- * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" }}
+ * F4 adds the table's columns to the same check. When the cited chunk's row
+ * ends its label in a column header and prints one cell per column, each
+ * figure the claim states is placed under its column by position, and the claim
+ * must name that column (`wrong_column` when it names another, `column_unstated`
+ * when it names none, `column_unresolved` when its figures sit under different
+ * columns). See columnReading for what counts as aligned; a header printed only
+ * above a table's first row is not read for the rows after it, and a row whose
+ * cell count does not match its header is not read at all.
+ *
+ * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "wrong_column" | "column_unstated" | "column_unresolved" }}
  */
 export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
   const clauses = String(claimText || "")
@@ -2204,7 +2544,8 @@ export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
   }
 
   const claimWords = conditionWords(clauses.join(" "));
-  const sourceRows = quoteRows(String(sourceText ?? evidence));
+  const source = String(sourceText ?? evidence);
+  const sourceRows = quoteRows(source);
   const subject = parseClaimSubject(claimText);
   // Only the claimed part's rows can support it: another part's row printing
   // the same figure ("Rotor minimum thickness 25.0 mm. Pad thickness 25.0 mm")
@@ -2215,7 +2556,14 @@ export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
     ? holding.filter((row) => rowNamesSubject(rows, row, subject, claimText))
     : [];
   const details = (named.length ? named : holding).map((row) =>
-    judgeFigureRow(rows, row, claimWords, sourceRows, subject)
+    judgeFigureRow(
+      rows,
+      row,
+      claimWords,
+      sourceRows,
+      subject,
+      columnReading(rows, row, specs, evidence, sourceRows, source)
+    )
   );
 
   if (details.includes("")) {
