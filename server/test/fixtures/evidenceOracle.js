@@ -116,6 +116,20 @@ const F4_RIDE_TIRES_QUOTE = "Ride height: Front Rear Sedan 310 mm (12.2 in.) 295
 // inside the column row's "310 mm". A quote of just that cell is tied to no row.
 const F4_RIDE_SPACER =
   "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) Spacer thickness 5 mm 10 mm";
+// A PART NAME that contains both words of a group ("Rear ... x Front ..."): read as a
+// header it would turn a correct torque claim into a wrong-column or unresolved one.
+const F4_MOUNT_QUOTE = "Rear mount insulator x Front crossmember bolt 55 N*m 561 kgf*cm 41 ft.*lbf";
+const F4_MOUNT = `Engine mount torque. ${F4_MOUNT_QUOTE}. Next item.`;
+const F4_MOUNT_TWO_UNITS_QUOTE = "Rear mount insulator x Front crossmember bolt 55 N*m 41 ft.*lbf";
+const F4_MOUNT_TWO_UNITS = `Engine mount torque. ${F4_MOUNT_TWO_UNITS_QUOTE}. Next item.`;
+// Other groups and a four-alternative header (standard / minimum / maximum / limit).
+const F4_DISC =
+  "Brake service. Disc thickness Standard Minimum Maximum 25.0 mm 23.0 mm 26.0 mm Replace the disc below the minimum.";
+const F4_DISC_QUOTE = "Disc thickness Standard Minimum Maximum 25.0 mm 23.0 mm 26.0 mm";
+const F4_VALVE = "Valve service. Valve clearance: Intake Exhaust 0.19 mm 0.30 mm. Adjust if outside the range.";
+const F4_VALVE_QUOTE = "Valve clearance: Intake Exhaust 0.19 mm 0.30 mm";
+// The column row is NOT the first row of the chunk.
+const F4_RIDE_SECOND = `Spacer thickness 5 mm 10 mm. ${F4_RIDE}`;
 // Bare numbers under a unit header ("(N*m)"): the cells carry no unit of their own.
 const F4_HUB_BARE = "Hub nut torque (N*m): Front Rear Sedan 120 90 Wagon 130 95";
 const F4_HUB_BARE_QUOTE = "Hub nut torque (N*m): Front Rear Sedan 120 90";
@@ -152,6 +166,15 @@ export const F4_TABLES = {
   rideFootQuote: F4_RIDE_FOOT_QUOTE,
   rideSame: F4_RIDE_SAME,
   rideSpacer: F4_RIDE_SPACER,
+  rideSecond: F4_RIDE_SECOND,
+  mount: F4_MOUNT,
+  mountQuote: F4_MOUNT_QUOTE,
+  mountTwoUnits: F4_MOUNT_TWO_UNITS,
+  mountTwoUnitsQuote: F4_MOUNT_TWO_UNITS_QUOTE,
+  disc: F4_DISC,
+  discQuote: F4_DISC_QUOTE,
+  valve: F4_VALVE,
+  valveQuote: F4_VALVE_QUOTE,
   rideTires: F4_RIDE_TIRES,
   rideTiresQuote: F4_RIDE_TIRES_QUOTE,
   tire: F4_TIRE,
@@ -1403,7 +1426,8 @@ export const ASK_ORACLE = [
     claim: "For the sedan, the rear ride height is 310 mm.",
     expect: "reject",
     finding: "F4-unaligned-column",
-    note: "Three cells under two headers: no cell can be placed under a column, so no claim may name one. 310 mm is the first cell, Front.",
+    todo: "F4-unaligned-column",
+    note: "Three cells under two headers: no cell can be placed under a column, so a claim naming one has nothing to stand on. 310 mm is the first cell, Front. KNOWN LIMIT, pinned on purpose: a rule rejecting such claims was measured on the real corpus at one legitimate torque row newly rejected (a part name whose words Rear and Front read as a header) and no row newly protected, so it was removed; a footnoted or stacked table under a header can still pass a wrong-column claim, exactly as it did before.",
   },
   {
     id: "F4-A10-bare-number-table-wrong-column",
@@ -1765,7 +1789,7 @@ export const ASK_ORACLE = [
     claim: "For the sedan, the ride height is 310 mm.",
     expect: "reject",
     finding: "control",
-    note: "Scope guard: the row has three cells under two headers, so it is not aligned and its full row must keep counting as a sibling. Only an aligned column row stops doing so.",
+    note: "A cut quote's own full row counts as a sibling like any other row: here it prints no condition the quote lacks, but the row has three cells under two headers and no column can be read, so only the older rules judge it. The claim names no column and the quote drops the header; this was already rejected.",
   },
   {
     id: "control-F4-label-picks-the-row-among-rows-sharing-a-first-cell",
@@ -1865,6 +1889,113 @@ export const ASK_ORACLE = [
     expect: "reject",
     finding: "F4-sibling-exclusion",
     note: "Every cell is quoted, only the trailing 'or less' is cut. This was already rejected before the exclusion existed.",
+  },
+
+  // ---- F4: a part name that holds both words of a group is not a header ----
+  // "Rear mount insulator x Front crossmember bolt" has Rear and Front four words
+  // apart, so it can read as a header. With a cell count that matches no header the
+  // row is not read, and the correct claim stands.
+  {
+    id: "control-F4-part-name-with-two-header-words-three-cells-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_MOUNT,
+    quote: F4_MOUNT_QUOTE,
+    claim: "The rear mount insulator x front crossmember bolt torque is 55 N*m.",
+    expect: "accept",
+    finding: "control",
+    note: "A real torque row looks like this: a part name containing Rear and Front, then three bare numbers (N*m, kgf*cm, ft.*lbf). The words are the part's name, not columns; rejecting this claim lost a correct torque on the owner's engine.",
+  },
+  {
+    id: "F4-L3-part-name-with-two-header-words-two-cells",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_MOUNT_TWO_UNITS,
+    quote: F4_MOUNT_TWO_UNITS_QUOTE,
+    claim: "The rear mount insulator x front crossmember bolt torque is 55 N*m.",
+    expect: "accept",
+    finding: "F4-part-name-header",
+    todo: "F4-part-name-header",
+    note: "KNOWN LIMIT, pinned: the same part name with exactly as many numbers as there are 'columns' (two units) reads as an aligned table, and the correct claim, which names both words, gets wrong_column. No such row exists in the corpus.",
+  },
+
+  // ---- F4: the other header groups, and a four-alternative header ----
+  {
+    id: "F4-E1-minimum-column-claims-the-standard-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (minimum) is 25.0 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "25.0 mm is under Standard; the minimum is 23.0 mm. This is the group where a wear limit can be claimed under the wrong column.",
+  },
+  {
+    id: "F4-E2-maximum-column-claims-the-minimum-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (maximum) is 23.0 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "Three columns: 23.0 mm is under Minimum, not Maximum.",
+  },
+  {
+    id: "control-F4-minimum-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (minimum) is 23.0 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "23.0 mm is under Minimum.",
+  },
+  {
+    id: "control-F4-maximum-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_DISC,
+    quote: F4_DISC_QUOTE,
+    claim: "The disc thickness (maximum) is 26.0 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "26.0 mm is under Maximum, the third column.",
+  },
+  {
+    id: "F4-E3-exhaust-claims-the-intake-clearance",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_VALVE,
+    quote: F4_VALVE_QUOTE,
+    claim: "The valve clearance for the exhaust is 0.19 mm.",
+    expect: "reject",
+    finding: "F4-wrong-column",
+    note: "0.19 mm is under Intake; Exhaust is 0.30 mm.",
+  },
+  {
+    id: "control-F4-exhaust-column-valid",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_VALVE,
+    quote: F4_VALVE_QUOTE,
+    claim: "The valve clearance for the exhaust is 0.30 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "0.30 mm is under Exhaust.",
+  },
+  {
+    id: "F4-E4-column-row-is-second-in-the-chunk-no-column",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: F4_RIDE_SECOND,
+    quote: "295 mm (11.6 in.)",
+    claim: "The ride height is 295 mm.",
+    expect: "reject",
+    finding: "F4-column-unstated",
+    note: "The column row is not the first row of the chunk; the cells-only quote must still be found inside it.",
   },
 
   // ---- F4: known limit, pinned (header inheritance is out of scope) ----

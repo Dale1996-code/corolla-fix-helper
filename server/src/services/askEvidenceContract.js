@@ -2128,8 +2128,11 @@ function normalizeRowValues(values) {
 // as many cells as the run has columns; cell i is then under header i. Anything
 // the verifier cannot align -- a footnoted extra cell, a stacked table, a blank
 // cell, a header printed only above the first row -- is not a column row and is
-// judged as before, except that a claim naming a column of a header it cannot
-// align is rejected (`column_unresolved`).
+// judged as before. (A rule rejecting a claim that names a column of a header it
+// could not align was built and measured: on the real corpus it newly rejected
+// one legitimate torque row and protected none, so it was removed.) Words of a
+// group inside a PART NAME ("Rear ... x Front ...") can still read as a header
+// when the row happens to print one cell per "column"; that is a known limit.
 
 // "with" is ordinary English, so with/without is never a printed column header.
 // (The "or less" / "or more" group needs no exclusion: its tokens are
@@ -2148,8 +2151,8 @@ const COLUMN_HEADER_MAX_TAIL = 8;
  * Takes the last sentence of the label and, for one condition group at a time,
  * the cluster of its words nearest the values: header words from the end
  * backwards, no more than COLUMN_HEADER_MAX_GAP words apart. A label that
- * wanders through earlier text ("... B Rear axle bolt ... C Front wheel ...
- * Front C - A Rear D - B") still yields its real header, because the earlier
+ * wanders through earlier text ("... B Rear subframe pin ... C Front link pin
+ * ... Front 1 - A Rear 2 - B") still yields its real header, because the earlier
  * words are too far back to join the cluster. The run needs two DIFFERENT
  * alternatives of ONE group and must end within COLUMN_HEADER_MAX_TAIL words of
  * the values. It yields none when the reading is ambiguous: an alternative
@@ -2324,8 +2327,6 @@ function possibleColumnRow(quoteRow, sourceRows, sourceText) {
  *     numbers) under which EVERY figure is printed -- the intersection, so a
  *     figure printed in both columns of a row can be stated by either, and two
  *     figures under different columns can be stated by neither;
- *   { status: "unaligned", group }
- *     the run is clean but the cells do not line up with it;
  *   { status: "possible", group }
  *     the quote is tied to no single chunk row but prints a column row's cells
  *     (possibleColumnRow): no column is attributed, but one must be named.
@@ -2333,8 +2334,10 @@ function possibleColumnRow(quoteRow, sourceRows, sourceText) {
  * The header and the cell count come from the CHUNK's row, not the quote: a
  * quote cut after the first cell still has that cell under the first column,
  * and a quote starting inside the header cannot move a cell to another column.
- * A row printing fewer than two cells is not read at all (see the guard below),
- * so a sentence that merely contains both words of a group is never a table.
+ * A row printing fewer than two cells, or a cell count that does not match the
+ * header's, is not read at all (see the guards below): a sentence that merely
+ * contains both words of a group is never a table, and a footnoted or stacked
+ * row is left to the older rules.
  */
 function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   const row = rows[index];
@@ -2350,23 +2353,22 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
     return null;
   }
 
-  const unaligned = { status: "unaligned", group: run.group };
   const sourceCells = quoteRowCells(sourceText, sourceRows[sourceIndex]);
   const quoteCells = quoteRowCells(evidence, row);
 
-  // One value after a pair of group words is a sentence, not a row of cells:
-  // "Height difference between the right and left strut caps: 2.0 mm or less". There is
-  // nothing to place under a column, so the row is not read and a claim that
-  // restates those words is judged as before. Rejecting it would reject real
-  // alignment, steering, fuel-sender and climate specifications. A genuine
-  // column row with a blank cell also prints one value and is left to the older
-  // rules for the same reason; that is a documented limit.
-  if (sourceCells.length < 2) {
-    return null;
-  }
-
+  // One cell per column, or no reading. A header always has two columns or more,
+  // so this also covers one value after a pair of group words, which is a
+  // sentence and not a row of cells ("Height difference between the right and
+  // left strut caps: 2.0 mm or less"): there is nothing to place under a column,
+  // and a claim restating those words is judged as before. A count that does not
+  // match (a genuine column row with a blank cell, a footnoted extra cell, a
+  // stacked table, a part name whose words only look like a header followed by
+  // bare numbers) is left to the older rules too. Rejecting a claim that names a
+  // column there was measured on the real corpus: real alignment, steering,
+  // fuel-sender, climate and torque specifications newly rejected, no row
+  // protected. These are documented limits.
   if (sourceCells.length !== run.alternatives.length) {
-    return unaligned;
+    return null;
   }
 
   // The quote's cells are the chunk row's first cells, cell for cell: the row was
@@ -2420,12 +2422,6 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
       // that names none could be under any of them.
       if (!stated.length) {
         return "column_unstated";
-      }
-    } else if (reading.status === "unaligned") {
-      // A header the verifier cannot align to cells cannot place a figure under
-      // a column, so a claim that names one has nothing to stand on.
-      if (stated.length) {
-        return "column_unresolved";
       }
     } else {
       if (!reading.columnsOf.size) {
@@ -2528,9 +2524,9 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
  * figure the claim states is placed under its column by position, and the claim
  * must name that column (`wrong_column` when it names another, `column_unstated`
  * when it names none, `column_unresolved` when its figures sit under different
- * columns, or when a header's cells cannot be aligned and the claim names a
- * column of it). See columnReading for what counts as aligned; a header printed
- * only above a table's first row is not read for the rows after it.
+ * columns). See columnReading for what counts as aligned; a header printed only
+ * above a table's first row is not read for the rows after it, and a row whose
+ * cell count does not match its header is not read at all.
  *
  * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "wrong_column" | "column_unstated" | "column_unresolved" }}
  */

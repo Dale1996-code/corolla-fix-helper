@@ -481,15 +481,20 @@ the quote must still print the column word with the figure (`row_mismatch`):
   header out**, because the table has several columns and the figure could be any
   of them. It holds for every quote the verifier can tie to the table: a quote
   that starts at the row's first cell or carries the row's label (the row is
-  singled out and its column attributed), and a quote of cells alone that starts
-  at a later cell, starts inside a cell, or starts at a first cell two rows share
-  (tied to no single row, but printed inside a clean column row of the chunk, so
-  no column is attributed and one must be named). It does not hold for the cases
+  singled out and its column attributed), and any quote that cannot be tied to a
+  single chunk row but prints a clean column row's cells (it starts at a later
+  cell, starts inside a cell, starts at a first cell two rows share, or repeats a
+  row the chunk prints twice; labelled or not). Those are read as `possible`: no
+  column is attributed, but one must be named. It does not hold for the cases
   listed under *What the column reading does not cover*;
 - figures under different columns in one claim are `column_unresolved` — the
-  claim is true but cannot be attributed figure by figure, so it must be split;
-- a header whose cells do not line up with it (a footnoted extra cell, a stacked
-  table) rejects a claim that names one of its columns as `column_unresolved`.
+  claim is true but cannot be attributed figure by figure, so it must be split.
+
+A row whose cell count does not match its header (a footnoted extra cell, a
+stacked table, a part name whose words merely look like a header) is **not read**
+and the older rules judge it. A rule rejecting a claim that names a column of
+such a header was built and measured on the real corpus: it newly rejected one
+legitimate torque specification and protected no row, so it was removed.
 
 The header and the cell count come from the chunk's row, so a quote that begins
 inside the header cannot move a cell to another column, and a quote cut after the
@@ -511,23 +516,41 @@ unless the rules above apply:
 
 - *A header printed only above a table's first row* governs the rows after it,
   but the verifier reads a header only from a row's own label. For those rows a
-  claim naming the wrong column is still rejected (the column word is not in the
+  claim naming the wrong column is usually rejected (the column word is not in the
   row's sentence) and so is a correct one, but **a claim that names no column is
-  accepted**. This is a remaining false accept, not a verified safe case; in the
-  saved corpus nearly every column row has such rows after it.
-- A row printing a single value, a header whose words repeat inside the header
-  ("Front Rear Front axle"), two groups' words side by side, and two identical
-  rows in one chunk give **no reading**: the older rules judge them, and a
+  accepted**, and a wrong-column claim is accepted when the row's own label prints
+  a column word ("Wagon (rear-wheel drive) …"). This is a remaining false accept,
+  not a verified safe case; in the saved corpus nearly every column row has such
+  rows after it.
+- A row printing a single value, a row whose cell count does not match its header,
+  a header whose words repeat inside the header ("Front Rear Front axle"), and two
+  groups' words side by side give **no reading**: the older rules judge them, and a
   wrong-column claim whose quote prints both header words is still accepted
-  there. **The single-value case is common, not a corner:** a column row cut by
-  the end of its chunk prints one value (an overlapping chunk ends mid-row), so it
-  is not read. In the saved corpus the accelerator-pedal header row is printed by
-  42 chunks in 10 documents, and 21 of them end that way: the wrong-column claim is
-  rejected for the other 21 and **still accepted for these**, and every one of the
-  10 documents has at least one such chunk.
+  there. Two identical rows in one chunk are read as `possible`: a claim naming no
+  column is rejected, a wrong-column claim still passes. **The single-value case is
+  common, not a corner:** a column row cut by the end of its chunk prints one value
+  (an overlapping chunk ends mid-row), so it is not read. In the saved corpus the
+  accelerator-pedal header row is printed by 42 chunks in 10 documents, and 21 of
+  them end that way: the wrong-column claim is rejected for the other 21 and
+  **still accepted for these**, and every one of the 10 documents has at least one
+  such chunk.
+- *Shapes that are not column headers to the verifier:* a with/without header (the
+  word "with" is ordinary English, so that group is never a header); a threshold
+  printed after each cell ("1.0 mm or more 1.5 mm or more"), where the "or" joins
+  both values into one cell; and an alternate unit printed without parentheses
+  ("310 mm 12.2 in."), which is counted as a second cell and placed under the
+  second column, so a correct claim for the first column gets `wrong_column`
+  while a wrong claim for the second passes. A wrong-column claim can also pass
+  on the first two, as it did before this feature.
+- *A part name holding both words of a group* ("Rear … x Front …") can read as a
+  header. When the row prints exactly as many numbers as there are "columns", the
+  row is read as a table and a correct claim naming the part gets `wrong_column`.
+  When it prints a different count (the real engine-mount torque row prints three
+  numbers) it is not read, and the claim stands. No row of the first kind exists in
+  the saved corpus.
 - A label-less quote of cells that are not printed inside the column row (a later
-  row that relies on the header above it, or a row whose cells do not line up) is
-  tied to nothing, and the older rules judge it.
+  row that relies on the header above it) is tied to nothing, and the older rules
+  judge it.
 - A header printed only in the previous chunk is not seen.
 - A table with several header rows or merged cells is only as reliable as the
   cell count: a coincidental match would place a cell under the wrong column.

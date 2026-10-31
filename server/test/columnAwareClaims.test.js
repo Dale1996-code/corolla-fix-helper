@@ -203,17 +203,33 @@ test("a claim naming no column of a clean column row is rejected as column_unsta
   assert.equal(detailOf("The tire pressure is 230 kPa.", T.tireFull, T.tire), "column_unstated");
 });
 
-test("figures under different columns, or in an unalignable row, are column_unresolved", () => {
+test("figures under different columns in one claim are column_unresolved", () => {
   // Correct, but no one column states both figures.
   assert.equal(
     detailOf("For the sedan, the ride height is 310 mm at the front and 295 mm at the rear.", T.rideFull, T.ride),
     "column_unresolved"
   );
+});
 
-  // A third cell under two headers: nothing can be placed.
+test("KNOWN LIMIT: a footnoted extra cell under a header gets no reading, so a wrong-column claim passes", () => {
+  // Three cells under two headers: nothing can be placed under a column. A rule
+  // rejecting a claim that names a column of such a header was measured on the
+  // real corpus at ONE legitimate torque row newly rejected (a part name holding
+  // Rear and Front, then three bare numbers) and no row newly protected, so it was
+  // removed: the older rules judge the row, and accept this wrong-column claim
+  // exactly as they did before. If this is ever fixed, flip the assertion.
+  const wrong = "For the sedan, the rear ride height is 310 mm.";
+
+  assert.equal(verify(wrong, T.rideFootQuote, T.rideFoot).accepted, true);
+  assert.equal(checkClaimQualifiers(wrong, T.rideFootQuote, T.rideFoot).detail, "");
+});
+
+test("a part name that holds both words of a group is not read as a header when its cells do not match", () => {
+  // Rear and Front are four words apart inside one part name, followed by three
+  // numbers. The row prints no header; the correct torque claim must stand.
   assert.equal(
-    detailOf("For the sedan, the rear ride height is 310 mm.", T.rideFootQuote, T.rideFoot),
-    "column_unresolved"
+    verify("The rear mount insulator x front crossmember bolt torque is 55 N*m.", T.mountQuote, T.mount).accepted,
+    true
   );
 });
 
@@ -298,15 +314,45 @@ test("DESIGN: a figure naming its column through the alternate unit is the same 
 
 // ---- Limits that stay open (each pinned so a change must be deliberate) ----
 
-test("KNOWN LIMIT: two identical rows in one chunk give no reading, so the older rules decide", () => {
+test("KNOWN LIMIT: two identical rows in one chunk are tied to no single row, so a wrong-column claim passes", () => {
   const twin = `${T.rideFull}. ${T.rideFull}`;
-  const claim = "For the sedan, the rear ride height is 310 mm.";
+  const wrong = "For the sedan, the rear ride height is 310 mm.";
+  const unstated = "For the sedan, the ride height is 310 mm.";
 
-  // The quote matches two chunk rows, so the row it belongs to is not unique and
-  // no column is attributed. The older rules then accept the wrong-column claim,
-  // exactly as they did before F4. Repeating a whole row in one chunk is not
-  // known to occur; if this is ever fixed, flip the assertion.
-  assert.equal(verify(claim, T.rideFull, twin).accepted, true);
+  // The quote matches two chunk rows, so the row it belongs to is not unique and no
+  // column is attributed: it is read as `possible`. A claim naming no column is
+  // rejected (column_unstated), but the older rules still accept the wrong-column
+  // claim, exactly as they did before F4, because the quote prints both header
+  // words. Repeating a whole row in one chunk is not known to occur; if this is
+  // ever fixed, flip the first assertion.
+  assert.equal(verify(wrong, T.rideFull, twin).accepted, true);
+  assert.equal(verify(unstated, T.rideFull, twin).rejected.detail, "column_unstated");
+});
+
+test("KNOWN LIMIT: an inherited row whose own label prints a column word can pass a wrong-column claim", () => {
+  const chunk =
+    "Ride height (unloaded): Front Rear Sedan 310 mm (12.2 in.) 295 mm (11.6 in.) " +
+    "Wagon (rear-wheel drive) 320 mm (12.6 in.) 305 mm (12.0 in.)";
+  const quote = "Wagon (rear-wheel drive) 320 mm (12.6 in.) 305 mm (12.0 in.)";
+
+  // The wagon row relies on the header above it, which is read only from a row's
+  // own label, so its cells are not placed under a column. Its label happens to
+  // print "rear", so the claim's column word is "printed" and the older rules
+  // accept it although 320 mm is the first column. A wrong-column claim is
+  // therefore NOT always rejected for such rows (first follow-up: header
+  // inheritance).
+  assert.equal(verify("For the wagon (rear-wheel drive), the rear ride height is 320 mm.", quote, chunk).accepted, true);
+});
+
+test("KNOWN LIMIT: shapes that get no reading and keep the older rules' wrong-column accepts", () => {
+  // with/without is never a column header ("with" is ordinary English).
+  const oil = "Engine oil capacity With oil filter Without oil filter 4.2 liters 3.9 liters";
+  assert.equal(verify("The oil capacity with oil filter is 3.9 liters.", oil, oil).accepted, true);
+
+  // A threshold after each cell joins both values into one cell, so the row has a
+  // single cell and is not read.
+  const lining = "Lining thickness Front Rear 1.0 mm or more 1.5 mm or more";
+  assert.equal(verify("The lining thickness (rear) is 1.0 mm or more.", lining, lining).accepted, true);
 });
 
 test("KNOWN LIMIT: a cut quote on a label that carries a foreign condition word is rejected", () => {
