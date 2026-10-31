@@ -477,16 +477,33 @@ tolerance ("1.5° +/- 0.3°") is one cell. The claim must then name that column,
 the quote must still print the column word with the figure (`row_mismatch`):
 
 - naming a different column is `wrong_column`;
-- naming none is `column_unstated`, **even when the quote left the header out**,
-  because the table has several columns and the figure could be any of them;
+- naming none is `column_unstated`, and that holds **even when the quote left the
+  header out**, because the table has several columns and the figure could be any
+  of them. It holds for every quote the verifier can tie to the table: a quote
+  that starts at the row's first cell or carries the row's label (the row is
+  singled out and its column attributed), and a quote of cells alone that starts
+  at a later cell, starts inside a cell, or starts at a first cell two rows share
+  (tied to no single row, but printed inside a clean column row of the chunk, so
+  no column is attributed and one must be named). It does not hold for the cases
+  listed under *What the column reading does not cover*;
 - figures under different columns in one claim are `column_unresolved` — the
   claim is true but cannot be attributed figure by figure, so it must be split;
 - a header whose cells do not line up with it (a footnoted extra cell, a stacked
   table) rejects a claim that names one of its columns as `column_unresolved`.
 
-The header and the cell count come from the chunk's row, so a quote cut after the
-first cell is placed correctly, and a quote that begins inside the header cannot
-move a cell to another column.
+The header and the cell count come from the chunk's row, so a quote that begins
+inside the header cannot move a cell to another column, and a quote cut after the
+first cell has that cell placed under its column.
+
+**A cut quote is still rejected when the row's label carries a condition word the
+quote leaves out** (`unlabelled_row`, exactly as before this feature), even when
+that word is unrelated to the figure: the vehicle-height table's label sentence
+runs back through an unrelated "lower …", so a cut quote of its row is rejected
+although the claim is right. Letting a cut quote's own row stop counting as a
+sibling would verify it, but it also verified quotes that drop a real "Minimum",
+"Reused", "without" or a trailing "or less" (see the iteration log), and no
+narrower rule could be shown safe. The verifier prefers to lose the correct claim.
+A quote that keeps every cell and the label is not affected.
 
 **What the column reading does not cover.** The verifier is **not** fail-closed
 for tables in general, and a verified figure from a table is not column-checked
@@ -498,11 +515,19 @@ unless the rules above apply:
   row's sentence) and so is a correct one, but **a claim that names no column is
   accepted**. This is a remaining false accept, not a verified safe case; in the
   saved corpus nearly every column row has such rows after it.
-- A row printing a single value (including a column row with a blank cell), a
-  header whose words repeat inside the header ("Front Rear Front axle"), two
-  groups' words side by side, and two identical rows in one chunk give **no
-  reading**: the older rules judge them, and a wrong-column claim whose quote
-  prints both header words is still accepted there.
+- A row printing a single value, a header whose words repeat inside the header
+  ("Front Rear Front axle"), two groups' words side by side, and two identical
+  rows in one chunk give **no reading**: the older rules judge them, and a
+  wrong-column claim whose quote prints both header words is still accepted
+  there. **The single-value case is common, not a corner:** a column row cut by
+  the end of its chunk prints one value (an overlapping chunk ends mid-row), so it
+  is not read. In the saved corpus the accelerator-pedal header row is printed by
+  42 chunks in 10 documents, and 21 of them end that way: the wrong-column claim is
+  rejected for the other 21 and **still accepted for these**, and every one of the
+  10 documents has at least one such chunk.
+- A label-less quote of cells that are not printed inside the column row (a later
+  row that relies on the header above it, or a row whose cells do not line up) is
+  tied to nothing, and the older rules judge it.
 - A header printed only in the previous chunk is not seen.
 - A table with several header rows or merged cells is only as reliable as the
   cell count: a coincidental match would place a cell under the wrong column.

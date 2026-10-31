@@ -78,7 +78,7 @@ test("columnHeaderRun reads two alternatives of one group, in the order printed"
   assert.deepEqual(contract.columnHeaderRun("Ride height: Rear Front Sedan").alternatives, [1, 0]);
 
   // Spellings count as their alternative: "LH" is left, "RH" is right.
-  const sides = contract.columnHeaderRun("Belt Assembly LH Belt Assembly RH Pretensioner");
+  const sides = contract.columnHeaderRun("Shock tower LH Shock tower RH Bracket");
   assert.deepEqual(sides.alternatives, [0, 1]);
   assert.equal(sides.group[0][0], "left");
 });
@@ -88,7 +88,7 @@ test("columnHeaderRun takes the longest CLEAN suffix, so words repeated earlier 
   // that wanted each word exactly once in the whole sentence would find no header
   // here, and "lower" is not a column at all.
   const label =
-    "Measuring points: A lower arm bolt ground clearance B Rear axle bolt ground clearance " +
+    "Reference marks: A lower link pin offset B Rear subframe pin offset " +
     "Ride height (unloaded): Front Rear Sedan";
   const run = contract.columnHeaderRun(label);
 
@@ -243,7 +243,6 @@ test("a right claim is judged grounded, with the figure's column printed in its 
     ["For the sedan, the front ride height is 310 mm.", T.rideFull, T.ride],
     ["For the sedan, the rear ride height is 295 mm.", T.rideFull, T.ride],
     ["For the sedan, the front ride height is 310 mm.", T.rideCut, T.ride],
-    ["For the sedan, the front ride height is 310 mm.", T.rideCut, T.ridePrelude],
     ["For the sedan, the rear ride height is 295 mm.", T.rideHeaderCut, T.ride],
     ["For the sedan, the front ride height is 310 mm (12.2 in.).", T.rideFull, T.ride],
   ]) {
@@ -308,6 +307,70 @@ test("KNOWN LIMIT: two identical rows in one chunk give no reading, so the older
   // exactly as they did before F4. Repeating a whole row in one chunk is not
   // known to occur; if this is ever fixed, flip the assertion.
   assert.equal(verify(claim, T.rideFull, twin).accepted, true);
+});
+
+test("KNOWN LIMIT: a cut quote on a label that carries a foreign condition word is rejected", () => {
+  // The label sentence of this table runs back through "lower link pin". The
+  // chunk's own full row therefore reads as a sibling labelled "lower" and a cut
+  // quote of it is rejected (unlabelled_row), although the claim is right. Making
+  // a cut quote's own row stop counting as a sibling cured that, but also hid a
+  // condition the quote dropped ("Minimum", "without", a trailing "or less"), and
+  // no narrower rule could be shown safe, so a correct claim is lost here instead
+  // of an incorrect one being let in. If this is ever fixed, flip the assertion.
+  const right = "For the sedan, the front ride height is 310 mm.";
+
+  assert.equal(verify(right, T.rideCut, T.ridePrelude).accepted, false);
+  assert.equal(verify(right, T.rideCut, T.ridePrelude).rejected.detail, "unlabelled_row");
+  // The same cut on a label without the foreign word verifies: only the foreign
+  // word is the problem.
+  assert.equal(verify(right, T.rideCut, T.ride).accepted, true);
+});
+
+test("a cut quote that drops a printed condition is rejected, whatever the column", () => {
+  const cases = [
+    ["Brake service. Minimum disc thickness Front Rear 23.0 mm (0.906 in.) 9.0 mm (0.354 in.)", "disc thickness Front Rear 23.0 mm (0.906 in.)", "The disc thickness at the front is 23.0 mm."],
+    ["Disc service. Disc runout Front Rear 0.05 mm (0.0020 in.) 0.07 mm (0.0028 in.) or less", "Disc runout Front Rear 0.05 mm (0.0020 in.)", "The front disc runout is 0.05 mm."],
+  ];
+
+  for (const [chunk, quote, claim] of cases) {
+    assert.equal(verify(claim, quote, chunk).accepted, false, claim);
+  }
+});
+
+test("a quote tied to no single chunk row still reads as a column table when it prints a column row's cells", () => {
+  const stated = (claim, quote, chunk) => verify(claim, quote, chunk).rejected?.detail;
+
+  // Starting at the second cell, at a first cell two rows share, or inside a cell:
+  // no one row's values start with the quote, yet the cells are a column row's.
+  assert.equal(stated("The ride height is 295 mm.", "295 mm (11.6 in.)", T.ride), "column_unstated");
+  assert.equal(stated("The ride height is 310 mm.", "310 mm (12.2 in.)", T.rideSame), "column_unstated");
+  assert.equal(stated("The ride height is 12.2 in.", "12.2 in.", T.ride), "column_unstated");
+
+  // Naming a column does not rescue it: the quote still must print the word.
+  assert.equal(stated("The rear ride height is 295 mm.", "295 mm (11.6 in.)", T.ride), "condition_not_in_row");
+
+  // A figure not printed inside the column row is not affected.
+  assert.equal(verify("The winter package adds 10 mm.", "Add 10 mm for the winter package", T.ride).accepted, true);
+});
+
+test("a quote tied to no single row is read as a column table only for an ALIGNED column row", () => {
+  // Three cells under two headers: not aligned, so the row is not read. A
+  // label-less quote of its second cell matches no row's values, and the older
+  // rules decide (a claim naming no column is judged as before). The unaligned
+  // rule only rejects a claim that NAMES a column of such a header.
+  const stated = (claim, quote, chunk) => verify(claim, quote, chunk).rejected?.detail;
+
+  assert.equal(verify("The ride height is 295 mm.", "295 mm (11.6 in.)", T.rideFoot).accepted, true);
+  assert.equal(stated("The ride height is 295 mm.", "295 mm (11.6 in.)", T.ride), "column_unstated");
+  // A figure that is only digits inside a longer number is not that column row's.
+  assert.equal(verify("The value is 10 mm.", "10 mm", T.rideSpacer).accepted, true);
+});
+
+test("KNOWN LIMIT: a row that relies on a header above it keeps no reading even for a label-less quote of its own cells", () => {
+  // The wagon row prints no header of its own; its cells equal no cell of the
+  // sedan row, so nothing ties them to the column table. Reading a header for the
+  // rows that rely on it is the first follow-up.
+  assert.equal(verify("For the wagon, the ride height is 320 mm.", "320 mm (12.6 in.)", T.ride).accepted, true);
 });
 
 test("KNOWN LIMIT: a row name that repeats a header word leaves the header unread, so the older rules decide", () => {

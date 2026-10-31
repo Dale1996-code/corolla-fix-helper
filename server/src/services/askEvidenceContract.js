@@ -2283,17 +2283,52 @@ function sourceRowIndex(quoteRow, sourceRows) {
 }
 
 /**
+ * A quote row that cannot be tied to ONE chunk row -- it starts at a later cell,
+ * starts inside a cell, or starts at a first cell two rows share -- may still
+ * print the cells of a column row. When its values are printed inside a clean
+ * column row of the chunk (a header run and one cell per column, on token
+ * boundaries), the figure sits in a table with several columns even though no
+ * column can be attributed to it. Returns { status: "possible", group } for the
+ * first such row, or null. It can only make a claim fail, never pass.
+ */
+function possibleColumnRow(quoteRow, sourceRows, sourceText) {
+  for (const candidate of sourceRows) {
+    const run = columnHeaderRun(candidate.label);
+
+    if (!run) {
+      continue;
+    }
+
+    const cells = quoteRowCells(sourceText, candidate);
+
+    // A header run always has at least two columns, so one cell per column is
+    // already two cells or more.
+    if (
+      cells.length === run.alternatives.length &&
+      quoteAppearsInChunk(quoteRow.values, candidate.values)
+    ) {
+      return { status: "possible", group: run.group };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Where the claim's figures sit in the table: null when the row is not a
  * column row at all, otherwise
- *   { status: "aligned", group, sourceIndex, columnsOf }
+ *   { status: "aligned", group, columnsOf }
  *     the cited chunk's row ends its label in a clean header run and prints
  *     exactly as many cells as the run has columns, and every figure the claim
  *     states was found in a cell. `columnsOf` holds the columns (alternative
  *     numbers) under which EVERY figure is printed -- the intersection, so a
  *     figure printed in both columns of a row can be stated by either, and two
  *     figures under different columns can be stated by neither;
- *   { status: "unaligned", group, sourceIndex }
- *     the run is clean but the cells do not line up with it.
+ *   { status: "unaligned", group }
+ *     the run is clean but the cells do not line up with it;
+ *   { status: "possible", group }
+ *     the quote is tied to no single chunk row but prints a column row's cells
+ *     (possibleColumnRow): no column is attributed, but one must be named.
  *
  * The header and the cell count come from the CHUNK's row, not the quote: a
  * quote cut after the first cell still has that cell under the first column,
@@ -2306,7 +2341,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   const sourceIndex = sourceRowIndex(row, sourceRows);
 
   if (sourceIndex < 0) {
-    return null;
+    return possibleColumnRow(row, sourceRows, sourceText);
   }
 
   const run = columnHeaderRun(sourceRows[sourceIndex].label);
@@ -2315,7 +2350,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
     return null;
   }
 
-  const unaligned = { status: "unaligned", group: run.group, sourceIndex };
+  const unaligned = { status: "unaligned", group: run.group };
   const sourceCells = quoteRowCells(sourceText, sourceRows[sourceIndex]);
   const quoteCells = quoteRowCells(evidence, row);
 
@@ -2335,9 +2370,12 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   }
 
   // The quote's cells are the chunk row's first cells, cell for cell: the row was
-  // matched by label suffix and values prefix (sourceRowIndex), so the same
-  // spans, cut at most inside the last one. A figure's position therefore lies
-  // in a cell of the quote row, and cell i is under header i.
+  // matched by label suffix and values prefix (sourceRowIndex), so the quote has
+  // the same value spans, cut at most inside the last one. A figure's position
+  // therefore lies in a cell of the quote row, and cell i is under header i. One
+  // caveat: when the chunk prints a header unit the quote lacks ("(N*m)"), bare
+  // numbers are values only in the chunk, the two texts differ, and no row is
+  // matched at all, so there is no reading rather than a wrong one.
   const evidenceNumbers = allNumbersIn(evidence);
   const evidenceSpecs = readSpecs(evidence);
   const headerUnits = headerUnitsIn(evidence);
@@ -2363,7 +2401,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
       : printedUnder;
   }
 
-  return { status: "aligned", group: run.group, sourceIndex, columnsOf: columnsOf || new Set() };
+  return { status: "aligned", group: run.group, columnsOf: columnsOf || new Set() };
 }
 
 function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null) {
@@ -2376,7 +2414,14 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
   if (reading) {
     const stated = alternativesIn(claimWords, reading.group);
 
-    if (reading.status === "unaligned") {
+    if (reading.status === "possible") {
+      // The quote prints a column row's cells but cannot be tied to ONE row, so
+      // no column can be attributed. The table still has several, and a figure
+      // that names none could be under any of them.
+      if (!stated.length) {
+        return "column_unstated";
+      }
+    } else if (reading.status === "unaligned") {
       // A header the verifier cannot align to cells cannot place a figure under
       // a column, so a claim that names one has nothing to stand on.
       if (stated.length) {
@@ -2399,18 +2444,18 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
     }
   }
 
-  // The chunk's own full row, when this quote is a cut of it, is this very row
-  // and not another one. Only an aligned column row says so reliably: for any
-  // other row the sibling check keeps seeing it, because a quote that dropped a
-  // condition word AND cut its values is exactly what that check catches.
-  const ownSourceIndex = reading?.status === "aligned" ? reading.sourceIndex : -1;
   const part = partTokens(own.label);
   // Other rows of the source for the same part: their own sentence names it.
-  // A row printing the same figure cannot make this one ambiguous.
+  // A row printing the same figure cannot make this one ambiguous. The chunk's
+  // own full row counts when this quote is a CUT of it, deliberately: it is the
+  // only thing that sees a condition the quote left out ("Minimum" before the
+  // part, "without" before the header, an "or less" after the last cell). Letting
+  // it stop counting cured a false reject (a foreign condition word in the same
+  // label sentence) but newly accepted exactly those quotes, so that case is a
+  // pinned limit instead.
   const siblings = part.length
     ? sourceRows
         .flatMap((other, otherIndex) =>
-          otherIndex !== ownSourceIndex &&
           normalizeRowValues(other.values) !== normalizeRowValues(row.values)
             ? [figureSentence(sourceRows, otherIndex, subject)]
             : []
