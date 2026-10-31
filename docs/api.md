@@ -551,6 +551,32 @@ unless the rules above apply:
 - A label-less quote of cells that are not printed inside the column row (a later
   row that relies on the header above it) is tied to nothing, and the older rules
   judge it.
+
+**Correct claims that can now be rejected.** The checks above only add
+rejections, so nothing is verified that was not verified before, but some correct,
+well-qualified claims are lost. None lets a wrong figure through:
+
+- *A column word anywhere in the figure's clause counts as naming that column,
+  negated or not.* With 0.6 to 1.2 V under "Fully Released" (an invented sensor
+  table), the claim "The sensor alpha voltage with the pedal **not depressed** is
+  0.6 to 1.2 V" names *depressed* and gets `wrong_column`; so does a figure clause
+  that mentions the other column in passing ("…and it rises as the pedal is
+  depressed"). The same shape was reproduced on a real accelerator-pedal data
+  list. Name only the figure's own column.
+- *A claim naming no column* against a quote that lands inside a column row is
+  rejected by design, including a quote that starts at a later cell, inside a
+  cell (at the alternate unit), or at a first cell two rows share.
+- *A labelled row the chunk prints twice*, beside a column table whose cell holds
+  the same figure, is rejected when the claim names no column (`column_unstated`).
+  No instance exists in the saved corpus.
+- *An alternate unit printed without parentheses* ("310 mm 12.2 in.") is counted
+  as a second cell, so a correct claim for the first column gets `wrong_column`.
+- *A part name holding both words of a group* ("Rear … x Front …"), when the row
+  prints as many numbers as there are columns, is read as a header and a correct
+  claim gets `wrong_column`.
+
+Separately, a cut quote of a row whose label sentence carries an unrelated
+condition word stays rejected (`unlabelled_row`); the old verifier rejects it too.
 - A header printed only in the previous chunk is not seen.
 - A table with several header rows or merged cells is only as reliable as the
   cell count: a coincidental match would place a cell under the wrong column.

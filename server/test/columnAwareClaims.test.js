@@ -241,9 +241,10 @@ test("an unalignable row that names no column is judged by the older rules, not 
 
 test("a header run beside a single value is prose, not a table: restating its words names no column", () => {
   // "right and left" / "front and rear" are ordinary words here and one value
-  // follows. A row needs at least two cells before a header run can be
-  // 'unaligned'; below that the row is judged by the older rules, so a claim
-  // quoting the manual's own sentence is not rejected for naming both words.
+  // follows. A header run is read only when the row prints one cell per column,
+  // and one value is a sentence, not a table: the row is judged by the older
+  // rules, so a claim quoting the manual's own sentence is not rejected for
+  // naming both words.
   assert.equal(
     detailOf("The height difference between the right and left strut caps is 2.0 mm or less.", T.rackQuote, T.rack),
     ""
@@ -400,10 +401,11 @@ test("a quote tied to no single chunk row still reads as a column table when it 
 });
 
 test("a quote tied to no single row is read as a column table only for an ALIGNED column row", () => {
-  // Three cells under two headers: not aligned, so the row is not read. A
-  // label-less quote of its second cell matches no row's values, and the older
-  // rules decide (a claim naming no column is judged as before). The unaligned
-  // rule only rejects a claim that NAMES a column of such a header.
+  // Three cells under two headers: the cell count does not match, so the row is
+  // not read at all. A label-less quote of its second cell matches no row's
+  // values and is not read as a column row either, so the older rules decide (a
+  // claim naming no column is judged as before; no rule rejects a claim that names
+  // a column of such a header).
   const stated = (claim, quote, chunk) => verify(claim, quote, chunk).rejected?.detail;
 
   assert.equal(verify("The ride height is 295 mm.", "295 mm (11.6 in.)", T.rideFoot).accepted, true);

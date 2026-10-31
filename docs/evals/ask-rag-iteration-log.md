@@ -4601,8 +4601,38 @@ accepted too. That holds for any input, not only the ones tried.
 
 Owner decisions (2026-10-31): include cut quotes; reject a figure that names no column when the
 chunk's row is a clean column row, even if the quote omitted the header; remove the same-row exclusion
-(below); implement the M7 rule; remove the unaligned rule (below). Mine, open to overrule: a claim
-spanning two columns is rejected and must be split; header inheritance is out of scope.
+(below); implement the M7 rule, in the cell-boundary form the owner was shown (the shipped rule is
+broader: see "Scope of the label-less-quote rule"); remove the unaligned rule (below). Mine, open to
+overrule: a claim spanning two columns is rejected and must be split; header inheritance is out of scope.
+
+### Scope of the label-less-quote (M7) rule: what was approved and what shipped
+
+**Chronology.** After the first review the owner chose "Fix the docs, defer behavior" for M7 and also
+instructed that M7 be investigated separately and, if the no-column requirement could not be met without
+significant new risk, that the tradeoff be explained rather than silently weakened. I investigated,
+stopped, and asked again with a measured prototype footprint: "if a quote's values sit at a cell
+boundary inside a clean column row and the claim names no column, reject", with 33 claims newly rejected
+in the two real column tables, 12 more in the vehicle-height table's later rows, and 0 in unrelated
+tables. The owner then chose "Implement it". So the rule was authorized in-session after the footprint
+was shown, and the earlier "defer" was superseded by that second answer.
+
+**What shipped is broader than the wording the owner was shown, and the widening was not separately
+approved.** `possibleColumnRow` uses token-bounded containment of the quote's values inside a clean
+column row, not a cell-boundary start, and applies to any quote row tied to no single chunk row,
+labelled or not:
+
+| Difference | Effect |
+|---|---|
+| A quote that starts **inside** a cell (at the alternate unit, or the second end of a range) is caught too | Widens. Measured on the corpus (every word start inside a cell to the cell's end, claim "The value is F."): **120 claims in 27 chunks / 13 docs** in the two column tables plus **36 claims in 6 chunks / 4 docs** in the vehicle-height table's later rows; 0 in unrelated tables; 0 newly accepted. (A reviewer's different enumeration counted 81 and 12.) |
+| A **labelled** quote that matches two or more chunk rows (a row printed twice) is caught too | Widens. 0 instances in the corpus; one invented false reject (below) |
+| A quote tied to a non-column row is never caught, even if its values occur inside a column row | Narrows |
+| The chunk row must print exactly one cell per column | As shown |
+
+The 33 + 12 + 0 figure the owner saw covers only quotes that start and end at cell boundaries. I
+reported the footprint as unchanged without flagging the first two rows as differences; that was an
+omission. The widened cases are all no-column claims in the same two tables, and they are rejected by
+the same rule for the same reason, but the owner may require the rule to be narrowed back to the
+cell-boundary wording.
 
 ### What the earlier versions got wrong, and how it was found
 
@@ -4675,23 +4705,55 @@ bare-number rows above.
   controls that never reached the code they were meant to pin; each was fixed, removed or rewritten.
 - **Fuzz, final tree: 402,384 invented cases** (4 header groups, 7 condition settings, 6 placements of the
   condition relative to the last colon, subject-less claims, label-less quotes) scored against ground
-  truth, old verifier against the final one: **0 incorrect claims newly accepted, 0 correct claims newly
-  rejected**, 8,824 incorrect claims newly rejected. The first commit newly accepted **4,754**.
+  truth, old verifier against the final one: **0 incorrect claims newly accepted** (this holds for every
+  input, by the diff argument above), and **0 correct claims newly rejected within the fuzz's own claim
+  vocabulary only** — not a general result: see "Correct claims the final verifier now rejects" for
+  correct claims outside that vocabulary that are lost. 8,824 incorrect claims newly rejected. The first
+  commit newly accepted **4,754**.
 - **`eval:replay`, 8 files** (three real captures, three variant captures, two invented fixtures): **8 of
   8 byte-identical** to the `9caaa2c` output.
 - **Corpus differential** (20,447 chunks; the 2026-10-28 snapshot copy, sha256 `7eb9a0d69ef7cb20…`,
   unchanged after, read-only), against the old verifier: **0 claims newly accepted anywhere.** On the
   27 unit-bearing column rows (the vehicle-height row and the throttle-position row of an accelerator
-  data list, hand-checked), 105 wrong-column and 54 no-column synthetic claims are newly rejected and
-  nothing else changes. The real engine-mount torque claim is accepted again, as before.
-- **The M7 rule's footprint** (every start and end cell of every row, in the 30 chunks holding a column
-  row): 33 claims newly rejected in the column rows and 12 in the vehicle-height table's later rows
-  (6 chunks / 4 docs), **none** in an unrelated table. The corpus holds only two distinct column
-  tables, so how it generalizes is unmeasured. The second review also found one invented false reject
-  on a labelled quote repeated in a chunk (a spacer row printed twice, beside a column table); the
-  corpus has no instance.
+  data list, hand-checked), 105 wrong-column and 54 no-column synthetic claims are newly rejected and,
+  within those three claim templates (right column, other column, no column), nothing else changes. The
+  real engine-mount torque claim is accepted again, as before.
+- **The M7 rule's footprint, cell-boundary shapes** (every start and end cell of every row, in the 30
+  chunks holding a column row): 33 claims newly rejected in the column rows and 12 in the vehicle-height
+  table's later rows (6 chunks / 4 docs), **none** in an unrelated table. **Quotes starting inside a
+  cell add 120 claims (27 chunks / 13 docs) and 36 (6 chunks / 4 docs)**, again only in those two tables
+  (see "Scope of the label-less-quote rule"). The corpus holds only two distinct column tables, so how
+  it generalizes is unmeasured. The second review also found one invented false reject on a labelled
+  quote repeated in a chunk (see below); the corpus has no instance.
 
-### Still accepted or not covered (the verifier is NOT fail-closed for tables in general)
+### Correct claims the final verifier now rejects (introduced by this change; the safe direction)
+
+Each case below is a correct, well-qualified claim that the old verifier accepted and the final one
+rejects. They cost an answer; none lets a wrong figure through. The earlier statement "0 correct claims
+newly rejected" is true only of the fuzz's own claim vocabulary.
+
+- **A column word anywhere in the figure's clause counts as naming that column, negated or not.** On
+  real chunk #6218 (the accelerator-pedal data list) a correct claim for the Released cell that adds
+  "with the pedal **not depressed**", or "…and it rises as the pedal is depressed", gets `wrong_column`
+  from the new verifier and is accepted by the old one, while the same claim naming only Released is
+  accepted by both. Invented analogue, same behaviour (a table with 0.6 to 1.2 V under Fully Released):
+  "The sensor alpha voltage with the pedal not depressed is 0.6 to 1.2 V." The real chunk's own wording
+  and figures are deliberately not reproduced here. **Not pinned by a test.**
+- **A claim naming no column, against a quote that lands inside a column row** (intended, this is the
+  no-column rule): cells alone, a quote starting at a later cell, at a first cell two rows share, or
+  inside a cell. Counts in "Scope of the label-less-quote rule".
+- **A labelled row printed twice beside a column table**, whose value occurs inside a cell. Invented
+  repro: a chunk with a Front/Rear row "… 310 mm (12.2 in.) 295 mm …" and "Spacer plate thickness
+  12.2 in." printed twice; the quote "Spacer plate thickness 12.2 in." with the claim "The spacer plate
+  thickness is 12.2 in." is `column_unstated`, and accepted when the row is printed once. Reproduced on
+  invented text; no corpus instance; **not pinned by a test**.
+- **An alternate unit printed without parentheses** ("310 mm 12.2 in."): counted as a second cell, so a
+  correct claim for the first column gets `wrong_column`. Invented; no corpus instance; not pinned.
+- **A part name holding both words of a group** when the row prints exactly as many numbers as columns:
+  the correct claim gets `wrong_column`. Pinned as `F4-L3`; no corpus instance.
+
+Not an introduced loss: a cut quote on the vehicle-height label, whose sentence carries an unrelated
+condition word. The old verifier rejects it too (`F4-C1`).
 
 - **A quote that drops a leading condition while keeping every cell** (the old "quote trimming" limit):
   **2,796** of the 402,384 invented cases, all also accepted by the old verifier, each a quote that
