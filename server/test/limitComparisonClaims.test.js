@@ -56,8 +56,8 @@ const controls = ASK_ORACLE.filter((row) => /^control-R3-/.test(row.id));
 // ---- The oracle rows reach the stage they are about ----
 
 test("R3 oracle rows exist and every one passes the earlier gates", () => {
-  assert.ok(mustReject.length >= 25, `expected the R3 rows, found ${mustReject.length}`);
-  assert.ok(controls.length >= 24, `expected the R3 controls, found ${controls.length}`);
+  assert.ok(mustReject.length >= 28, `expected the R3 rows, found ${mustReject.length}`);
+  assert.ok(controls.length >= 25, `expected the R3 controls, found ${controls.length}`);
 
   // A red row is only evidence about the new rule if the quote, the figures, the
   // part name and the row check all pass first. A row that died at an earlier

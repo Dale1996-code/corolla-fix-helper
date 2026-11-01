@@ -2507,7 +2507,8 @@ function leavesLimitUnmarked(quoteRow, sourceRows, source, subject, claimText) {
 // and the figure is refused. Only when BOTH sides name components and share none
 // is the comparison taken to describe something else.
 
-// Words that carry the comparison, or a generic noun for the figure, not the part.
+// Words that carry the comparison, what to do about it, or a generic noun for the
+// figure or for the thing to replace, but name no particular part.
 const COMPARISON_FILLER_WORDS = new Set(
   [
     ...["if", "when", "whenever", "where", "should", "must", "is", "are", "was", "were", "be", "been"],
@@ -2515,6 +2516,8 @@ const COMPARISON_FILLER_WORDS = new Set(
     ...["greater", "larger", "more", "above", "beyond", "over", "less", "smaller", "below", "under"],
     ...["shorter", "longer", "higher", "lower", "measurement", "reading", "figure", "amount"],
     ...["number", "size", "dimension", "result"],
+    ...["adjust", "repair", "measure", "tighten", "loosen", "service", "correct", "clean"],
+    ...["reset", "fit", "remove", "assembly", "unit", "component", "item", "one", "them"],
   ].map((word) => normalizeSubjectToken(word))
 );
 
@@ -2692,6 +2695,12 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
  * columns). See columnReading for what counts as aligned; a header printed only
  * above a table's first row is not read for the rows after it, and a row whose
  * cell count does not match its header is not read at all.
+ *
+ * R3 adds `qualifier_after_figure` last, after every check above: an unmarked
+ * single-value figure that the sentence right after it compares with "the
+ * maximum / minimum / limit" is that limit, and a plain claim is refused (see
+ * leavesLimitUnmarked). It never makes a claim pass and does not read a
+ * qualifier printed after the figure or on the previous page.
  *
  * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "qualifier_after_figure" | "wrong_column" | "column_unstated" | "column_unresolved" }}
  */

@@ -4803,3 +4803,119 @@ would show it; it is not part of this change.
 6. The optional paid capture of `applicability-vehicle-height-wrong-engine` that saves replies.
 7. F2 (header in the previous chunk), the 12× `in.*lbf` unit false accept, and applicability (build
    variant) remain separate and unstarted.
+
+
+## R3: a single unmarked figure that the next sentence compares with its limit (2026-11-01)
+
+**Free validation only. No model call was made.** Everything here is the verifier judged against invented
+text, the saved captures, and a copy of the pinned snapshot (sha `7eb9a0d69ef7cb20`, unchanged by every scan).
+
+### What was wrong
+
+The qualifier checks read a figure's qualifiers from the part of its own sentence before the figure. For
+"Flange gap 2.4 mm. If the gap is greater than the maximum, replace the coupler." the sentence after the
+figure says the figure *is* the maximum, so a plain claim ("the flange gap is 2.4 mm") presents the limit as
+the normal value. The saved used-plug replies showed it: 9 replies stated the figure, 4 of them plainly.
+Those four were one (claim, quote, chunk) triple, rejected only by `unlabelled_row`, and only because a
+neighbouring row happened to say "new" **and** the quote named the part. Changing that one word, removing the
+neighbouring row, or quoting the bare figure made the verifier accept it; two other chunks in the library
+with the same shape had no such neighbour and were accepted. The cause is structural: chunks are cut per
+page, so a page break can leave a label at the bottom of one page and its figure at the top of the next.
+
+### The change
+
+`leavesLimitUnmarked`, last in `judgeFigureRow`, so it can only turn an accept into a reject. A claim is
+refused (`row_mismatch`, server-side detail `qualifier_after_figure`) when, for any source row the quote
+could be: the figure's own sentence prints no condition word and not "standard"; the figure is a single value
+(not `to` / a dash range); and the sentence right after it (one closing bracket, then one `.` or `;`,
+skipped; another figure in between ends the search) compares with the maximum, minimum or limit within its
+first 24 words; **and** the comparison is about the figure's own component (A2, below).
+
+**A2, the component tie.** Component words (never the measured quantity, never an action word or a generic
+noun) of the figure's label sentence and of the claim are compared with those of the comparison sentence; a
+shared word, or a shared prefix of three letters or more, ties them. Two named components with nothing in
+common mean the comparison is about something else and the claim stands. If either side names none (a page
+break cut the label off and the claim says only "the value"), the figure is refused. Evaluated before it was
+included: without A2, 2,480 of 9,122 invented correct controls were newly rejected in a 20,000-case run (27%
+over 450,000); with it, none. On the real library A2 changes nothing (the same 5 rows with and without it),
+so its justification is the invented cross-component cases, not the corpus.
+
+### Test-first, and what mutation testing found
+
+23 oracle rows were added before any code and were red on the original verifier (12 of 12 must-reject rows
+accepted). The first implementation had no A2; it passed the 12 and failed the 2 cross-component controls, which
+is why A2 exists. Mutation testing (72 mutants, first pass: 46 killed, 24 survived, 2 not matching) then
+found three real defects, each fixed after red rows were added: a comparison after "26.0 mm." or "mm;" was
+missed because the full stop was left in front of the next sentence; a "new" borrowed from the previous sentence
+exempted the figure; and the range check listed "and"/"or" and spaced hyphens, which the older checks already
+refuse (unreachable). Three untested pieces were then deleted rather than tested. The fuzz found a fourth: an
+action word in the comparison ("…, adjust it") counted as a component and vetoed the rule. Final: **89 mutants,
+89 killed, 0 survivors.**
+
+| | Count |
+|---|---|
+| Oracle rows | 28 must-reject, 25 controls, 3 pinned limits (`todo`) |
+| `limitComparisonClaims.test.js` | exact detail, precedence over older rejections, A2 edge cases, the 24-word edge, limits, a time bound |
+| Mutants | 89 / 89 killed (five passes; every survivor was a missing test, an equivalent piece of code that was deleted, or a real defect) |
+
+### Fuzz (invented text; truth is set by the generator, never by a verifier)
+
+| Run | Cases | Misleading claims accepted | Correct controls newly rejected | Subset violations | Throws |
+|---|---|---|---|---|---|
+| Structured, seeds 101/202/303 (first generator) | 450,000 | 0 of 187,004 | **8** | 0 | 0 |
+| Structured, seeds 111/222/333 (fresh seeds) | 450,000 | 0 of 187,074 | 0 of 206,825 | 0 | 0 |
+| Unstructured (random fragments, random quotes, junk), 3 seeds | 445,853 | n/a | n/a | 0 | 0 (slowest call 4.7 ms, 0 non-deterministic) |
+
+The old verifier accepted about 94% of the misleading claims. The 8 rejections in the first structured run
+were all one generator artifact: the "intervening figure" of one layout was sometimes drawn identical to the
+main figure, so the quote matched two identical rows and the claim was refused, which is the designed
+fail-closed reading (oracle row `R3-W-same-figure-printed-twice`). The generator was corrected and the run
+repeated on fresh seeds. Its first small run had also shown the action-word weakness above. The generator's
+documented known limits (a comparison that is not the next sentence, more than 24 words in, a qualifier
+after the figure in its own sentence: 56,101 cases in the fresh runs) are accepted exactly as before and
+counted apart.
+
+### Real library
+
+| | |
+|---|---|
+| Chunks / pairs tried | 20,447 / 161,058 (119,958 unit-bearing, 41,100 bare-number) |
+| Accepted by the old verifier | 92,078 |
+| **Newly accepted** | **0** |
+| Newly rejected | 12 pairs = 5 rows = **3 distinct chunk texts** in 5 documents (all unit-bearing; 0 bare-number) |
+| Same, with A2 removed | the same 5 rows |
+
+All 5 rows were read by hand. Three distinct chunk texts are the genuine cases: a minimum-length label at the
+bottom of one page, a maximum-wear label at the bottom of another, and the used-plug maximum. Two of the five
+rows are the labelled "maximum wear" rows of the second text, refused only because a bare-figure quote also matches
+its unlabelled row (the designed reading of an ambiguous quote). No other row changed.
+
+Bare-number tables: the 41,100 bare-number pairs changed nothing, and an invented bare-number table row under a
+`(mm)` header unit is refused when its quote carries the header (a claim whose quote leaves the header out is
+already refused earlier as an unsupported figure, so this check is not needed there).
+
+### Saved captures
+
+`eval:replay` over the six real captures and the two synthetic fixtures prints byte-identical output to the
+unchanged `c17758c` tree (the "verdicts changed" it shows in two files compare with the verdicts recorded under
+older verifiers). Claim by claim, 190 real captured claims (137 accepted by the old verifier, 74 of them with a
+figure): 0 newly rejected, 0 newly accepted.
+
+### What this does not do
+
+- **A correctly qualified claim is still rejected** (`condition_not_in_row`): "the MAXIMUM flange gap is 2.4 mm"
+  against the same text. Trusting the comparison or the previous page's heading to qualify a figure was measured
+  on invented text: a following comparison accepted **34.4%** of wrongly qualified claims (a standard range, a
+  declared standard), and the previous chunk's open heading **17.0%** (a heading about another part), while
+  gaining 43% and 86% of the true ones. Five of the nine saved used-plug replies stated the figure with its
+  qualifier and were refused (three on the short quote, two because the model joined text across the page break);
+  none was ever accepted, before or after. Recovering these answers needs the qualifier inside the quote's own
+  sentence (context expansion, a retrieval and prompt change) and is separate work.
+- Not read: a comparison that is not the sentence right after the figure; one more than 24 words in, or whose limit
+  word is more than 40 characters from its comparing word; one in the next chunk; the previous page's heading when no
+  comparison follows (the verifier is not given neighbouring text); a qualifier printed after the figure in its own
+  sentence (no instance in the library); a comparison the label does not name (refused as the same component).
+- A layout with an unlabelled standard value followed by such a sentence would be refused (a correct claim lost, never
+  a wrong figure let through). None exists in the library.
+- Nothing here measures what a model writes. Whether the model states the figure plainly on the two other affected
+  pages is unknown; a small paid capture is proposed separately.

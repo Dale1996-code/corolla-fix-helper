@@ -583,6 +583,60 @@ condition word stays rejected (`unlabelled_row`); the old verifier rejects it to
   Column order is the order of the extracted text, the same assumption every
   other check makes.
 
+**A figure the manual then compares with its limit (R3).** A figure that has no
+qualifier before it (no new/used, maximum/minimum/limit, standard, … in its own
+sentence) and is a single value rather than a range is the limit itself when the
+sentence right after it compares the part with "the maximum", "the minimum" or
+"the limit" ("Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
+coupler."). A claim that states it plainly ("the flange gap is 2.4 mm") presents the
+limit as the normal value and is rejected as `row_mismatch` with the server-side
+detail `qualifier_after_figure`. The check runs after every older one and only ever
+turns an accept into a reject. It does not depend on how much of the row the quote
+copied: the label and the figure, the bare figure, or a figure the chunk prints in
+several rows (the claim is refused if any row the quote could be is an unmarked
+limit). Before this check a plain claim was refused only by accident, when a
+neighbouring row happened to be marked new, used or standard **and** the quote named
+the part.
+
+- *What counts as the comparison.* The first sentence after the figure (a full stop or
+  semicolon that closes the figure's own sentence is skipped, and another figure in
+  between means the comparison belongs to that figure), within its first 24 words: a
+  comparing word (greater, larger, more, exceeds, above, beyond, over, less, smaller,
+  below, under, shorter, longer, higher, lower) followed, within 40 characters and in the
+  same sentence, by the maximum, minimum or limit.
+- *It must be about the figure's own component.* The component words of the figure's
+  label sentence and of the claim are compared with those of the comparison sentence. The
+  measured quantity (thickness, diameter, …) is never a component, an abbreviation of
+  three letters or more ties to the full word, and an action word or a generic noun
+  ("adjust", "assembly") is not a component. When both sides name components and share
+  none, the comparison is taken to describe something else and the claim stands (a pad's
+  thickness is not refused because a comparison about the rotor follows it). When either
+  side names none, for instance a page break cut the label off and the claim says only "the
+  value", nothing shows the comparison is about anything else and the figure is refused.
+- *Bare-number table rows* are covered as the older rules cover them: a claim is
+  verified only when its quote carries the header unit, and this check applies then.
+
+What it does **not** do, on purpose:
+
+- **It does not make the qualified claim verifiable.** "The maximum flange gap is
+  2.4 mm" against the same text is still rejected (`condition_not_in_row`): the word is
+  not in the figure's sentence, and trusting a nearby sentence or the previous page's
+  heading to qualify a figure was measured, on invented text, to accept wrongly
+  qualified claims (34% and 17% of them). In the saved replies to the used-plug question
+  five of nine stated the figure with its qualifier and were refused; recovering such
+  answers is separate work.
+- It does not read a comparison that is not the sentence right after the figure, one
+  that starts more than 24 words in or whose limit word is more than 40 characters from
+  its comparing word, or one in the next chunk. Nor does it read the previous page's
+  heading when no comparison follows the figure: no neighbouring text is passed to the
+  verifier.
+- It does not read a qualifier printed after the figure in its own sentence ("2.4 mm for a
+  used coupler"). No such figure without a qualifier before it exists in the saved library.
+- Its reading of "the figure just before a comparison with the maximum is the maximum"
+  is the manual's idiom, not a proof. A layout that prints an unlabelled standard value
+  and then such a sentence is refused (a correct claim lost, never a wrong figure let
+  through); none exists in the saved library.
+
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
 the figure's own row names the part, and in any quote that the claim and the

@@ -2341,6 +2341,42 @@ export const ASK_ORACLE = [
     note: "The figure sits in a bracketed sentence: the full stop is followed by the closing bracket before the next sentence starts.",
   },
   {
+    id: "R3-W-comparison-ends-in-an-action-word",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Pad thickness 44.7 mm (1.7598 in.) When the thickness is larger than the limit, adjust it.",
+    quote: "Pad thickness 44.7 mm (1.7598 in.)",
+    claim: "Pad thickness is 44.7 mm (1.7598 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "'adjust' is what to do, not a component: the comparison names only the thickness, so nothing shows it is about another part.",
+  },
+  {
+    id: "R3-W-comparison-names-a-generic-object",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Rotor thickness 10.0 mm (0.394 in.) If the thickness is less than the minimum, replace the assembly.",
+    quote: "Rotor thickness 10.0 mm (0.394 in.)",
+    claim: "Rotor thickness is 10.0 mm (0.394 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "'the assembly' names no particular component, so it cannot show the comparison is about a different one.",
+  },
+  {
+    id: "R3-W-bare-cell-under-a-header-unit",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Item Specified Condition (mm) Flange Gap 2.4 If the gap is greater than the maximum, replace the coupler.",
+    quote: "Item Specified Condition (mm) Flange Gap 2.4",
+    claim: "Flange Gap is 2.4 mm.",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "A bare number under a '(mm)' header unit, with the header in the quote: the unit comes from the header and the rule applies exactly as to a figure that prints its own unit. (With the header left out of the quote the claim is already refused as an unsupported figure, so this rule is not needed there.)",
+  },
+  {
     id: "control-R3-declared-standard",
     verifier: "ask",
     channel: "documentSupported",
@@ -2626,6 +2662,18 @@ export const ASK_ORACLE = [
     expect: "accept",
     finding: "control",
     note: "A later row prints the same figure text under a label that merely mentions the gap; the quote names its own row, and that row is not followed by a comparison.",
+  },
+  {
+    id: "control-R3-bare-cell-next-row-intervenes",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Item Specified Condition (mm) Flange Gap 2.4 Shim play 0.5 If the play is greater than the maximum, replace the shim.",
+    quote: "Item Specified Condition (mm) Flange Gap 2.4",
+    claim: "Flange Gap is 2.4 mm.",
+    expect: "accept",
+    finding: "control",
+    note: "The same table shape: another cell sits between this one and the comparison, which belongs to that cell.",
   },
   // Documented limit, not a fix: the sentence after the figure is not the
   // comparison. The rule reads only the sentence immediately after.
