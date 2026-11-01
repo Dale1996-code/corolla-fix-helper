@@ -2273,14 +2273,19 @@ export function quoteRowCells(text, row) {
  * Exactly one such row, or -1: two identical rows in one chunk cannot be told
  * apart, so no column is read and the older rules decide.
  */
-function sourceRowIndex(quoteRow, sourceRows) {
+function sourceRowCandidates(quoteRow, sourceRows) {
   const label = normalizeForMatch(quoteRow.label);
   const values = normalizeForMatch(quoteRow.values);
-  const candidates = sourceRows.flatMap((row, index) =>
+
+  return sourceRows.flatMap((row, index) =>
     normalizeForMatch(row.label).endsWith(label) && normalizeForMatch(row.values).startsWith(values)
       ? [index]
       : []
   );
+}
+
+function sourceRowIndex(quoteRow, sourceRows) {
+  const candidates = sourceRowCandidates(quoteRow, sourceRows);
 
   return candidates.length === 1 ? candidates[0] : -1;
 }
@@ -2406,7 +2411,157 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   return { status: "aligned", group: run.group, columnsOf: columnsOf || new Set() };
 }
 
-function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null) {
+// ---------------------------------------------------------------------------
+// A figure the manual goes on to compare with "the maximum" (R3)
+// ---------------------------------------------------------------------------
+//
+// "Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
+// coupler." The sentence right after an unmarked figure compares the part with
+// "the maximum", so the figure IS the maximum -- but the qualifier checks above
+// read only the words BEFORE a figure, so a plain claim ("the flange gap is
+// 2.4 mm") was accepted whenever no neighbouring row happened to be marked
+// new, used or standard AND the quote happened to name the part. This is the
+// used-plug case: the label ("Maximum ... Used Spark Plug:") ended the previous
+// page and the page break left the figure bare.
+//
+// The rule only ever REJECTS, and only a claim the checks above accepted, so it
+// cannot let through anything they refused. It does not make the qualified claim
+// ("the MAXIMUM flange gap is 2.4 mm") verifiable: that still fails
+// `condition_not_in_row`, because trusting a nearby sentence to qualify a figure
+// was measured to accept wrong claims.
+
+// A comparison with a limit: a comparing word, then the maximum, minimum or limit.
+// Bounded gaps keep the match linear; it is only ever run on one short sentence.
+const LIMIT_COMPARISON_REGEX =
+  /\b(?:greater|larger|more|exceeds?|exceeding|above|beyond|over|less|smaller|below|under|shorter|longer|higher|lower)\b[^.;]{0,40}?\b(?:than\s+)?(?:the\s+)?(?:maximum|minimum|limit)\b/i;
+// How far into the sentence after the figure the comparison may start.
+const LIMIT_COMPARISON_WORDS = 24;
+
+/**
+ * The sentence right after the figure of `sourceRows[k]`, when it compares the
+ * part with a limit; otherwise "". The text between one figure and the next is the
+ * NEXT row's label, so only its first sentence belongs to this figure, and a
+ * comparison that follows another figure belongs to that figure.
+ */
+function limitComparisonAfter(sourceRows, k, source) {
+  const row = sourceRows[k];
+  const next = sourceRows[k + 1];
+  const gap = source.slice(row.end, next ? next.start : source.length).replace(/^[\s)\]]+/, "");
+  const sentence = (gap.split(SENTENCE_END_REGEX)[0] || "")
+    .split(/\s+/)
+    .slice(0, LIMIT_COMPARISON_WORDS)
+    .join(" ");
+
+  return LIMIT_COMPARISON_REGEX.test(sentence) ? sentence : "";
+}
+
+/** Does the figure's sentence print no condition at all, not even "standard"? */
+function printsNoCondition(words) {
+  return ROW_CONDITION_GROUPS.every((group) =>
+    group === WITH_GROUP ? !words.has("without") : !alternativesIn(words, group).length
+  );
+}
+
+/** Is the figure a single value? A range is a standard to hold, not a limit. */
+function isSingleValue(values) {
+  const figure = values.replace(/\(.*$/, "");
+
+  return !/\d\s*(?:to|and|or)\s*-?\d|\d\s*[-\u2013\u2014]\s*\d/i.test(figure);
+}
+
+/**
+ * Is this figure, left unmarked, the limit a sentence right after it compares the
+ * part with? Checked against EVERY source row the quoted row could be: a quote of
+ * the bare figure, or one that is printed twice, does not say which, and the claim
+ * is refused if any of them is an unmarked limit.
+ */
+function leavesLimitUnmarked(quoteRow, sourceRows, source, subject, claimText) {
+  return sourceRowCandidates(quoteRow, sourceRows).some((k) => {
+    const printed = figureSentence(sourceRows, k, subject);
+    const comparison = limitComparisonAfter(sourceRows, k, source);
+
+    return (
+      comparison !== "" &&
+      isSingleValue(sourceRows[k].values) &&
+      printsNoCondition(printed.words) &&
+      comparisonIsAboutFigure(comparison, printed.label, claimText)
+    );
+  });
+}
+
+// ---- A2: is the comparison about THIS figure's component? ----
+//
+// A sentence after a figure is not assumed to describe it: "Spacer width 2.0 mm.
+// If the gap is greater than the maximum, replace the coupler." compares the gap,
+// not the spacer. The tie compares COMPONENT words -- a pad, a rotor, a gap, a
+// coupler -- never the measured quantity (thickness, diameter, ...): "pad
+// thickness" and "rotor thickness" both speak of a thickness and are two parts.
+//
+// Where the evidence names no component (the page break cut the label off and the
+// claim says only "the value"), nothing shows the comparison is about another one
+// and the figure is refused. Only when BOTH sides name components and share none
+// is the comparison taken to describe something else.
+
+// Words that carry the comparison, or a generic noun for the figure, not the part.
+const COMPARISON_FILLER_WORDS = new Set(
+  [
+    ...["if", "when", "whenever", "where", "should", "must", "is", "are", "was", "were", "be", "been"],
+    ...["it", "its", "than", "then", "not", "no", "too", "much", "exceed", "exceeds", "exceeding"],
+    ...["greater", "larger", "more", "above", "beyond", "over", "less", "smaller", "below", "under"],
+    ...["shorter", "longer", "higher", "lower", "measurement", "reading", "figure", "amount"],
+    ...["number", "size", "dimension", "result"],
+  ].map((word) => normalizeSubjectToken(word))
+);
+
+// What is measured, not what it is measured on. An abbreviation ("Dia.", "Temp")
+// of one of these is a quantity too.
+const MEASURED_QUANTITY_WORDS = [
+  ...SPEC_SUBJECT_NOUNS,
+  ...["voltage", "resistance", "speed", "temperature", "current"],
+].map((word) => normalizeSubjectToken(word));
+
+/** The words of a text that name a component: its parts, minus figures, quantities and comparison words. */
+function componentWords(text) {
+  let rest = String(text || "");
+
+  for (const spec of extractSpecNumbers(rest)) {
+    rest = rest.replace(spec.raw, " ");
+  }
+
+  return partTokens(rest).filter(
+    (token) =>
+      /^[a-z][a-z-]*$/.test(token) &&
+      !COMPARISON_FILLER_WORDS.has(token) &&
+      !(token.length >= 3 && MEASURED_QUANTITY_WORDS.some((word) => word.startsWith(token)))
+  );
+}
+
+/** The same word, or one is the other's first three letters or more ("elec", "electrode"). */
+function componentWordsTie(left, right) {
+  return (
+    left === right ||
+    (Math.min(left.length, right.length) >= 3 && (left.startsWith(right) || right.startsWith(left)))
+  );
+}
+
+/**
+ * Does the comparison speak of the figure's own component? The figure's side is
+ * the words of its label sentence (a heading inside it included) and of the
+ * claim; the comparison's side is its whole sentence, because the component is
+ * often named only in what it says to replace.
+ */
+function comparisonIsAboutFigure(comparison, label, claimText) {
+  const figureParts = [...new Set([...componentWords(label), ...componentWords(claimText)])];
+  const comparisonParts = componentWords(comparison);
+
+  if (!figureParts.length || !comparisonParts.length) {
+    return true;
+  }
+
+  return figureParts.some((left) => comparisonParts.some((right) => componentWordsTie(left, right)));
+}
+
+function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null, limit = null) {
   const row = rows[index];
   const own = figureSentence(rows, index, subject);
 
@@ -2496,6 +2651,11 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
     }
   }
 
+  // Last, so every older rejection keeps its own detail (R3).
+  if (limit && leavesLimitUnmarked(row, sourceRows, limit.source, subject, limit.claim)) {
+    return "qualifier_after_figure";
+  }
+
   return "";
 }
 
@@ -2528,7 +2688,7 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
  * above a table's first row is not read for the rows after it, and a row whose
  * cell count does not match its header is not read at all.
  *
- * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "wrong_column" | "column_unstated" | "column_unresolved" }}
+ * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "qualifier_after_figure" | "wrong_column" | "column_unstated" | "column_unresolved" }}
  */
 export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
   const clauses = String(claimText || "")
@@ -2562,7 +2722,8 @@ export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
       claimWords,
       sourceRows,
       subject,
-      columnReading(rows, row, specs, evidence, sourceRows, source)
+      columnReading(rows, row, specs, evidence, sourceRows, source),
+      { claim: claimText, source }
     )
   );
 

@@ -2028,6 +2028,297 @@ export const ASK_ORACLE = [
     todo: "F4-inherited-header-unstated",
     note: "The wagon row sits under a two-column header, so this figure is as ambiguous as the sedan's, but the verifier cannot see the inherited header and accepts it.",
   },
+
+  // ---- R3: a figure with no qualifier before it, followed at once by a comparison ----
+  // ---- to "the maximum / minimum / limit" (the used-plug maximum, 2026-11-01) ----
+  // A manual prints "<part> <figure>. If the <part> is greater than the maximum,
+  // replace it": the figure just before that sentence IS the maximum, but the
+  // verifier reads a figure's qualifiers only from the part of its own sentence
+  // before the figure, so a plain claim ("the gap is 2.4 mm") was accepted unless
+  // a neighbouring row happened to be marked new/used/standard AND the quote
+  // named the part. Every text below is invented (a coupler, a slider, a spring).
+  // The rejections are `row_mismatch` / `qualifier_after_figure`; the controls
+  // pin what must keep passing so a fix cannot over-correct. The qualified claim
+  // ("the MAXIMUM gap is ...") stays rejected by the existing check; recovering it
+  // safely is a separate piece of work (see limitComparisonClaims.test.js).
+  {
+    id: "R3-W-gap-label-quote",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. e. Clean the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The sentence right after the figure compares the gap with the maximum, so 2.4 mm is the maximum; a plain claim presents the limit as the normal gap.",
+  },
+  {
+    id: "R3-W-gap-figure-only-quote",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. e. Clean the coupler.",
+    quote: "2.4 mm (0.0945 in.)",
+    claim: "Flange gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The same figure quoted without its label: the verdict must not depend on how much of the row the model copied.",
+  },
+  {
+    id: "R3-W-gap-figure-and-comparator-quote",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. e. Clean the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler.",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The quote itself prints the comparison; a plain claim still drops the word that says which value this is.",
+  },
+  {
+    id: "R3-W-length-label-less-chunk-start",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "2.4 mm (0.0945 in.) If the exposed length is less than the minimum, replace the latch assembly. 3. INSPECT THE HINGE",
+    quote: "2.4 mm (0.0945 in.)",
+    claim: "The exposed length is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The page break cut the label off, so the chunk opens on the bare figure; the comparison that follows still says it is the minimum.",
+  },
+  {
+    id: "R3-W-generic-claim-no-part-anywhere",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "2.4 mm (0.0945 in.) If the exposed length is less than the minimum, replace the latch assembly. 3. INSPECT THE HINGE",
+    quote: "2.4 mm (0.0945 in.)",
+    claim: "The value is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "No usable part name in the evidence label or in the claim: nothing shows the comparison is about another component, so the figure is not verified (fail closed).",
+  },
+  {
+    id: "R3-W-wear-exceeds-the-limit",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Slider wear 0.8 mm (0.031 in.) When the wear exceeds the limit, replace the slider. Next step: check the guide.",
+    quote: "Slider wear 0.8 mm (0.031 in.)",
+    claim: "Slider wear is 0.8 mm (0.031 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "A different verb and target word (exceeds, limit): the rule reads the comparison, not one phrase.",
+  },
+  {
+    id: "R3-W-minimum-direction",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Spring free length 41.5 mm (1.634 in.) If the length is shorter than the minimum, replace the spring.",
+    quote: "Spring free length 41.5 mm (1.634 in.)",
+    claim: "Spring free length is 41.5 mm (1.634 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The comparison names the minimum instead of the maximum; the figure is the minimum.",
+  },
+  {
+    id: "R3-W-sibling-beside-figure-only-quote",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. Flange Gap for New Coupler: Flange Gap 1.5 to 1.6 mm (0.0591 to 0.0630 in.) e. Clean the coupler.",
+    quote: "2.4 mm (0.0945 in.)",
+    claim: "Flange gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "A neighbouring new-part row used to be the only thing that stopped the plain claim, and only when the quote named the part. A quote of the bare figure must be refused on the comparison itself.",
+  },
+  {
+    id: "R3-W-same-figure-printed-twice",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Slider wear 0.8 mm (0.031 in.) If the wear is greater than the maximum, replace the slider. Maximum wear: 0.8 mm (0.031 in.) If the wear is greater than the maximum, replace the guide.",
+    quote: "0.8 mm (0.031 in.)",
+    claim: "Slider wear is 0.8 mm (0.031 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The quoted figure text occurs in two rows of the chunk; one of them is the unmarked row followed by the comparison, and the quote does not say which it is, so the claim is refused.",
+  },
+  {
+    id: "R3-W-heading-in-label",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Coupler flange: Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler.",
+    quote: "Coupler flange: Gap 2.4 mm (0.0945 in.)",
+    claim: "Coupler flange gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The component is named in a heading inside the figure's own label sentence, and the comparison names it again.",
+  },
+  {
+    id: "R3-W-abbreviated-label",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Elec. gap 1.3 mm (0.0512 in.) If the electrode gap is greater than the maximum, replace the plug.",
+    quote: "Elec. gap 1.3 mm (0.0512 in.)",
+    claim: "Elec. gap is 1.3 mm (0.0512 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The label abbreviates the component the comparison spells out.",
+  },
+  {
+    id: "R3-W-label-is-only-an-abbreviation",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Elec 1.3 mm (0.0512 in.) If the electrode gap exceeds the limit, replace the plug.",
+    quote: "Elec 1.3 mm (0.0512 in.)",
+    claim: "Elec is 1.3 mm (0.0512 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "The only component word in the evidence is a prefix of the one the comparison names; a prefix of three letters or more still ties them.",
+  },
+  {
+    id: "control-R3-declared-standard",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Standard Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler.",
+    quote: "Standard Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "The row says Standard, so the comparison that follows refers to another figure, not this one.",
+  },
+  {
+    id: "control-R3-unlabelled-range",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "d. Check the coupler. Flange Gap 1.5 to 1.6 mm (0.0591 to 0.0630 in.) If the gap is greater than the maximum, replace the coupler.",
+    quote: "Flange Gap 1.5 to 1.6 mm (0.0591 to 0.0630 in.)",
+    claim: "Flange Gap is 1.5 to 1.6 mm (0.0591 to 0.0630 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "A range is a normal value, not a limit: the comparison refers to a maximum printed elsewhere.",
+  },
+  {
+    id: "control-R3-maximum-stated-and-printed",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Maximum Flange Gap: 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler.",
+    quote: "Maximum Flange Gap: 2.4 mm (0.0945 in.)",
+    claim: "The maximum flange gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "The row prints its own qualifier and the claim states it: the comparison adds nothing to refuse.",
+  },
+  {
+    id: "control-R3-comparison-belongs-to-next-row",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Flange Gap 2.4 mm (0.0945 in.) Shim thickness 0.5 mm (0.020 in.) If the thickness is greater than the maximum, replace the shim.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "Another figure sits between this one and the comparison, so the comparison belongs to that figure.",
+  },
+  {
+    id: "control-R3-comparison-about-another-component",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Spacer width 2.0 mm (0.079 in.) If the gap is greater than the maximum, replace the coupler.",
+    quote: "Spacer width 2.0 mm (0.079 in.)",
+    claim: "Spacer width is 2.0 mm (0.079 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "The figure names a spacer and the comparison names the gap and the coupler: nothing says they are the same component, so the comparison is not applied to the spacer.",
+  },
+  {
+    id: "control-R3-same-quantity-other-component",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Pad thickness 10.0 mm (0.394 in.) If the rotor thickness is less than the minimum, replace the rotor.",
+    quote: "Pad thickness 10.0 mm (0.394 in.)",
+    claim: "Pad thickness is 10.0 mm (0.394 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "Both sentences speak of a thickness, but of a pad and of a rotor. Sharing the measured quantity does not make them one component.",
+  },
+  {
+    id: "control-R3-no-comparison",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.) e. Clean the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "Nothing after the figure compares it with a limit: the rule has nothing to act on.",
+  },
+  {
+    id: "control-R3-comparison-without-a-limit-word",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Flange Gap 2.4 mm (0.0945 in.) If the gap is too large, replace the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "No maximum, minimum or limit is named, so the sentence does not say the figure is one.",
+  },
+  {
+    id: "control-R3-comparison-with-its-own-number",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than 3.0 mm (0.118 in.), replace the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "accept",
+    finding: "control",
+    note: "The comparison names its own figure rather than 'the maximum', so it says nothing about this one.",
+  },
+  // Documented limit, not a fix: the sentence after the figure is not the
+  // comparison. The rule reads only the sentence immediately after.
+  {
+    id: "R3-L-comparison-not-adjacent",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText:
+      "Flange Gap 2.4 mm (0.0945 in.) Tighten the clamp evenly. If the gap is greater than the maximum, replace the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.)",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-comparison-not-adjacent",
+    todo: "R3-comparison-not-adjacent",
+    note: "Known limit: another sentence sits between the figure and the comparison, and the rule does not look past it (looking further reads the wrong figure far more often).",
+  },
+  {
+    id: "R3-L-qualifier-same-sentence-after-figure",
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.) for a used coupler. e. Clean the coupler.",
+    quote: "Flange Gap 2.4 mm (0.0945 in.) for a used coupler",
+    claim: "Flange Gap is 2.4 mm (0.0945 in.).",
+    expect: "reject",
+    finding: "R3-qualifier-same-sentence-after-figure",
+    todo: "R3-qualifier-same-sentence-after-figure",
+    note: "Known limit, not seen in the current library: a qualifier printed after the figure in its own sentence is not read, so the plain claim is accepted.",
+  },
 ];
 
 /** @type {EvidenceOracleRow[]} */
