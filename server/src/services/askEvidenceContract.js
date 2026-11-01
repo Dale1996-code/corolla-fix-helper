@@ -2421,7 +2421,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
 // read only the words BEFORE a figure, so a plain claim ("the flange gap is
 // 2.4 mm") was accepted whenever no neighbouring row happened to be marked
 // new, used or standard AND the quote happened to name the part. This is the
-// used-plug case: the label ("Maximum ... Used Spark Plug:") ended the previous
+// used-plug case: the label that names the used-plug maximum ended the previous
 // page and the page break left the figure bare.
 //
 // The rule only ever REJECTS, and only a claim the checks above accepted, so it

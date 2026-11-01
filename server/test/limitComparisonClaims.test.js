@@ -119,7 +119,7 @@ test("a rejection the verifier already made keeps its detail", () => {
     outcome(
       "Flange Gap is 2.4 mm (0.0945 in.).",
       "Flange Gap 2.4 mm (0.0945 in.)",
-      "Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. Flange Gap for New Coupler: Flange Gap 1.5 to 1.6 mm (0.0591 to 0.0630 in.)"
+      "Flange Gap 2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler. Flange Gap, new coupler: 1.5 to 1.6 mm (0.0591 to 0.0630 in.)"
     ),
     "row_mismatch/unlabelled_row"
   );
@@ -194,12 +194,12 @@ test("A2: a claim that names a different component than the label-less compariso
 });
 
 test("A2: an abbreviated component ties by its first three letters or more", () => {
-  const chunk = "Elec 1.3 mm (0.0512 in.) If the electrode gap exceeds the limit, replace the plug.";
-  assert.equal(outcome("Elec is 1.3 mm (0.0512 in.).", "Elec 1.3 mm (0.0512 in.)", chunk), REJECT_DETAIL);
+  const chunk = "Elec 1.7 mm (0.0669 in.) If the electrode gap exceeds the limit, replace the plug.";
+  assert.equal(outcome("Elec is 1.7 mm (0.0669 in.).", "Elec 1.7 mm (0.0669 in.)", chunk), REJECT_DETAIL);
 
   // Two letters is not enough to call it the same word.
-  const short = "El 1.3 mm (0.0512 in.) If the electrode gap exceeds the limit, replace the plug.";
-  assert.equal(outcome("El is 1.3 mm (0.0512 in.).", "El 1.3 mm (0.0512 in.)", short), "accept");
+  const short = "El 1.7 mm (0.0669 in.) If the electrode gap exceeds the limit, replace the plug.";
+  assert.equal(outcome("El is 1.7 mm (0.0669 in.).", "El 1.7 mm (0.0669 in.)", short), "accept");
 });
 
 test("A2: an abbreviated measured quantity is not a component", () => {
@@ -314,7 +314,6 @@ test("both comparison directions and several wordings are read", () => {
   for (const sentence of [
     "If the gap is too large, replace it.",
     "If the gap is greater than 3.0 mm (0.118 in.), replace it.",
-    "Replace the coupler when the maximum is reached.",
     "The maximum gap is set at the factory.",
   ]) {
     const chunk = `Flange Gap 2.4 mm (0.0945 in.) ${sentence}`;
@@ -379,6 +378,112 @@ test("LIMIT: a comparison in the next chunk is not visible", () => {
     outcome("Flange Gap is 2.4 mm (0.0945 in.).", "Flange Gap 2.4 mm (0.0945 in.)", "d. Check the coupler. Flange Gap 2.4 mm (0.0945 in.)"),
     "accept"
   );
+});
+
+// ---- Costs and misses found by the independent review ----
+//
+// Each test below pins what the rule does TODAY in a layout where that is not
+// what a person would want, so a later change is a decision and not an accident.
+// Two groups: (1) a plain claim that means the limit and is still ACCEPTED (a
+// miss, the older behaviour); (2) a correct claim that is REFUSED (a cost, the
+// safe direction). Every text is invented.
+
+test("LIMIT (miss): other wordings of the same comparison are not read", () => {
+  const quote = "Flange Gap 2.4 mm (0.0945 in.)";
+  const claim = "Flange Gap is 2.4 mm (0.0945 in.).";
+
+  for (const sentence of [
+    "If the gap exceeds max, replace it.",
+    "If the gap exceeded the maximum, replace it.",
+    "If the gap is greater than the limits, replace it.",
+    "If the gap reaches the limit, replace it.",
+    "If the gap is out of the limit, replace it.",
+    "Replace the coupler when the maximum is reached.",
+  ]) {
+    assert.equal(outcome(claim, quote, `Flange Gap 2.4 mm (0.0945 in.) ${sentence}`), "accept", sentence);
+  }
+});
+
+test("LIMIT (miss): words that trail the figure in its own sentence hide the comparison after them", () => {
+  const quote = "Flange Gap 2.4 mm (0.0945 in.)";
+
+  for (const trailing of [" at the rim", " (see illustration)", " each side", " approx"]) {
+    assert.equal(
+      outcome(
+        "Flange Gap is 2.4 mm (0.0945 in.).",
+        quote,
+        `Flange Gap 2.4 mm (0.0945 in.)${trailing}. If the gap is greater than the maximum, replace the coupler.`
+      ),
+      "accept",
+      trailing
+    );
+  }
+});
+
+test("LIMIT (miss, A2): a comparison that names only a remedy part, or only a measured quantity the list knows, stands in for 'another component'", () => {
+  // The only component word the comparison carries is the thing to replace, which
+  // shares nothing with the figure's label, so the comparison is taken to be about
+  // something else and the plain claim stands.
+  assert.equal(
+    outcome(
+      "The flange clearance is 2.4 mm.",
+      "Flange clearance 2.4 mm",
+      "Flange clearance 2.4 mm. If the clearance is greater than the maximum, replace the coupler."
+    ),
+    "accept"
+  );
+  // The same text with a word the quantity list does NOT know is refused.
+  assert.equal(
+    outcome(
+      "The flange gap is 2.4 mm.",
+      "Flange gap 2.4 mm",
+      "Flange gap 2.4 mm. If the gap is greater than the maximum, replace the coupler."
+    ),
+    REJECT_DETAIL
+  );
+  // An uncommon remedy word after a pronoun: any word outside the filler list counts as a component.
+  assert.equal(
+    outcome(
+      "The coupler flange gap is 2.4 mm.",
+      "Coupler flange gap 2.4 mm",
+      "Coupler flange gap 2.4 mm. If it is greater than the maximum, regrind."
+    ),
+    "accept"
+  );
+});
+
+test("LIMIT (miss, A2): a claim that names another part than the bare-figure quote's page escapes the rule", () => {
+  assert.equal(
+    outcome(
+      "The spacer width is 2.4 mm.",
+      "2.4 mm",
+      "2.4 mm (0.0945 in.) If the gap is greater than the maximum, replace the coupler."
+    ),
+    "accept"
+  );
+});
+
+test("LIMIT (cost): correct claims the rule refuses in layouts it cannot tell apart", () => {
+  const cases = [
+    // the comparison prints its own limit, so the figure is plainly not the limit
+    ["Coupler flange gap 2.4 mm. If the gap is greater than the maximum of 2.8 mm, replace the coupler.", "Coupler flange gap 2.4 mm", "The coupler flange gap is 2.4 mm."],
+    // a gauge mark, not a comparison of the figure
+    ["Coolant capacity 6.0 L. If the coolant level is lower than the minimum line, add coolant.", "Coolant capacity 6.0 L", "The coolant capacity is 6.0 L."],
+    // a different quantity of the same component
+    ["Disc thickness 25.0 mm. If the runout is greater than the maximum, replace the disc.", "Disc thickness 25.0 mm", "The disc thickness is 25.0 mm."],
+    // a standard value labelled with a word outside the 'standard' vocabulary
+    ["Nominal rotor thickness 25.0 mm. If the thickness is less than the minimum, replace the rotor.", "Nominal rotor thickness 25.0 mm", "The nominal rotor thickness is 25.0 mm."],
+    // a negated comparison
+    ["Flange gap 2.4 mm. If the gap is not greater than the maximum, the coupler may be reused.", "Flange gap 2.4 mm", "The flange gap is 2.4 mm."],
+    // a shared modifier word ties two different components
+    ["Oil pump clearance 0.1 mm. If the oil pressure is lower than the minimum, check the oil filter.", "Oil pump clearance 0.1 mm", "The oil pump clearance is 0.1 mm."],
+    // a measured word the quantity list does not know ties the same measurement of two components
+    ["Hub runout 0.05 mm. If the rotor runout is greater than the maximum, replace the rotor.", "Hub runout 0.05 mm", "The hub runout is 0.05 mm."],
+  ];
+
+  for (const [chunk, quote, claim] of cases) {
+    assert.equal(outcome(claim, quote, chunk), REJECT_DETAIL, chunk);
+  }
 });
 
 // ---- Bounded work ----

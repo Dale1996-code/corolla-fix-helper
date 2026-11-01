@@ -4831,14 +4831,16 @@ could be: the figure's own sentence prints no condition word and not "standard";
 skipped; another figure in between ends the search) compares with the maximum, minimum or limit within its
 first 24 words; **and** the comparison is about the figure's own component (A2, below).
 
-**A2, the component tie.** Component words (never the measured quantity, never an action word or a generic
-noun) of the figure's label sentence and of the claim are compared with those of the comparison sentence; a
+**A2, the component tie.** Component words (the twelve measured quantities the code knows, a short list of action words and generic
+nouns, and abbreviations of those, are left out; every other word counts) of the figure's label sentence and of the claim are compared with those of the comparison sentence; a
 shared word, or a shared prefix of three letters or more, ties them. Two named components with nothing in
 common mean the comparison is about something else and the claim stands. If either side names none (a page
 break cut the label off and the claim says only "the value"), the figure is refused. Evaluated before it was
 included: without A2, 2,480 of 9,122 invented correct controls were newly rejected in a 20,000-case run (27%
-over 450,000); with it, none. On the real library A2 changes nothing (the same 5 rows with and without it),
-so its justification is the invented cross-component cases, not the corpus.
+over 450,000); with it, none. That generator was built around A2's own assumptions; the independent review
+below, whose layouts were not, found A2 fixed none of its 22 false rejects and left 15 more of its 32
+misleading layouts accepted. On the real library A2 changes nothing (the same 5 rows with and without it), so
+its only justification is invented cross-component cases.
 
 ### Test-first, and what mutation testing found
 
@@ -4914,8 +4916,61 @@ figure): 0 newly rejected, 0 newly accepted.
 - Not read: a comparison that is not the sentence right after the figure; one more than 24 words in, or whose limit
   word is more than 40 characters from its comparing word; one in the next chunk; the previous page's heading when no
   comparison follows (the verifier is not given neighbouring text); a qualifier printed after the figure in its own
-  sentence (no instance in the library); a comparison the label does not name (refused as the same component).
+  sentence (no instance in the library); a comparison that names only a remedy part or an unlisted word, which
+  A2 takes to be about another component, so the plain claim stands (see the review below).
 - A layout with an unlabelled standard value followed by such a sentence would be refused (a correct claim lost, never
   a wrong figure let through). None exists in the library.
 - Nothing here measures what a model writes. Whether the model states the figure plainly on the two other affected
   pages is unknown; a small paid capture is proposed separately.
+
+
+### Independent review (Opus), my reproduction, and what changed
+
+A separate Opus agent reviewed commits `c17758c..dfcbee6` with its own generators and probes, and was told not to
+trust the numbers above. It confirmed the hard constraints: accepts(new) is a subset of accepts(old) (read from the
+code, and ~460k differential cases of its own, 0 violations, 0 throws), the `sourceRowIndex` refactor is
+behaviour-preserving, the qualified claim is still `condition_not_in_row`, and there is no Rule C, chunking,
+retrieval or prompt change. Its verdict was **merge-ready after fixes**. I re-ran every case it described against
+the real old and new modules before accepting it:
+
+| | Finding | Reproduced |
+|---|---|---|
+| F1 | possible real text: a quoted heading in a comment; a real figure beside "electrode gap … plug" | yes; **fixed** (unrelated figures, comment reworded, sibling phrased like the earlier F1v3 rows) |
+| F2 | A2's quantity list holds 12 words; gap, play, runout, wear, length… count as components: a miss ("Flange clearance 2.4 mm. If the clearance is greater than the maximum, replace the coupler.") and a cost ("Hub runout … If the rotor runout …") | yes |
+| F3 | a pronoun subject plus an unusual remedy word ("…, renew.", "regrind", "shim it") makes the comparison look like it is about another component | 12 of 13 tails |
+| F4 | correct claims refused: the comparison prints its own limit; a gauge mark; another quantity of the same component; "Nominal/Specified/Reference/…" labels; a shared modifier or 3-letter prefix; a negated comparison | all 22 layouts built from its cases |
+| F5 | wordings not read: "max.", "exceeded", "limits", "reaches the limit", "out of the limit" | yes |
+| F6 | words trailing the figure in its own sentence, or `..` / `.;` / `!`, hide the comparison | yes |
+| F7 | one test pinned a miss as required behaviour | yes; **fixed** (now a named LIMIT test) |
+| F8 | a bare-figure quote with a claim that names another part escapes the rule | yes |
+
+**A2 against Rule A alone, on the reviewer's 54 layouts** (32 where the claim is misleading, 22 where it is correct;
+none of them in the real library):
+
+| | misleading claims still accepted | correct claims refused |
+|---|---|---|
+| with A2 (as committed) | 30 of 32 | 22 of 22 |
+| Rule A alone | 15 of 32 | 22 of 22 |
+
+So on these layouts A2 costs 15 detections and removes none of the refusals: the 22 come from other causes
+(a limit printed in the sentence, gauge words, labels, negation, shared words). The reviewer's layouts were
+built to break A2, and my generator's controls to suit it, so neither number is a rate. The real library is
+neutral: with and without A2 the same 5 rows (3 chunk texts) are refused.
+
+**Recall census on the real library** (a looser detector than the rule): of 14,060 unmarked single-value unit rows,
+only 7 pairs are followed by any broad limit-comparison wording (comparing or reaching word, then max/min/limit, in
+the next 250 characters up to the next figure). The rule rejects the genuine ones; the one other row is a speed
+threshold, not a limit. So the wording and A2 misses above hide no exposure in this library today; they are
+robustness concerns for pages not yet imported.
+
+**Changed after the review:** F1 hygiene, the F7 test, a LIMIT test per miss and per refused layout (so each is
+pinned and named), and the documentation (`docs/api.md`, `CLAUDE.md`, `AGENTS.md`) now says what the code does,
+including that A2 is a word-overlap heuristic that errs both ways. **Not changed: no rule behaviour.**
+
+**Open decision (owner):** (1) keep Rule A with A2 as committed, with the limits above documented; (2) keep Rule A and
+drop A2, adding narrowings that only remove refusals (skip when the comparison prints its own limit; skip a limit
+word followed by mark/line/level; skip a negated comparison; read "specified/nominal/reference/typical" like
+"standard"), then repeat the validation; (3) redesign A2 (compare only the comparison's subject, a longer
+quantity list, a different-quantity check) and repeat the whole validation. The author recommends (2): the rule
+exists to stop a misleading figure being shown, a refused correct claim is the safe direction, and A2 is the
+only piece whose errors go the unsafe way.

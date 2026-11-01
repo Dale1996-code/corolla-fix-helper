@@ -586,7 +586,7 @@ condition word stays rejected (`unlabelled_row`); the old verifier rejects it to
 **A figure the manual then compares with its limit (R3).** A figure that has no
 qualifier before it (no new/used, maximum/minimum/limit, standard, … in its own
 sentence) and is a single value rather than a range is the limit itself when the
-sentence right after it compares the part with "the maximum", "the minimum" or
+text right after it compares the part with "the maximum", "the minimum" or
 "the limit" ("Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
 coupler."). A claim that states it plainly ("the flange gap is 2.4 mm") presents the
 limit as the normal value and is rejected as `row_mismatch` with the server-side
@@ -598,21 +598,29 @@ limit). Before this check a plain claim was refused only by accident, when a
 neighbouring row happened to be marked new, used or standard **and** the quote named
 the part.
 
-- *What counts as the comparison.* The first sentence after the figure (a full stop or
-  semicolon that closes the figure's own sentence is skipped, and another figure in
-  between means the comparison belongs to that figure), within its first 24 words: a
-  comparing word (greater, larger, more, exceeds, above, beyond, over, less, smaller,
-  below, under, shorter, longer, higher, lower) followed, within 40 characters and in the
-  same sentence, by the maximum, minimum or limit.
-- *It must be about the figure's own component.* The component words of the figure's
-  label sentence and of the claim are compared with those of the comparison sentence. The
-  measured quantity (thickness, diameter, …) is never a component, an abbreviation of
-  three letters or more ties to the full word, and an action word or a generic noun
-  ("adjust", "assembly") is not a component. When both sides name components and share
-  none, the comparison is taken to describe something else and the claim stands (a pad's
-  thickness is not refused because a comparison about the rotor follows it). When either
-  side names none, for instance a page break cut the label off and the claim says only "the
-  value", nothing shows the comparison is about anything else and the figure is refused.
+- *What counts as the comparison.* The text that follows the figure, up to the end of
+  its sentence. A closing bracket and one full stop or semicolon straight after the
+  figure are skipped, so the comparison is usually the next sentence; another figure in
+  between means the comparison belongs to that figure. It is read within its first 24
+  words: a comparing word (greater, larger, more, exceeds, above, beyond, over, less,
+  smaller, below, under, shorter, longer, higher, lower) followed, within 40 characters
+  and in the same sentence, by the maximum, minimum or limit. Words that trail the figure
+  in its own sentence ("at the rim", "(see illustration)", "each side") make that
+  sentence, so a comparison after them is not seen.
+- *It should be about the figure's own component (A2, a word-overlap heuristic).* The
+  component words of the figure's label sentence and of the claim are compared with those
+  of the comparison sentence, the whole sentence, because the part is often named only in
+  what it says to replace. Twelve measured quantities are known and left out (torque,
+  capacity, pressure, clearance, thickness, diameter, depth, voltage, resistance, speed,
+  temperature, current), as are their abbreviations of three letters or more, a short
+  fixed list of action words (adjust, repair, measure, …) and generic nouns (assembly,
+  unit, …); **every other word counts as a component**. An abbreviation of three letters
+  or more ties to the full word. When both sides name components and share none, the
+  comparison is taken to describe something else and the claim stands (a pad's thickness
+  is not refused because a comparison about the rotor follows it). When either side names
+  none, for instance a page break cut the label off and the claim says only "the value",
+  nothing shows the comparison is about anything else and the figure is refused. The
+  limits of this heuristic are listed below; it changes nothing on the saved library.
 - *Bare-number table rows* are covered as the older rules cover them: a claim is
   verified only when its quote carries the header unit, and this check applies then.
 
@@ -636,6 +644,27 @@ What it does **not** do, on purpose:
   is the manual's idiom, not a proof. A layout that prints an unlabelled standard value
   and then such a sentence is refused (a correct claim lost, never a wrong figure let
   through); none exists in the saved library.
+- *A2 errs in both directions.* A comparison that names only the thing to replace, an
+  uncommon remedy word, or a listed quantity followed by a replaced part ("Flange clearance
+  2.4 mm. If the clearance is greater than the maximum, replace the coupler.") reads as
+  being about another component, so the plain claim **stands** (a miss). The same
+  measurement of two components under a word the list does not know ("Hub runout 0.05 mm.
+  If the rotor runout is greater than the maximum …") ties them, so a correct claim is
+  **refused** (a cost). A claim that names a different part than a bare-figure quote's page
+  also escapes. Without A2 the rule misses fewer of these misleading layouts and refuses
+  the same correct claims in the layouts below; the choice is documented in the iteration
+  log.
+- *Wordings not read:* "max." / "Max", "exceeded", the plural "limits", "reaches the
+  limit", "out of / not within the limit", "… when the maximum is reached".
+- *Correct claims the rule can refuse* (the old verifier accepted them): a comparison that
+  prints its own limit ("… greater than the maximum of 2.8 mm"); a gauge mark rather than a
+  comparison of the figure ("… lower than the minimum line"); a different quantity of the same
+  component ("Disc thickness 25.0 mm. If the runout is greater than the maximum …"); a standard
+  value labelled with a word other than "standard" ("Nominal", "Specified", "Reference",
+  "Typical"); a shared modifier word or a three-letter prefix that ties two components ("oil
+  pump clearance" and "oil pressure", "pin" and "pinion"); and a negated comparison ("is not
+  greater than the maximum"). None occurs in the saved library, which is why it shows no
+  correct claim lost; they are the cost of a lexical rule applied to a different library.
 
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
