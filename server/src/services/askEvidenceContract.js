@@ -2441,12 +2441,16 @@ const LIMIT_COMPARISON_WORDS = 24;
  * The sentence right after the figure of `sourceRows[k]`, when it compares the
  * part with a limit; otherwise "". The text between one figure and the next is the
  * NEXT row's label, so only its first sentence belongs to this figure, and a
- * comparison that follows another figure belongs to that figure.
+ * comparison that follows another figure belongs to that figure. What closes the
+ * figure's own sentence first -- a bracket, a full stop, a semicolon -- is not
+ * part of the next sentence.
  */
 function limitComparisonAfter(sourceRows, k, source) {
   const row = sourceRows[k];
   const next = sourceRows[k + 1];
-  const gap = source.slice(row.end, next ? next.start : source.length).replace(/^[\s)\]]+/, "");
+  const gap = source
+    .slice(row.end, next ? next.start : source.length)
+    .replace(/^[\s)\]]*(?:[.;]\s*)?/, "");
   const sentence = (gap.split(SENTENCE_END_REGEX)[0] || "")
     .split(/\s+/)
     .slice(0, LIMIT_COMPARISON_WORDS)
@@ -2464,9 +2468,7 @@ function printsNoCondition(words) {
 
 /** Is the figure a single value? A range is a standard to hold, not a limit. */
 function isSingleValue(values) {
-  const figure = values.replace(/\(.*$/, "");
-
-  return !/\d\s*(?:to|and|or)\s*-?\d|\d\s*[-\u2013\u2014]\s*\d/i.test(figure);
+  return !/\d\s*to\s*-?\d|\d\s*[-\u2013\u2014]\s*\d/i.test(values);
 }
 
 /**
@@ -2483,7 +2485,10 @@ function leavesLimitUnmarked(quoteRow, sourceRows, source, subject, claimText) {
     return (
       comparison !== "" &&
       isSingleValue(sourceRows[k].values) &&
-      printsNoCondition(printed.words) &&
+      // The figure's OWN sentence: "Install a new rotor. Thickness 26.0 mm" lends
+      // the thickness the previous sentence's "new" for a claim that states it, but
+      // that word qualifies the rotor, not the figure, and must not exempt it here.
+      printsNoCondition(printed.ownWords) &&
       comparisonIsAboutFigure(comparison, printed.label, claimText)
     );
   });

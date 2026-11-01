@@ -56,8 +56,8 @@ const controls = ASK_ORACLE.filter((row) => /^control-R3-/.test(row.id));
 // ---- The oracle rows reach the stage they are about ----
 
 test("R3 oracle rows exist and every one passes the earlier gates", () => {
-  assert.ok(mustReject.length >= 12, `expected the R3 rows, found ${mustReject.length}`);
-  assert.ok(controls.length >= 8, `expected the R3 controls, found ${controls.length}`);
+  assert.ok(mustReject.length >= 25, `expected the R3 rows, found ${mustReject.length}`);
+  assert.ok(controls.length >= 24, `expected the R3 controls, found ${controls.length}`);
 
   // A red row is only evidence about the new rule if the quote, the figures, the
   // part name and the row check all pass first. A row that died at an earlier
@@ -298,6 +298,14 @@ test("both comparison directions and several wordings are read", () => {
     "If the gap is smaller than the minimum, replace it.",
     "If the gap is below the minimum, replace it.",
     "If the gap is shorter than the limit, replace it.",
+    "If the gap is above the maximum, replace it.",
+    "If the gap is over the maximum, replace it.",
+    "If the gap is longer than the limit, replace it.",
+    "If the gap is higher than the maximum, replace it.",
+    "If the gap is lower than the minimum, replace it.",
+    "If the gap is under the minimum, replace it.",
+    "When exceeding the maximum, the gap needs the coupler replaced.",
+    "If the gap is GREATER THAN THE MAXIMUM, replace it.",
   ]) {
     const chunk = `Flange Gap 2.4 mm (0.0945 in.) ${sentence}`;
     assert.equal(outcome("Flange Gap is 2.4 mm (0.0945 in.).", "Flange Gap 2.4 mm (0.0945 in.)", chunk), REJECT_DETAIL, sentence);
@@ -317,6 +325,19 @@ test("both comparison directions and several wordings are read", () => {
 test("the comparison is found only in the first sentence after the figure, and only near its start", () => {
   const far = `Flange Gap 2.4 mm (0.0945 in.) ${"Inspect the coupler flange carefully before any measurement is taken at all today and ".repeat(2)}and the gap is greater than the maximum, replace it.`;
   assert.equal(outcome("Flange Gap is 2.4 mm (0.0945 in.).", "Flange Gap 2.4 mm (0.0945 in.)", far), "accept");
+});
+
+test("the comparison is read up to the 24th word after the figure, exactly", () => {
+  // The words before the comparing phrase repeat the figure's own component so
+  // that the part-name tie holds; only the position of the phrase changes. The
+  // full stop and the space after it must not count as a word.
+  const endingAtWord = (position) =>
+    `Flange Gap 2.4 mm (0.0945 in.). ${"gap ".repeat(position - 4)}greater than the maximum`;
+  const quote = "Flange Gap 2.4 mm (0.0945 in.)";
+  const claim = "Flange Gap is 2.4 mm (0.0945 in.).";
+
+  assert.equal(outcome(claim, quote, endingAtWord(24)), REJECT_DETAIL);
+  assert.equal(outcome(claim, quote, endingAtWord(25)), "accept");
 });
 
 // ---- Limits that stay open on purpose ----
