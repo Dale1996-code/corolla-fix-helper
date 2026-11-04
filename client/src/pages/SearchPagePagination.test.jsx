@@ -172,6 +172,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// Its own budget: this test passes in well under a second alone, but went past
+// Vitest's 5 s default under full-suite load on a slow CI runner.
 test("the idle Search page renders only the first page, never the whole library", async () => {
   const { fetchMock, documents } = createFetchMock();
   vi.stubGlobal("fetch", fetchMock);
@@ -188,7 +190,7 @@ test("the idle Search page renders only the first page, never the whole library"
 
   // The initial request asks for a bounded page.
   expect(documents.requestedUrls[0]).toContain("limit=25");
-});
+}, 15000);
 
 test("no completed-search result count appears before a search is submitted", async () => {
   const { fetchMock } = createFetchMock();

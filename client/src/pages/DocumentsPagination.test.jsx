@@ -94,6 +94,8 @@ function selectedHeading() {
   return screen.getByRole("heading", { level: 2, name: /^Doc \d{3}$/ }).textContent;
 }
 
+// Its own budget: this test passes in well under a second alone, but went past
+// Vitest's 5 s default under full-suite load on a slow CI runner.
 test("the first view is one bounded request, never the whole library", async () => {
   const fetchMock = stubApi();
 
@@ -116,7 +118,7 @@ test("the first view is one bounded request, never the whole library", async () 
   expect(rowTitles()[0]).toBe("Doc 060");
   expect(rowTitles()[24]).toBe("Doc 036");
   expect(screen.getByText("Showing 1–25 of 60 documents.")).toBeInTheDocument();
-});
+}, 15000);
 
 test("Next and Previous request the matching offset and keep the counter honest", async () => {
   const fetchMock = stubApi();
