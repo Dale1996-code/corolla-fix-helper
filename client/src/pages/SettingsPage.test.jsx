@@ -193,8 +193,36 @@ test("the backup section explains the CLI restore workflow", async () => {
   expect(screen.getByText(/there is no restore button in the app/i)).toBeTruthy();
   expect(screen.getByText(/Stop the running server first/i)).toBeTruthy();
   expect(screen.getByText(/there is no confirmation prompt/i)).toBeTruthy();
-  expect(screen.getByText(/replaces the documents, symptoms, procedures, notes/i)).toBeTruthy();
   expect(screen.getByText("docs/backup-restore.md")).toBeTruthy();
+});
+
+test("the restore guidance matches what the restore CLI actually does", async () => {
+  stubSettingsFetch();
+
+  renderSettings();
+
+  expect(await screen.findByText("Restoring a backup")).toBeTruthy();
+
+  // The root `restore` script hands off to `npm --prefix server`, so the CLI's
+  // path.resolve runs in server/: a relative path typed in the project folder
+  // is looked up under server/, never beside it.
+  expect(screen.queryByText(/relative to the project folder works/i)).toBeNull();
+  expect(
+    screen.getByText(/relative path is looked up from the server folder inside the project/i)
+  ).toBeTruthy();
+
+  // A rollback can itself fail (rollback_failed); the CLI then prints recovery
+  // steps instead of moving everything back.
+  expect(screen.queryByText(/move back automatically/i)).toBeNull();
+  expect(screen.getByText(/if it cannot, it prints the steps/i)).toBeTruthy();
+
+  // The swap replaces the whole database file, so every table is replaced,
+  // not just the four record types the old copy listed.
+  expect(
+    screen.getByText(
+      /replaces everything saved in the app with what is in the backup: documents, symptoms, procedures, notes, repair checklists, repair history, settings, and uploaded files/i
+    )
+  ).toBeTruthy();
 });
 
 test("the restore command can be copied to the clipboard", async () => {

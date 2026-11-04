@@ -368,7 +368,8 @@ function RestoreInstructions({ restore }) {
         <li>
           Replace the path with the full path to a{" "}
           <code className="rounded bg-white px-1 py-0.5 text-xs">.tar.gz</code> backup
-          file you exported. A path relative to the project folder works too.
+          file you exported. A relative path is looked up from the server folder inside
+          the project, not from the project folder itself, so the full path is safest.
         </li>
         <li>Stop the running server first, then start it again once the restore finishes.</li>
         <li>
@@ -377,7 +378,8 @@ function RestoreInstructions({ restore }) {
           <code className="rounded bg-white px-1 py-0.5 text-xs">pre-restore-…</code>{" "}
           folder next to it and your uploads folder to{" "}
           <code className="rounded bg-white px-1 py-0.5 text-xs">uploads.pre-restore-…</code>
-          , and both move back automatically if anything fails.
+          . If anything fails, restore moves them back, and if it cannot, it prints the
+          steps to put them back by hand.
         </li>
         <li>
           Full details are in{" "}
@@ -389,8 +391,9 @@ function RestoreInstructions({ restore }) {
       </ul>
 
       <InfoBanner tone="amber" className="mt-3">
-        A successful restore replaces the documents, symptoms, procedures, notes, and
-        uploaded files currently in the app with the ones in the backup.
+        A successful restore replaces everything saved in the app with what is in the
+        backup: documents, symptoms, procedures, notes, repair checklists, repair
+        history, settings, and uploaded files.
       </InfoBanner>
     </div>
   );
