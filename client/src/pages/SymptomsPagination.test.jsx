@@ -156,6 +156,8 @@ test("the first view is one bounded page, with no whole-collection downloads", a
   expect(api.fullListRequests).toEqual([]);
 });
 
+// Its own budget: this test passes in well under a second alone, but went past
+// Vitest's 5 s default under full-suite load on a slow CI runner.
 test("Next and Previous walk the page boundaries the server reports", async () => {
   const api = await renderSymptoms();
   await waitFor(() => expect(rowTitles()).toHaveLength(25));
@@ -176,7 +178,7 @@ test("Next and Previous walk the page boundaries the server reports", async () =
   fireEvent.click(screen.getByRole("button", { name: "Previous" }));
   await waitFor(() => expect(rowTitles()[0]).toBe("Symptom 035"));
   expect(api.listRequests.map((params) => params.get("offset"))).toEqual(["0", "25", "50", "25"]);
-});
+}, 15000);
 
 test("a page past the end settles on the last real page, by replace", async () => {
   await renderSymptoms("/symptoms?page=9");

@@ -1761,6 +1761,8 @@ test("SearchPage renders separate search sections for all entity types", async (
   expect(screen.getAllByRole("textbox", { name: "Keyword" })).toHaveLength(4);
 });
 
+// Its own budget: this test passes in well under a second alone, but went past
+// Vitest's 5 s default under full-suite load on a slow CI runner.
 test("SearchPage lets one section search independently", async () => {
   const fetchMock = vi.fn((url) => {
     if (url === "/api/search/documents?sort=relevance&limit=25") {
@@ -1908,7 +1910,7 @@ test("SearchPage lets one section search independently", async () => {
   expect(fetchMock).toHaveBeenCalledWith("/api/search/documents?sort=relevance&limit=25");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/procedures?sort=newest");
   expect(fetchMock).toHaveBeenCalledWith("/api/search/notes?sort=newest");
-});
+}, 15000);
 
 // ---- Evidence source navigation -------------------------------------------
 //
