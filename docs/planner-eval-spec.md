@@ -493,12 +493,15 @@ Ask's synthetic-fixture marker test.
 
 ```
 {"type":"header","format":"corolla-fix-helper/planner-capture","version":1,
- "capturedAt","revision","dirty","answerModel","reasoningEffort","maxOutputTokens",
- "maxTurns","maxToolCallsPerTurn","maxSearchResults","evidenceContextCharLimit",
- "instructionsHash","toolSchemasHash","extractorOutputHash",
+ "capturedAt","revision","dirty",          // exact commit; dirty=true marks the run NOT COMPARABLE
+ "config":{                               // everything that can change a run without a code change
+   "answerModel","reasoningEffort","maxOutputTokens","maxTurns","maxToolCallsPerTurn",
+   "maxSearchResults","evidenceContextCharLimit","retrievalMode","retrievalMaxChunksPerSource",
+   "rerankEnabled","relevanceFloorEnabled","embeddingVersion"},
+ "instructionsHash",                      // the prompt text (P-2); other hashes deferred (D9)
  "scenarioSetVersion","repeats","vehicleProfile":{"engineCode","buildPlant"},
- "corpus":{"documents","chunks","embeddingVersion","dbSnapshotMd5"},
- "tokenCeilings":{"perRunInput","totalInput"}}
+ "corpus":{"documents","chunks","dbSnapshotMd5"},
+ "limits":{"maxRuns","maxProviderRequests","maxInputTokensPerRun","maxInputTokensTotal"}}
 
 {"type":"planner_run","scenarioId","repeat",
  "request":{"brief","skillLevel","availableTools","availableParts","constraints"},
@@ -574,7 +577,7 @@ Layout (values below are intentionally blank; **no numbers have been measured ye
 |---|---|
 | Revision / dirty | |
 | Model / reasoning effort / max output tokens | |
-| `instructionsHash` / `toolSchemasHash` / `extractorOutputHash` | |
+| `instructionsHash`, and the full `config` snapshot (10) | |
 | `scenarioSetVersion` / facts confirmed / facts unconfirmed | |
 | Corpus: documents, chunks, embedding version, DB snapshot MD5 | |
 | Variant details at run time (engine code, build plant) | |
@@ -591,21 +594,47 @@ Layout (values below are intentionally blank; **no numbers have been measured ye
 |---|---|---|---|---|---|---|---|---|---|---|
 
 **Table 3: rejection reasons** (U2) and the list of false-rejection fact ids.
-**Table 4: readiness x completeness cross-tab** (R2).
-**Table 5: invariants** (I-1..I-8) pass/fail with counts.
-**Table 6: L0** (task counts, phantom tasks, W1 server-flag recall).
-**Table 7: operations** (turns, tool calls, searches, tokens, wall time).
-**Section: spot-check results** (7.3) with sample size.
 
-### 11.1 Comparing two baselines
+**Required in the first report (owner decision D9): "Plans marked `verified` or `ready`
+that lack essential confirmed facts."** This is the core finding of the whole effort (F1, F2)
+and must not be lost to simplification. It is a short list, one line per run, not a table of
+its own:
 
-`report --compare <old.json> <new.json>` prints per-metric deltas with one of three labels:
+```
+VERIFIED/READY PLANS LACKING ESSENTIAL CONFIRMED FACTS
+  runs with evidenceStatus verified, or level ready (unacknowledged or acknowledged): N of R
+    assessable (>= 1 essential confirmed fact exists for the scenario):          A
+      covered every essential confirmed fact:                                     B
+      lacking >= 1 essential confirmed fact:                                      C   <- the finding
+        S1 repeat 2: verified, ready; uncovered: drain-plug torque
+    NOT assessable (no essential confirmed fact exists yet, so completeness is
+      unknown, never "complete"):                                                 D
+```
+
+Rules: `C` is always printed even when 0; `D` is printed as a count and the scenarios are named,
+so a run in an unconfirmed scenario can never read as complete (7.4 rule 6). A `verified` or
+`ready` plan counts if **either** word applies. The status/level used are the run's own, never
+re-labelled.
+
+*Deferred past the first report (D9):* a separate readiness x completeness cross-tab (R2),
+a separate invariants table, a separate L0 table, a separate operations table, and
+`--compare` (11.1). The invariants (7.2) and operations (O1) still run and still print as a
+single pass/fail line and a one-line total; they only lose their own tables. The 7.3 sample is
+printed as a fixed-seed list.
+
+### 11.1 Comparing two baselines (the tool is deferred; the rule is not)
+
+`--compare` is not built in the first version (D9). Until it is, the comparability rule below
+is applied by eye from Table 0: two baselines are comparable only if the `config` snapshot,
+`instructionsHash`, `scenarioSetVersion`, and corpus fingerprint match, and neither run has
+`dirty: true`. The `revision` is *expected* to differ; it names the code under test.
+
+When built, `report --compare <old.json> <new.json>` prints per-metric deltas with one of three labels:
 `improved`, `regressed`, or `within noise`. A change is **not** noise only if the new median
 falls outside the old run's `[min, max]` across its repeats. Before any delta is printed the
 tool checks comparability and prints `NOT COMPARABLE (<field>)` when any of
-`scenarioSetVersion`, `instructionsHash`, `toolSchemasHash`, `answerModel`,
-`reasoningEffort`, `extractorOutputHash`, or the corpus fingerprint differ, **naming which one
-changed**. A prompt change or a corpus change is thus visible as the *cause*, not hidden
+`scenarioSetVersion`, `instructionsHash`, any `config` field (model, reasoning effort, caps,
+retrieval settings), `dirty`, or the corpus fingerprint differ, **naming which one changed**. A prompt change or a corpus change is thus visible as the *cause*, not hidden
 inside the delta. Critical counts are always shown, never netted against improvements.
 
 ---
@@ -680,6 +709,18 @@ whether it stops requests before the first paid session.
 
 ### 12.4 Guards on the paid tool (`eval:planner:capture`)
 
+**Preconditions before any paid session (owner decision D10).** None of these is met yet, and
+**no paid call is authorized**:
+
+- A **dedicated OpenAI API project and key** for evaluations, where practical, so eval spend is
+  separable from the app's own use and the key can be revoked alone.
+- A **monthly project limit, proposed at $10, with hard-limit enforcement enabled.** The owner
+  has not yet configured or confirmed it. Before the pilot, the owner confirms the setting
+  actually in force (value, and that it stops requests rather than only sending a notice) and
+  says so in the session. The assistant cannot check it from the repository.
+- Limits 1 and 3 (run count, provider-request count) are implemented and tested. They are
+  mandatory whether or not a token tee is ever built.
+
 1. `--dry-run` is the default. It lists scenarios, repeats, the run count, the projected
    provider-request count, every limit above with its value, and the estimated dollars (as an
    estimate), and calls nothing.
@@ -696,8 +737,10 @@ whether it stops requests before the first paid session.
 7. Run against a `VACUUM INTO` snapshot of the database (as the Stage 5-E2 runs did) so the
    corpus cannot change mid-baseline; the snapshot's MD5 goes in the header.
 
-The token-usage tee is the fragile part (Risk R6). If it is not built, limits 1-3 and 5-6 still
-work, and limit 4 is simply absent: the pilot-then-approve staging replaces it.
+The token-usage tee is the fragile part (Risk R6). It is deferred (D9). If it is not built,
+limits 1-3 and 5-6 still work and limit 4 is simply absent: the pilot-then-approve staging
+replaces it, **provided the provider-side budget above has been verified first**. Without that
+verification, the tee is not optional.
 
 ---
 
@@ -716,7 +759,7 @@ work, and limit 4 is simply absent: the pilot-then-approve staging replaces it.
 | R9 | Measuring what is easy rather than what matters (completeness defined by whoever writes the facts). | Medium / High | Essential vs non-essential flag; the owner signs off the essential list per scenario; spot-check protocol 7.3. |
 | R10 | **The eval is used to "improve the score" by loosening verification.** | Low / Critical | Hard rule in section 3; report honesty rules 7.4 (rejections never shown without false acceptances); `PLANNER_ORACLE` and the new forbidden/decoy rows must stay green; PR template line: "touches no verifier, readiness, classifier, extractor, or prompt logic". |
 | R11 | The corpus changes between runs (imports, deletions). | Medium / Medium | Snapshot + fingerprint; `NOT COMPARABLE` on mismatch. |
-| R12 | The task extractor changes and silently invalidates scenarios. | Medium / Medium | `extractorOutputHash` in the header and an L0 pin test that fails loudly. |
+| R12 | The task extractor changes and silently invalidates scenarios. | Medium / Medium | Phase 1b's L0 pin tests fail loudly when the extractor's output for any scenario brief changes; every capture records the exact `revision`, so a changed extractor is attributable. |
 | R13 | The Variant details saved in Settings are ignored by the planner, so S6 cannot be graded "for your car". | Certain / Low | Recorded in the header; S6's rule is "no unqualified single-variant figure", which does not need the plant. |
 | R14 | `P-1` refactor breaks a test that relied on eager import. | Low / Low | It is the first PR, reviewed alone; `repairPlanner.test.js` must pass unchanged. |
 | R15 | The new files fail `typecheck` (`checkJs` covers all of `server/src`). | Medium / Low | JSDoc types written with the code; `npm run verify` is each PR's gate. |
@@ -732,7 +775,7 @@ changed lines; it is a planning aid, not a promise.
 
 | Phase | Deliverable | Production code touched | Paid? | Needs your DB? | Size |
 |---|---|---|---|---|---|
-| **1a. Isolate the pure tools (P-1)** | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
+| **1a. Isolate the pure tools (P-1)** *(implemented in PR #175, awaiting review)* | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
 | **1b. Pin today's pre-model behavior** | One test file: the 8 canonical briefs and the natural-phrasing set through the real task extractor and safety classifier; readiness invariants I-2/I-3; `todo` rows for the measured gaps (14.2). No new module, no schema. | none | no | no | **S** (~250 lines, tests only) |
 | **2. Scenarios, synthetic harness, judge** | `plannerScenarios.js` (introduced here, because this is the first phase that reads it; **S1, S2, S8 only**), `plannerCaseRunner.js` (injected agent), scripted-model builder, invented mini-corpora, synthetic negative rows (8.1-8.4 "A"), pure `plannerJudge.js` (re-verify + 5.1 decision procedure + metrics) | none | no | no | **L** (~1,200 lines; re-scope after 1b) |
 | **3. Capture format and replay** | **P-2 first, as its own tiny PR** (export the instructions text, with a regression test); then `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, import-boundary test with `fetch` disabled | P-2 (1 line, separate PR) | no | no | **M-L** (~800 lines) |
@@ -745,20 +788,21 @@ Dependencies: 1a -> 1b -> 2 -> 3 -> 5; 4 can run in parallel with 2-3 once 1b la
 (facts) and 5 (tool). **1a and 1b alone already deliver value** (14.2). Phases 2-3 add
 deterministic coverage of every planner failure layer that does not need a model.
 
-### 14.1 Scope trims (proposed; owner to accept or reject)
+### 14.1 Scope trims (approved by the owner with conditions, D9)
 
-To avoid over-building, these items from the earlier draft are proposed for deferral until a
-first baseline shows they are needed. None changes what the first baseline can measure.
+To avoid over-building, these items are deferred until a first baseline shows they are needed.
+The conditions the owner attached are stated in the third column and are **requirements, not
+suggestions**.
 
-| Defer | Why it is safe to wait | Revisit when |
+| Deferred | Condition (owner decision D9) | Revisit when |
 |---|---|---|
-| `--compare` between two baselines (11.1) | Needs two baselines to be useful. Until then, the identity table (Table 0) is enough to see what differs by eye. | A second baseline exists |
-| Token-usage tee and token stop limits (12.4 limit 4) | Pilot-then-approve staging plus request-count limits and a provider-side budget cover the same risk with much less code. | The pilot shows usage varies unpredictably |
-| Source-quality sub-metrics Q2, Q3, Q4 (7.1); keep only Q1 | No data yet says duplicates, OCR chunks, or other-engine citations matter for these scenarios. | The first baseline's cited sources look odd |
-| Loop-level replay (10.1) | Contract-level replay already judges verifier changes. | A change to the loop itself needs judging |
-| Tables 4-7 of the report (11) as separate generated tables | Start with Tables 0-3 and the critical-finding line; add the rest as a human actually wants them. | After the first read-through |
-| `extractorOutputHash` and `toolSchemasHash` in the header | Phase 1b's pin tests already fail loudly if the extractor changes. Keep `instructionsHash` only. | A capture is ever compared across extractor versions |
-| Spot-check sampling tool (7.3) | A fixed-seed list printed by the report is enough; the checking itself is manual anyway. | Never, unless the sample grows |
+| `--compare` between two baselines (11.1) | None beyond the comparability rule in 11.1 being applied by eye from Table 0. | A second baseline exists |
+| Loop-level replay (10.1) | None. | A change to the loop itself needs judging |
+| Automated spot-check sampling (7.3) | None; a fixed-seed list is printed and the checking is manual. | The sample grows |
+| Separate Tables 4-7 (11) | **The first report must still identify `verified`/`ready` plans that lack essential confirmed facts** (the required block in section 11). Invariants and operations still run and print as one line each. | After the first read-through |
+| Token-usage tee and token stop limits (12.4 limit 4) | **Only if appropriate provider-side spending controls are verified before any paid evaluation** (12.4 preconditions). **Strict run-count and request-count limits (limits 1 and 3) are mandatory regardless.** | The pilot shows usage varies unpredictably |
+| Source-quality metrics Q2, Q3, Q4 as separate metrics (7.1); keep Q1 | **Detection and reporting of accepted wrong-engine or wrong-variant specifications is retained** through P2, P3, the `forbidden` rules (6.3), and the negative tests NEG-WE-1..5 (8.2). Only the cited-source *counts* (duplicates, OCR/garbled, other-engine citations) wait. | The first baseline's cited sources look odd |
+| `extractorOutputHash` and `toolSchemasHash` in the header | **Every capture keeps the exact code `revision`, the `dirty` flag, and the `config` snapshot** (section 10) so non-comparable runs are still detectable. Only `instructionsHash` is kept as a hash. | A capture is ever compared across extractor versions |
 
 Kept on purpose, because each guards a specific measured risk: the scoring gate (6.1), the
 failure-layer decision procedure (5.1), the `todo` rows for known gaps, the hard invariants,
@@ -852,7 +896,7 @@ that passes it.
 | 2 | `plannerScenarios.js` holds S1, S2, S8 only, with `confirmed` set only on the facts listed in 6.2; the scoring gate is tested (an unconfirmed fact yields `unscored`, never a pass or a failure). A synthetic fixture exists that produces **each** of L0, S, R, V(false rejection), V(false acceptance), G(omission), G(query), G(no_search), G(run_failure), I as the single classification; a hand-built record proves the 5.1 sum reconciles (I-7); NEG-ME-2..5, NEG-WE-1..3, NEG-IP-1..4 and NEG-X-1..5 run through the real agent loop with a scripted model; `todo` rows flip the suite red the moment they start passing (same as `evidenceOracle.test.js`). |
 | 3 | P-2 shipped first as its own tiny PR, with a regression test that the instructions string the agent passes to `streamTurn` equals the exported one and that its hash is stable; the agent's behavior is otherwise unchanged. A committed synthetic capture round-trips; replay of it reports "0 verdicts changed"; an injected stricter/looser verifier makes replay print exactly the changed verdicts; a malformed line is reported with its number and exits 1; the replay test runs with `fetch` disabled and `OPENAI_API_KEY` unset and imports neither `config.js` nor `database.js`. |
 | 4 | Every scenario has `corpusSupport` for every fact with a page reference; each promoted fact was checked on the rendered PDF; the chunk-length report states how many chunks exceed 1,500 characters; S8's precondition passes; you have signed off the essential-fact list per scenario. |
-| 5 | `--dry-run` is the default and calls nothing (tested); a real run without `--yes` or without a key refuses; `--max-runs` defaults to 1; with a stubbed model, the wrapper makes **no further `streamTurn` or `retrieve` call** once `--max-provider-requests` is reached, and records the run as Layer I (tested); if the tool has token limits, a scripted usage figure above the limit stops the next request, and unreadable usage stops the tool after that run (tested); the dry-run output prints the estimate labelled as an estimate and lists limit 6 (provider-side budget) as unverified; an end-to-end test with a stubbed model through the real `runRepairPlannerAgent` writes a capture that replays with 0 changes; the report generator produces Tables 0-3 and the critical-finding line from a synthetic capture and refuses to print if I-7 fails. |
+| 5 | `--dry-run` is the default and calls nothing (tested); a real run without `--yes` or without a key refuses; `--max-runs` defaults to 1; with a stubbed model, the wrapper makes **no further `streamTurn` or `retrieve` call** once `--max-provider-requests` is reached, and records the run as Layer I (tested); if the tool has token limits, a scripted usage figure above the limit stops the next request, and unreadable usage stops the tool after that run (tested); the dry-run output prints the estimate labelled as an estimate and lists limit 6 (provider-side budget) as unverified; an end-to-end test with a stubbed model through the real `runRepairPlannerAgent` writes a capture that replays with 0 changes; the report generator produces Tables 0-3, the critical-finding line, and the **"verified/ready plans lacking essential confirmed facts" block** from a synthetic capture (tested with a fixture where a `verified`/`ready` plan omits a confirmed essential fact, one that covers all of them, and one in a scenario with none confirmed; counts A+D+... reconcile to N), and refuses to print if I-7 fails; mandatory limits 1 and 3 are enforced and tested whether or not a token tee exists. |
 | 6 | The pilot ran as one S1 run under its own approval, and its observed requests and tokens are recorded before any further approval; the 6a runs (S1, S2, S8 x 3) are captured (or the shortfall explained as Layer I); every *confirmed* fact attributed exactly once and every other fact reported `unscored`; invariants pass or each failure is explained; the committed log holds aggregates only; the spot-check sample is recorded; **no verifier, readiness, classifier, extractor, or prompt code changed in the baseline PR**. |
 
 ### 15.2 Whole system
@@ -881,12 +925,16 @@ that passes it.
 | D7 | Phantom tasks from natural phrasing (F3) as a future roadmap item. | **Deferred, but include the deterministic phantom-task tests.** | Phase 1b natural-phrasing `todo` rows (14.2). |
 | D8 | Who runs Tier B/D. | **Confirmed: your local machine.** | Section 4 note; Phases 4 and 6. |
 
-**Still open (new):**
+| D9 | Scope trims (14.1). | **Approved with conditions.** Deferred: `--compare`, loop-level replay, automated spot-check sampling, separate Tables 4-7. Token tee only if provider-side controls are verified first, with strict run- and request-count limits regardless. Q2-Q4 deferred as separate metrics, but wrong-engine/wrong-variant detection stays (P2, P3, negative tests). The first report must identify `verified`/`ready` plans lacking essential confirmed facts. Extractor/tool-schema hashes deferred if every capture keeps the exact revision and relevant configuration. | 14.1 conditions column; required block in section 11; `config` snapshot in section 10. |
+| D10 | Spending controls. | Dedicated OpenAI project and key where practical; proposed **$10 monthly project limit with hard-limit enforcement**. **Not yet confirmed or configured. No paid calls authorized.** | Preconditions list in 12.4; 12.3 limit 6. |
+| Phase 1a | Begin P-1. | **Approved to begin** as an isolated PR; no merge, no Phase 1b, no later phase without separate review. | Implemented in PR #175 (awaiting review). |
+
+**Still open:**
 
 | # | Question | Needed before |
 |---|---|---|
-| D9 | Accept or reject each scope trim in 14.1. | Phase 2 |
-| D10 | Confirm the OpenAI project budget (value, and whether it hard-stops or only notifies) and whether to use a dedicated project key for evals. | Any paid session |
+| D10b | Configure the dedicated project, key, and $10 hard limit, and confirm the setting in force (value, hard-stop versus notice-only). | Any paid session, including the pilot |
+| D11 | Recommended, not yet decided: before the first baseline, confirm a small list of **essential procedure steps** for S1 and S2 (a handful each, against the rendered PDF pages). Today only one figure each is confirmed, so every S1/S2 plan would land in "NOT assessable" in the required block and the core finding (`verified`/`ready` plans lacking essential facts) could not be demonstrated on them. S8 needs no steps. | The 6a baseline (Phase 4) |
 
 ---
 
