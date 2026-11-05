@@ -6,6 +6,15 @@
 > planner modules in a scratch folder with the retriever stubbed and **invented** fixture
 > text (see [Appendix A](#appendix-a-what-was-measured-and-how)).
 >
+> **Revision 2 (2026-11-05), after owner review.** Owner decisions are recorded in section 16.
+> Changes: (1) the S3 evidence inconsistency is corrected, and the claim that S1 and S2 were
+> "already confirmed" is narrowed to the specific facts that are (6.2); (2) **no fact is scored
+> until its evidence is confirmed** (6.1, 7.4); (3) section 12 no longer presents a token
+> ceiling as a dollar cap: it separates what each limit actually guarantees, and corrects an
+> earlier "$10 worst case" figure that was wrong; (4) Phase 1 is split into 1a and 1b, and the
+> speculative scenario module moves out of it (14); (5) section 14.1 lists scope trims to avoid
+> over-building. **No paid call is authorized by anything in this document.**
+>
 > **Purpose:** give the Repair Planner what Ask AI already has: a reproducible baseline, so
 > that the next change to the planner (prompt, tools, retrieval, verifier, task extractor) can
 > be judged as better, worse, or unchanged, instead of guessed.
@@ -47,9 +56,11 @@ manual text; (3) a capture/replay format modeled on Ask's; (4) a one-time, read-
 your real manuals to confirm each golden fact; (5) a guarded paid capture tool and a report
 generator; (6) one paid baseline run, only with your approval.
 
-**What it costs.** Everything except step 6 is free. Step 6 is estimated at **about $4-5**
-(24 live runs, ~$0.18 each from the Stage 5-E2 log) with a hard token ceiling and a recommended
-cap of **$10**. Section 12 shows the arithmetic and its uncertainty.
+**What it costs.** Everything except step 6 is free. Step 6 is *estimated* at **about $4-5**
+(24 live runs, ~$0.18 each from the Stage 5-E2 log), but that is an estimate, not a limit. The
+tool has stop limits on runs, requests, and tokens, and none of them is a dollar guarantee: the
+only true dollar bound is a budget set on the OpenAI project itself. Section 12 explains what
+each limit does and does not promise. The first paid session is a one-run pilot.
 
 **What it will not do.** It will not change the verifier, the prompt, the readiness rubric, the
 safety classifier, or the task extractor, and it sets **no pass/fail targets** for live
@@ -172,7 +183,7 @@ real and different: **L0** (task derivation, F3/F4) and **I** (infrastructure).
 | **R Retrieval** | The fact is in the corpus in a usable form, but no search in the run returned it, **and** a canonical query would not have found it either. | Capture + survey annotation | no (replay) |
 | **V Verification** | The model submitted a claim for the fact and the verifier rejected it (**false rejection**), or the verifier accepted a claim that is wrong or forbidden (**false acceptance**, critical). | Capture + golden oracle | no (replay) |
 | **G Generation** | The evidence was in front of the model and the verifier would have accepted a correct claim, but the model never submitted one; or it never searched a task; or it failed to finalize. | Capture | no (replay) |
-| **I Infrastructure** | Rate limit, timeout, truncated stream, spend ceiling. Not a product signal. | Wrapper-recorded provider errors | n/a |
+| **I Infrastructure** | Rate limit, timeout, truncated stream, a tripped stop limit. Not a product signal. | Wrapper-recorded provider errors | n/a |
 
 ### 5.1 Decision procedure (applied to every golden fact in every run)
 
@@ -248,6 +259,11 @@ sum and refuses to print if it does not reconcile.
 - Everything starts `verified: false` / `confirmed: false`. Facts are promoted one at a time by
   the Ask process: the owner or assistant checks the **rendered PDF page**, not just the
   extracted text.
+- **Scoring gate (owner decision D2).** A fact that is not `confirmed` is never scored. It is
+  reported as `unscored`, it cannot create a failure or a pass, and any metric that depends on
+  it (C1, T1, W2, P1) prints `unscored` rather than a number. A scenario may still *run*
+  before its facts are confirmed; the run is recorded, and the metrics that need no answer key
+  (status, readiness, rejection reasons, operations, hard invariants) are still reported.
 
 ### 6.2 The eight scenarios
 
@@ -257,22 +273,33 @@ assertion about your manuals, except where the repo already records a confirmati
 
 | ID | Canonical brief | Measured L0 | Role in the baseline | Corpus (hypothesis, or repo-confirmed) |
 |---|---|---|---|---|
-| **S1** oil-and-filter | "Change the engine oil and replace the oil filter." | 2 tasks, Engine, beginner, not critical | **Control.** Table of known-good figures; multi-task coverage. | Drain-plug torque confirmed (Ask case `oil-drain-plug-torque`, "Oil and Oil Filter Replacement" p1). Filter-cap torque and capacities were seen in live planner runs (iteration log, Stage 5-E2). |
-| **S2** spark-plugs | "Replace the spark plugs." | 1 task, Engine, beginner, not critical | **Control + same-table decoy.** The new-plug gap sits one row from the used-plug maximum. | Both gap figures confirmed on rendered pages (Ask case `spark-plug-gap`: doc 226 p1; doc 724 p5-6). |
-| **S3** cabin-air-filter | "Replace the cabin air filter." | 1 task, HVAC, beginner, not critical | **Easy control.** Only scenario where `ready` is reachable with no safety gate, and the `none_required` path may apply. | Unknown (Ask template `cabin-air-filter-procedure` is unverified). |
+| **S1** oil-and-filter | "Change the engine oil and replace the oil filter." | 2 tasks, Engine, beginner, not critical | **Control.** Table of known-good figures; multi-task coverage. | **Confirmed:** drain-plug torque only (Ask case `oil-drain-plug-torque`, "Oil and Oil Filter Replacement" p1). **Not confirmed:** filter-cap torque and capacities were merely *seen in live planner runs* (iteration log, Stage 5-E2); that shows the planner kept them, not that they are right. Procedure steps, tools, and parts are unconfirmed. |
+| **S2** spark-plugs | "Replace the spark plugs." | 1 task, Engine, beginner, not critical | **Control + same-table decoy.** The new-plug gap sits one row from the used-plug maximum. | **Confirmed:** the new-plug electrode gap and the used-plug maximum (the decoy), on rendered pages (Ask case `spark-plug-gap`: doc 226 p1; doc 724 p5-6). **Not confirmed:** procedure steps, tools, parts, any torque. |
+| **S3** cabin-air-filter | "Replace the cabin air filter." | 1 task, HVAC, beginner, not critical | **Easy control.** Only scenario where `ready` is reachable with no safety gate, and the `none_required` path may apply. | **Nothing confirmed.** Whether the corpus even contains a cabin-filter procedure is unknown (Ask template `cabin-air-filter-procedure` is unverified). Excluded from the first baseline. |
 | **S4** front-brake-pads | "Replace the front brake pads." | 1 task, Brakes, **critical**, 1 flag; **no** lifting/wheel flag (F4) | **Safety + R-vs-S diagnostic.** Stage 5-E2 found no pad-replacement procedure; this scenario settles whether that is retrieval or the corpus. | Unknown; the main question. |
 | **S5** engine-coolant | "Replace the engine coolant." | 1 task, Cooling, **critical** | **Incomplete-procedure + capacity figures.** | Unknown; Ask case `coolant-drain-and-refill` is on the documented unstable list. |
 | **S6** front-engine-mount | "Replace the front engine mount." | 1 task, Engine, **beginner, not critical** (suspect, F4) | **Wrong-variant trap.** One fastener, two build-plant torques 29 N·m apart (TMMT vs TMC). | Row confirmed (Ask case `applicability-engine-mount-build-variant`, doc 1269 p1). The planner never reads the Variant details saved in Settings. |
 | **S7** battery-and-charging | "Replace the battery and then test the charging voltage." | 2 tasks: Electrical **critical**; second is system General | **Multi-task + electrical units.** | Unknown (Ask template `charging-system-voltage` unverified). |
-| **S8** timing-belt | "Replace the timing belt." | 1 task, Engine, **advanced** (skill mismatch vs beginner) | **Plausible-but-absent.** The 2ZR-FE uses a timing *chain*; "timing belt"/"cam belt" match 0 of 20,447 chunks. Any belt procedure the plan "verifies" is fabrication. | Absence confirmed (Ask case `refuse-timing-belt-interval`), re-checked by `checkTimingBeltRefusalPrecondition` at each run. |
+| **S8** timing-belt | "Replace the timing belt." | 1 task, Engine, **advanced** (skill mismatch vs beginner) | **Plausible-but-absent.** The 2ZR-FE uses a timing *chain*; "timing belt"/"cam belt" match 0 of 20,447 chunks. Any belt procedure the plan "verifies" is fabrication. | **Confirmed:** absence of a timing-belt procedure (Ask case `refuse-timing-belt-interval`), re-checked by `checkTimingBeltRefusalPrecondition` before each run. |
 
-**Why these eight:** three controls whose evidence is already confirmed (S1-S3) so the
-baseline is trustworthy on day one; two safety-critical jobs with suspected corpus gaps (S4,
+**Why these eight:** two controls with some confirmed figures (S1, S2) and one control whose
+corpus support is still unknown (S3); two safety-critical jobs with suspected corpus gaps (S4,
 S5) that separate R from S; one variant trap (S6); one multi-task electrical job (S7); one
-absent-by-design job (S8).
+absent-by-design job (S8). Only S1, S2, S6, and S8 have *any* fact confirmed in the repo today.
 
-**Smallest useful first baseline:** S1, S2, S8 (all with evidence already confirmed in the
-repo). S3-S7 follow once their golden facts are confirmed against the PDFs (Phase 4).
+**First baseline (owner decision D4): S1, S2, S8.** What it can and cannot score, stated
+plainly so it is not over-read:
+
+| Scenario | Scored in the first baseline (confirmed seed facts only) | `unscored` until confirmed in Phase 4 |
+|---|---|---|
+| S1 | Drain-plug torque: right figure and unit (P1), wrong figure (P2) | Procedure completeness (C1), tools (T1), parts, safety (W2), filter-cap torque, capacities |
+| S2 | New-plug gap (P1), used-plug maximum given as the new-plug gap (P2, the decoy) | C1, T1, W2, any torque |
+| S8 | No accepted claim describes a belt procedure (P3 fabrication check); precondition holds | n/a (an absence scenario needs no steps) |
+
+So the first baseline can say how often the planner states the *confirmed* figures correctly,
+what statuses and readiness levels it produces, why claims are rejected, and whether it
+fabricates a belt procedure. It **cannot** say whether the oil-change or spark-plug plans are
+complete. S3-S7 follow as their facts are confirmed against the PDFs (Phase 4).
 
 ### 6.3 Scenario file shape (committed, `server/src/evals/plannerScenarios.js`)
 
@@ -379,6 +406,8 @@ population estimate.
    did not rise.
 4. `verified`, `Ready`, and "detailed" are never used as quality words in the report.
 5. State N (repeats) and that the baseline is a characterization, not a statistical estimate.
+6. A metric that depends on an unconfirmed fact prints `unscored`, never `0` and never a
+   number (owner decision D2). A report with unscored cells says how many and which.
 
 ---
 
@@ -583,38 +612,92 @@ inside the delta. Critical counts are always shown, never netted against improve
 
 ## 12. Cost and spend control
 
-**Estimate.** Stage 5-E2 recorded four live runs at about $0.70 total (28 Responses calls,
-226,463 input tokens of which 138,752 cached, 6,353 output tokens; $5 / $0.50 / $30 per million
-input / cached / output, secondary-source list prices). That is about **$0.18 per run**.
+**Authorization status (owner decision D3).** Three repeats are approved *for planning only*.
+**No paid call is authorized.** Each paid session needs its own explicit approval that names
+the scenarios, the repeats, and the stop limits below. Nothing in this specification's
+preparation made a paid call.
+
+### 12.1 Expected cost (an estimate, not a limit)
+
+Stage 5-E2 recorded four live runs at about $0.70 total (28 Responses calls, 226,463 input
+tokens of which 138,752 cached, 6,353 output tokens; list prices $5 / $0.50 / $30 per million
+input / cached input / output, from a secondary source). That is about **$0.18 per run**.
 
 | Item | Runs | Estimate |
 |---|---|---|
-| Baseline: 8 scenarios x 3 repeats | 24 | ~$4.3 (plausible range $3-$8: two-task briefs cost more; prices and prompt size can change) |
-| Free-cost negatives (defeat, vague) | 2 | $0 |
+| Pilot: S1, 1 repeat | 1 | ~$0.2 |
+| First baseline: S1, S2, S8 x 3 repeats | 9 | ~$1.6 (two-task briefs such as S1 cost more) |
+| Full baseline: 8 scenarios x 3 repeats | 24 | ~$4.3 (plausible $3-$8) |
 | Hybrid golden-query probes (optional) | ~30 embeddings | cents |
 | Optional later: pinned-evidence runs, natural-phrasing A/B (3 scenarios x 3) | ~18 | ~$3 |
 
-This is an estimate from one dated log entry, not a guarantee. The capture tool prints a
-projection from the *actual* token counts of the first run and asks to continue.
+These come from one dated log entry. Prompt size, prices, the cached share, and the number of
+searches per run can all move them. Dollars shown by the tool are **observed tokens times a
+price table kept in the tool and marked "as of <date>, verify"**. They are for reporting and
+are never used to enforce anything.
 
-**Guards on the paid tool (`eval:planner:capture`):**
+### 12.2 Why a token ceiling is not a dollar cap
 
-1. `--dry-run` is the default: it lists scenarios, repeats, the projected provider-request
-   count, and the ceilings, and calls nothing.
+An earlier draft called 3,000,000 input tokens "about $10 worst case". That was wrong, and the
+reasons are general:
+
+1. **Tokens are not dollars.** Input tokens cost $5 per million uncached and $0.50 cached, a
+   10x spread, and output tokens (including hidden reasoning tokens) cost $30 per million.
+   3,000,000 input tokens is therefore anywhere from about **$1.50 to $15** before output.
+2. **A limit is checked between requests.** A request already streaming cannot be recalled, so
+   a limit can be overshot by up to one in-flight request.
+3. **It depends on reading usage back.** Token usage is read from the streamed response by a
+   tee (finding I3). If that fails, a token limit cannot see anything.
+4. **Prices and caching change.** A fixed token number silently changes meaning.
+
+What the code *can* bound exactly, with no usage reading at all: the number of runs, the
+number of model turns (`maxTurns` = 8), tool calls per turn (8), chunks per search (8),
+evidence characters per chunk (1,500), and output tokens per request (`max_output_tokens` =
+2,048). Input tokens per request are bounded only by those caps, indirectly. Arithmetic, with
+its assumptions: a maximal search turn adds up to 8 searches x 8 chunks x 1,500 characters =
+96,000 characters, roughly 24,000-32,000 tokens at 3-4 characters per token; input accumulates
+across turns, so one run in which *every* turn hit every cap would read about **0.7-0.9 million
+input tokens** (28 x the per-turn addition) and write at most 8 x 2,048 = 16,384 output tokens,
+about **$4-5 per run at uncached list prices**, or roughly **$100 for 24 runs** if all of them
+did. That scenario is not realistic (observed runs average about 57,000 input tokens), but it
+is the only number the caps alone can promise, which is why a real dollar bound has to come
+from outside the tool.
+
+### 12.3 What each limit actually guarantees
+
+| # | Limit | Bounds | Needs usage reading? | Guarantee |
+|---|---|---|---|---|
+| 1 | `--max-runs N` per invocation (default **1**) | Number of runs | no | Exact |
+| 2 | Fixed agent caps (turns 8, tool calls/turn 8, chunks/search 8, 1,500 chars/chunk, `max_output_tokens` 2,048) | Shape and output of a run | no | Exact for counts and output; input only indirectly (12.2) |
+| 3 | `--max-provider-requests N` (the wrapper counts every `streamTurn` call and every `retrieve` call, the latter standing in for embedding requests) | Requests | no | Exact; checked **before** each request, so overshoot is at most one request already in flight |
+| 4 | `--max-input-tokens-per-run` and `--max-input-tokens-total` | Observed input tokens | **yes** | Best effort. Checked before the next request. **Fail-closed:** if usage cannot be read for a run, the tool stops after that run instead of continuing blind |
+| 5 | `AI_DAILY_CALL_LIMIT` | Requests, per process | no | The counter is in memory and per process; the capture is its own process, so it counts only the capture's own requests and resets on restart |
+| 6 | **A budget set on the OpenAI project** (a dedicated project and key for evals) | **Dollars** | no | The only real dollar bound. **Verify before relying on it** whether the setting hard-stops requests or only sends a notice; this cannot be checked from the repository |
+
+Limits 1-5 are brakes on the tool. Limit 6 is the cap. The roadmap already records an owner
+decision (D4) to set a monthly limit on the OpenAI project; confirm its current value and
+whether it stops requests before the first paid session.
+
+### 12.4 Guards on the paid tool (`eval:planner:capture`)
+
+1. `--dry-run` is the default. It lists scenarios, repeats, the run count, the projected
+   provider-request count, every limit above with its value, and the estimated dollars (as an
+   estimate), and calls nothing.
 2. A real run requires `--yes` **and** `OPENAI_API_KEY`; it prints "PAID" and refuses to start
-   without both. As with Ask, it is run only with your approval in the session.
-3. Per-run input-token ceiling (350,000, as used in Stage 5-E2) and a total ceiling
-   (suggested 3,000,000 input tokens, about 2x the expected 1.4M). On breach the run stops and
-   writes what it has.
-4. `AI_DAILY_CALL_LIMIT` is per process and the capture is its own process. The tool computes
-   the worst case (up to 8 Responses calls plus up to 64 embedding requests per run) and warns
-   if the configured limit could trip mid-baseline. A tripped limit is classed Layer I.
-5. Between-case delay (`EVAL_CASE_DELAY_MS`, as Ask) and bounded 429 retry; a persistent 429 is
+   without both.
+3. **Staged sessions.** The first paid invocation is the pilot: one scenario (S1), one repeat.
+   The tool reports observed tokens and requests; the next invocation needs a fresh approval.
+4. The owner's approval names: scenarios, repeats, `--max-runs`, `--max-provider-requests`, and
+   the token limits. A run that hits a limit stops, writes what it has, and is classed Layer I.
+5. Worst-case request count (up to 8 Responses calls plus up to 64 embedding requests per run)
+   is shown beside `AI_DAILY_CALL_LIMIT` so a daily-limit trip mid-session is not a surprise.
+6. Between-case delay (`EVAL_CASE_DELAY_MS`, as Ask) and bounded 429 retry; a persistent 429 is
    reported as infrastructure, never as a product failure.
-6. Run against a `VACUUM INTO` snapshot of the database (as the Stage 5-E2 runs did) so the
+7. Run against a `VACUUM INTO` snapshot of the database (as the Stage 5-E2 runs did) so the
    corpus cannot change mid-baseline; the snapshot's MD5 goes in the header.
 
-Nothing in this specification's preparation made a paid call.
+The token-usage tee is the fragile part (Risk R6). If it is not built, limits 1-3 and 5-6 still
+work, and limit 4 is simply absent: the pilot-then-approve staging replaces it.
 
 ---
 
@@ -642,23 +725,113 @@ Nothing in this specification's preparation made a paid call.
 
 ## 14. Implementation plan: smallest reasonable sequence
 
-Seven phases, one PR each (Phase 4 includes human verification time). Complexity is relative
-(S < M < L) with a rough size in changed lines; it is a planning aid, not a promise.
+Phases 1a and 1b are specified in detail (14.2). Phases 2-7 are **outlines to be re-scoped after
+1b is reviewed**; section 14.1 lists what is likely to be trimmed. One PR per phase (Phase 4
+includes human verification time). Complexity is relative (S < M < L) with a rough size in
+changed lines; it is a planning aid, not a promise.
 
 | Phase | Deliverable | Production code touched | Paid? | Needs your DB? | Size |
 |---|---|---|---|---|---|
-| **1. Foundations** | P-1 lazy retriever; `plannerScenarios.js` (8 scenarios, schema, `verified:false`); L0 tests (task derivation, safety flags, phantom-task counts, readiness matrix, invariants I-2/I-3 on all scenarios, `todo` rows for F3/F4); import-boundary test | `repairTools.js` (3 lines) | no | no | **M** (~700 lines, mostly tests) |
-| **2. Synthetic harness and judge** | `plannerCaseRunner.js` (injected agent), scripted-model builder, invented mini-corpora, synthetic negative rows (8.1-8.4 "A"), pure `plannerJudge.js` (re-verify + 5.1 decision procedure + metrics) | none | no | no | **L** (~1,400 lines) |
-| **3. Capture format and replay** | `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, boundary test with `fetch` disabled | P-2 (1 line) | no | no | **M-L** (~900 lines) |
+| **1a. Isolate the pure tools (P-1)** | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
+| **1b. Pin today's pre-model behavior** | One test file: the 8 canonical briefs and the natural-phrasing set through the real task extractor and safety classifier; readiness invariants I-2/I-3; `todo` rows for the measured gaps (14.2). No new module, no schema. | none | no | no | **S** (~250 lines, tests only) |
+| **2. Scenarios, synthetic harness, judge** | `plannerScenarios.js` (introduced here, because this is the first phase that reads it; **S1, S2, S8 only**), `plannerCaseRunner.js` (injected agent), scripted-model builder, invented mini-corpora, synthetic negative rows (8.1-8.4 "A"), pure `plannerJudge.js` (re-verify + 5.1 decision procedure + metrics) | none | no | no | **L** (~1,200 lines; re-scope after 1b) |
+| **3. Capture format and replay** | **P-2 first, as its own tiny PR** (export the instructions text, with a regression test); then `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, import-boundary test with `fetch` disabled | P-2 (1 line, separate PR) | no | no | **M-L** (~800 lines) |
 | **4. Corpus survey and fact confirmation** | `surveyPlannerCorpus.js` (read-only): per-fact search, chunk-length distribution vs 1,500, extraction-status and duplicate-group tags, timing-belt precondition, keyword golden-query probes. **Then** human confirmation of each fact against rendered PDF pages; promote facts into `plannerScenarios.js` | none | no | **yes** | **M code + the longest human step** (about 5-8 essential facts per scenario, ~40-60 total; stage it) |
-| **5. Paid capture tool and report** | `capturePlanner.js` (dry-run default, `--yes`, ceilings, snapshot, usage tee), `reportPlannerBaseline.js` (+ `--compare`), `docs/evals/planner-baseline-log.md` template, docs updates (`quality-testing.md`, `repair-planner.md`, `AGENTS.md`, `CLAUDE.md`) | none | no (stubbed-model end-to-end test only) | no | **L** (~1,300 lines) |
-| **6. Baseline run** | One paid session (with your approval), report generation, spot-check, committed aggregate log entry. Staged: **6a** S1, S2, S8 (+S3 if confirmed); **6b** S4-S7 | none | **yes (~$4-5 total)** | yes | **S** (a session, not a PR of code) |
+| **5. Paid capture tool and report** | `capturePlanner.js` (dry-run default, `--yes`, `--max-runs`, `--max-provider-requests`, snapshot; token limits and usage tee only if built, see 12.4), `reportPlannerBaseline.js`, `docs/evals/planner-baseline-log.md` template, docs updates (`quality-testing.md`, `repair-planner.md`, `AGENTS.md`, `CLAUDE.md`) | none | no (stubbed-model end-to-end test only) | no | **L** (~1,000 lines; `--compare` deferred, 14.1) |
+| **6. Baseline run** | Paid sessions, each separately approved (12.4): **6-pilot** S1 x 1 repeat; **6a** S1, S2, S8 x 3 repeats (~$1.6 estimated); **6b** S3-S7 once their facts are confirmed. Report generation, spot-check, committed aggregate log entry. | none | **yes, per-session approval; estimates only (12.1)** | yes | **S** (a session, not a PR of code) |
 | **7. Later, optional** | Pinned-evidence live runs (hand the model exactly the right or wrong chunks to separate G from R), natural-phrasing live A/B, N5-tagger report-only metrics, loop-level replay | none | yes | yes | decided after the baseline |
 
-Dependencies: 1 -> 2 -> 3 -> 5; 4 can run in parallel with 2-3 once Phase 1 lands; 6 needs 4
-(facts) and 5 (tool). **Phases 1-3 alone already deliver value:** deterministic coverage of
-every planner failure layer that does not need a model, with the findings in section 2 turned
-into permanent tests.
+Dependencies: 1a -> 1b -> 2 -> 3 -> 5; 4 can run in parallel with 2-3 once 1b lands; 6 needs 4
+(facts) and 5 (tool). **1a and 1b alone already deliver value** (14.2). Phases 2-3 add
+deterministic coverage of every planner failure layer that does not need a model.
+
+### 14.1 Scope trims (proposed; owner to accept or reject)
+
+To avoid over-building, these items from the earlier draft are proposed for deferral until a
+first baseline shows they are needed. None changes what the first baseline can measure.
+
+| Defer | Why it is safe to wait | Revisit when |
+|---|---|---|
+| `--compare` between two baselines (11.1) | Needs two baselines to be useful. Until then, the identity table (Table 0) is enough to see what differs by eye. | A second baseline exists |
+| Token-usage tee and token stop limits (12.4 limit 4) | Pilot-then-approve staging plus request-count limits and a provider-side budget cover the same risk with much less code. | The pilot shows usage varies unpredictably |
+| Source-quality sub-metrics Q2, Q3, Q4 (7.1); keep only Q1 | No data yet says duplicates, OCR chunks, or other-engine citations matter for these scenarios. | The first baseline's cited sources look odd |
+| Loop-level replay (10.1) | Contract-level replay already judges verifier changes. | A change to the loop itself needs judging |
+| Tables 4-7 of the report (11) as separate generated tables | Start with Tables 0-3 and the critical-finding line; add the rest as a human actually wants them. | After the first read-through |
+| `extractorOutputHash` and `toolSchemasHash` in the header | Phase 1b's pin tests already fail loudly if the extractor changes. Keep `instructionsHash` only. | A capture is ever compared across extractor versions |
+| Spot-check sampling tool (7.3) | A fixed-seed list printed by the report is enough; the checking itself is manual anyway. | Never, unless the sample grows |
+
+Kept on purpose, because each guards a specific measured risk: the scoring gate (6.1), the
+failure-layer decision procedure (5.1), the `todo` rows for known gaps, the hard invariants,
+the fail-closed capture parser, and the staged paid sessions.
+
+### 14.2 Phase 1 in detail: the smallest useful implementation
+
+The aim is the smallest change that turns this spec's **free, already-measured findings** into
+permanent tests, without building any evaluation machinery yet. It needs no scenario schema,
+no capture format, no CLI, and no database. Phase 1a and 1b are separate PRs because 1a touches
+production code and must be reviewable alone (owner decision D5).
+
+**Phase 1a: isolate the pure tools (P-1).**
+
+- *Change:* in `server/src/services/agent/repairTools.js`, replace the static import of
+  `retrieveRelevantChunks` with a lazy default, so importing the pure tools (task extractor,
+  readiness, checklist, inventory parsing) no longer opens the database. Nothing else in the
+  file changes. `repairPlannerAgent.js` and `chunkRetrievalService.js` are not edited.
+- *Regression tests (written first, shown failing against today's code, then passing):*
+  1. **No side effect on import.** A child process sets `DATABASE_FILE` and `UPLOADS_DIR` to a
+     fresh temporary folder, imports `repairTools.js`, and the test asserts no database file
+     was created there. (Today the import creates one, which is the failing test.)
+  2. **The lazy default still works.** `searchRepairDocs` and `createToolRegistry` called with
+     *no* injected retriever resolve the real one against an empty temporary database and
+     return no citations without throwing. This proves the lazy path actually loads and runs.
+  3. **Injection is unchanged.** The existing `repairPlanner.test.js` passes with no edits.
+- *Acceptance:* `npm run verify` green (or CI green, see the environment note below);
+  `git diff` shows `repairTools.js` changed only at the import and default retriever; no other
+  production file changed.
+- *What it gives:* the planner's pure core can be imported by tests and, later, by an offline
+  replay without opening anyone's database.
+
+**Phase 1b: pin today's pre-model behavior.** One new test file, for example
+`server/test/plannerL0Pins.test.js`, tests only.
+
+- *Canonical briefs (the 8 from 6.2):* assert task count, system, difficulty, `safetyCritical`,
+  `compound`, and the number of safety flags exactly as measured (Appendix A, probe A3). These
+  are *characterization pins*: they exist so a silent change to the extractor or classifier
+  fails loudly, not because today's output is ideal.
+- *Natural-phrasing set (deterministic phantom-task tests, owner decision D7):* the five briefs
+  from probe A4. Each asserts the **desired** behavior (no task that is a symptom or context
+  sentence, and no spurious safety-critical flag) and carries `todo: "F3-phantom-task"`. They
+  report as `todo`, keep the suite green, and turn it red the moment one starts passing, so
+  the row must then be updated (same mechanism as `evidenceOracle.test.js`).
+- *Known-gap rows:* S4 should flag lifting and wheel retention (`todo: "F4-brake-lifting"`); S6
+  should not be rated beginner/non-critical (`todo: "F4-engine-mount"`). Desired behavior is
+  written as the assertion; nothing is "fixed".
+- *Readiness invariants I-2 and I-3,* as a loop over the 8 briefs x evidence status
+  (`verified`, `partial`, `not_found`) x acknowledgment (true/false): a `safetyCritical` task is
+  never `ready` while unacknowledged; `not_found` is always `not_ready`; `partial` is never
+  `ready`. These are properties of today's code that must stay true; they are not
+  characterizations of any wrong behavior.
+- *Deliberately not pinned:* probe A1 (one claim yields `verified` / 100 / `ready`) and A2 (the
+  zero-evidence score floor). They are *measurements* for the baseline report, not
+  expectations; pinning them as passing tests would enshrine behavior that decision D6 may
+  later change.
+- *Acceptance:* the new tests run in `npm run test:server` with no key, no network, and no
+  real database; every `todo` row names a finding id; the file contains only invented or
+  generic brief text (no manual text); no production file changed.
+- *What it gives, together with 1a:* free, permanent regression coverage of everything that
+  happens before the model runs (task derivation, safety flags, readiness math), which is
+  where Finding F3 and F4 live, plus the first deterministic evidence for or against the
+  phantom-task hypothesis.
+
+**Moved out of Phase 1:** the scenario module (`plannerScenarios.js` with its fact schema)
+and the import-boundary test for replay. A fact schema written before any fact is confirmed
+would be guesswork, and the boundary test belongs with the replay it protects (Phase 3).
+
+**Environment note.** This cloud sandbox runs Node 22 and has no server dependencies
+installed; the project requires Node 24. The assistant can write 1a and 1b here, but
+`npm run verify` can only be run for real on Node 24 (your machine, or CI on the pull
+request). The PR description will say which steps ran where, and will not call the gate
+passed on the strength of the Node 22 probe runs.
 
 **Per-phase gate:** `npm run verify` (lint -> typecheck -> test -> build -> smoke) plus
 `npm run backup:drill` only if backup code is touched (it is not). Each PR description lists
@@ -674,12 +847,13 @@ that passes it.
 
 | Phase | Done when |
 |---|---|
-| 1 | `repairTools.js` imports no database/config (boundary test); all existing server tests pass unchanged; L0 tests pin the measured extractor/classifier output for all 8 canonical briefs and the natural-phrasing set; the F3/F4 gaps exist as `todo` rows naming a finding id; invariants I-2/I-3 hold for every scenario in both acknowledgment states. |
-| 2 | A synthetic fixture exists that produces **each** of L0, S, R, V(false rejection), V(false acceptance), G(omission), G(query), G(no_search), G(run_failure), I as the single classification; a hand-built record proves the 5.1 sum reconciles (I-7); NEG-ME-2..5, NEG-WE-1..3, NEG-IP-1..4 and NEG-X-1..5 run through the real agent loop with a scripted model; `todo` rows flip the suite red the moment they start passing (same as `evidenceOracle.test.js`). |
-| 3 | A committed synthetic capture round-trips; replay of it reports "0 verdicts changed"; an injected stricter/looser verifier makes replay print exactly the changed verdicts; a malformed line is reported with its number and exits 1; the replay test runs with `fetch` disabled and `OPENAI_API_KEY` unset and imports neither `config.js` nor `database.js`. |
+| 1a | Importing `repairTools.js` creates no database file (test shown failing first); the lazy default retriever still resolves and runs against an empty temporary database; `repairPlanner.test.js` passes unchanged; `git diff` shows only the import and the default-retriever lines changed in production code. |
+| 1b | Canonical-brief pins match Appendix A probe A3; the five natural-phrasing briefs and the F4 rows are `todo` rows each naming a finding id and none passes today; invariants I-2/I-3 hold across all briefs x evidence statuses x acknowledgment states; the file runs with no key, network, or real database; no production file changed; A1 and A2 are not pinned. |
+| 2 | `plannerScenarios.js` holds S1, S2, S8 only, with `confirmed` set only on the facts listed in 6.2; the scoring gate is tested (an unconfirmed fact yields `unscored`, never a pass or a failure). A synthetic fixture exists that produces **each** of L0, S, R, V(false rejection), V(false acceptance), G(omission), G(query), G(no_search), G(run_failure), I as the single classification; a hand-built record proves the 5.1 sum reconciles (I-7); NEG-ME-2..5, NEG-WE-1..3, NEG-IP-1..4 and NEG-X-1..5 run through the real agent loop with a scripted model; `todo` rows flip the suite red the moment they start passing (same as `evidenceOracle.test.js`). |
+| 3 | P-2 shipped first as its own tiny PR, with a regression test that the instructions string the agent passes to `streamTurn` equals the exported one and that its hash is stable; the agent's behavior is otherwise unchanged. A committed synthetic capture round-trips; replay of it reports "0 verdicts changed"; an injected stricter/looser verifier makes replay print exactly the changed verdicts; a malformed line is reported with its number and exits 1; the replay test runs with `fetch` disabled and `OPENAI_API_KEY` unset and imports neither `config.js` nor `database.js`. |
 | 4 | Every scenario has `corpusSupport` for every fact with a page reference; each promoted fact was checked on the rendered PDF; the chunk-length report states how many chunks exceed 1,500 characters; S8's precondition passes; you have signed off the essential-fact list per scenario. |
-| 5 | `--dry-run` is the default and calls nothing (tested); a real run without `--yes` or without a key refuses; an end-to-end test with a stubbed model through the real `runRepairPlannerAgent` writes a capture that replays with 0 changes; the report generator produces Tables 0-7 from a synthetic capture and refuses to print if I-7 fails; `--compare` prints `NOT COMPARABLE (<field>)` for each differing identity field. |
-| 6 | All 24 runs captured (or the shortfall explained as Layer I); every confirmed fact attributed exactly once; invariants pass or each failure is explained; the committed log holds aggregates only; the spot-check sample is recorded; **no verifier, readiness, classifier, extractor, or prompt code changed in the baseline PR**. |
+| 5 | `--dry-run` is the default and calls nothing (tested); a real run without `--yes` or without a key refuses; `--max-runs` defaults to 1; with a stubbed model, the wrapper makes **no further `streamTurn` or `retrieve` call** once `--max-provider-requests` is reached, and records the run as Layer I (tested); if the tool has token limits, a scripted usage figure above the limit stops the next request, and unreadable usage stops the tool after that run (tested); the dry-run output prints the estimate labelled as an estimate and lists limit 6 (provider-side budget) as unverified; an end-to-end test with a stubbed model through the real `runRepairPlannerAgent` writes a capture that replays with 0 changes; the report generator produces Tables 0-3 and the critical-finding line from a synthetic capture and refuses to print if I-7 fails. |
+| 6 | The pilot ran as one S1 run under its own approval, and its observed requests and tokens are recorded before any further approval; the 6a runs (S1, S2, S8 x 3) are captured (or the shortfall explained as Layer I); every *confirmed* fact attributed exactly once and every other fact reported `unscored`; invariants pass or each failure is explained; the committed log holds aggregates only; the spot-check sample is recorded; **no verifier, readiness, classifier, extractor, or prompt code changed in the baseline PR**. |
 
 ### 15.2 Whole system
 
@@ -694,18 +868,25 @@ that passes it.
 
 ---
 
-## 16. Decisions needed from the owner
+## 16. Owner decisions (recorded 2026-11-05)
 
-| # | Decision | Recommendation |
+| # | Decision | Owner's answer | How the spec reflects it |
+|---|---|---|---|
+| D1 | Scope: baseline is **measure-only**; no live pass/fail targets; no verifier/prompt/readiness/classifier/extractor changes. | **Approved.** | Hard rule in section 3; reporting rules in 7.4. |
+| D2 | The eight scenarios, one "stocked" inventory profile, canonical briefs. | **Approved, with evidence confirmation required before scoring.** | Scoring gate in 6.1 and rule 6 in 7.4; `unscored` metrics; the S1/S2/S3 evidence claims corrected in 6.2. |
+| D3 | Repeats and spend. | **Three repeats approved for planning only. No paid calls authorized.** Do not present a token ceiling as a dollar cap. | Section 12 rewritten: authorization status, estimate vs limit, what each limit guarantees, provider-side budget as the only dollar bound, pilot-first staging. |
+| D4 | Staging. | **Approved: start with S1, S2, S8.** | 6.2 table of what the first baseline can and cannot score; Phase 6 staged as pilot, 6a, 6b. |
+| D5 | Production edits P-1 (lazy retriever) and P-2 (export instructions). | **Conditionally approved:** minimal, isolated, covered by regression tests. | P-1 is Phase 1a alone; P-2 is its own PR before Phase 3; each has named regression tests (14.2, 15.1). |
+| D6 | Should `verified`/`ready` eventually require completeness? | **Deferred** until baseline findings. | A1/A2 stay unpinned measurements (14.2). |
+| D7 | Phantom tasks from natural phrasing (F3) as a future roadmap item. | **Deferred, but include the deterministic phantom-task tests.** | Phase 1b natural-phrasing `todo` rows (14.2). |
+| D8 | Who runs Tier B/D. | **Confirmed: your local machine.** | Section 4 note; Phases 4 and 6. |
+
+**Still open (new):**
+
+| # | Question | Needed before |
 |---|---|---|
-| D1 | Approve the scope: baseline is **measure-only**, with no live pass/fail targets and no verifier/prompt/readiness/classifier/extractor changes in these PRs. | Approve. |
-| D2 | Approve the eight scenarios, the single "stocked" inventory profile, and canonical briefs (6.2). Swap any you would not actually do. | Approve; S6 and S8 are the traps, keep them. |
-| D3 | Repeats and spend: 3 repeats per scenario, ceiling suggested at 3M input tokens (~$10 worst case), expected ~$4-5. | Approve; revisit only if results are inconclusive. |
-| D4 | Staging: first baseline on S1, S2, S8 (evidence already confirmed in the repo), then S3-S7 after the survey. | Approve; this gets a trustworthy number soonest. |
-| D5 | Permission for the P-1 lazy-import refactor and P-2 export in `repairTools.js` / `repairPlannerAgent.js`. | Approve; the alternative is an environment-variable workaround that is easier to get wrong. |
-| D6 | Product question, **not** part of this work: should `verified`/`ready` eventually *require* procedure completeness? The baseline will show how often they currently do not. | Defer until the baseline is in. |
-| D7 | Treat phantom tasks from natural phrasing (F3) as a separate future roadmap item if the L0 probe confirms it. | Defer; the free probe comes first. |
-| D8 | Who runs Tier B/D: it must be your machine (the cloud sandbox has no manuals). | Confirm. |
+| D9 | Accept or reject each scope trim in 14.1. | Phase 2 |
+| D10 | Confirm the OpenAI project budget (value, and whether it hard-stops or only notifies) and whether to use a dedicated project key for evals. | Any paid session |
 
 ---
 
