@@ -1,9 +1,24 @@
-import { retrieveRelevantChunks } from "../chunkRetrievalService.js";
 import { normalizeText } from "../../utils/text.js";
 import { CLAIM_KINDS } from "./repairPlanEvidenceContract.js";
 // The safety rubric lives in its own module so the "is this safety critical"
 // keyword list and the "which warnings apply" rule table stay in sync.
 import { classifyRepairTask } from "../safetyClassifier.js";
+
+/** @typedef {typeof import("../chunkRetrievalService.js").retrieveRelevantChunks} Retriever */
+
+// The default retriever is loaded on first use, not at import. The retriever
+// module imports database.js, which opens the real database as a side effect of
+// being imported -- so a static import here made every importer of these pure
+// tools (the task extractor, readiness, the checklist) open it too. The agent
+// loop injects its own retriever, so this default is reached only when a search
+// runs without one, and then it behaves exactly as the static import did. An
+// offline tool that imports only the pure functions no longer touches a database.
+/** @type {Retriever} */
+const retrieveRelevantChunksLazily = async (question, options) => {
+  const { retrieveRelevantChunks } = await import("../chunkRetrievalService.js");
+
+  return retrieveRelevantChunks(question, options);
+};
 
 // Deterministic tools the repair-planning agent can call.
 //
@@ -461,11 +476,11 @@ export function createSourceRegistry() {
 
 /**
  * @param {{ query?: string, limit?: number, taskId?: number }} [args]
- * @param {{ retrieve?: typeof retrieveRelevantChunks, sources?: any }} [deps]
+ * @param {{ retrieve?: Retriever, sources?: any }} [deps]
  */
 export async function searchRepairDocs(
   { query, limit = DEFAULT_SEARCH_RESULTS, taskId } = {},
-  { retrieve = retrieveRelevantChunks, sources = null } = {}
+  { retrieve = retrieveRelevantChunksLazily, sources = null } = {}
 ) {
   const normalizedQuery = normalizeText(query);
 
@@ -982,10 +997,10 @@ export const repairToolSchemas = [
  * `ackSafety: true` or a replacement task list changes nothing. Only genuinely
  * model-chosen values (a search query, parts copy) come from `args`.
  *
- * @param {{ retrieve?: typeof retrieveRelevantChunks, trusted?: any, sources?: any }} [deps]
+ * @param {{ retrieve?: Retriever, trusted?: any, sources?: any }} [deps]
  */
 export function createToolRegistry({
-  retrieve = retrieveRelevantChunks,
+  retrieve = retrieveRelevantChunksLazily,
   trusted = {},
   sources = null,
 } = {}) {
