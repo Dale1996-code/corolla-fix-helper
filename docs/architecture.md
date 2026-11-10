@@ -281,9 +281,10 @@ Ask and the Repair Planner both render a statement as document-backed only after
 | `server/src/services/procedureSuggestionService.js` | Grounded procedure suggestions for a symptom |
 | `server/src/services/searchService.js` | Symptom/procedure/note keyword search + filter options; reuses entity/core mappers |
 | `server/src/services/attachmentService.js` | Image attachment CRUD + per-entity cleanup |
-| `server/src/services/backupService.js`, `databaseSnapshot.js`, `tarExecutable.js` | Backup export/restore plumbing; Windows-safe tar selection |
+| `server/src/services/backupService.js`, `databaseSnapshot.js`, `tarExecutable.js` | Backup export/restore plumbing (including `verifyBackupArchive`, the test restore); Windows-safe tar selection |
+| `server/src/services/backupStatusService.js` | The "Last backup" note: `backup-status.json` beside the database file, deliberately outside the database and every archive so a restore cannot rewind it; re-derives file-found / verified / stale on each read |
 | `server/src/services/agent/*` | Repair Planner (see above) |
-| `server/src/scripts/*` | CLI entry points for `npm run import/restore/backup:drill/embed:backfill/eval:*` |
+| `server/src/scripts/*` | CLI entry points for `npm run import/backup/restore/backup:drill/embed:backfill/eval:*` |
 | `client/src/lib/apiClient.js` | `requestJson` fetch wrapper + attachment/link helpers |
 | `client/src/pages/*.jsx` | One page per feature; tests co-located |
 

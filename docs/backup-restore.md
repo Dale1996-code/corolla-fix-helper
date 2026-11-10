@@ -9,9 +9,9 @@ backup, so the two halves are documented together here.
 
 ## What a backup contains
 
-A backup is a single gzipped tar archive. The Settings download is named
-`corolla-fix-helper-backup-<timestamp>.tar.gz`; the command-line export below
-writes `corolla-fix-helper-backup.tar.gz`. The archive's root holds:
+A backup is a single gzipped tar archive named
+`corolla-fix-helper-backup-<timestamp>.tar.gz`, whether it comes from the
+Settings download or from `npm run backup`. The archive's root holds:
 
 ```
 database/<name>.db   a snapshot of the SQLite database, including the newest
@@ -38,19 +38,113 @@ You can produce a backup two ways:
   `localhost` address. From a phone or another device (including through
   Tailscale) the download is refused with "Backups can only be downloaded on
   the host machine itself…".
-- **From the command line** (handy for scripts/cron):
+- **From the command line** (handy for scripts and scheduled tasks):
 
   ```bash
-  cd server
-  node -e "import('./src/services/backupService.js').then(m => m.createBackupArchive({ databaseFile: process.env.DATABASE_FILE || 'data/corolla-fix-helper.db', uploadsDir: process.env.UPLOADS_DIR || 'uploads', outFile: 'corolla-fix-helper-backup.tar.gz' }))"
+  npm run backup -- "D:\Backups"
   ```
 
-  The archive is written into the `server` folder. This command does not read
-  `server/.env`. If you changed `DATABASE_FILE` or `UPLOADS_DIR` there, set the
-  same values in your terminal before running it.
+  Run it from the project root, with the folder you want the archive written to.
+  The folder is required, and is created if it does not exist. It is safe to run
+  while the app is running: the database is read through SQLite, which includes
+  everything saved so far. It reads `server/.env` the same way the app does, so a
+  `DATABASE_FILE` or `UPLOADS_DIR` set there is picked up.
+
+  By default it also **test-restores the new archive**: it unpacks the archive
+  into a scratch folder and runs the same checks a real restore runs (the database
+  must open, pass SQLite's integrity check, and contain this app's tables). It
+  removes the scratch folder afterwards and touches none of your live data. Add
+  `--no-verify` to skip that step; the backup is then recorded as created but not
+  verified.
+
+  It is built so that it cannot damage a backup you already have:
+
+  - It **never overwrites or deletes an existing file**. If a file with the
+    archive's name is already there, it stops.
+  - The archive is written as `<name>.tar.gz.partial` and renamed only once it is
+    complete (and, unless `--no-verify`, once the test restore passed). A
+    `.tar.gz` in your folder is therefore never half-written. If a run fails, it
+    removes only the `.partial` file it created.
+  - It refuses a folder inside your uploads folder, because every backup would
+    then contain the one before it.
+  - A failed run leaves the "Last backup" record (below) exactly as it was.
 
 Store the resulting file somewhere off the machine (another disk, a synced
-folder, etc.). Use sample or fake PDFs before sharing a backup.
+folder, etc.). A backup on the same disk as the app does not protect you from
+that disk failing. Use sample or fake PDFs before sharing a backup.
+
+## Last backup in Settings
+
+**Settings → Backup and restore → Last backup** shows when the most recent
+successful backup was made, where it was saved, and whether the app can still
+stand behind it.
+
+Where the note is kept matters. It lives in a small file,
+`backup-status.json`, **in the same folder as the database** (`server/data/` by
+default). It is deliberately not a database table and not inside the uploads
+folder. A restore swaps the database file and the uploads folder and nothing
+else, and the file is never part of an archive, so restoring an older backup
+cannot rewind it into reporting a backup that never happened. Delete the file
+and Settings simply says no backup is recorded.
+
+It holds one record, the most recent successful backup. A backup counts only
+when it actually completed:
+
+| Made with | Recorded when | Destination | Test restore |
+|---|---|---|---|
+| `npm run backup` | the archive is complete and, unless `--no-verify`, the test restore passed | the full path | `passed`, or `not run` with `--no-verify` |
+| Settings → Export backup | the whole archive has been sent to the browser; a failed or cancelled download is never recorded | **unknown**: the browser decides where the file goes | never run |
+
+What Settings shows is re-checked each time the page loads (or when you press
+**Check again**), not copied from the note. The headline is one of three:
+
+- **Verified**: the archive is still at its recorded location with the size it
+  had, **and** it passed a test restore.
+- **Created, not verified**: the file is there, but no test restore was run on it
+  (`--no-verify`).
+- **Status unknown**: the file is missing or its size has changed, or the app
+  cannot see where it went. Every Settings download lands here by design, because
+  the app cannot find a file your browser saved or test-restore it. If the file
+  was moved on purpose, this is expected.
+
+Settings never calls a backup "safe". "File found" means a file of the recorded
+size exists, not that its contents were re-read. Only a test restore reads the
+archive, and only at the moment `npm run backup` made it.
+
+A backup **older than 7 days**, or no recorded backup at all, shows an amber
+warning. Backups made before this note existed, or saved some other way (such as
+copying files by hand), are not counted. A Settings download finishes after you
+click, so press **Check again** once it is done.
+
+There is not yet a command that test-restores a backup file you already have.
+`npm run restore` is the real thing and replaces your live data, so do not use it
+as a check. For a verified backup, use `npm run backup`.
+
+## If `npm run backup` fails
+
+The command exits non-zero and prints `Backup failed: …`, then confirms that no
+existing file was changed and the last-backup record was not updated. Common
+messages:
+
+- **`Usage: npm run backup -- "<folder>" [--no-verify]`**: you left out the
+  folder, gave more than one, or typed an option it does not know. Nothing was
+  done.
+- **`… already exists, so nothing was written`**: a file with that exact name is
+  already in the folder (names carry the time to the millisecond, so this is
+  rare). Nothing was overwritten. Run the command again.
+- **`… is inside your uploads folder`**: pick a folder outside `UPLOADS_DIR`.
+- **`Backup database is missing required tables …`, an integrity-check message,
+  or `tar exited with code …`**: the archive was made but did not pass the test
+  restore (or could not be made), so it was removed and **nothing was recorded**.
+  Check free disk space and run it again. If it keeps failing on the integrity
+  check, your live database may be damaged: stop the app and look at it before
+  doing anything else.
+- **`The backup was made, but the "last backup" note could not be saved`**: the
+  archive is complete and was kept. Only the Settings note failed, usually
+  because the folder holding the database is not writable. Settings will not show
+  this backup until a later backup records one.
+- **`tar is not available on this system`**: Windows 10 and later ship `tar`; on
+  other systems install it.
 
 ## Restore a backup
 
@@ -214,7 +308,7 @@ install, so it never touches your real data. It seeds fake documents, symptoms,
 procedures, notes, a PDF, and an attachment image; exports a backup while a
 database connection is still open, the way the running app's would be; wipes
 the database and uploads; restores; and asserts the row counts and the PDF and
-image bytes came back intact. It uses the same export code as the command line,
-not the Settings download. It prints `Backup + restore drill PASSED` on success
+image bytes came back intact. It uses the same export code as `npm run backup`,
+not the Settings download. It does not touch the last-backup note. It prints `Backup + restore drill PASSED` on success
 and exits non-zero if anything fails. Run it after changing backup or storage
 code.
