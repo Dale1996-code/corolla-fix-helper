@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "import": "node src/scripts/importFolder.js",
     "demo:seed": "node src/scripts/demoSeed.js",
+    "backup": "node src/scripts/createBackup.js",
     "restore": "node src/scripts/restoreBackup.js",
     "backup:drill": "node src/scripts/backupDrill.js",
     "smoke": "node src/scripts/smokeTest.js",

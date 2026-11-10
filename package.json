@@ -15,6 +15,7 @@
     "build:client": "npm --prefix client run build",
     "import": "npm --prefix server run import --",
     "demo:seed": "npm --prefix server run demo:seed",
+    "backup": "npm --prefix server run backup --",
     "restore": "npm --prefix server run restore --",
     "backup:drill": "npm --prefix server run backup:drill",
     "smoke": "npm --prefix server run smoke",
