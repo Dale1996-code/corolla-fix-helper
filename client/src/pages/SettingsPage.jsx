@@ -3,6 +3,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ErrorBanner, InfoBanner, SuccessBanner } from "../components/feedback/Banner";
 import { SelectField, TextAreaField, TextField } from "../components/forms/FormFields";
 import { requestJson } from "../lib/apiClient";
+import { formatDate } from "../lib/formatDate";
 
 const emptyVehicleForm = {
   year: "",
@@ -336,6 +337,165 @@ function AiSection({ ai, refreshing, refreshError, onRefresh }) {
   );
 }
 
+// What the app could see of the archive file when the server last checked.
+const BACKUP_FILE_LABELS = {
+  found: "Found (same size as when it was made)",
+  missing: "Not found at that location",
+  changed: "Found, but its size is different from when it was made",
+  not_checkable: "Can't be checked from here",
+};
+
+// The one line the owner leans on. "Verified" is only ever shown for a backup
+// whose file is still there AND that passed a test restore; everything the app
+// cannot confirm says so instead of reading as covered. The server decides
+// which applies (`assurance`); this only words it.
+const BACKUP_ASSURANCE = {
+  verified: {
+    text: "Verified: it passed a test restore and its file is still there.",
+    className: "text-emerald-800",
+  },
+  created: {
+    text: "Created, not verified: the file is there, but no test restore has been run on it.",
+    className: "text-slate-800",
+  },
+  unknown: {
+    text: "Status unknown: this backup's file can't be confirmed, so the app can't vouch for it.",
+    className: "text-amber-800",
+  },
+};
+
+function describeBackupAge(ageDays) {
+  if (!Number.isFinite(ageDays) || ageDays <= 0) {
+    return "today";
+  }
+
+  return ageDays === 1 ? "1 day ago" : `${ageDays} days ago`;
+}
+
+function BackupDetail({ label, children }) {
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
+      <dt className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:w-32">
+        {label}
+      </dt>
+      <dd className="min-w-0 break-words text-sm text-slate-900">{children}</dd>
+    </div>
+  );
+}
+
+function testRestoreText(lastBackup) {
+  if (lastBackup.verification !== "passed") {
+    return "Not run";
+  }
+
+  // It passed when it was made. That only counts while its file can still be
+  // confirmed, so say what is true now rather than leave the old pass standing.
+  return lastBackup.assurance === "verified"
+    ? `Passed on ${formatDate(lastBackup.verifiedAt)}`
+    : "Passed when it was made, but its file can no longer be confirmed";
+}
+
+/**
+ * "Last backup": when the most recent successful backup was made, where it went,
+ * and whether the app can still stand behind it.
+ *
+ * Every value is derived by the server on each request from a status file kept
+ * beside the database (see services/backupStatusService.js), so a restore cannot
+ * rewind it and a deleted archive stops being reported. A Settings download goes
+ * to the browser, so for those the destination is unknown and the status stays
+ * "unknown" by design.
+ */
+function LastBackupPanel({ lastBackup, refreshing, refreshError, onRefresh }) {
+  return (
+    <div
+      role="region"
+      aria-label="Last backup"
+      className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-900">Last backup</p>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+        >
+          {refreshing ? "Checking..." : "Check again"}
+        </button>
+      </div>
+
+      {!lastBackup ? (
+        <p className="mt-2 text-sm text-slate-600">
+          Last-backup details are not available from the server. Restart the app and try again.
+        </p>
+      ) : !lastBackup.recorded ? (
+        <InfoBanner tone="amber" announce className="mt-3">
+          No backup recorded yet. Backups made before this was tracked, or saved some other way,
+          are not counted. Export a backup below, or run the backup command.
+        </InfoBanner>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <p
+            className={`text-sm font-semibold ${
+              (BACKUP_ASSURANCE[lastBackup.assurance] || BACKUP_ASSURANCE.unknown).className
+            }`}
+          >
+            {(BACKUP_ASSURANCE[lastBackup.assurance] || BACKUP_ASSURANCE.unknown).text}
+          </p>
+
+          {lastBackup.stale ? (
+            <InfoBanner tone="amber" announce>
+              This backup is {lastBackup.ageDays} days old. Backups older than{" "}
+              {lastBackup.staleAfterDays} days are flagged — make a new one.
+            </InfoBanner>
+          ) : null}
+
+          <dl className="space-y-2">
+            <BackupDetail label="Made">
+              {formatDate(lastBackup.createdAt)}
+              <span className="block text-xs text-slate-600">
+                {describeBackupAge(lastBackup.ageDays)}
+              </span>
+            </BackupDetail>
+            <BackupDetail label="How">
+              {lastBackup.source === "cli"
+                ? "Command line (npm run backup)"
+                : "Settings → Export backup"}
+            </BackupDetail>
+            <BackupDetail label="Saved to">
+              {lastBackup.destination ? (
+                lastBackup.destination
+              ) : (
+                <>
+                  Your browser&apos;s download folder.
+                  <span className="block text-xs text-slate-600">
+                    The app can&apos;t see where the browser put the file.
+                  </span>
+                </>
+              )}
+            </BackupDetail>
+            <BackupDetail label="File">
+              {BACKUP_FILE_LABELS[lastBackup.file] || BACKUP_FILE_LABELS.not_checkable}
+            </BackupDetail>
+            <BackupDetail label="Test restore">{testRestoreText(lastBackup)}</BackupDetail>
+          </dl>
+        </div>
+      )}
+
+      {refreshError ? (
+        <ErrorBanner className="mt-3">
+          {refreshError} The details above are from the last successful check.
+        </ErrorBanner>
+      ) : null}
+
+      <p className="mt-3 text-xs text-slate-600">
+        Checked when this page loads. Press Check again after a download or a backup command
+        finishes.
+      </p>
+    </div>
+  );
+}
+
 /**
  * Restore guidance.
  *
@@ -425,6 +585,8 @@ export function SettingsPage() {
   const [backupExport, setBackupExport] = useState(emptyBackupExport);
   const [backupExportMessage, setBackupExportMessage] = useState("");
   const [backupExportError, setBackupExportError] = useState("");
+  const [backupRefreshing, setBackupRefreshing] = useState(false);
+  const [backupRefreshError, setBackupRefreshError] = useState("");
 
   useEffect(() => {
     async function loadSettings() {
@@ -480,6 +642,32 @@ export function SettingsPage() {
       setAiRefreshError(error.message || "Could not refresh AI status.");
     } finally {
       setAiRefreshing(false);
+    }
+  }
+
+  // Re-read only the last-backup block, for after a download or a backup command
+  // finishes. Like the AI refresh, a failure keeps the last known details on
+  // screen with the error beside them: blanking them would claim a different
+  // state than the server reported.
+  async function handleBackupStatusRefresh() {
+    try {
+      setBackupRefreshing(true);
+      setBackupRefreshError("");
+
+      const payload = await requestJson("/api/settings", {
+        errorMessage: "Could not check the last backup.",
+      });
+
+      if (payload.backupExport?.lastBackup) {
+        setBackupExport((current) => ({
+          ...current,
+          lastBackup: payload.backupExport.lastBackup,
+        }));
+      }
+    } catch (error) {
+      setBackupRefreshError(error.message || "Could not check the last backup.");
+    } finally {
+      setBackupRefreshing(false);
     }
   }
 
@@ -842,6 +1030,12 @@ export function SettingsPage() {
                     <p className="text-sm text-slate-700">
                       {backupExport.message || emptyBackupExport.message}
                     </p>
+                    <LastBackupPanel
+                      lastBackup={backupExport.lastBackup}
+                      refreshing={backupRefreshing}
+                      refreshError={backupRefreshError}
+                      onRefresh={handleBackupStatusRefresh}
+                    />
                     <button
                       type="button"
                       onClick={handleBackupExport}
@@ -851,6 +1045,19 @@ export function SettingsPage() {
                     </button>
                     {backupExportMessage ? <SuccessBanner>{backupExportMessage}</SuccessBanner> : null}
                     {backupExportError ? <ErrorBanner>{backupExportError}</ErrorBanner> : null}
+                    {backupExport.cli?.command ? (
+                      <div>
+                        <p className="text-sm text-slate-700">
+                          Or back up from the command line into a folder you choose. This also
+                          runs a test restore of the new archive, and it never overwrites or
+                          deletes an existing file. Run it from the project folder on the
+                          computer hosting the app:
+                        </p>
+                        <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 text-xs text-slate-100">
+                          <code>{backupExport.cli.command}</code>
+                        </pre>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="mt-2 text-sm text-slate-700">

@@ -301,3 +301,91 @@ test("Settings backup export streams data and ends only after tar succeeds", asy
   assert.equal(response.headers["Content-Type"], "application/gzip");
   assert.equal(response.destroyed, false);
 });
+
+// ---------------------------------------------------------------------------
+// "Last backup" bookkeeping. A Settings download goes straight to the browser,
+// so the app can only know that the whole archive was sent, never where it was
+// saved or whether it can be restored.
+// ---------------------------------------------------------------------------
+
+const DOWNLOAD_TIME = new Date("2026-11-10T12:00:00.000Z");
+
+test("a completed Settings download is recorded as a backup whose location the app cannot know", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const recorded = [];
+  const handler = buildHandler(tarProcess, {
+    recordBackup: (backup) => recorded.push(backup),
+    now: () => DOWNLOAD_TIME,
+  });
+
+  await handler({}, response);
+  tarProcess.stdout.write("archive bytes");
+  tarProcess.emit("close", 0);
+  await once(response, "finish");
+
+  assert.deepEqual(recorded, [
+    {
+      createdAt: "2026-11-10T12:00:00.000Z",
+      source: "settings",
+      archivePath: null,
+      archiveBytes: null,
+      verification: { state: "not_run", checkedAt: null },
+    },
+  ]);
+});
+
+test("a download that fails after it started is not recorded as a backup", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const recorded = [];
+  const handler = buildHandler(tarProcess, {
+    recordBackup: (backup) => recorded.push(backup),
+  });
+
+  await handler({}, response);
+  tarProcess.stdout.write("partial archive");
+  tarProcess.emit("close", 2);
+  await once(response, "close");
+
+  assert.deepEqual(recorded, []);
+});
+
+test("a cancelled download is not recorded as a backup", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const recorded = [];
+  const handler = buildHandler(tarProcess, {
+    recordBackup: (backup) => recorded.push(backup),
+  });
+
+  await handler({}, response);
+  tarProcess.stdout.write("partial archive");
+  await nextTurn();
+  response.destroy();
+  await nextTurn();
+  await nextTurn();
+
+  assert.deepEqual(recorded, []);
+});
+
+test("a failure to save the backup note is logged and never breaks the download", async () => {
+  const tarProcess = fakeTarProcess();
+  const response = new FakeResponse();
+  const logMessages = [];
+  const handler = buildHandler(tarProcess, {
+    recordBackup: () => {
+      throw new Error("disk full");
+    },
+    logger: { error: (message) => logMessages.push(message) },
+  });
+
+  await handler({}, response);
+  tarProcess.stdout.write("archive bytes");
+  tarProcess.emit("close", 0);
+  await once(response, "finish");
+
+  assert.equal(Buffer.concat(response.chunks).toString(), "archive bytes");
+  assert.equal(response.destroyed, false);
+  assert.match(logMessages.join("\n"), /disk full/);
+});
