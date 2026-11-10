@@ -951,6 +951,23 @@ implements them; a change to any of them is an owner decision, not a judge fix.
 | 2b-6 | **Negative tests assert three axes.** | Every negative row asserts the evidence status, the verifier's rejection reasons, and the failure-layer attribution, through one helper that fails if an axis is left out. NEG-IP-6 is included (three structurally invalid finalizers end in `invalid_final_contract`; two invalid then one valid completes). NEG-X-1..X-3 stay as thin re-assertions of existing tests. A bare `SST` rejection is a pinned `known-limitation` row, not a `todo`. |
 | 2b-7 | **Two ledgers.** | One outcome per confirmed fact (I-7) and one verdict per submitted claim, kept separate. |
 
+**Choices made while building 2b, for the owner to confirm** (each is a judge rule, not a
+product change, and each is pinned by a test):
+
+- *A false rejection needs the fact to have been shown.* Section 5.1 calls every rejected claim
+  that matches a fact a false rejection. The judge counts it as one only when the fact was in
+  the text the model was shown (the same cut 5.1 step 3 makes for the fact). A claim stating
+  the right figure while citing text that never showed it is an `ungrounded_rejection`: the
+  verifier was right to refuse it, so it is not counted in U4.
+- *`procedure_step` is a new fact kind,* added with its matcher (every step matcher must hit the
+  claim). Only the negative tests' own scenarios use it; no committed scenario has a confirmed
+  step yet (D11), so C1 stays `unscored` for S1, S2, and S8.
+- *NEG-ME-4 pins `claim_not_in_quote`, not `unsupported_number`.* The planner first checks that
+  a claim is a fragment of its quote, so a claim can print only its quote's numbers and
+  `unsupported_number` cannot be reached through a whole run.
+- *The matcher does not read a number with no declared unit* ("tighten the drain plug to 45").
+  It is a known blind spot, stated in the code, rather than a guess.
+
 Found while building 2a, for the roadmap rather than this phase: the planner accepts a
 drive-belt claim for the "Replace the timing belt" task, because its task-subject check needs
 only one shared word (`belt`). The `S8-drive-belt-decoy` run exists so the judge can be shown
