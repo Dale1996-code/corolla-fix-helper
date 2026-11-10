@@ -635,24 +635,35 @@ function judgeFact(fact, context) {
 
 // ---- The claim ledger -----------------------------------------------------------------
 
-function classifyClaim(verdict, labels) {
-  const values = Object.values(labels);
-  const supports = values.some((label) => SUPPORT_LABELS.has(label));
-  const wrong = values.some((label) => WRONG_LABELS.has(label));
+/**
+ * One claim's verdict class. A rejected claim stating a confirmed fact is a
+ * FALSE rejection only when that fact was in the text the model was shown:
+ * then a correct claim was available and the verifier turned it down. A claim
+ * stating the right figure while citing text that never showed it is an
+ * ungrounded claim the verifier was right to refuse (section 5.1 step 3 makes
+ * the same cut for the fact), so it is not counted in U4.
+ */
+function classifyClaim(verdict, labels, seenFactIds) {
+  const entries = Object.entries(labels);
+  const supportedFacts = entries.filter(([, label]) => SUPPORT_LABELS.has(label)).map(([id]) => id);
+  const wrong = entries.some(([, label]) => WRONG_LABELS.has(label));
 
   if (verdict === "accepted") {
     if (wrong) {
       return "false_acceptance";
     }
-    return supports ? "covered" : "unscored_acceptance";
+    return supportedFacts.length > 0 ? "covered" : "unscored_acceptance";
   }
-  if (supports) {
+  if (supportedFacts.some((id) => seenFactIds.has(id))) {
     return "false_rejection";
+  }
+  if (supportedFacts.length > 0) {
+    return "ungrounded_rejection";
   }
   return wrong ? "correct_rejection" : "unscored_rejection";
 }
 
-function buildClaimLedger(finalizer, scoredFacts) {
+function buildClaimLedger(finalizer, scoredFacts, seenFactIds) {
   if (!finalizer) {
     return [];
   }
@@ -674,7 +685,7 @@ function buildClaimLedger(finalizer, scoredFacts) {
       verdict,
       reason,
       labels,
-      classification: classifyClaim(verdict, labels),
+      classification: classifyClaim(verdict, labels, seenFactIds),
     };
   });
 }
@@ -994,7 +1005,14 @@ export function judgeRun(record, scenario, { vehicleLabel = DEFAULT_VEHICLE_LABE
 
   const scoredFacts = effective.facts.filter(isScorable);
   const facts = effective.facts.map((fact) => judgeFact(fact, context));
-  const claims = buildClaimLedger(decisive, scoredFacts);
+  // Facts the model was actually shown, for telling a false rejection from an
+  // ungrounded claim.
+  const seenFactIds = new Set(
+    scoredFacts
+      .filter((fact) => fact.kind !== "absence" && context.sources.some((source) => statesFact(source.evidenceText, fact)))
+      .map((fact) => fact.id)
+  );
+  const claims = buildClaimLedger(decisive, scoredFacts, seenFactIds);
   const metrics = computeMetrics(record, effective, facts, claims, finalizerInfo);
 
   const readiness = checkReadiness(record);

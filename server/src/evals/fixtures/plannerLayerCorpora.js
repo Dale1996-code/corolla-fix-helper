@@ -80,7 +80,7 @@ const PLANT_VARIANTS = [
     441,
     "Engine Mounting Service Data - Synthetic Fixture",
     1,
-    "Front mount bolt torque for TMC built vehicles: 50 N·m. Front mount bolt torque for TMMT built vehicles: 80 N·m.",
+    "The front mount bolt torque for TMC built vehicles is 50 N·m. The front mount bolt torque for TMMT built vehicles is 80 N·m.",
     { purpose: "one fastener, two build-plant figures" }
   ),
 ];
