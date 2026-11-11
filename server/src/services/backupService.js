@@ -363,7 +363,45 @@ export async function createBackupArchive({
   }
 }
 
-function isSameOrInside(parentPath, childPath) {
+/**
+ * Prove an existing archive can be restored, without touching any live data.
+ *
+ * This is the first half of restoreBackup (unpack into a scratch folder, then
+ * run the same validation) and nothing more: it takes no database or uploads
+ * path, so it has nothing live to move or overwrite. Resolves with the parsed
+ * manifest (null for an older archive without one); rejects when the file is
+ * missing, will not unpack, or fails validation. The scratch folder is always
+ * removed.
+ */
+export async function verifyBackupArchive({
+  archivePath,
+  fs = fsDefault,
+  extractArchive = defaultExtractArchive,
+}) {
+  if (!archivePath || !fs.existsSync(archivePath)) {
+    throw new Error(`Backup archive not found: ${archivePath}`);
+  }
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "corolla-fix-helper-verify-"));
+
+  try {
+    await extractArchive(archivePath, workDir);
+
+    const { manifest } = validateExtractedBackup(workDir, { fs });
+
+    return { manifest };
+  } finally {
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    } catch {
+      // A scratch folder under the OS temp directory that could not be removed
+      // (Windows can briefly hold a just-closed file) must not turn a finished
+      // verification into a failure; the OS clears its temp folder.
+    }
+  }
+}
+
+export function isSameOrInside(parentPath, childPath) {
   const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

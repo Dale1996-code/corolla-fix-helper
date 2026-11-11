@@ -1098,6 +1098,24 @@ curl.exe -X POST http://localhost:4000/api/attachments `
   "backupExport": {
     "supported": true,
     "message": "...",
+    "cli": {
+      "command": "npm run backup -- \"/path/to/backup-folder\"",
+      "documentation": "docs/backup-restore.md"
+    },
+    "lastBackup": {
+      "recorded": true,
+      "createdAt": "2026-11-08T12:00:00.000Z",
+      "source": "cli",
+      "destination": "D:\\Backups\\corolla-fix-helper-backup-2026-11-08T12-00-00-000Z.tar.gz",
+      "archiveBytes": 52428800,
+      "file": "found",
+      "verification": "passed",
+      "verifiedAt": "2026-11-08T12:00:30.000Z",
+      "assurance": "verified",
+      "ageDays": 2,
+      "stale": false,
+      "staleAfterDays": 7
+    },
     "restore": {
       "supported": true,
       "method": "cli",
@@ -1118,6 +1136,18 @@ curl.exe -X POST http://localhost:4000/api/attachments `
 ```
 
 `runtime` is the fastest way to check which database/uploads paths the live server is actually using.
+
+`backupExport.lastBackup` is the "Last backup" panel on the Settings page. It is **derived on every request** from `backup-status.json`, a small file kept in the same folder as the database (not in the database, not in the uploads folder, and never inside an archive, so a restore cannot rewind it — see [backup-restore.md](backup-restore.md#last-backup-in-settings)). It describes the single most recent successful backup:
+
+- `recorded: false` means no usable record exists (no file, or one that cannot be read). The payload is then just `{ "recorded": false, "stale": true, "staleAfterDays": 7 }`.
+- `source` is `"cli"` (`npm run backup`) or `"settings"` (the Settings download). A Settings download is recorded only once the whole archive has been sent to the browser; a failed or cancelled download never is.
+- `destination` is the archive's full path, or `null` when the app cannot know it (every Settings download: the browser chooses where the file goes).
+- `file` is what the server sees **now**: `"found"` (a file of the recorded size exists — the contents are not re-read), `"missing"`, `"changed"` (the size differs from when it was recorded), or `"not_checkable"` (no known location).
+- `verification` is `"passed"` only when `npm run backup` test-restored the archive (unpacked it into a scratch folder and ran the same validation a restore runs); otherwise `"not_run"`. `verifiedAt` is when, or `null`.
+- `assurance` is the one field to branch on: `"verified"` (file found **and** test restore passed), `"created"` (file found, no test restore), or `"unknown"` (file missing or changed, or location unknown). A past pass never keeps a missing file `"verified"`. Nothing here means a backup is "safe".
+- `ageDays` is whole days since `createdAt` (never negative); `stale` is `true` when it is **more than** `staleAfterDays` (7) old, and always `true` when nothing is recorded.
+
+`backupExport.cli.command` is the backup command text, served here (like `restore.command`) so the UI cannot drift from the script.
 
 `ai` is the safe status block behind the Settings page's **AI** card. Read it carefully before relying on it:
 
@@ -1160,7 +1190,7 @@ Body: `commonSystems`, `documentTypes` — the option lists offered on the uploa
 
 ### `GET /api/settings/backup-export`
 
-Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire uploads tree) as a download. `500` with `{ "error": "Could not create backup export archive." }` if `tar` fails — see the [runbook](runbook.md#backup-export-fails). Restore is a CLI operation, not an API call ([backup-restore.md](backup-restore.md)).
+Streams `corolla-fix-helper-backup-<timestamp>.tar.gz` (database + entire uploads tree) as a download. When the whole archive has been sent it records a `source: "settings"` entry in the last-backup note (no destination, not verified); a failure to save that note is logged and never affects the download. `500` with `{ "error": "Could not create backup export archive." }` if `tar` fails — see the [runbook](runbook.md#backup-export-fails). Restore is a CLI operation, not an API call ([backup-restore.md](backup-restore.md)).
 
 Host machine only, even with `NETWORK_MODE=1` (`requireLoopback` in `routes/settings.js`). `403` unless all three hold: the connection comes from this machine, the request carries no proxy forwarding header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`), and its `Host` is `localhost`, `127.0.0.1` or `[::1]`. The last two refuse a request relayed by a proxy on this machine, such as `tailscale serve` or a Vite dev server started with `--host`. Download backups on the laptop itself, at `http://localhost:4000` (or `:5173` in dev). It is also a side-effect GET, so a cross-site request gets `403` too.
 

@@ -36,6 +36,7 @@ Check:
 - The AI card shows **Configured** / **Not configured**, the model name, and "AI calls today". The API key itself never appears — check the Network tab's `/api/settings` response too.
 - "AI calls today" goes up after an Ask (by more than one if the rewrite and reranker ran) and does not move when you only click **Refresh**.
 - The restore instructions show `npm run restore -- "..."`, **Copy command** copies it, and the command block scrolls sideways instead of stretching the page at phone width.
+- **Last backup** (above the Export button): with no backup recorded it shows an amber "No backup recorded yet". After `npm run backup -- "<folder>"` and **Check again**, it shows **Verified**, the date, the full archive path, "File: Found", and "Test restore: Passed on …". Deleting that archive and pressing **Check again** changes the headline to **Status unknown** and "Not found at that location". After **Export backup** and **Check again**, it shows **Status unknown** with "Your browser's download folder" (the app cannot see where the browser saved it). The word "safe" never appears. Restoring an older backup does not change what it shows.
 
 ## 3. Documents
 

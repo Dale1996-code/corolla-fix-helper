@@ -13,6 +13,11 @@ import {
 import { getAiUsageSnapshot, AI_USAGE_DAY_BOUNDARY } from "../services/aiUsageBudget.js";
 import { resolveTarExecutable } from "../services/tarExecutable.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
+import {
+  backupStatusFileFor,
+  describeLastBackup,
+  recordSuccessfulBackup,
+} from "../services/backupStatusService.js";
 import { getVehicle } from "../services/vehicleService.js";
 import {
   normalizeApplicabilityProfile,
@@ -99,6 +104,16 @@ function getBackupExportSettings() {
     path: "Download from Settings",
     message:
       "Use Export backup to download one .tar.gz file containing your SQLite database and uploaded PDFs.",
+    // The same archive from the command line (server/src/scripts/createBackup.js),
+    // for a folder of your choice, with a test restore. Like the restore command
+    // below, it lives here so the UI cannot drift from the script that exists.
+    cli: {
+      command: 'npm run backup -- "/path/to/backup-folder"',
+      documentation: "docs/backup-restore.md",
+    },
+    // Re-derived on every request from the status file beside the database, so
+    // a restore cannot rewind it and a deleted archive stops being reported.
+    lastBackup: describeLastBackup({ statusFile: backupStatusFileFor(config.databaseFile) }),
     // Restore is a CLI operation (server/src/scripts/restoreBackup.js). The
     // command lives here rather than as client-side text so the UI cannot drift
     // from the script that actually exists.
@@ -168,7 +183,17 @@ async function createBackupStagingDir() {
   return stagingRoot;
 }
 
+// A Settings download is recorded with no location and no verification: the
+// archive goes to the browser, so the app can neither find the file again nor
+// test-restore it. The status file lives beside the database, outside every
+// backup, so restoring an older backup does not rewind it.
+function recordBackupInStatusFile(backup) {
+  recordSuccessfulBackup({ statusFile: backupStatusFileFor(config.databaseFile), backup });
+}
+
 export function createBackupExportHandler({
+  recordBackup = recordBackupInStatusFile,
+  now = () => new Date(),
   spawnProcess = spawn,
   resolveTar = resolveTarExecutable,
   createStagingDir = createBackupStagingDir,
@@ -326,6 +351,25 @@ export function createBackupExportHandler({
         if (!settled) {
           settled = true;
           cleanup();
+
+          // Counted as a backup only once the whole archive has been handed to
+          // the browser: a failed or cancelled download never reaches "finish".
+          // This runs from an event handler, where a throw would crash the
+          // server, so a note that cannot be saved is logged instead.
+          response.once("finish", () => {
+            try {
+              recordBackup({
+                createdAt: now().toISOString(),
+                source: "settings",
+                archivePath: null,
+                archiveBytes: null,
+                verification: { state: "not_run", checkedAt: null },
+              });
+            } catch (error) {
+              logger.error(`Could not save the last-backup note: ${error.message}`);
+            }
+          });
+
           response.end();
         }
       });

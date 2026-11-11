@@ -144,6 +144,7 @@ Run from the repo root:
 | `npm run import -- "C:\path\to\pdfs"` | Bulk PDF import with duplicate detection |
 | `npm run embed:backfill` | Embed chunks missing the current embedding version — run after importing or re-extracting PDFs |
 | `npm run eval:retrieval` / `npm run eval:answers` | Retrieval and answer-quality evals ([docs/quality-testing.md](docs/quality-testing.md)) |
+| `npm run backup -- "D:\Backups"` | Write a backup archive into a folder you choose, test-restore it, and record it as the "Last backup" shown in Settings (`--no-verify` skips the test restore; never overwrites an existing file) |
 | `npm run restore -- "path\to\backup.tar.gz"` | Restore a backup (stop the server first) |
 | `npm run backup:drill` | Prove the backup→restore round trip on throwaway data |
 

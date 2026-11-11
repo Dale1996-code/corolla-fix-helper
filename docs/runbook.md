@@ -194,6 +194,14 @@ Full details live in [backup-restore.md](backup-restore.md); the short version:
 
 **Take a backup** (do this before anything risky): Settings → **Export backup** downloads `corolla-fix-helper-backup-<timestamp>.tar.gz` containing the database and the whole uploads tree. Store it off the machine.
 
+Or from a terminal, into a folder you choose (safe while the app is running; it never overwrites or deletes an existing file):
+
+```powershell
+npm run backup -- "D:\Backups"
+```
+
+It prints the archive path and test-restores the archive before it calls it done (`--no-verify` skips that). **Settings → Last backup** shows when the most recent backup was made, where it went, and whether its file can still be found and passed a test restore, and warns when it is more than 7 days old. A Settings download shows as "Status unknown" by design, because the app cannot see where your browser saved it. See [backup-restore.md](backup-restore.md#last-backup-in-settings).
+
 **Restore** (⚠️ stop the server first):
 
 ```powershell
