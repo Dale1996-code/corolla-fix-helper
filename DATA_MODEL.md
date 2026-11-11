@@ -383,6 +383,8 @@ Important fields:
 - `chunk_text`
 - `embedding`
 - `embedding_version`
+- `scope_at_start`
+- `scope_version`
 - `created_at`
 
 Current use:
@@ -397,6 +399,8 @@ The table keeps each document, page, and chunk index unique so re-running extrac
 A document's row and its chunks are written as one unit. Re-running extraction updates `documents.extracted_text`, `extraction_status`, and `page_count` and rebuilds the chunks inside one transaction (`withTransaction` in `server/src/database.js`; the rebuild nests as a savepoint), and an upload inserts the row and its chunks the same way. A failure anywhere in the unit leaves the document exactly as it was — the row never claims text that its chunks do not hold (audit 1B-04).
 
 `embedding` stores the Float32 embedding as a SQLite BLOB. `embedding_version` stores the active model and dimension pair, for example `text-embedding-3-small@512`. Hybrid retrieval ignores a chunk's vector for **semantic** ranking when its `embedding_version` does not match the current config, but the chunk still participates in keyword ranking — so changing the model/dimensions never removes a document from Ask, it just loses semantic ranking until `embed:backfill` re-embeds it.
+
+`scope_at_start` and `scope_version` (N5 P2, migration 008) record which engine and build plant the manual scopes the chunk's **first word** to, as JSON (`{"engine": …, "plant": …}`), and which tagger rules produced it (`scope-v1`), much as `embedding_version` names the embedding model. They repair the context a 200-word chunk loses: a chunk that names no engine itself still records that it opens inside a "(for 2AZ-FE)" block, or under an article titled "(2AZ-FE)" on an earlier page. The chunk rebuild computes them from the document's pages and writes them with the same inserts, so a re-extraction replaces text and scope together; `npm run backfill:applicability` fills them for chunks saved before. `NULL` means "not computed" (an older chunk, a non-default chunk window, or a tagger error, which never blocks saving a PDF) and is never read as "applies"; `{"engine":null,"plant":null}` means computed with nothing stated. **Nothing reads these columns yet:** Ask, the planner, and retrieval behave exactly as before until a later N5 phase enforces scope (`applicabilityNotEnforced.test.js` and `applicabilityScopeNotRead.test.js` fail if something starts to).
 
 ### `attachments`
 
@@ -471,6 +475,13 @@ Applied migrations:
   copy of the owner's library on 2026-10-23: 9 of 1,443 documents had no hash; 2 were recorded
   and 7 kept `NULL` (one missing demo file, and six web uploads whose bytes another document
   already holds).
+- `008_document_chunk_applicability_scope` — adds the nullable `scope_at_start` and
+  `scope_version` text columns to `document_chunks` (see above). Columns only: it computes
+  nothing, so startup stays fast and every existing chunk reads `NULL` until
+  `npm run backfill:applicability -- --apply` fills it. No chunk's text, embedding, or
+  embedding version is touched, so nothing needs re-embedding, and older code ignores the
+  columns. Measured on a `VACUUM INTO` copy of the owner's library on 2026-11-11: the backfill
+  tagged 20,447 of 20,447 chunks in about 6 seconds, with every embedding byte-identical.
 
 ## Not In The Current Schema
 
