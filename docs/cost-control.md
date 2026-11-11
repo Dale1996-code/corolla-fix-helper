@@ -42,6 +42,8 @@ gcloud compute instances delete "$VM_NAME" --zone="$ZONE"
 
 ## Delete A Firewall Rule
 
+The current deployment guide creates no firewall rule. An earlier version created one that opened port 4000. If you followed that version, delete the rule:
+
 ```bash
 gcloud compute firewall-rules delete allow-corolla-fix-helper-4000
 ```
