@@ -16,6 +16,7 @@
     "diagnose:zero-chunks": "node src/scripts/diagnoseZeroChunkDocuments.js",
     "diagnose:applicability": "node src/scripts/diagnoseApplicability.js",
     "diagnose:document-health": "node src/scripts/diagnoseDocumentHealth.js",
+    "backfill:applicability": "node src/scripts/backfillApplicability.js",
     "check:applicability-labels": "node src/scripts/checkApplicabilityLabels.js",
     "recover:zero-chunks": "node src/scripts/recoverZeroChunkDocuments.js",
     "analyze:ocr-quality": "node src/scripts/analyzeOcrChunkQuality.js",
