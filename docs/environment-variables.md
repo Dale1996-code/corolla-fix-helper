@@ -161,6 +161,6 @@ For the intended Docker-on-VM deployment, pass env values to Docker instead of s
 
 The `/data` path should be mounted to a persistent folder on the VM.
 
-Inside a container the app cannot see the VM's own addresses: the only LAN address it finds is the container's. To open it by the VM's IP or a DNS name, also pass `-e NETWORK_MODE=1` (so it listens on the container's interface at all) and `-e ALLOWED_HOSTS=VM_PUBLIC_IP` (or the DNS name). `http://localhost:4000` on the VM itself works without `ALLOWED_HOSTS`.
+A container also needs `-e NETWORK_MODE=1`. Without it the app listens only on the container's own loopback address, and Docker's `-p` port mapping cannot reach it at all. Pair it with `-p 127.0.0.1:4000:4000`, so the port is published on the VM's loopback address only and never on its public one. With that pair, `http://localhost:4000` on the VM works without `ALLOWED_HOSTS`. The app cannot see the VM's own names from inside the container, so a private name such as a Tailscale address goes in `ALLOWED_HOSTS`. Never put the VM's public IP there: the app has no login. [Google Cloud deployment](gcp-deployment.md) has the full command and the private ways to open the app.
 
 Do not paste a real key into documentation, commits, screenshots, or pull request text.

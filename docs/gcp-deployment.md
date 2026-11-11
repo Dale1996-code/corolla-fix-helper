@@ -1,6 +1,6 @@
 # Google Cloud Deployment
 
-This is the intended Google Cloud deployment path for the current app. It has not been run or verified as part of this documentation cleanup.
+This is the intended Google Cloud deployment path for the current app. **It has never been run end to end.** Sections 9–13 were rewritten on 2026-11-11: the earlier `docker run` command could not reach the app, and the earlier "external test" opened it on the public internet. The app's own address and Host-name rules behind the new steps were checked on a local machine; the Docker, Google Cloud, and Tailscale steps themselves were not run.
 
 The recommended target is one Google Compute Engine VM running the Docker image from this repo.
 
@@ -18,7 +18,7 @@ A VM can keep those files on persistent disk. Cloud Run is not the preferred cur
 - Google Cloud resources can cost money.
 - Use fake or sample PDFs for demos because the app has no login.
 - Do not put secrets in the repo.
-- Do not expose the app publicly without access control and HTTPS.
+- **The app has no login, so never give it a public address.** This guide publishes the app only on the VM's own loopback address and reaches it through an SSH tunnel or Tailscale. It opens no firewall port. Do not add one, and do not use `tailscale funnel`.
 - This doc gives commands to create resources. Read each section before running it.
 
 ## Placeholder Values
@@ -165,15 +165,24 @@ sudo docker rm -f corolla-fix-helper || true
 sudo docker run -d \
   --name corolla-fix-helper \
   --restart unless-stopped \
-  -p 4000:4000 \
+  -p 127.0.0.1:4000:4000 \
   -e NODE_ENV=production \
   -e PORT=4000 \
+  -e NETWORK_MODE=1 \
+  -e ALLOWED_HOSTS= \
   -e DATABASE_FILE=/data/corolla-fix-helper.db \
   -e UPLOADS_DIR=/data/uploads \
   -e MAX_UPLOAD_SIZE_MB=20 \
   -v /opt/corolla-fix-helper-data:/data \
   "$IMAGE"
 ```
+
+Two settings in this command work as a pair. Change neither on its own:
+
+- **`-e NETWORK_MODE=1`** makes the app listen on all of the *container's* addresses. Without it the app listens only on the container's own loopback address (`server/src/config.js`), so the `-p` mapping can never reach it and every request fails with "connection refused".
+- **`-p 127.0.0.1:4000:4000`** publishes that port on the *VM's* loopback address only. Nothing outside the VM can connect, even if a firewall rule is added later. A plain `-p 4000:4000` would listen on every VM address, including the external one.
+
+`ALLOWED_HOSTS` stays empty unless you set up Tailscale (section 11). This command sets no `OPENAI_API_KEY`, so the AI features show "AI not configured". To enable them, add `-e OPENAI_API_KEY=...` here on the VM; never put the key in the repo or the image.
 
 ## 10. Smoke Test On The VM
 
@@ -188,44 +197,66 @@ curl -I http://localhost:4000/
 Expected result:
 
 - the container is running
-- the health route returns OK
+- the health route returns `200` with `"status":"ok"`
 - the built frontend responds
 
-## 11. Temporary External Test
+If `curl` says "connection refused", check that the `docker run` command included `-e NETWORK_MODE=1`.
 
-Only open a public firewall rule if you understand the risk. Prefer restricting it to your own IP.
+## 11. Open The App Privately
 
-```bash
-gcloud compute firewall-rules create allow-corolla-fix-helper-4000 \
-  --allow=tcp:4000 \
-  --target-tags=corolla-fix-helper \
-  --source-ranges=YOUR_PUBLIC_IP/32
-```
+The app has no login, so it is reached only through a private, encrypted path. Choose one.
 
-Replace `YOUR_PUBLIC_IP/32` with your current public IP range.
-
-Get the VM public IP:
+**Option A — SSH tunnel (nothing extra to install).** Run this on your own computer, not on the VM, and leave it running:
 
 ```bash
-gcloud compute instances describe "$VM_NAME" \
-  --zone="$ZONE" \
-  --format="value(networkInterfaces[0].accessConfigs[0].natIP)"
+gcloud compute ssh "$VM_NAME" --zone="$ZONE" -- -N -L 4000:localhost:4000
 ```
 
-Then open:
+Then open `http://localhost:4000` in a browser on that same computer. Traffic travels inside the SSH connection, and only people who can SSH into this Google Cloud project can open the tunnel. It only works on a computer with `gcloud` installed, so not on a phone. If port 4000 is already busy on your computer, use `-L 4001:localhost:4000` and open `http://localhost:4001`.
 
-```text
-http://VM_PUBLIC_IP:4000
+**Option B — Tailscale (works from your phone).** Tailscale gives devices you have signed in to your own Tailscale account a private network, plus an HTTPS address. Run on the VM:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale serve --bg 4000
+tailscale serve status
 ```
 
-## 12. Before Sharing More Broadly
+`tailscale serve status` prints an address like `https://corolla-fix-helper-demo.tail1234.ts.net`. The app runs inside the container and cannot discover that name by itself, so it refuses requests addressed to it with `421`. Re-run the `docker run` command from section 9, changing one line to that hostname, without `https://`:
 
-Before sharing a public URL, add:
+```bash
+  -e ALLOWED_HOSTS=corolla-fix-helper-demo.tail1234.ts.net \
+```
 
-- HTTPS
-- access control
-- backup plan
-- restore test
-- cost controls
+Then open the `https://` address on a device signed in to the same Tailscale account. Serve is private to that account. **Never run `tailscale funnel`**: Funnel publishes the address on the public internet. The first `tailscale serve` may print a link asking you to enable HTTPS for your Tailscale account; follow it. See [Mobile access](mobile-access.md) for why the HTTPS address matters and how to install the app on a phone.
+
+## 12. Backups On The VM
+
+**Settings → Export backup does not work in this setup.** The app only streams a backup to a request that comes from its own machine. Inside the container, every request arrives from Docker's network bridge, not the container's own loopback address, so the download is refused with `403`. (This is a deliberate rule in `server/src/routes/settings.js`, not a bug.)
+
+Back up the data folder on the VM instead. Stopping the container first writes all saved changes into the `.db` file. Run on the VM:
+
+```bash
+sudo docker stop corolla-fix-helper
+sudo tar -czf ~/corolla-fix-helper-data-$(date +%Y%m%d-%H%M%S).tar.gz -C /opt corolla-fix-helper-data
+sudo docker start corolla-fix-helper
+```
+
+Then copy it off the VM. Run this on your own computer, replacing the filename with the one created above:
+
+```bash
+gcloud compute scp "$VM_NAME":~/corolla-fix-helper-data-YYYYMMDD-HHMMSS.tar.gz . --zone="$ZONE"
+```
+
+This archive is a copy of the data folder, not the app's own backup format, so `npm run restore` cannot read it. To restore it, stop the container, replace `/opt/corolla-fix-helper-data` with the archive's contents, and start the container. Neither step has been tested on a VM. See [Backup and restore](backup-restore.md) for what a backup contains.
+
+## 13. Before Relying On It
+
+Before keeping real repair data on the VM:
+
+- make a backup (section 12), restore it into a scratch VM or folder, and check that your documents open
+- set a budget alert on the Google Cloud project
+- keep the app private: no firewall rule for port 4000, no public address, no `tailscale funnel`
 
 See `docs/cost-control.md` for cleanup commands.
