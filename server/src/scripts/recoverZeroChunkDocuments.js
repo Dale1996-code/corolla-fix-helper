@@ -22,6 +22,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "../config.js";
 import { db } from "../database.js";
+import { initializeDatabase } from "../initDatabase.js";
 import { snapshotDatabase } from "../services/databaseSnapshot.js";
 import {
   isAlreadyComplete,
@@ -239,6 +240,13 @@ async function runCli() {
   const options = parseArguments(process.argv.slice(2));
 
   try {
+    // --apply rebuilds chunks, and the rebuild writes the current schema's
+    // columns (migration 008's scope columns, N5 P2), so bring the database up
+    // to date first, as startup and `npm run import` do. A dry run writes
+    // nothing, the schema included.
+    if (options.apply) {
+      initializeDatabase();
+    }
     await runRecovery(options);
   } catch (error) {
     console.error(error?.message || String(error));

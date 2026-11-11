@@ -5,7 +5,11 @@
 > implemented on `claude/n5-p1-applicability-tagger` and **measured** after a fresh whole-branch review:
 > on 158 distinct blind-labeled real contexts, 0/18 other-engine figures judged to apply and 0/81
 > owner figures judged another engine's (see the iteration log entry "N5 P1"). Nothing is pushed.
-> P2–P6 are not started; see the P3 prerequisites in §7.
+> **P2** (persist scope: migration 008, scope written by the chunk rebuild, `backfill:applicability`) is
+> implemented on `claude/n5-p2-persist-scope` and measured on a `VACUUM INTO` copy of the library
+> (2026-11-11): 20,447 of 20,447 chunks tagged at `scope-v1`, embedding count, versions, and bytes
+> identical before and after, zero API calls, `eval:retrieval` 12/12. Nothing reads the scope yet.
+> P3–P6 are not started; see the P3 prerequisites in §7.
 > **Date:** 2026-10-22. Measured against `main` = `5e5c4ee`; code references re-checked against
 > `46b083d` (after #154 and #155, neither of which touches the code paths this design relies on).
 > **Target vehicle:** 2009 Toyota Corolla LE, 1.8L **2ZR-FE**.

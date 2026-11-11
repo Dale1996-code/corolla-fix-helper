@@ -631,6 +631,26 @@ function backfillUploadedDocumentMd5() {
   }
 }
 
+// Migration 008: give every chunk room for its applicability scope (N5 P2,
+// docs/n5-applicability-design.md §6.1 part 3). Two NULLABLE text columns:
+//
+//   scope_at_start -- the engine/plant scope in effect at the chunk's first
+//                     word, as JSON. A chunk that names no engine itself still
+//                     records that it opens inside, say, a "(for 2AZ-FE)" block.
+//   scope_version  -- which tagger rules produced it (APPLICABILITY_SCOPE_VERSION),
+//                     much as `embedding_version` names the embedding model.
+//
+// The columns only. Nothing is computed here: existing chunks read NULL, which
+// means "not computed yet" and never "applies", until `npm run
+// backfill:applicability` fills them; new chunks get theirs from the rebuild.
+// Text, embeddings, and embedding versions are not touched, so nothing needs
+// re-embedding. Nothing READS these columns until a later phase enforces scope
+// (applicabilityNotEnforced.test.js fails if something starts to).
+function addDocumentChunkApplicabilityScope() {
+  ensureColumn("document_chunks", "scope_at_start", "TEXT");
+  ensureColumn("document_chunks", "scope_version", "TEXT");
+}
+
 function seedVehicle() {
   // One-vehicle workspace: only insert when no vehicle exists at all. Matching
   // on the original year/make/model/trim would insert a second hidden row once
@@ -905,6 +925,7 @@ export function initializeDatabase() {
   runMigration("005_repair_checklist_provenance", createRepairChecklistProvenance);
   runMigration("006_vehicle_applicability_profile", addVehicleApplicabilityProfile);
   runMigration("007_backfill_upload_file_md5", backfillUploadedDocumentMd5);
+  runMigration("008_document_chunk_applicability_scope", addDocumentChunkApplicabilityScope);
 
   ensureAppSettingsRecord();
   seedVehicle();

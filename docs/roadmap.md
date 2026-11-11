@@ -198,7 +198,7 @@ this alone.
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
 | N4 | Close the two named evidence gaps | High — in progress | Slight increase |
-| N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0, P1 done; classification only) | Slight increase |
+| N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0, P1 done, P2 in review; classify and store only) | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | **Done**, except two unset budgets (response time, import throughput) | Slight increase |
 | N8 | Document-health report | High | Slight increase |
@@ -487,7 +487,7 @@ names the condition it is scoped to; make that a property of the answer rather t
 thing the model may or may not mention.
 *Design:* [`docs/n5-applicability-design.md`](n5-applicability-design.md), seven phases,
 P0–P6, one PR each.
-*Status: in progress, classification only (October 2026).* Two phases are done:
+*Status: in progress, classify and store only (November 2026).* Two phases are done and a third is in review:
 
 - **P0 — Variant details. Done (PR #156).** Migration `006_vehicle_applicability_profile`
   adds five nullable columns to `vehicles` — engine code, build plant, transmission code,
@@ -502,15 +502,18 @@ P0–P6, one PR each.
   figures was judged to apply to the owner's 2ZR-FE, and none of 81 owner figures was judged
   to belong to another engine. Those are small denominators — a pass, not a proof. See the
   [iteration log](evals/ask-rag-iteration-log.md).
+- **P2 — Persist scope. Implemented, in review** (branch `claude/n5-p2-persist-scope`).
+  Migration `008_document_chunk_applicability_scope` adds two nullable columns to
+  `document_chunks`; the chunk rebuild writes each chunk's starting scope with the same
+  inserts, and `npm run backfill:applicability` fills the library already saved (offline,
+  dry run by default, resumable). On a `VACUUM INTO` copy of the owner's library: 20,447 of
+  20,447 chunks tagged, every embedding byte-identical, zero API calls. **Still nothing reads
+  it.**
 
-*Remaining, per the design's section 7:* P2 persists each chunk's scope (a numbered
-migration and a backfill, no API calls); P3 checks it in the Ask verifier, reported in
+*Remaining, per the design's section 7:* P3 checks the scope in the Ask verifier, reported in
 shadow first and enforced only after; P4 keeps other-variant chunks out of retrieval and
 labels scope in the prompt and the answer; P5 takes the other axes (plant, VSC,
-transmission, Smart Key) one at a time; P6 gives the Repair Planner the same check. P2 is
-unblocked: audit Stage 4-D2 (PR #158) now saves a document's extraction and its chunk
-rebuild in one transaction (`withTransaction` in `database.js`), which is where P2 computes
-each chunk's scope. P3 must first settle the five residual risks the P1 review recorded in
+transmission, Smart Key) one at a time; P6 gives the Repair Planner the same check. P3 must first settle the five residual risks the P1 review recorded in
 the design. Its acceptance test replays captured answers offline with `npm run eval:replay`
 (audit Stage 1b, PR #159), and it needs a capture taken after P2: one taken before P2 has no
 scope field to replay a check against.
