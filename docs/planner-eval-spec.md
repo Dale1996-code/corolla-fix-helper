@@ -775,7 +775,7 @@ changed lines; it is a planning aid, not a promise.
 
 | Phase | Deliverable | Production code touched | Paid? | Needs your DB? | Size |
 |---|---|---|---|---|---|
-| **1a. Isolate the pure tools (P-1)** *(implemented in PR #175, awaiting review)* | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
+| **1a. Isolate the pure tools (P-1)** *(merged, PR #175)* | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
 | **1b. Pin today's pre-model behavior** | One test file: the 8 canonical briefs and the natural-phrasing set through the real task extractor and safety classifier; readiness invariants I-2/I-3; `todo` rows for the measured gaps (14.2). No new module, no schema. | none | no | no | **S** (~250 lines, tests only) |
 | **2. Scenarios, synthetic harness, judge** | `plannerScenarios.js` (introduced here, because this is the first phase that reads it; **S1, S2, S8 only**), `plannerCaseRunner.js` (injected agent), scripted-model builder, invented mini-corpora, synthetic negative rows (8.1-8.4 "A"), pure `plannerJudge.js` (re-verify + 5.1 decision procedure + metrics) | none | no | no | **L** (~1,200 lines; re-scope after 1b) |
 | **3. Capture format and replay** | **P-2 first, as its own tiny PR** (export the instructions text, with a regression test); then `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, import-boundary test with `fetch` disabled | P-2 (1 line, separate PR) | no | no | **M-L** (~800 lines) |
@@ -927,7 +927,7 @@ that passes it.
 
 | D9 | Scope trims (14.1). | **Approved with conditions.** Deferred: `--compare`, loop-level replay, automated spot-check sampling, separate Tables 4-7. Token tee only if provider-side controls are verified first, with strict run- and request-count limits regardless. Q2-Q4 deferred as separate metrics, but wrong-engine/wrong-variant detection stays (P2, P3, negative tests). The first report must identify `verified`/`ready` plans lacking essential confirmed facts. Extractor/tool-schema hashes deferred if every capture keeps the exact revision and relevant configuration. | 14.1 conditions column; required block in section 11; `config` snapshot in section 10. |
 | D10 | Spending controls. | Dedicated OpenAI project and key where practical; proposed **$10 monthly project limit with hard-limit enforcement**. **Not yet confirmed or configured. No paid calls authorized.** | Preconditions list in 12.4; 12.3 limit 6. |
-| Phase 1a | Begin P-1. | **Approved to begin** as an isolated PR; no merge, no Phase 1b, no later phase without separate review. | Implemented in PR #175 (awaiting review). |
+| Phase 1a | Begin P-1. | **Approved to begin** as an isolated PR; no merge, no Phase 1b, no later phase without separate review. | Merged as PR #175. Phase 1b merged as PR #176. Phase 2 was split in two: 2a (scenario data, injected recorder, scripted model, invented corpora) merged as PR #177; 2b (the judge) follows the decisions in 16.1. |
 
 **Still open:**
 
@@ -935,6 +935,43 @@ that passes it.
 |---|---|---|
 | D10b | Configure the dedicated project, key, and $10 hard limit, and confirm the setting in force (value, hard-stop versus notice-only). | Any paid session, including the pilot |
 | D11 | Recommended, not yet decided: before the first baseline, confirm a small list of **essential procedure steps** for S1 and S2 (a handful each, against the rendered PDF pages). Today only one figure each is confirmed, so every S1/S2 plan would land in "NOT assessable" in the required block and the core finding (`verified`/`ready` plans lacking essential facts) could not be demonstrated on them. S8 needs no steps. | The 6a baseline (Phase 4) |
+
+### 16.1 Decisions that bind Phase 2b (made in the owner's review of the Phase 2a plan)
+
+These were decided in review before PR #177 and recorded only in that PR until now. Phase 2b
+implements them; a change to any of them is an owner decision, not a judge fix.
+
+| # | Decision | What it means for the judge |
+|---|---|---|
+| 2b-1 | **A contradicted fact stays in layer V.** | A fact with an accepted correct claim AND an accepted wrong claim is `V:false_acceptance` with `kind: contradicted`, `alsoCovered: true`. There is no seventh layer, and a correct claim never cancels the critical finding. A contradicted or partly covered fact is **not** in the numerator of P1 or C1 but **is** in the denominator, so it cannot inflate a success rate. C3 counts it as uncovered. |
+| 2b-2 | **Unknown stays unknown.** | `sourceQuality` and `goldenQueryRetrieves` are `null` for S1/S2 (confirming a figure on the rendered page says nothing about the extracted text) and `not_applicable` for S8. Null is never read as clean. R and G(query) are assigned only when support, quality, and the golden-query probe are all known; otherwise a missed fact is `UNDETERMINED` with the missing fields named. `UNDETERMINED` is an attribution status, not a layer, and still counts once for I-7. |
+| 2b-3 | **Desired jobs are unconfirmed, so L0 is `unscored`.** | Until the owner reviews `desiredJobs`, the judge reports task derivation but scores no L0 failure. Decomposition is kept apart from the vehicle `premise`: S8 deriving a belt task is correct decomposition, never an L0 defect. |
+| 2b-4 | **`corpusSupport: partial` is never `COVERED`.** | The best outcome is `PARTIALLY_COVERED`, the remainder is tagged `S:partial_source`, and the fact stays in the C1 denominator. |
+| 2b-5 | **I-4 is a hard invariant.** | Every detector-visible figure in the plan text, checklist draft, checklist, handoff notes, and gaps must come from an accepted claim's quote, from the owner's own input, or from what the same builders print with zero claims. Q1 stays where the source hint is confirmed; Q2-Q4 stay deferred (D9). |
+| 2b-6 | **Negative tests assert three axes.** | Every negative row asserts the evidence status, the verifier's rejection reasons, and the failure-layer attribution, through one helper that fails if an axis is left out. NEG-IP-6 is included (three structurally invalid finalizers end in `invalid_final_contract`; two invalid then one valid completes). NEG-X-1..X-3 stay as thin re-assertions of existing tests. A bare `SST` rejection is a pinned `known-limitation` row, not a `todo`. |
+| 2b-7 | **Two ledgers.** | One outcome per confirmed fact (I-7) and one verdict per submitted claim, kept separate. |
+
+**Choices made while building 2b, for the owner to confirm** (each is a judge rule, not a
+product change, and each is pinned by a test):
+
+- *A false rejection needs the fact to have been shown.* Section 5.1 calls every rejected claim
+  that matches a fact a false rejection. The judge counts it as one only when the fact was in
+  the text the model was shown (the same cut 5.1 step 3 makes for the fact). A claim stating
+  the right figure while citing text that never showed it is an `ungrounded_rejection`: the
+  verifier was right to refuse it, so it is not counted in U4.
+- *`procedure_step` is a new fact kind,* added with its matcher (every step matcher must hit the
+  claim). Only the negative tests' own scenarios use it; no committed scenario has a confirmed
+  step yet (D11), so C1 stays `unscored` for S1, S2, and S8.
+- *NEG-ME-4 pins `claim_not_in_quote`, not `unsupported_number`.* The planner first checks that
+  a claim is a fragment of its quote, so a claim can print only its quote's numbers and
+  `unsupported_number` cannot be reached through a whole run.
+- *The matcher does not read a number with no declared unit* ("tighten the drain plug to 45").
+  It is a known blind spot, stated in the code, rather than a guess.
+
+Found while building 2a, for the roadmap rather than this phase: the planner accepts a
+drive-belt claim for the "Replace the timing belt" task, because its task-subject check needs
+only one shared word (`belt`). The `S8-drive-belt-decoy` run exists so the judge can be shown
+not to count it as a timing-belt fabrication.
 
 ---
 

@@ -32,15 +32,19 @@ export const SCENARIO_SET_VERSION = 1;
 export const NOT_APPLICABLE = "not_applicable";
 export const INVENTORY_PROFILE_ID = "stocked-home-garage-v1";
 
-// Only the kinds a scenario in this set uses. A later phase adds a kind together
-// with its matcher; a kind without a matcher would be data nobody can score.
-export const FACT_KINDS = ["numeric_spec", "absence"];
+// A kind is added together with its matcher (plannerJudge.js); a kind without a
+// matcher would be data nobody can score. `procedure_step` arrived with the
+// Phase 2b judge for the negative tests' own scenarios: no committed scenario
+// has a confirmed procedure step yet (decision D11 is still open), so C1 stays
+// `unscored` for S1, S2, and S8.
+export const FACT_KINDS = ["numeric_spec", "absence", "procedure_step"];
 export const CORPUS_SUPPORT = ["full", "partial", "absent"];
 export const PARTIAL_KINDS = ["fragmented", "qualifier_missing", "range_incomplete", "variant_ambiguous"];
 export const SOURCE_QUALITIES = ["clean", "garbled", "flattened_table", "ocr_unusable", "truncated", "condition_missing"];
 export const PREMISE_STATUSES = ["not_assessed", "unsupported_for_vehicle"];
 export const NUMERIC_CLAIM_LABELS = ["covers", "partial_figure", "wrong_figure", "other_fact", "unrelated"];
 export const ABSENCE_CLAIM_LABELS = ["forbidden", "not_forbidden"];
+export const PROCEDURE_CLAIM_LABELS = ["covers", "unrelated"];
 export const SET_OUTCOMES = ["COVERED", "PARTIALLY_COVERED", "CORRECTLY_ABSENT", "V:false_acceptance"];
 export const SET_KINDS = ["contradicted", "wrong_only", "fabrication"];
 
@@ -286,13 +290,22 @@ function validateFact(problems, where, fact, jobIds) {
     validateNumericFact(problems, where, fact);
   } else if (fact.kind === "absence") {
     validateAbsenceFact(problems, where, fact);
+  } else if (fact.kind === "procedure_step") {
+    // A step is stated when EVERY matcher hits the claim: one names the action,
+    // another its object, so "remove the cover" cannot cover "remove the filter".
+    validateMatchers(problems, `${where} stepMatchers`, fact.stepMatchers);
   }
 
   validateClaimExamples(problems, where, fact);
 }
 
 function validateClaimExamples(problems, where, fact) {
-  const labels = fact.kind === "absence" ? ABSENCE_CLAIM_LABELS : NUMERIC_CLAIM_LABELS;
+  const labels =
+    fact.kind === "absence"
+      ? ABSENCE_CLAIM_LABELS
+      : fact.kind === "procedure_step"
+        ? PROCEDURE_CLAIM_LABELS
+        : NUMERIC_CLAIM_LABELS;
 
   if (!Array.isArray(fact.claimExamples) || fact.claimExamples.length === 0) {
     problems.push(`${where}: claimExamples must list labelled claims`);
