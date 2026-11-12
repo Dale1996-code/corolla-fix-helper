@@ -579,6 +579,12 @@ needs attention.
 future extraction change. Include the already-measured overprinting artifact — 366 of
 19,636 chunks across 75 documents contain a three-times-repeated phrase — as a display-only
 warning on the affected quotes. No re-extraction, no re-embedding.
+*Progress:* slice 1 (November 2026) is the read-only terminal report
+`npm run diagnose:document-health`. It lists documents whose stored PDF is missing, that
+hold zero chunks, whose extraction failed, that needed or used OCR, or that have chunks
+missing the current embedding version, as counts per problem plus JSON and CSV. Still to
+do: page-level low-text and table flags, the overprinting warning, and the maintenance view
+in the browser.
 
 ### The 2026-10-18 full review
 
