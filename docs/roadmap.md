@@ -134,7 +134,8 @@ state a plan imagined.
   "never", "without", "n't", and the like) in the three words before it within its clause is
   `negation_dropped`; a cut through a range or a signed value is `range_cut`; and a
   `numeric_spec` or `safety_instruction` that is not a whole clause of its quote is
-  `not_whole_clause`. A claim carrying a figure must name a part, and a `numeric_spec` must
+  `not_whole_clause`; and a claim of any kind that stops before its figure's unit ("torque
+  to 37" from "37 N·m") is `unit_cut` (November 2026, found by the planner eval). A claim carrying a figure must name a part, and a `numeric_spec` must
   share a part word with its task, in the claim or its quote (`subject_missing`), so a bare
   "37 N·m" never counts. Tool and part matching against the owner's lists is whole-word, and
   a negated entry ("no torque wrench") counts as absent. What it still cannot see: a

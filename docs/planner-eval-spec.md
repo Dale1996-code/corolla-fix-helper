@@ -973,6 +973,12 @@ drive-belt claim for the "Replace the timing belt" task, because its task-subjec
 only one shared word (`belt`). The `S8-drive-belt-decoy` run exists so the judge can be shown
 not to count it as a timing-belt fabrication.
 
+Found while building 2b, and since fixed: the verifier accepted a claim that stopped before its
+figure's unit ("torque to 37" from "torque to 37 N·m") under every claim kind, as long as the
+quote was trimmed at the same place. It is now rejected as `unit_cut`, read in the source
+(`docs/repair-planner.md`, check 3). This also narrows the matcher blind spot above: an
+accepted claim can no longer carry a figure whose unit the source printed right after it.
+
 ---
 
 ## Appendix A: what was measured, and how

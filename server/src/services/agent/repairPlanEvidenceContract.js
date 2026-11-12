@@ -2,6 +2,7 @@ import {
   checkClaimNumbers,
   quoteAppearsInChunk,
   redactSpecNumbers,
+  specNumberSpans,
 } from "../askEvidenceContract.js";
 
 // Repair-plan evidence contract.
@@ -298,13 +299,17 @@ const LETTER = /\p{L}/u;
 const DIGIT = /\d/;
 const DECIMAL_MARK = /[.,]/;
 
-function normalizeForPlacement(text) {
+/** normalizeForPlacement without the lowercasing, for readers that need case. */
+function collapseForPlacement(text) {
   return String(text || "")
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+    .trim();
+}
+
+function normalizeForPlacement(text) {
+  return collapseForPlacement(text).toLowerCase();
 }
 
 function startsOnTokenBoundary(haystack, at, needle) {
@@ -451,6 +456,27 @@ function cutsRange(text, start, end, statement) {
   return ENDS_ON_VALUE.test(statement) && RANGE_AFTER.test(text.slice(end));
 }
 
+// What may be left outside a claim that ends inside a printed specification
+// without cutting it: closing punctuation only. "0.906 in" without the period
+// of "in." still reads as inches.
+const PUNCTUATION_ONLY = /^[\s.,;:!?)\]"']*$/;
+
+/**
+ * A specification the source prints ("37 N*m", "90°", "12.6 V") that the claim
+ * runs into but stops before finishing, so its figure lost its unit or part of
+ * it. Only a number with no unit after it is "printed in its quote"
+ * (checkClaimNumbers reads a bare figure as nothing to check), and only a
+ * numeric_spec or safety_instruction must be a whole clause -- of its QUOTE,
+ * which a quote cut at the same place satisfies. Before this, a drain-plug claim
+ * that stopped at its bare 37 verified under every claim kind (planner eval,
+ * Phase 2b).
+ */
+function cutsUnit(spans, text, end) {
+  return spans.some(
+    (span) => span.start < end && span.end > end && !PUNCTUATION_ONLY.test(text.slice(end, span.end))
+  );
+}
+
 /**
  * Checks where a claim sits, not just that it is contained. Every placement of
  * the quote in the source and of the claim in the quote is tried; one clean
@@ -459,10 +485,16 @@ function cutsRange(text, start, end, statement) {
  * @returns {string | null} rejection reason, or null when a clean placement exists
  */
 function claimPlacementProblem(claim, evidenceText) {
-  const text = normalizeForPlacement(evidenceText);
+  const shown = collapseForPlacement(evidenceText);
+  const text = shown.toLowerCase();
   const quote = normalizeForPlacement(claim.evidenceQuote);
   const statement = normalizeForPlacement(claim.claim);
   const wholeClause = WHOLE_CLAUSE_KINDS.has(claim.kind);
+  // Units are read with their case ("V" is volts, "v" is not). Lowercasing
+  // keeps every position unless a character changes length when lowercased
+  // ("İ"); then the lowercased text is read instead, which can only miss a
+  // case-sensitive symbol, never invent a unit.
+  const unitSpans = specNumberSpans(shown.length === text.length ? shown : text);
   let firstProblem = null;
 
   for (const quoteAt of tokenBoundedOccurrences(quote, text)) {
@@ -480,6 +512,8 @@ function claimPlacementProblem(claim, evidenceText) {
         !(startsClause(quote, offset) && endsClause(quote, offset, offset + statement.length))
       ) {
         problem = "not_whole_clause";
+      } else if (cutsUnit(unitSpans, text, end)) {
+        problem = "unit_cut";
       }
 
       if (!problem) {
@@ -629,9 +663,9 @@ function claimSubjectProblem(claim, task) {
  * Verifies each validated claim against the source it cites.
  *
  * Fails CLOSED: a claim whose quote is not in the source, whose text is not in
- * its own quote, which drops a negation or cuts a range or clause, whose
- * numbers are not supported, or which does not name its part and its task
- * becomes a GAP rather than rendered content. Rejected claims never disappear
+ * its own quote, which drops a negation or cuts a range, a clause, or a
+ * figure's unit, whose numbers are not supported, or which does not name its
+ * part and its task becomes a GAP rather than rendered content. Rejected claims never disappear
  * silently -- if they did, a model could submit one easy claim, omit
  * everything hard, and still look fully grounded.
  *
@@ -710,6 +744,7 @@ const REJECTION_TEXT = {
   negation_dropped: 'the statement left out a "not", "no", or "never" that comes right before it in the cited text',
   range_cut: "the statement cut a range or a signed value out of the cited text",
   not_whole_clause: "a specification or safety statement must be a whole sentence or clause of its quote",
+  unit_cut: "the statement cut a figure off its unit in the cited text",
   unsupported_number: "a number in the statement was not present in the cited text",
   subject_missing: "the statement did not name the part it applies to, or a part named by its task",
   item_name_too_short: "the named item was too short to identify a tool or part",
