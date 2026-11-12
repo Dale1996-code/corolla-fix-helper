@@ -669,6 +669,29 @@ export function extractSpecNumbers(text) {
   return readSpecs(text).map(({ value, raw, unit }) => ({ value, raw, unit }));
 }
 
+/**
+ * Where each specification sits in the text, as [start, end) of its whole
+ * printed match: number, any range, and the unit ("37 N*m", "13.2 to 14.8 V",
+ * "90°", "5W-30"). The same readers as extractSpecNumbers, so a unit this
+ * module does not know never has a span. Case-sensitive symbols ("V", "A",
+ * "L", "Ω") are found only in text that kept its case.
+ *
+ * @param {string} text
+ * @returns {Array<{ start: number, end: number }>}
+ */
+export function specNumberSpans(text) {
+  const source = String(text || "");
+  const spans = [];
+
+  for (const regex of [...SPEC_REGEXES, VISCOSITY_REGEX]) {
+    for (const match of source.matchAll(regex)) {
+      spans.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  return spans.sort((left, right) => left.start - right.start);
+}
+
 // The measurement units, grouped by family. Nothing converts between them
 // (owner decision D1, 2026-10-19): a claimed number must be printed in its quote
 // IN THE SAME UNIT. Toyota tables print a specification in every unit they

@@ -181,7 +181,15 @@ also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
    - a `numeric_spec` or `safety_instruction` must be a whole clause of its
      quote, from one `.` `;` `:` `!` `?` or `|` boundary to the next
      (`not_whole_clause`). Other kinds may be any part of the quote that passes
-     the two rules above;
+     the other rules here;
+   - no figure cut off its unit, or off part of it: "torque to 37" from
+     "torque to 37 N·m", "377 kgf" from "377 kgf·cm", "an additional 90" from
+     "an additional 90°" (`unit_cut`). This holds for every kind. Before it, a
+     claim and quote both trimmed before the unit passed under any kind: the
+     quote was "whole", and a bare 37 is "printed in it". Units are the ones
+     the specification reader knows (`specNumberSpans` in
+     `askEvidenceContract.js`); a step label it reads as a current ("STEP 10 A")
+     can reject an honest "go to step 10", the safe direction;
 4. every number in the claim is printed in the quote (`unsupported_number`);
 5. the claim names what it is about (audit 1A-06/1B-01, `subject_missing`):
    - any claim carrying a figure, and every `numeric_spec`, must contain a word

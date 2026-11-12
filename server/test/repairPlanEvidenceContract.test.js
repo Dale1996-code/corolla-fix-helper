@@ -6,6 +6,7 @@ import {
   buildRepairPlanEvidence,
   buildRequirementGroups,
   deriveEvidenceStatus,
+  describeRejections,
   normalizeRequirementName,
   validateFinalizerPayload,
   verifyClaims,
@@ -355,6 +356,114 @@ test("a claim may not cut a range or drop a sign, even with a trimmed quote", ()
     evidenceQuote: "Alternator output: 13.2 to 14.8 V",
   });
   assert.equal(whole.accepted.length, 1, "the whole range verifies");
+});
+
+// --- A figure keeps its unit ---------------------------------------------------
+//
+// Found by the planner eval (Phase 2b): a drain-plug claim that stopped at its
+// bare figure was ACCEPTED from a line printing the figure with its unit. Only
+// a numeric_spec or a safety_instruction must be a whole clause, and that is
+// measured against the quote -- so trimming the quote at the same place let any
+// kind through, and a bare 37 is "printed in its quote". At the car, "37" with
+// no unit is a figure the owner has to guess the meaning of.
+//
+// The sentences here are invented, and worded unlike the planner-eval fixtures
+// on purpose: those fixtures may not share an eight-word run with any other
+// server file (test/fixtures/sourceDerivedMaterial.js).
+
+const DRAIN_PLUG_TEXT = "Oil pan drain plug: torque to 37 N*m (27 ft-lbf). Wipe the pan clean afterward.";
+const DRAIN_PLUG_LINE = "Oil pan drain plug: torque to 37 N*m (27 ft-lbf)";
+const DRAIN_PLUG_CUT = "Oil pan drain plug: torque to 37";
+const OIL_TASK = "Change the engine oil";
+
+test("a claim may not cut a figure off its unit, whatever kind and however its quote is trimmed", () => {
+  for (const kind of ["procedure", "vehicle_fact", "numeric_spec", "safety_instruction"]) {
+    for (const statement of [
+      DRAIN_PLUG_CUT, // the unit dropped
+      "Oil pan drain plug: torque to 37 N*m (27", // the conversion's unit dropped
+    ]) {
+      const { accepted, rejected } = verifyAgainst(
+        DRAIN_PLUG_TEXT,
+        { kind, claim: statement, evidenceQuote: statement },
+        OIL_TASK
+      );
+      assert.equal(accepted.length, 0, `${kind}: ${statement}`);
+      assert.equal(rejected[0]?.reason, "unit_cut", `${kind}: ${statement}`);
+    }
+  }
+
+  // The case the eval found: a procedure claim cut short inside a whole quote.
+  const procedure = verifyAgainst(
+    DRAIN_PLUG_TEXT,
+    { kind: "procedure", claim: DRAIN_PLUG_CUT, evidenceQuote: DRAIN_PLUG_LINE },
+    OIL_TASK
+  );
+  assert.equal(procedure.rejected[0]?.reason, "unit_cut");
+
+  // A specification whose quote goes on still reports the older reason first.
+  const spec = verifyAgainst(
+    DRAIN_PLUG_TEXT,
+    { kind: "numeric_spec", claim: DRAIN_PLUG_CUT, evidenceQuote: DRAIN_PLUG_LINE },
+    OIL_TASK
+  );
+  assert.equal(spec.rejected[0]?.reason, "not_whole_clause");
+
+  // Keeping the unit verifies, with or without the conversion after it.
+  for (const statement of ["Oil pan drain plug: torque to 37 N*m", DRAIN_PLUG_LINE]) {
+    const { accepted, rejected } = verifyAgainst(
+      DRAIN_PLUG_TEXT,
+      { kind: "procedure", claim: statement, evidenceQuote: DRAIN_PLUG_LINE },
+      OIL_TASK
+    );
+    assert.equal(accepted.length, 1, `${statement} -> ${rejected[0]?.reason}`);
+  }
+});
+
+test("every unit the specification reader knows counts, glued or spaced, symbol or word", () => {
+  const cases = [
+    ["Tighten the drain plug to 37N*m.", "Tighten the drain plug to 37"], // glued symbol
+    ["Turn the bolt an additional 90°.", "Turn the bolt an additional 90"], // turn angle
+    ["Fill the radiator with a 50% coolant mix.", "Fill the radiator with a 50"], // percent
+    ["Battery voltage is 12.6 V at rest.", "Battery voltage is 12.6"], // electrical symbol
+    ["The fuse is rated 10 A for the horn.", "The fuse is rated 10"], // current symbol
+    ["Engine oil capacity with filter is 4.2 L.", "Engine oil capacity with filter is 4.2"], // litre symbol
+    ["Tighten the drain plug to 37 N*m (377 kgf*cm).", "Tighten the drain plug to 37 N*m (377 kgf"], // cut inside a unit
+    ["Use SAE 5W-30 engine oil.", "Use SAE 5"], // a viscosity grade
+  ];
+
+  for (const [text, statement] of cases) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 0, statement);
+    assert.equal(rejected[0]?.reason, "unit_cut", statement);
+  }
+});
+
+test("a claim ending on a number with no unit after it is not a cut", () => {
+  const cases = [
+    // Nothing unit-like follows the figure.
+    ["Install the clip in hole 2 and press it home.", "Install the clip in hole 2"],
+    // "in" before a word is the preposition, never inches.
+    ["Insert locking tab 2 in the bracket slot.", "Insert locking tab 2"],
+    // Leaving off the period of "in." keeps the unit: the claim still reads inches.
+    ["Measure the bore at 0.906 in.", "Measure the bore at 0.906 in"],
+  ];
+
+  for (const [text, statement] of cases) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 1, `${statement} -> ${rejected[0]?.reason}`);
+  }
+});
+
+test("a unit cut becomes a gap that says why", () => {
+  const { rejected } = verifyAgainst(
+    DRAIN_PLUG_TEXT,
+    { kind: "procedure", claim: DRAIN_PLUG_CUT, evidenceQuote: DRAIN_PLUG_CUT },
+    OIL_TASK
+  );
+  const [gap] = describeRejections(rejected);
+
+  assert.match(gap, /unit/);
+  assert.doesNotMatch(gap, /could not be verified/, "the reason has its own text, not the fallback");
 });
 
 // --- Subject guard (1A-06 / 1B-01) ------------------------------------------
