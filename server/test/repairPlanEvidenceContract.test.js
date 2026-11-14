@@ -466,6 +466,121 @@ test("a unit cut becomes a gap that says why", () => {
   assert.doesNotMatch(gap, /could not be verified/, "the reason has its own text, not the fallback");
 });
 
+// A range or tolerance prints its unit once, after the high end, so a claim that
+// stops on the high end cuts the unit off BOTH figures. Before this test a
+// mutation making cutsUnit skip range spans passed the whole server suite.
+test("a claim may not cut the unit off a range or a tolerance", () => {
+  const cases = [
+    ["Charging voltage should read 13.2 to 14.8 V at idle.", "Charging voltage should read 13.2 to 14.8"],
+    ["Charging voltage should read 13.2-14.8 V at idle.", "Charging voltage should read 13.2-14.8"],
+    ["Hold coolant between 80 and 84 °C during the check.", "Hold coolant between 80 and 84"],
+    ["Set the spark plug gap to 1.0 – 1.1 mm before fitting.", "Set the spark plug gap to 1.0 – 1.1"],
+  ];
+
+  for (const [text, statement] of cases) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 0, statement);
+    assert.equal(rejected[0]?.reason, "unit_cut", statement);
+  }
+});
+
+test("the middle-dot spelling N·m is a unit like N*m", () => {
+  const text = "Wheel hub nut: tighten to 216 N·m (2,200 kgf·cm).";
+
+  for (const statement of ["Wheel hub nut: tighten to 216", "Wheel hub nut: tighten to 216 N·m (2,200"]) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.equal(accepted.length, 0, statement);
+    assert.equal(rejected[0]?.reason, "unit_cut", statement);
+  }
+
+  const whole = verifyAgainst(text, {
+    kind: "procedure",
+    claim: "Wheel hub nut: tighten to 216 N·m",
+    evidenceQuote: "Wheel hub nut: tighten to 216 N·m",
+  });
+  assert.equal(whole.accepted.length, 1, whole.rejected[0]?.reason);
+});
+
+// Units the Ask specification reader does not know, so they have no span in
+// specNumberSpans and a bare figure in front of them verified. Widening Ask's
+// UNIT_PATTERN would change D1 matching for every Ask answer, so the planner
+// reads these for unit_cut only.
+test("a claim may not cut off a unit that only the planner reads (time, mass, volume, vacuum, power)", () => {
+  const cases = [
+    ["Let the starter rest for 30 seconds between attempts.", "Let the starter rest for 30"],
+    ["Let the starter rest for 30 sec. between attempts.", "Let the starter rest for 30"],
+    ["Allow the sealant to cure for 15 minutes first.", "Allow the sealant to cure for 15"],
+    ["Allow the sealant to cure for 15 min. first.", "Allow the sealant to cure for 15"],
+    ["Leave the vehicle parked for 2 hours before draining.", "Leave the vehicle parked for 2"],
+    ["Pack the bearing with 5 g of wheel grease.", "Pack the bearing with 5"],
+    ["Pack the bearing with 5g of wheel grease.", "Pack the bearing with 5"],
+    ["The spare wheel weighs about 12 kg in total.", "The spare wheel weighs about 12"],
+    ["Add 150 cc of compressor oil to the circuit.", "Add 150"],
+    ["Manifold vacuum reads 450 mmHg at idle.", "Manifold vacuum reads 450"],
+    ["Manifold vacuum reads 18 inHg at idle.", "Manifold vacuum reads 18"],
+    ["Each headlight bulb draws 55 W when lit.", "Each headlight bulb draws 55"],
+    ["Each headlight bulb draws 55 watts when lit.", "Each headlight bulb draws 55"],
+    // A unit printed in brackets right after its figure.
+    ["Tighten the strut mount nut to 39 (N*m) by hand wrench.", "Tighten the strut mount nut to 39"],
+  ];
+
+  for (const [text, statement] of cases) {
+    for (const kind of ["procedure", "vehicle_fact"]) {
+      const { accepted, rejected } = verifyAgainst(text, { kind, claim: statement, evidenceQuote: statement });
+      assert.equal(accepted.length, 0, `${kind}: ${statement}`);
+      assert.equal(rejected[0]?.reason, "unit_cut", `${kind}: ${statement}`);
+    }
+  }
+});
+
+test("a planner-only unit counts only as a whole word after its figure", () => {
+  const cases = [
+    // A letter that starts a word is not a unit: "5 gaskets", "2 hoses", "3 wires".
+    ["Replace the 5 gaskets on the cover.", "Replace the 5"],
+    ["Disconnect the 2 hoses from the pump.", "Disconnect the 2"],
+    ["Unplug connector 3 wires first.", "Unplug connector 3"],
+    // "min" or "W" glued into another word.
+    ["Use hole 4 minimum for the clip.", "Use hole 4"],
+    ["Remove bolt 6 Wx from the bracket.", "Remove bolt 6"],
+    // "W/" is "with", and "10W-" is a viscosity grade's start, not watts.
+    ["Fit bracket 1 W/ pulley kit attached.", "Fit bracket 1"],
+    // A lowercase "w" is not watts.
+    ["Turn knob 2 w the arrow up.", "Turn knob 2"],
+    // A one-letter bracket is a label, not amps or litres.
+    ["Probe terminal 2 (A) against ground.", "Probe terminal 2"],
+    ["Loosen bolt 3 (L) before bolt 4.", "Loosen bolt 3"],
+  ];
+
+  // Other checks (the subject guard) may still reject these; unit_cut must not.
+  for (const [text, statement] of cases) {
+    const { rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement });
+    assert.notEqual(rejected[0]?.reason, "unit_cut", statement);
+  }
+
+  // The unit kept verifies.
+  const kept = verifyAgainst("Allow the sealant to cure for 15 minutes first.", {
+    kind: "procedure",
+    claim: "Allow the sealant to cure for 15 minutes",
+    evidenceQuote: "Allow the sealant to cure for 15 minutes",
+  });
+  assert.equal(kept.accepted.length, 1, kept.rejected[0]?.reason);
+});
+
+// Still out of reach: the unit is not printed next to the figure, so nothing in
+// the claim's own sentence shows it was dropped. Each row is the desired
+// behavior; it turns from todo into a real test once fixed.
+const UNIT_APART_TODO = "unit printed apart from its figure (planner unit_cut follow-up)";
+
+for (const [id, text, statement] of [
+  ["header-unit", "Tightening torque (N*m): drain plug 37, filter cap 25.", "Tightening torque (N*m): drain plug 37"],
+  ["next-cell", "Drain plug | 37 | N*m", "Drain plug | 37"],
+]) {
+  test(`desired behavior: unit_cut sees a ${id} [${UNIT_APART_TODO}]`, { todo: UNIT_APART_TODO }, () => {
+    const { accepted } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
+    assert.equal(accepted.length, 0);
+  });
+}
+
 // --- Subject guard (1A-06 / 1B-01) ------------------------------------------
 //
 // Planner claims are verbatim fragments, so "is the claim's part in its quote?"

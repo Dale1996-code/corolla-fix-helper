@@ -471,6 +471,39 @@ const PUNCTUATION_ONLY = /^[\s.,;:!?)\]"']*$/;
  * that stopped at its bare 37 verified under every claim kind (planner eval,
  * Phase 2b).
  */
+// Units Ask's specification reader does not know, read for unit_cut ONLY. Adding
+// them to Ask's UNIT_PATTERN would change D1 number matching for every Ask
+// answer, which needs a corpus measurement first; here they can only add a
+// rejection. Each must be a whole word right after its figure, so "5 gaskets",
+// "4 minimum", and "2 hoses" stay figures with no unit. Case is kept: "W" is
+// watts and "w" is not; "g" is grams only in lowercase. On the 2026-11-14
+// snapshot (20,447 chunks) these match in 4,802 chunks, most of them waits
+// ("Wait at least 90 seconds after disconnecting ..."). A false match can only
+// reject a claim that ends on that number, never accept one.
+const PLANNER_ONLY_UNIT_REGEX = new RegExp(
+  String.raw`(?<![\d.,])\d+(?:[.,]\d+)?\s*` +
+    String.raw`(?:` +
+    String.raw`(?:[Ss]ec(?:ond)?s?|[Mm]in(?:ute)?s?|[Hh](?:ou)?rs?)(?:\.|(?![A-Za-z0-9_]))|` +
+    String.raw`(?:[Kk]ilo)?[Gg]rams?(?![A-Za-z0-9_])|(?:kg|KG|Kg|g)(?![A-Za-z0-9_])|` +
+    String.raw`(?:cc|CC|cm3|cm³)(?![A-Za-z0-9_])|` +
+    String.raw`(?:mm\s*Hg|mmHg|in\.?\s*Hg|inHg)(?![A-Za-z0-9_])|` +
+    // Bare "W" refuses a following "/", "-" or "(": in the corpus those are
+    // "W/" (with), "0W-20" (a viscosity grade) and "W(*2)" (a pin label).
+    String.raw`[Ww]atts?(?![A-Za-z0-9_])|W(?![A-Za-z0-9_\/(-])|` +
+    // A unit in brackets right after its figure: "39 (N*m)". Multi-letter units
+    // only: "terminal 2 (A)" and "bolt 3 (L)" are labels, not amps or litres.
+    String.raw`\(\s*(?:N\s*[·.*-]?\s*m|Nm|kgf\s*[·.*-]?\s*cm|ft\.?\s*[-·.*]?\s*lbf?|mm|kPa|°C|°F)\s*\)` +
+    String.raw`)`,
+  "g"
+);
+
+function plannerOnlyUnitSpans(text) {
+  return [...String(text).matchAll(PLANNER_ONLY_UNIT_REGEX)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
 function cutsUnit(spans, text, end) {
   return spans.some(
     (span) => span.start < end && span.end > end && !PUNCTUATION_ONLY.test(text.slice(end, span.end))
@@ -494,7 +527,8 @@ function claimPlacementProblem(claim, evidenceText) {
   // keeps every position unless a character changes length when lowercased
   // ("İ"); then the lowercased text is read instead, which can only miss a
   // case-sensitive symbol, never invent a unit.
-  const unitSpans = specNumberSpans(shown.length === text.length ? shown : text);
+  const casedText = shown.length === text.length ? shown : text;
+  const unitSpans = [...specNumberSpans(casedText), ...plannerOnlyUnitSpans(casedText)];
   let firstProblem = null;
 
   for (const quoteAt of tokenBoundedOccurrences(quote, text)) {
