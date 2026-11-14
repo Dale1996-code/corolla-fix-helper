@@ -1112,21 +1112,48 @@ function tokenAt(text, index) {
 
 /**
  * Numbers in a claim that no specification pattern read and no identifier
- * shape explains, and that its evidence does not print.
+ * shape explains, and that its evidence does not print WITHOUT A UNIT.
  *
- * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }> }}
+ * A number the evidence prints only inside a unit-bearing specification ("37"
+ * against "37 N*m") is a figure whose unit the claim dropped, so it is not
+ * verified either (owner decision D1: the printed value in the same unit). A
+ * number the evidence also prints bare ("4 clips" beside "4 mm") is a count it
+ * really prints and still passes. When every unsupported number is of the
+ * first kind, `detail` is "unit_missing"; it is set only on a failure.
+ *
+ * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }>, detail?: string }}
  */
 export function checkUnrecognizedFigures(claimText, evidenceText) {
   const claim = String(claimText || "");
   const spans = specificationSpans(claim);
-  const printed = signedNumbers(evidenceText).map((number) => number.value);
-  const unsupported = signedNumbers(claim)
+  const evidenceSpans = specNumberSpans(evidenceText);
+  const withUnit = (index) => evidenceSpans.some(({ start, end }) => index >= start && index < end);
+  const evidence = String(evidenceText || "");
+  const isIdentifier = (text, index) =>
+    IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(text, index)));
+  const evidenceNumbers = signedNumbers(evidence);
+  const printedWithUnit = evidenceNumbers.filter(({ index }) => withUnit(index)).map(({ value }) => value);
+  // A number inside a name ("A-1", "B31-104") is no bare printing of a value
+  // the quote also prints with a unit: resistance tables print "Below 1 Ω"
+  // beside pin labels, and the label's 1 must not excuse a claim's unitless 1.
+  // Without a unit-bearing printing it still grounds the number, as before.
+  const printedBare = evidenceNumbers
+    .filter(({ index }) => !withUnit(index))
+    .filter(({ value, index }) => !printedWithUnit.includes(value) || !isIdentifier(evidence, index))
+    .map(({ value }) => value);
+  const unread = signedNumbers(claim)
     .filter(({ index }) => !spans.some(([start, end]) => index >= start && index < end))
-    .filter(({ index }) => !IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(claim, index))))
-    .filter(({ value }) => !printed.includes(value))
-    .map(({ raw, index }) => ({ raw, index }));
+    .filter(({ index }) => !isIdentifier(claim, index))
+    .filter(({ value }) => !printedBare.includes(value));
+  const unsupported = unread.map(({ raw, index }) => ({ raw, index }));
 
-  return { grounded: unsupported.length === 0, unsupported };
+  if (!unsupported.length) {
+    return { grounded: true, unsupported };
+  }
+
+  return unread.every(({ value }) => printedWithUnit.includes(value))
+    ? { grounded: false, unsupported, detail: "unit_missing" }
+    : { grounded: false, unsupported };
 }
 
 /**
@@ -2782,10 +2809,15 @@ export function verifyEvidence(validated, chunks) {
         ...origin,
         claim: claim.claim,
         reason: "unrecognized_figure",
+        ...(figures.detail ? { detail: figures.detail } : {}),
         unsupported: figures.unsupported.map((figure) => figure.raw),
       });
       gaps.push(
-        `Unverified (a figure in it is not printed in the cited text): ${gapClaimText(
+        `${
+          figures.detail === "unit_missing"
+            ? "Unverified (a figure in it leaves out the unit the cited text prints)"
+            : "Unverified (a figure in it is not printed in the cited text)"
+        }: ${gapClaimText(
           claim.claim,
           claim.evidenceQuote
         )}`

@@ -4803,3 +4803,28 @@ would show it; it is not part of this change.
 6. The optional paid capture of `applicability-vehicle-height-wrong-engine` that saves replies.
 7. F2 (header in the previous chunk), the 12× `in.*lbf` unit false accept, and applicability (build
    variant) remain separate and unstarted.
+
+## 2026-11-14 — Ask: a figure stated without its printed unit (`unit_missing`)
+
+Found in the independent review of PR #183: "The oil drain plug torque is 37" was ACCEPTED against a
+quote printing `37 N·m`, with `printedFigures: []`. The claim's bare 37 has no unit, so the
+specification check read nothing from it, and the unrecognized-figure floor passed it because the
+quote prints a 37. Under D1 a verified figure is the printed value in the same unit, so a unitless
+figure the quote prints only with a unit is now rejected: `unrecognized_figure` with server-side
+`detail: "unit_missing"` (no new reason, so the response enum, rejection probes, and eval-case
+coverage are unchanged). A number inside a name (`A-1`) in the quote no longer excuses it when the
+quote also prints that value with a unit.
+
+Measured offline on a `VACUUM INTO` snapshot (20,447 chunks), old verifier (`e9bbb18`) vs new, no
+model calls:
+
+| Probe | Pairs | Result |
+| --- | ---: | --- |
+| A real sentence citing itself with one unit-bearing span stripped to its number(s) | 22,796 | Old accepted 13,941; now 13,336 rejected `unit_missing`, 605 still accepted |
+| A sentence with a bare number citing a neighbouring sentence of its chunk | 87,165 | 84 changed (83 accepted → `unit_missing`, 1 earlier-stage reason change), each a count or step number the quote printed only as a figure (e.g. "10 times" against "between 10 and 16 V") |
+
+The 605 still accepted are mostly probe artefacts that keep the unit for a range ("between 5 and
+30°C"), plus real remaining accepts: the number printed bare elsewhere outside a name ("terminal 1", a
+step marker "(10)", the day or month of a printed date). Not changed and still accepted: a unitless claim of a row in a
+header-unit table (`Torque (N·m): bolt 37`). `eval:replay` on the synthetic capture: 0 of 9 verdicts
+changed. The pairs quote real manual text and are archived under `PrivateArchives`, not here.

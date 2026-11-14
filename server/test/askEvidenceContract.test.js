@@ -2607,3 +2607,112 @@ test("S1: a table's minimum does not pass as its standard value", () => {
   assert.equal(verdictOf("The disc thickness is 23.0 mm.", disc), "row_mismatch");
   assert.equal(rowDetailOf("The disc thickness is 23.0 mm.", disc), "condition_mismatch");
 });
+
+// ---- A figure stated without the unit its quote prints (unit_missing) ----
+//
+// Owner decision D1: a verified figure is the printed value IN THE SAME UNIT.
+// A claim's bare "37" names no unit, so the specification check reads nothing
+// from it, and the unrecognized-figure floor used to accept it because the
+// quote prints a 37 -- with N*m. Found reviewing PR #183. All wording here is
+// invented; none of it is manual text.
+
+/** The rejection detail on one claim citing one quote, or null when accepted. */
+function figureDetailOf(claim, quote) {
+  const result = verifySingleClaim(claim, quote);
+
+  return result.documentSupported.length ? null : result.rejected[0].detail ?? null;
+}
+
+test("a figure the quote prints only with a unit is rejected when the claim drops the unit", () => {
+  for (const [claim, quote] of [
+    // N·m, the case the PR #183 review found.
+    ["The rear hub carrier nut torque is 37.", "Snug the rear hub carrier nut evenly, then bring it to 37 N·m"],
+    // Nm, glued and spaced.
+    ["Bring the heat shield screw to 21.", "Heat shield screw torque 21 Nm checked after the shield cools"],
+    ["Bring the heat shield screw to 21.", "Heat shield screw torque 21Nm checked after the shield cools"],
+    // A range: both ends lose their unit.
+    ["The alternator output should read 13.2 to 14.8.", "With every lamp switched off the alternator output reads 13.2 to 14.8 V"],
+    // A decimal.
+    ["The pad lining service limit is 1.5.", "Pad lining service limit 1.5 mm measured at its thinnest edge"],
+    // The same number printed twice, in two units, and never bare.
+    ["The idler pulley bolt is 43.", "Idler pulley bolt 43 N·m and the pulley flange step 43 mm deep"],
+    // A unit the detector does not know is no unit at all.
+    ["The idler pulley bolt is 43 widgets.", "Idler pulley bolt 43 N·m and the pulley flange step 43 mm deep"],
+  ]) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "unrecognized_figure", claim);
+    assert.equal(result.rejected[0].detail, "unit_missing", claim);
+    assert.equal(deriveEvidenceStatus(result), "not_found", claim);
+    // The figure is not reprinted in its gap, and the gap says what is missing.
+    assert.match(result.gaps[0], /leaves out the unit/, claim);
+    assert.match(result.gaps[0], /\[unverified value\]/, claim);
+  }
+
+  // The same claims with the unit verify, and show the printed figure.
+  const withUnit = verifySingleClaim(
+    "The rear hub carrier nut torque is 37 N·m.",
+    "Snug the rear hub carrier nut evenly, then bring it to 37 N·m"
+  );
+  assert.equal(withUnit.documentSupported.length, 1);
+  assert.deepEqual(withUnit.documentSupported[0].printedFigures, ["37 N·m"]);
+
+  // A number the quote ALSO prints bare is a count it really prints.
+  assert.equal(
+    figureDetailOf("Release the 4 retaining clips first.", "Release the 4 retaining clips beside the 4 mm locating pin"),
+    null
+  );
+  // A number the quote never prints keeps its old detail-free rejection.
+  const unprinted = verifySingleClaim("The idler pulley bolt is 44.", "Idler pulley bolt 43 N·m and the pulley flange step 43 mm deep");
+  assert.equal(unprinted.rejected[0].reason, "unrecognized_figure");
+  assert.equal(unprinted.rejected[0].detail, undefined);
+});
+
+test("identifier-shaped numbers keep their verdict when the quote prints that number with a unit", () => {
+  for (const [claim, quote] of [
+    // A code whose digits the quote prints as a pressure.
+    ["The coolant gauge sets code P0171 when the sender fails.", "The coolant gauge sets code P0171 when the sender fails; cap rated 171 kPa"],
+    // A pin and a connector.
+    ["Probe terminal B9-1 on connector A51 for a signal.", "Probe terminal B9-1 on connector A51 for a signal, 1 V expected"],
+    // An engine code and a model year.
+    ["The 2009 2ZR-FE cover gasket is reused once.", "The 2009 2ZR-FE cover gasket is reused once and sealed with 2009 mm of bead"],
+    // A part number.
+    ["Order seal 90919-01253 for the cover.", "Order seal 90919-01253 for the cover, about 1253 mm long"],
+    // An ordinal.
+    ["Tighten on the 2nd pass only.", "Tighten on the 2nd pass only, to 2 N·m"],
+    // A step number the quote prints bare as well as with a unit.
+    ["In step 3 lift the cover away.", "Step 3 lift the cover away from its 3 mm guide pins"],
+  ]) {
+    assert.equal(figureDetailOf(claim, quote), null, claim);
+  }
+});
+
+test("checkUnrecognizedFigures reports unit_missing only for a number printed solely with a unit", () => {
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "Torque it to 37 N·m now"), {
+    grounded: false,
+    unsupported: [{ raw: "37", index: 13 }],
+    detail: "unit_missing",
+  });
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 38.", "Torque it to 37 N·m now"), {
+    grounded: false,
+    unsupported: [{ raw: "38", index: 13 }],
+  });
+  assert.deepEqual(checkUnrecognizedFigures("Fit 2 clips.", "Fit 2 clips"), { grounded: true, unsupported: [] });
+});
+
+test("a number printed bare only inside an identifier does not excuse a dropped unit", () => {
+  // Resistance tables print "Below 1 Ω" beside pin labels such as "A-1": the
+  // label's 1 is a name, not the figure printed without a unit.
+  assert.equal(
+    figureDetailOf("Between pins K-1 and K-2 the reading stays below 1.", "Between pins K-1 and K-2 the reading stays below 1 Ω at all times"),
+    "unit_missing"
+  );
+  // With no unit-bearing 1 in the quote, the label still grounds the number as before.
+  assert.equal(figureDetailOf("Probe pin 1 of the harness plug.", "Probe pin K-1 of the harness plug with the meter"), null);
+  // And a 1 the quote prints bare outside any identifier still grounds it.
+  assert.equal(
+    figureDetailOf("Probe pin 1 of the harness plug.", "Probe pin 1 of the harness plug: below 1 Ω"),
+    null
+  );
+});
