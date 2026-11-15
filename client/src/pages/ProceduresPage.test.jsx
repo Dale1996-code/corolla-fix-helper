@@ -140,8 +140,12 @@ test("ProceduresPage keeps showing the procedure the owner chose when a filter h
     await screen.findByText(getCountTextMatcher("Showing 1–1 of 1 procedure."))
   ).toBeInTheDocument();
   // The filter hides the throttle row from the list, not from the panel: the
-  // owner chose it, so loosening the filter finds them where they were.
-  expect(screen.getByRole("heading", { name: "Throttle body cleaning" })).toBeInTheDocument();
+  // owner chose it, so loosening the filter finds them where they were. Its row
+  // has left the page, so the panel shows it once the by-id lookup answers --
+  // which can land after the count line on a slow runner, hence findBy.
+  expect(
+    await screen.findByRole("heading", { name: "Throttle body cleaning" })
+  ).toBeInTheDocument();
   expect(api.lookups).toContain("/api/procedures/31");
 }, 10000);
 
