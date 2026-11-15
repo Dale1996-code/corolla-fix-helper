@@ -188,8 +188,19 @@ also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
      claim and quote both trimmed before the unit passed under any kind: the
      quote was "whole", and a bare 37 is "printed in it". Units are the ones
      the specification reader knows (`specNumberSpans` in
-     `askEvidenceContract.js`); a step label it reads as a current ("STEP 10 A")
-     can reject an honest "go to step 10", the safe direction;
+     `askEvidenceContract.js`), the ends of a range ("13.2 to 14.8" from
+     "13.2 to 14.8 V"), and a planner-only list Ask does not read
+     (`PLANNER_ONLY_UNIT_REGEX`): seconds/sec, minutes/min, hours/hr, g, kg,
+     grams, cc, cm3, mmHg, inHg, watts/W, and a multi-letter unit in brackets
+     right after the figure ("39 (N*m)"). The list is planner-only because
+     adding it to Ask's `UNIT_PATTERN` would change D1 number matching for
+     every Ask answer. A false match can only reject: a step label read as a
+     current ("STEP 10 A") or a pin label read as watts ("TC 3 W BATT") can
+     reject an honest claim ending on that number, the safe direction. Still
+     not seen: a unit printed apart from its figure — once in a column header
+     ("Torque (N*m): drain plug 37"), in the next table cell, or before the
+     number — and units in neither list (todo rows in
+     `repairPlanEvidenceContract.test.js`);
 4. every number in the claim is printed in the quote (`unsupported_number`);
 5. the claim names what it is about (audit 1A-06/1B-01, `subject_missing`):
    - any claim carrying a figure, and every `numeric_spec`, must contain a word
