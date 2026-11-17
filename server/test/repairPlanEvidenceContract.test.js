@@ -475,6 +475,10 @@ test("a claim may not cut the unit off a range or a tolerance", () => {
     ["Charging voltage should read 13.2-14.8 V at idle.", "Charging voltage should read 13.2-14.8"],
     ["Hold coolant between 80 and 84 °C during the check.", "Hold coolant between 80 and 84"],
     ["Set the spark plug gap to 1.0 – 1.1 mm before fitting.", "Set the spark plug gap to 1.0 – 1.1"],
+    // A "±" tolerance is not a range to the specification reader: the value
+    // after "±" is a spec of its own ("0.1 mm"), so this is a separate path from
+    // the four rows above, and a mutation skipping range spans would not see it.
+    ["Set the crank sensor air gap to 0.8 ± 0.1 mm at fitting.", "Set the crank sensor air gap to 0.8 ± 0.1"],
   ];
 
   for (const [text, statement] of cases) {
@@ -571,15 +575,40 @@ test("a planner-only unit counts only as a whole word after its figure", () => {
 // behavior; it turns from todo into a real test once fixed.
 const UNIT_APART_TODO = "unit printed apart from its figure (planner unit_cut follow-up)";
 
-for (const [id, text, statement] of [
-  ["header-unit", "Tightening torque (N*m): drain plug 37, filter cap 25.", "Tightening torque (N*m): drain plug 37"],
-  ["next-cell", "Drain plug | 37 | N*m", "Drain plug | 37"],
-]) {
-  test(`desired behavior: unit_cut sees a ${id} [${UNIT_APART_TODO}]`, { todo: UNIT_APART_TODO }, () => {
-    const { accepted } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
-    assert.equal(accepted.length, 0);
+const UNIT_APART_ROWS = [
+  {
+    id: "header-unit",
+    text: "Tightening torque (N*m): drain plug 37, filter cap 25.",
+    statement: "Tightening torque (N*m): drain plug 37",
+  },
+  { id: "next-cell", text: "Drain plug | 37 | N*m", statement: "Drain plug | 37" },
+];
+
+/** Whether the verifier still accepts the row's figure without its unit (the leak). */
+function unitApartLeaks({ text, statement }) {
+  const { accepted } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
+  return accepted.length > 0;
+}
+
+for (const row of UNIT_APART_ROWS) {
+  test(`desired behavior: unit_cut sees a ${row.id} [${UNIT_APART_TODO}]`, { todo: UNIT_APART_TODO }, () => {
+    assert.equal(unitApartLeaks(row), false);
   });
 }
+
+// Stale-todo guard. Node reports a todo test that starts passing as a todo, not
+// as a failure, so a fix for one of these leaks would land without anything
+// asking for its row to become a real test. This fails the suite instead, as
+// the guards in evidenceOracle.test.js and plannerNegatives.test.js do.
+test("every unit-apart todo row still leaks (remove its todo when a fix lands)", () => {
+  const nowFixed = UNIT_APART_ROWS.filter((row) => !unitApartLeaks(row)).map((row) => row.id);
+
+  assert.deepEqual(
+    nowFixed,
+    [],
+    "These rows are no longer accepted. Turn them into real tests and remove their todo."
+  );
+});
 
 // --- Subject guard (1A-06 / 1B-01) ------------------------------------------
 //
