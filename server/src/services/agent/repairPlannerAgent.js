@@ -80,7 +80,7 @@ export function buildPlannerGateText(request) {
     .join("\n");
 }
 
-const AGENT_INSTRUCTIONS = [
+export const AGENT_INSTRUCTIONS = [
   "You are the Repair Planner agent for a 2009 Toyota Corolla LE 1.8L repair workspace.",
   "Turn the owner's repair brief into an actionable plan. Work in this order using the tools:",
   "1. Call extract_repair_tasks (no arguments) to read the canonical task list for this run.",
