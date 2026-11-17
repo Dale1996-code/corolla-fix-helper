@@ -1110,25 +1110,282 @@ function tokenAt(text, index) {
   return text.slice(start, end).replace(/^[("'[{]+|[)"'\]},.;:!?]+$/g, "");
 }
 
+// ---------------------------------------------------------------------------
+// A unit printed apart from its figure
+// ---------------------------------------------------------------------------
+//
+// A flattened table prints a unit once, away from the number it applies to: in
+// a header ("Torque (N*m): drain plug 37, filter cap 25") or in the next cell
+// ("Drain plug | 37 | N*m"). No specification span covers such a figure, so a
+// claim's bare "37" read as a number the quote "prints bare" and verified with
+// its unit dropped. These readers say which bare numbers are such figures.
+//
+// The scope is the figure's own sentence (SENTENCE_END_REGEX): a unit header in
+// the torque row says nothing about the count printed in the next sentence. A
+// bare number is NOT taken for a table figure when it is a name, a step marker,
+// or "No. 3" (isNonValueNumber), an engine designation, a lone callout in
+// brackets ("(10)"), a reference right after one of REFERENCE_WORDS ("terminal
+// 1", "pin 3"), or a count: right before a lowercase plural word ("4 clips") or
+// right after "the", "these", "those", "all", or "both" ("the 4 cover bolts").
+// Everything else in a sentence carrying a header unit is read as a figure in
+// that unit, which can only add rejections.
+//
+// Only a column-header SHAPE counts as a header here (headerShapedUnitSpans),
+// not every unit standing alone as headerUnitsIn reads them: a unit in brackets
+// other than "(A)" and "(L)", a run of two or more units side by side, or a
+// unit alone in a "|" cell. headerUnitsIn costs little in the bare-number
+// fallback, where a claim must also state the unit; here it would turn every
+// count beside a prose "rpm", a step label "(A)", or a sentence ending "in"
+// into a figure. Measured by a parallel session on a 20,447-chunk snapshot
+// (2026-11-16): any lone unit newly rejected 262 of 52,056 real sentences
+// quoting themselves, mostly counts; the bracket-or-run shapes cut that to 44,
+// of them 22 real dropped units and 12 duty-ratio multipliers ("x 100 (%)"),
+// which the "x" rule below now also leaves alone.
+
+// Words that, right before a bare number, make it a reference, not a value.
+// Kept short on purpose: a word here can keep a table figure's dropped unit
+// from being noticed, so only words that never label a value row are listed.
+const REFERENCE_WORDS = new Set([
+  "terminal", "terminals", "pin", "pins", "step", "steps", "no", "connector", "cylinder",
+  "wire", "circuit", "item", "figure", "fig", "page", "cavity",
+]);
+const COUNT_DETERMINERS = new Set(["the", "these", "those", "all", "both"]);
+
+/** The word right before a position, across spaces and punctuation but no digit. */
+function wordBefore(text, index) {
+  const match = text.slice(0, index).match(/([A-Za-z]+)[^A-Za-z0-9]*$/);
+
+  return match ? match[1].toLowerCase() : "";
+}
+
+/** Is this bare number a reference or a count rather than a table figure? */
+function isReferenceOrCount(text, start, end) {
+  if (text[start - 1] === "(" && text[end] === ")") {
+    return true;
+  }
+
+  // A multiplier in a formula, "A / B x 100 (%)", is not a table figure.
+  if (/(?:^|\s)[x×]\s*$/.test(text.slice(0, start))) {
+    return true;
+  }
+
+  const before = wordBefore(text, start);
+
+  if (REFERENCE_WORDS.has(before) || COUNT_DETERMINERS.has(before)) {
+    return true;
+  }
+
+  // Only a plain space between the number and a lowercase plural: "37, filter
+  // caps" is one row ending and the next row starting.
+  const plural = text.slice(end).match(/^ +([a-z]{3,}s)(?![A-Za-z])/);
+
+  // A number followed by a unit word is a specification and never reaches here.
+  return Boolean(plural && !plural[1].endsWith("ss"));
+}
+
+/**
+ * The units in one sentence printed the way a column header is: in brackets
+ * ("(N*m)", "(V)" -- but not "(A)" or "(L)", which are step and connector
+ * letters as often as amperes and litres), two or more side by side ("N*m
+ * kgf*cm ft.*lbf"), or alone in a "|" cell ("| N*m |").
+ *
+ * @returns {Array<{ start: number, end: number }>}
+ */
+function headerShapedUnitSpans(sentence) {
+  const spelled = spansOf(sentence, [SPELLED_HEADER_UNIT_REGEX]).sort((left, right) => left[0] - right[0]);
+  const shaped = [];
+  const bracketed = (start, end) =>
+    /[([]\s*$/.test(sentence.slice(0, start)) && /^\s*[)\]]/.test(sentence.slice(end));
+  const inCell = (start, end) =>
+    /(?:^|\|)\s*$/.test(sentence.slice(0, start)) &&
+    /^\s*(?:\||$)/.test(sentence.slice(end)) &&
+    sentence.includes("|");
+  const touches = (left, right) => /^[\s,/]*$/.test(sentence.slice(left[1], right[0]));
+
+  spelled.forEach((span, index) => {
+    const [start, end] = span;
+
+    // A degree or percent sign standing loose is scanner noise far more often
+    // than a header ("° °" in OCR'd wiring diagrams): only "(°C)", "(%)" count.
+    if (/^[°%]$/.test(sentence.slice(start, end))) {
+      if (bracketed(start, end)) shaped.push({ start, end });
+      return;
+    }
+
+    const inRun =
+      (index > 0 && touches(spelled[index - 1], span)) ||
+      (index + 1 < spelled.length && touches(span, spelled[index + 1]));
+
+    if (bracketed(start, end) || inCell(start, end) || inRun) {
+      shaped.push({ start, end });
+    }
+  });
+
+  for (const match of sentence.matchAll(SYMBOL_HEADER_UNIT_REGEX)) {
+    if (match[1] !== "A" && match[1] !== "L") {
+      shaped.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  return shaped;
+}
+
+/**
+ * Bare numbers whose unit the text prints apart from them, in the same
+ * sentence: a header unit before the figure or a unit in a later cell. Each
+ * comes with the [start, end) of every such unit in its sentence. Shared with
+ * the planner's placement check (unit_not_stated).
+ *
+ * @param {string} text
+ * @returns {Array<{ start: number, end: number, value: number, unitSpans: Array<{ start: number, end: number }> }>}
+ */
+export function unitApartFigures(text) {
+  const source = String(text || "");
+  const specSpans = specNumberSpans(source).map(({ start, end }) => [start, end]);
+  const names = spansOf(source, [ENGINE_DESIGNATION_REGEX]);
+  const sentences = [];
+  let from = 0;
+
+  for (const match of source.matchAll(new RegExp(SENTENCE_END_REGEX.source, "g"))) {
+    sentences.push([from, match.index + match[0].length]);
+    from = match.index + match[0].length;
+  }
+  sentences.push([from, source.length]);
+
+  const figures = [];
+
+  for (const [start, end] of sentences) {
+    const sentence = source.slice(start, end);
+    const unitSpans = headerShapedUnitSpans(sentence).map((unit) => ({
+      start: start + unit.start,
+      end: start + unit.end,
+    }));
+
+    if (!unitSpans.length) {
+      continue;
+    }
+
+    for (const number of signedNumbers(sentence)) {
+      const at = start + number.index;
+      const atEnd = at + number.raw.length;
+
+      if (
+        insideSpans(specSpans, at) ||
+        insideSpans(names, at) ||
+        unitSpans.some((unit) => at >= unit.start && at < unit.end) ||
+        isNonValueNumber(sentence, number) ||
+        isReferenceOrCount(source, at, atEnd)
+      ) {
+        continue;
+      }
+
+      figures.push({ start: at, end: atEnd, value: number.value, unitSpans });
+    }
+  }
+
+  return figures;
+}
+
+// Words too common to show that two printings of a number are the same thing.
+const NEIGHBOR_GLUE_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on",
+  "or", "than", "the", "then", "to", "was", "with",
+]);
+
+// A short bracketed group between a number and its word: "1 (15 A) fuse".
+const SHORT_BRACKET_BEFORE = /\([^()]{0,12}\)[^A-Za-z0-9()]*$/;
+const SHORT_BRACKET_AFTER = /^[^A-Za-z0-9()]*\([^()]{0,12}\)/;
+// How many function words may be skipped looking for the nearest content word.
+const NEIGHBOR_SKIP_LIMIT = 3;
+
+/** The nearest word before a position that is not a function word, or "". */
+function contentWordBefore(text, index) {
+  let rest = text.slice(0, index).replace(SHORT_BRACKET_BEFORE, "");
+
+  for (let skipped = 0; skipped <= NEIGHBOR_SKIP_LIMIT; skipped += 1) {
+    const match = rest.match(/([A-Za-z]+)[^A-Za-z0-9]*$/);
+
+    if (!match) return "";
+
+    const word = match[1].toLowerCase();
+
+    if (!NEIGHBOR_GLUE_WORDS.has(word)) return word;
+    rest = rest.slice(0, match.index);
+  }
+
+  return "";
+}
+
+/** The nearest word after a position that is not a function word, or "". */
+function contentWordAfter(text, index) {
+  let rest = text.slice(index).replace(SHORT_BRACKET_AFTER, "");
+
+  for (let skipped = 0; skipped <= NEIGHBOR_SKIP_LIMIT; skipped += 1) {
+    const match = rest.match(/^[^A-Za-z0-9]*([A-Za-z]+)/);
+
+    if (!match) return "";
+
+    const word = match[1].toLowerCase();
+
+    if (!NEIGHBOR_GLUE_WORDS.has(word)) return word;
+    rest = rest.slice(match[0].length);
+  }
+
+  return "";
+}
+
+/**
+ * Do two printings of one number stand beside the same word -- "terminal 1"
+ * and "terminal 1", "4 clips" and "4 clips"? The word is the nearest one that
+ * is not a function word ("divisible by 3,000, then"), across a short bracket
+ * ("1 (15 A) fuse") but never across another number. A function word alone
+ * says nothing about which 1 it is.
+ */
+function sameNeighbor(leftText, left, rightText, right) {
+  const sameWord = (a, b) => Boolean(a) && a === b;
+
+  return (
+    sameWord(contentWordBefore(leftText, left.index), contentWordBefore(rightText, right.index)) ||
+    sameWord(
+      contentWordAfter(leftText, left.index + left.raw.length),
+      contentWordAfter(rightText, right.index + right.raw.length)
+    )
+  );
+}
+
+/** A unit as compared across texts: no brackets or spaces. */
+function bareUnitText(text) {
+  return String(text).replace(/[()[\]\s]/g, "");
+}
+
 /**
  * Numbers in a claim that no specification pattern read and no identifier
  * shape explains, and that its evidence does not print WITHOUT A UNIT.
  *
- * A number the evidence prints only inside a unit-bearing specification ("37"
- * against "37 N*m") is a figure whose unit the claim dropped, so it is not
- * verified either (owner decision D1: the printed value in the same unit). A
- * number the evidence also prints bare ("4 clips" beside "4 mm") is a count it
- * really prints and still passes. When every unsupported number is of the
- * first kind, `detail` is "unit_missing"; it is set only on a failure.
+ * A number the evidence prints only with a unit -- inside a unit-bearing
+ * specification ("37" against "37 N*m"), or as a table figure whose unit is
+ * printed in its header or next cell (unitApartFigures) -- is a figure whose
+ * unit the claim dropped, so it is not verified either (owner decision D1: the
+ * printed value in the same unit). A number the evidence also prints bare is
+ * excused by that printing only when it is plausibly the same thing: when the
+ * evidence prints the value with no unit at all, any bare printing will do, as
+ * before ("Fit 2 clips"); when it also prints it with a unit, the bare printing
+ * must stand beside the same word as the claim's ("terminal 1", "4 clips"), so
+ * "Connect terminal 1 ... 1 V" no longer verifies "the voltage is 1". When every
+ * unsupported number is printed with a unit, `detail` is "unit_missing"; it is
+ * set only on a failure.
  *
  * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }>, detail?: string }}
  */
 export function checkUnrecognizedFigures(claimText, evidenceText) {
   const claim = String(claimText || "");
   const spans = specificationSpans(claim);
-  const evidenceSpans = specNumberSpans(evidenceText);
-  const withUnit = (index) => evidenceSpans.some(({ start, end }) => index >= start && index < end);
   const evidence = String(evidenceText || "");
+  const evidenceSpans = specNumberSpans(evidence);
+  const apart = unitApartFigures(evidence);
+  const withUnit = (index) =>
+    evidenceSpans.some(({ start, end }) => index >= start && index < end) ||
+    apart.some(({ start, end }) => index >= start && index < end);
   const isIdentifier = (text, index) =>
     IDENTIFIER_TOKEN_PATTERNS.some((pattern) => pattern.test(tokenAt(text, index)));
   const evidenceNumbers = signedNumbers(evidence);
@@ -1139,12 +1396,36 @@ export function checkUnrecognizedFigures(claimText, evidenceText) {
   // Without a unit-bearing printing it still grounds the number, as before.
   const printedBare = evidenceNumbers
     .filter(({ index }) => !withUnit(index))
-    .filter(({ value, index }) => !printedWithUnit.includes(value) || !isIdentifier(evidence, index))
-    .map(({ value }) => value);
+    .filter(({ value, index }) => !printedWithUnit.includes(value) || !isIdentifier(evidence, index));
+  // A claim that prints the figure under a header of its own ("Strip the lead
+  // 8 to 11 (mm)") states the unit, as the planner reads it (unit_not_stated),
+  // when that header is the quote's unit for the same number.
+  const claimApart = unitApartFigures(claim);
+  const statesApartUnit = (number) => {
+    const own = claimApart.find((figure) => figure.start === number.index);
+
+    if (!own) return false;
+
+    const ownUnits = own.unitSpans.map((unit) => bareUnitText(claim.slice(unit.start, unit.end)));
+
+    return apart.some(
+      (figure) =>
+        figure.value === number.value &&
+        figure.unitSpans.some((unit) =>
+          ownUnits.some((ownUnit) => sameUnit(ownUnit, bareUnitText(evidence.slice(unit.start, unit.end))))
+        )
+    );
+  };
+  const excusedByBarePrinting = (number) =>
+    printedBare.some(
+      (printing) =>
+        printing.value === number.value &&
+        (!printedWithUnit.includes(number.value) || sameNeighbor(claim, number, evidence, printing))
+    );
   const unread = signedNumbers(claim)
     .filter(({ index }) => !spans.some(([start, end]) => index >= start && index < end))
     .filter(({ index }) => !isIdentifier(claim, index))
-    .filter(({ value }) => !printedBare.includes(value));
+    .filter((number) => !excusedByBarePrinting(number) && !statesApartUnit(number));
   const unsupported = unread.map(({ raw, index }) => ({ raw, index }));
 
   if (!unsupported.length) {

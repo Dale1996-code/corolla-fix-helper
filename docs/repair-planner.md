@@ -196,11 +196,27 @@ also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
      adding it to Ask's `UNIT_PATTERN` would change D1 number matching for
      every Ask answer. A false match can only reject: a step label read as a
      current ("STEP 10 A") or a pin label read as watts ("TC 3 W BATT") can
-     reject an honest claim ending on that number, the safe direction. Still
-     not seen: a unit printed apart from its figure — once in a column header
-     ("Torque (N*m): drain plug 37"), in the next table cell, or before the
-     number — and units in neither list (todo rows in
-     `repairPlanEvidenceContract.test.js`);
+     reject an honest claim ending on that number, the safe direction. Units
+     in neither list are still not seen;
+   - no figure stated without a unit its source prints apart from it, in the
+     figure's own sentence, in a column-header shape — in brackets
+     ("Tightening torque (N*m): drain plug 37"; not "(A)" or "(L)"), two or
+     more units side by side, or alone in the next cell ("Drain plug | 37 |
+     N*m")
+     (`unit_not_stated`). The claim's span must cover one of those printed
+     units: "drain plug 37" is rejected under every kind, "Tightening torque
+     (N*m): drain plug 37" and "Drain plug | 37 | N*m" verify. The figures are
+     read by `unitApartFigures` (shared with Ask's `unit_missing`), which does
+     not count references ("terminal 2", "pin 3", a lone "(10)") or counts
+     ("the 4 bolts", "4 clips") as table figures. Not seen: a header unit in
+     another sentence, a lone unbracketed header word, and a one-letter
+     header not in brackets. A claim covering several columns' units is
+     accepted when it covers any of them, so it does not check which column a
+     figure sits under. Measured on the 2026-11-16 snapshot (20,447 chunks)
+     against `6c8f4f0`, every clause-sized fragment of a sentence quoting
+     itself: 51 of 95,044 per kind newly rejected, 48 of them torque-table
+     rows or a "(mm)" table dropping their header unit, 3 scanned wiring-
+     diagram text (`docs/evals/ask-rag-iteration-log.md`);
 4. every number in the claim is printed in the quote (`unsupported_number`);
 5. the claim names what it is about (audit 1A-06/1B-01, `subject_missing`):
    - any claim carrying a figure, and every `numeric_spec`, must contain a word

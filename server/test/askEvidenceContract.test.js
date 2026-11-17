@@ -2716,3 +2716,179 @@ test("a number printed bare only inside an identifier does not excuse a dropped 
     null
   );
 });
+
+// ---- A unit printed apart from its figure, and a coincidental bare printing ----
+//
+// Two holes left after unit_missing. (1) The quote prints the unit once, in a
+// table header or in the next cell, so no specification span covers the
+// figure and a claim's bare "37" passed as a number the quote "prints bare".
+// (2) The quote prints the value with a unit AND the same number bare as a
+// terminal, pin, step, or count, and that unrelated printing excused the
+// claim's unitless figure. All wording here is invented; none is manual text.
+
+const HEADER_ROW_TABLE = "Torque specifications (N·m) | Oil drain plug | 37 | Oil filter cap | 25";
+const NEXT_CELL_TABLE = "Part | Torque | Unit | Oil drain plug | 37 | N·m";
+
+test("a figure whose unit is printed only in its header or next cell needs that unit in the claim", () => {
+  for (const [claim, quote] of [
+    ["The oil drain plug torque is 37.", HEADER_ROW_TABLE],
+    ["The oil filter cap torque is 25.", HEADER_ROW_TABLE],
+    ["The oil drain plug torque is 37.", NEXT_CELL_TABLE],
+    ["The mounting bolt torque is 37.", "Torque (N·m): mounting bolt 37"],
+    ["The terminal voltage is 11 to 14.", "Terminal voltage (V): 11 to 14"],
+    ["The oil pan drain plug torque is 37.", "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27"],
+    // A bracketed unit after the figure is that figure's header too.
+    ["The lead strip length is 6 to 9.", "Strip the lead 6 to 9 (mm) before crimping the sleeve"],
+  ]) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].reason, "unrecognized_figure", claim);
+    assert.equal(result.rejected[0].detail, "unit_missing", claim);
+    assert.match(result.gaps[0], /leaves out the unit/, claim);
+    assert.match(result.gaps[0], /\[unverified value\]/, claim);
+  }
+});
+
+test("a claim that keeps the header or next-cell unit still verifies", () => {
+  for (const [claim, quote] of [
+    ["The oil drain plug torque is 37 N·m.", HEADER_ROW_TABLE],
+    ["The oil drain plug torque is 37 N·m.", NEXT_CELL_TABLE],
+    ["The mounting bolt torque is 37 N·m.", "Torque (N·m): mounting bolt 37"],
+    ["The terminal voltage is 11 to 14 V.", "Terminal voltage (V): 11 to 14"],
+  ]) {
+    assert.equal(figureDetailOf(claim, quote), null, claim);
+  }
+});
+
+test("an unrelated bare printing does not excuse a figure the quote prints with a unit", () => {
+  for (const [claim, quote] of [
+    ["The ground voltage is 1.", "Connect terminal 1 to ground. Ground voltage: 1 V"],
+    ["The guide gap is 3.", "Lift pin 3 out first. Guide gap: 3 mm"],
+    ["The bracket bolt torque is 10.", "Seat the bracket bolt (10) by hand. Bracket bolt torque: 10 N·m"],
+    ["The lid clearance is 2.", "Do step 2 before the lid. Lid clearance: 2 mm"],
+    ["The clip gap is 4.", "Release the 4 clips first. Clip gap: 4 mm"],
+    // A shared function word ("to 1" and "to 1") says nothing about which 1 it is.
+    ["Set the sender voltage to 1.", "Turn the knob to 1 first. Sender voltage: 1 V"],
+  ]) {
+    const result = verifySingleClaim(claim, quote);
+
+    assert.equal(result.documentSupported.length, 0, claim);
+    assert.equal(result.rejected[0].detail, "unit_missing", claim);
+  }
+});
+
+test("terminals, pins, steps, counts, and part numbers keep verifying beside a united figure", () => {
+  for (const [claim, quote] of [
+    // The claim restates the bare printing itself.
+    ["Connect terminal 1 to ground.", "Connect terminal 1 to ground. Ground voltage: 1 V"],
+    ["Lift pin 3 out first.", "Lift pin 3 out first. Guide gap: 3 mm"],
+    ["Seat the bracket bolt (10) by hand.", "Seat the bracket bolt (10) by hand. Bracket bolt torque: 10 N·m"],
+    ["Do step 2 before the lid.", "Do step 2 before the lid. Lid clearance: 2 mm"],
+    ["Release the 4 clips first.", "Release the 4 clips first. Clip gap: 4 mm"],
+    // A reference, a count, and a step marker beside a header unit.
+    ["Probe terminal 2 of the sender plug.", "Probe terminal 2 of the sender plug. Sender voltage (V): 11 to 14"],
+    ["Probe terminal 2 and read the sender.", "Probe terminal 2 and read the sender (V): 12"],
+    ["Remove the 4 cover bolts.", "Remove the 4 cover bolts, then torque (N·m): cover bolt 37"],
+    ["Step 2 torques the cover bolt.", "2. Torque (N·m): cover bolt 37"],
+    ["Order seal 90919-01253 for the cover.", "Order seal 90919-01253 for the cover. Torque (N·m): cover bolt 25"],
+    // A count or a wait right before its plural word, beside a header unit.
+    ["Release 4 clips.", "Release 4 clips, then torque (N·m): cover bolt 37"],
+    ["Wait 30 seconds before reading.", "Wait 30 seconds before reading the sender (V): 12"],
+    // A unit word in prose, a step or connector letter, and a sentence ending in
+    // "in" are not column headers (measured shapes, 2026-11-16).
+    ["The counter steps 4 times in every 150 drum turns.", "In every 150 drum turns at a high rpm, the counter steps 4 times"],
+    ["In step (A), loosen 1 or 2 of the clamp screws.", "In step (A), loosen 1 or 2 of the clamp screws"],
+    ["Probe pin 3 of connector J4(L) with the lead.", "Probe pin 3 of connector J4(L) with the lead"],
+    ["Pressing the reset key 15 times or more locks the panel.", "Pressing the reset key 15 times or more locks the panel it sits in"],
+    ["Set the lever to 3 and press in.", "Set the lever to 3 and press in."],
+    // A multiplier in a formula beside a bracketed unit.
+    ["The duty ratio is the on time / cycle x 100.", "Duty ratio = on time / cycle x 100 (%)"],
+    // A number the quote prints only bare is unchanged.
+    ["Fit 2 clips.", "Fit 2 clips"],
+  ]) {
+    assert.equal(figureDetailOf(claim, quote), null, claim);
+  }
+});
+
+test("only the figure's own sentence header makes a bare table number a united figure", () => {
+  const twoRows = "Torque (N·m): cover bolt 37. Quantity: cover bolts 4";
+
+  // The count row prints no unit header of its own.
+  assert.equal(figureDetailOf("The cover bolt quantity is 4.", twoRows), null);
+  // The torque row does.
+  assert.equal(figureDetailOf("The cover bolt torque is 37.", twoRows), "unit_missing");
+});
+
+test("checkUnrecognizedFigures reads header and next-cell units as the figure's unit", () => {
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "Torque (N·m): bolt 37"), {
+    grounded: false,
+    unsupported: [{ raw: "37", index: 13 }],
+    detail: "unit_missing",
+  });
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "Bolt | 37 | N·m"), {
+    grounded: false,
+    unsupported: [{ raw: "37", index: 13 }],
+    detail: "unit_missing",
+  });
+});
+
+// Shapes found by measuring the rules above on the real corpus (2026-11-16
+// snapshot, invented wording here): each was a claim restating its own quote,
+// or a step result citing its step, newly rejected although it drops no unit.
+test("a claim that prints the same header unit as its quote keeps verifying", () => {
+  const strip = "Strip the lead 8 to 11 (mm) before crimping the sleeve.";
+
+  assert.equal(figureDetailOf(strip, strip), null);
+  // The claim's own header must be the quote's unit, not any unit.
+  assert.equal(
+    figureDetailOf("Strip the lead 8 to 11 (in.) before crimping the sleeve.", strip),
+    "unit_missing"
+  );
+  // And it must sit over the same number: 12 is printed nowhere.
+  assert.equal(verifySingleClaim("Strip the lead 8 to 12 (mm) before crimping the sleeve.", strip).documentSupported.length, 0);
+});
+
+test("the nearest content word on each side decides whether two printings are one", () => {
+  // Only function words stand right beside the bare 3,000; the sentence quotes itself.
+  const interval = "Count 2 for every 3,000 mile visit unless the total is divisible by 3,000, then stop.";
+  assert.equal(figureDetailOf(interval, interval), null);
+
+  // Measured by a parallel session too, as invented equivalents: a note quoting itself
+  // that prints a value with a unit and bare, and a fuse step citing its check.
+  const note = "Repeat the service every 5,000 Mile interval unless the total is already divisible by 5,000";
+  assert.equal(figureDetailOf(note, note), null);
+  assert.equal(figureDetailOf("Check the No. 1 fuse first.", "Check the No. 1 (15 A) fuse: Always Below 1 Ω"), null);
+
+  // Function words after the number are skipped too ("3 to the right").
+  assert.equal(figureDetailOf("Turn it 3 to the right stop.", "Turn knob 3 to the right stop first. Knob gap: 3 mm"), null);
+  // A step letter "(A)" heads nothing, even for a claim that does not copy it.
+  assert.equal(figureDetailOf("Loosen 1 or 2 of the clamp screws.", "In step (A), loosen 1 or 2 of the clamp screws"), null);
+
+  // A short bracketed rating between the number and its word is skipped.
+  assert.equal(figureDetailOf("1 fuse checks out.", "1 (15 A) fuse reading below 1 Ω at the socket"), null);
+
+  // Still not the same 1: different content words on both sides.
+  assert.equal(figureDetailOf("The socket reading is 1.", "1 (15 A) fuse reading below 1 Ω at the socket"), "unit_missing");
+});
+
+test("a degree or percent sign is a header only in brackets", () => {
+  // Scanned wiring diagrams print stray degree signs side by side.
+  assert.equal(figureDetailOf("Mark 4 on the dial.", "Mark 4 on the dial ° ° face"), null);
+  // In brackets it still heads its row.
+  assert.equal(figureDetailOf("The duty is 40.", "Duty (%): 40 at idle"), "unit_missing");
+});
+
+// Found while closing the holes above, NOT fixed here: a claim that states a
+// unit, but the wrong one for its column, still verifies, because the bare-
+// number header fallback accepts any header unit anywhere in the quote.
+// Each row is the desired behavior and turns into a real test once fixed.
+const WRONG_HEADER_TODO = "header-unit fallback does not tie a bare number to its own column";
+
+for (const [id, claim, quote] of [
+  ["wrong column", "The oil pan drain plug torque is 37 ft-lbf.", "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27"],
+]) {
+  test(`desired behavior: ${id} unit is not the figure's unit [${WRONG_HEADER_TODO}]`, { todo: WRONG_HEADER_TODO }, () => {
+    assert.equal(verifySingleClaim(claim, quote).documentSupported.length, 0);
+  });
+}

@@ -3,6 +3,7 @@ import {
   quoteAppearsInChunk,
   redactSpecNumbers,
   specNumberSpans,
+  unitApartFigures,
 } from "../askEvidenceContract.js";
 
 // Repair-plan evidence contract.
@@ -25,8 +26,8 @@ import {
 //
 // It deliberately does NOT reuse Ask's schema, renderer, or "answered" status.
 // Ask answers a question; the planner covers a task list, so its states and its
-// coverage rules are different. Only the three neutral, config-free helpers are
-// shared.
+// coverage rules are different. Only a few neutral, config-free helpers are
+// shared: the readers of quotes, numbers, and units, never Ask's verdicts.
 
 /**
  * Technical claims naming an item the repair REQUIRES. They are grouped into
@@ -511,6 +512,24 @@ function cutsUnit(spans, text, end) {
 }
 
 /**
+ * A figure in the claim whose unit the source prints apart from it -- in a
+ * table header ("Tightening torque (N*m): drain plug 37") or the next cell
+ * ("Drain plug | 37 | N*m") -- while the claim prints none of the units of that
+ * figure's sentence. No specification span covers such a figure, so unit_cut
+ * cannot see the cut; before this, "drain plug 37" verified under every kind.
+ * Positions are the source's, so "states the unit" means the claim's own span
+ * covers the printed unit, never that it names one somewhere else.
+ */
+function dropsApartUnit(figures, start, end) {
+  return figures.some(
+    (figure) =>
+      figure.start < end &&
+      figure.end > start &&
+      !figure.unitSpans.some((unit) => unit.start >= start && unit.end <= end)
+  );
+}
+
+/**
  * Checks where a claim sits, not just that it is contained. Every placement of
  * the quote in the source and of the claim in the quote is tried; one clean
  * placement verifies, otherwise the first problem found is the reason.
@@ -529,6 +548,7 @@ function claimPlacementProblem(claim, evidenceText) {
   // case-sensitive symbol, never invent a unit.
   const casedText = shown.length === text.length ? shown : text;
   const unitSpans = [...specNumberSpans(casedText), ...plannerOnlyUnitSpans(casedText)];
+  const apartFigures = unitApartFigures(casedText);
   let firstProblem = null;
 
   for (const quoteAt of tokenBoundedOccurrences(quote, text)) {
@@ -548,6 +568,8 @@ function claimPlacementProblem(claim, evidenceText) {
         problem = "not_whole_clause";
       } else if (cutsUnit(unitSpans, text, end)) {
         problem = "unit_cut";
+      } else if (dropsApartUnit(apartFigures, start, end)) {
+        problem = "unit_not_stated";
       }
 
       if (!problem) {
@@ -779,6 +801,7 @@ const REJECTION_TEXT = {
   range_cut: "the statement cut a range or a signed value out of the cited text",
   not_whole_clause: "a specification or safety statement must be a whole sentence or clause of its quote",
   unit_cut: "the statement cut a figure off its unit in the cited text",
+  unit_not_stated: "the statement left out the unit the cited table prints for its figure in a header or the next cell",
   unsupported_number: "a number in the statement was not present in the cited text",
   subject_missing: "the statement did not name the part it applies to, or a part named by its task",
   item_name_too_short: "the named item was too short to identify a tool or part",

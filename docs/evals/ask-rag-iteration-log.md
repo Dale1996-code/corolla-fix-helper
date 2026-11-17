@@ -4828,3 +4828,45 @@ The 605 still accepted are mostly probe artefacts that keep the unit for a range
 step marker "(10)", the day or month of a printed date). Not changed and still accepted: a unitless claim of a row in a
 header-unit table (`Torque (N·m): bolt 37`). `eval:replay` on the synthetic capture: 0 of 9 verdicts
 changed. The pairs quote real manual text and are archived under `PrivateArchives`, not here.
+
+## 2026-11-16 — Units printed apart from their figure (`unit_missing`, planner `unit_not_stated`)
+
+Branch `claude/unit-away-from-figure`. Two holes left after `unit_missing`: (1) a figure whose unit
+is printed once in a table header (`Torque (N·m): bolt 37`) or the next cell (`Bolt | 37 | N·m`) had
+no specification span, so a claim's bare "37" passed as a number the quote "prints bare", in Ask
+and in the planner; (2) in Ask, a bare printing of the same number elsewhere ("terminal 1" beside
+"1 V") excused a unitless claim. `unitApartFigures` (shared) reads figures under a header SHAPE in
+the same sentence: a bracketed unit other than `(A)`/`(L)`, two or more units side by side, or a
+unit alone in a `|` cell; references, callouts, counts, and multipliers are not figures. In Ask a
+bare printing now excuses a unitless figure printed elsewhere with a unit only when the nearest
+content word on one side matches; a claim printing the same header unit over the same number
+states it. The planner rejects a claim covering such a figure but none of its sentence's units.
+
+Measured offline on a `VACUUM INTO` snapshot (20,447 chunks), main `6c8f4f0` vs the branch, no model
+calls. Ask probes are a parallel session's harness (a sentence citing itself; a sentence with a bare
+number citing its neighbour); the planner probe cites every clause-sized fragment (split at
+`, ; : |`) of a sentence holding a bare number, as itself, under `procedure` and `numeric_spec`,
+task = the fragment.
+
+| Version | Ask self (52,056) | Ask neighbour (87,165) | Planner, per kind (95,044) |
+| --- | ---: | ---: | ---: |
+| Parallel session, any lone unit is a header | 262 | 41 | — |
+| Parallel session, header shapes | 44 | 1 | — |
+| This branch, first measured | 74 | 38 | 62 |
+| This branch, shipped | 21 | 11 | 51 |
+
+Counts are verdicts newly rejected (accepted → `unit_missing` / `unit_not_stated`); a further 36
+Ask self-quotes were already rejected and only changed reason. The first measurement found three
+false-rejection shapes, each fixed with an invented test: a note quoting itself whose bare number
+has only function words beside it ("divisible by 3,000, then"); a step result citing its check
+across a bracket ("1 FUSE OK" against "1 (50 A) fuse"); and a claim copying the header unit itself
+("*a 8~11 (mm)"), which Ask now accepts as the planner does. Loose "° °" in scanned diagrams no
+longer counts as a header. What remains: Ask self 21 and neighbour 7 are scanned wiring-diagram
+text, 3 neighbour pairs are a probe artefact (its splitter cuts "sensor No. 2" at "No."), and 1 is
+a "12/2007" date inside a torque table's heading line. Planner: 48 of 51 are torque-table rows or a
+"(mm)" size table dropping their header unit (true catches), 3 scanned diagram text. Because a
+self-quote copies its header, the Ask self probe no longer shows the true catches; they are covered
+by invented tests of prose claims. `eval:replay` on the synthetic capture: 0 of 9 verdicts changed.
+Still accepted: a stated unit from the wrong column (`37 ft-lbf` under N·m — a todo row), a header in
+another sentence, a lone unbracketed header word. The probe outputs quote real manual text and are
+archived under `PrivateArchives`, not here.
