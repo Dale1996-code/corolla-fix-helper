@@ -570,44 +570,55 @@ test("a planner-only unit counts only as a whole word after its figure", () => {
   assert.equal(kept.accepted.length, 1, kept.rejected[0]?.reason);
 });
 
-// Still out of reach: the unit is not printed next to the figure, so nothing in
-// the claim's own sentence shows it was dropped. Each row is the desired
-// behavior; it turns from todo into a real test once fixed.
-const UNIT_APART_TODO = "unit printed apart from its figure (planner unit_cut follow-up)";
+// A unit printed apart from its figure: once in the table's header, or in the
+// next cell. No specification span covers the figure, so unit_cut cannot see a
+// cut; the claim must instead print a unit its figure's sentence prints apart
+// (unit_not_stated). These were todo rows from PR #184, held by the stale-todo
+// guard from PR #186 until a fix landed; the guard went with them. The first row's todo
+// expected "Tightening torque (N*m): drain plug 37" to be rejected too, but that
+// claim keeps the header unit, so the owner sees it: it now verifies, and the
+// claim that drops the header is the one rejected.
+const HEADER_UNIT_TEXT = "Tightening torque (N*m): drain plug 37, filter cap 25.";
+const NEXT_CELL_TEXT = "Drain plug | 37 | N*m";
+const PIPE_TABLE_TEXT = "Torque specifications (N·m) | Oil drain plug | 37 | Oil filter cap | 25";
 
-const UNIT_APART_ROWS = [
-  {
-    id: "header-unit",
-    text: "Tightening torque (N*m): drain plug 37, filter cap 25.",
-    statement: "Tightening torque (N*m): drain plug 37",
-  },
-  { id: "next-cell", text: "Drain plug | 37 | N*m", statement: "Drain plug | 37" },
-];
+test("a claim must keep a unit printed in its figure's header or next cell", () => {
+  for (const [text, statement] of [
+    [HEADER_UNIT_TEXT, "drain plug 37"],
+    [HEADER_UNIT_TEXT, "filter cap 25"],
+    [NEXT_CELL_TEXT, "Drain plug | 37"],
+    [PIPE_TABLE_TEXT, "Oil drain plug | 37"],
+    [PIPE_TABLE_TEXT, "Oil drain plug | 37 | Oil filter cap"],
+  ]) {
+    for (const kind of ["procedure", "vehicle_fact", "numeric_spec"]) {
+      const { accepted, rejected } = verifyAgainst(text, { kind, claim: statement, evidenceQuote: statement }, OIL_TASK);
+      assert.equal(accepted.length, 0, `${kind}: ${statement}`);
+      assert.equal(rejected[0]?.reason, "unit_not_stated", `${kind}: ${statement}`);
+    }
+  }
+});
 
-/** Whether the verifier still accepts the row's figure without its unit (the leak). */
-function unitApartLeaks({ text, statement }) {
-  const { accepted } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
-  return accepted.length > 0;
-}
+test("a claim that keeps the header or next-cell unit verifies", () => {
+  for (const [text, statement] of [
+    [HEADER_UNIT_TEXT, "Tightening torque (N*m): drain plug 37"],
+    [NEXT_CELL_TEXT, "Drain plug | 37 | N*m"],
+    [PIPE_TABLE_TEXT, "Torque specifications (N·m) | Oil drain plug | 37"],
+  ]) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
+    assert.equal(accepted.length, 1, `${statement}: ${rejected[0]?.reason}`);
+  }
+});
 
-for (const row of UNIT_APART_ROWS) {
-  test(`desired behavior: unit_cut sees a ${row.id} [${UNIT_APART_TODO}]`, { todo: UNIT_APART_TODO }, () => {
-    assert.equal(unitApartLeaks(row), false);
-  });
-}
-
-// Stale-todo guard. Node reports a todo test that starts passing as a todo, not
-// as a failure, so a fix for one of these leaks would land without anything
-// asking for its row to become a real test. This fails the suite instead, as
-// the guards in evidenceOracle.test.js and plannerNegatives.test.js do.
-test("every unit-apart todo row still leaks (remove its todo when a fix lands)", () => {
-  const nowFixed = UNIT_APART_ROWS.filter((row) => !unitApartLeaks(row)).map((row) => row.id);
-
-  assert.deepEqual(
-    nowFixed,
-    [],
-    "These rows are no longer accepted. Turn them into real tests and remove their todo."
-  );
+test("references, counts, and other sentences' numbers need no header unit", () => {
+  for (const [text, statement] of [
+    ["Probe terminal 2 and read the sender (V): 12", "Probe terminal 2 and read the sender"],
+    ["Remove the 4 cover bolts, then torque (N*m): cover bolt 37", "Remove the 4 cover bolts"],
+    ["Torque (N*m): cover bolt 37. Fit cover bolts 4 in total.", "Fit cover bolts 4 in total"],
+    ["Seat the bracket bolt (10) by hand, then torque (N*m): bracket bolt 10", "Seat the bracket bolt (10) by hand"],
+  ]) {
+    const { accepted, rejected } = verifyAgainst(text, { kind: "procedure", claim: statement, evidenceQuote: statement }, OIL_TASK);
+    assert.equal(accepted.length, 1, `${statement}: ${rejected[0]?.reason}`);
+  }
 });
 
 // --- Subject guard (1A-06 / 1B-01) ------------------------------------------
