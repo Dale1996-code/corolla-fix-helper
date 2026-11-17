@@ -491,6 +491,41 @@ JSON Lines, written line by line so a run that dies keeps what it paid for. Giti
 Never commit one; a test scans committed planner fixtures for long verbatim runs, mirroring
 Ask's synthetic-fixture marker test.
 
+**As built (Phase 3).** `server/src/evals/plannerCapture.js` writes and reads this format. There
+is one recorder, `recordPlannerRun` (`plannerCaseRunner.js`), and a capture line **wraps** its
+record rather than flattening it:
+
+```
+{"type":"planner_run","run":{ ...recordPlannerRun's record, verbatim... },
+ "captured":{"decisive":<finalizer index | null>,
+             "finalizers":[{"turn","callOrdinal","valid","errors",
+                            "verdicts":[{"claimIndex","taskId","verdict"}]}],  // "accepted" or a rejection reason
+             "readinessAcknowledged":{"level","score"} | null}}
+```
+
+Nesting the record means the judge's functions take `line.run` unchanged and a field the recorder
+gains later is carried without a serializer edit (the idea behind Ask's `snapshotChunk`). The
+header carries `format`, its own `version` (1), `capturedAt`, `revision` (a non-empty string),
+`dirty` (a boolean), all twelve `config` keys (a value may be `null` for unknown, a key may not be
+missing), and `instructionsHash` (sha256 of `AGENT_INSTRUCTIONS`, P-2). `scenarioSetVersion`,
+`repeats`, `vehicleProfile`, `corpus`, and `limits` are accepted and default to `null` until the
+paid capture tool exists.
+
+Where the sketch below and the recorder disagreed, and how it was settled:
+
+| Sketch | Recorder | Resolution |
+|---|---|---|
+| flat record | no `type`, no wrapper | add `type`; nest the record as `run` |
+| `turns[].calls[]` `{callId,name,arguments}`, `skipped`, `ms` | `{ordinal,callId,name,frameName,arguments,disposition,taskId,retrievalCount}`, `streamCompleted`, `frameCount` | the recorder's shape wins; `skipped` is `disposition:"skipped_by_cap"`; **no `ms`** (timing would make identical runs differ) |
+| `retrievals[]` without `callOrdinal` / `error` | has both; `results` is `null` on error | recorder wins |
+| `finalizers[]` with `structurallyValid`, `errors` | `{turn,callOrdinal,callId,arguments}` | validity and errors live in `captured.finalizers`; the recorder cannot know them |
+| `outcome.failure{code,reason}` | `outcome{status,code,reason,evidenceStatus}` | recorder wins |
+| `captured.sources / requirements / coverage / gaps / readiness / ...Digest / pipelineStatus` | already in `run.outputs` (full content, not digests) and `run.outcome.evidenceStatus` | `captured` shrinks to what `run` lacks: per-claim verdicts (the agent never keeps rejection reasons), the decisive finalizer, and readiness once the owner has acknowledged the safety warning (the agent only builds the unacknowledged state). Replay diffs against the full `run.outputs`, so a change prints readably where a digest could only say "changed". |
+| `usage` | not recorded | omitted in v1 (the token tee is deferred, D9) |
+| `documentMeta` | not recorded | omitted in v1; it would travel automatically if retrieval ever returned it |
+
+The sketch, kept for the record:
+
 ```
 {"type":"header","format":"corolla-fix-helper/planner-capture","version":1,
  "capturedAt","revision","dirty",          // exact commit; dirty=true marks the run NOT COMPARABLE
@@ -530,19 +565,26 @@ Design points:
   counts plus input byte size, with dollars read from the OpenAI dashboard (Risk R6).
 - **`documentMeta`** (extraction status, content-group key) is added at capture time with a
   read-only lookup by `documentId`, because retrieval results do not carry it.
-- **`captured` is a cross-check, not the source of truth.** Replay recomputes it. A mismatch
-  between `captured.pipelineStatus` and the status the real run returned is a capture bug and
-  fails the capture (same rule as Ask's `statusMismatches`).
+- **`captured` is a cross-check, not the source of truth.** Replay recomputes it. As built,
+  `buildPlannerCaptureRecord` re-derives each fresh record and compares it with what the real run
+  produced (`run.outputs`: evidence status, readiness, accepted claims, checklist draft notes, plan
+  text). Any difference is a capture bug and throws `PlannerCaptureMismatch`, so the line is never
+  written (same rule as Ask's `statusMismatches`, but fatal).
 - **Planner state is isolated**: each captured run gets its own `createPlanRunStore()` so drafts
   never pollute the app's store.
 - Raw model arguments are stored here (local, gitignored). They never reach a browser frame.
 
 ### 10.1 Replay
 
-`replayPlannerRun(record, { verify = buildRepairPlanEvidence, readiness = checkRepairReadiness, ... })`
-rebuilds the source registry by re-registering the recorded retrieval results in order, re-runs
-the verifier over the recorded finalizer payload, recomputes readiness (both states), the
-checklist draft, and the rendered text, and diffs each against `captured`. Output ends with:
+`replayPlannerRun(record, seams)` (`plannerReplay.js`) rebuilds the source registry by
+re-registering the recorded retrieval results in order, re-runs the verifier over every recorded
+finalizer payload, recomputes readiness (both states), the checklist draft, and the rendered text,
+and diffs each against what was recorded. It re-uses the judge's `reverifyRun` and
+`rebuildEvidence` rather than writing a second re-verification. The seams (`verifyClaims`,
+`buildEvidence`, `readiness`, `buildDraft`) default to the production functions and are injectable,
+so a test can stand a changed verifier in for the real one; each seam moves only its own line.
+`npm run eval:planner:replay -- <capture.jsonl>` prints every changed row (a claim row shows the
+claim, its source, and old → new) and ends with:
 
 ```
 N claim verdicts changed of M
@@ -551,8 +593,13 @@ N readiness levels changed of R runs
 N draft notes changed of R runs
 ```
 
-Options: `--rederive-tasks` re-runs `extractRepairTasks` on the recorded brief and reports a
-divergence (the model saw the old task list, so replay keeps using the recorded one).
+The count of readiness levels covers both acknowledgment states; a score that moves without its
+level is printed as a row marked `[score only]` and not counted. A changed plan text is printed as
+a row above the four lines and is not a fifth count, since this section lists four.
+
+Not built in Phase 3: `--rederive-tasks`, which would re-run `extractRepairTasks` on the recorded
+brief and report a divergence (the model saw the old task list, so replay keeps using the
+recorded one). It is a small follow-up.
 Exit 1 only when a file could not be read in full. A changed verdict is information, not a
 failure. A **loop-level** replay (feeding recorded turns back through `runRepairPlannerAgent`)
 is a later, optional phase because it would require the agent's config/database imports.
@@ -778,7 +825,7 @@ changed lines; it is a planning aid, not a promise.
 | **1a. Isolate the pure tools (P-1)** *(merged, PR #175)* | Lazy default retriever in `repairTools.js`, plus regression tests for it (14.2). Nothing else. | `repairTools.js` (~3 lines) | no | no | **S** (~60 lines, mostly tests) |
 | **1b. Pin today's pre-model behavior** | One test file: the 8 canonical briefs and the natural-phrasing set through the real task extractor and safety classifier; readiness invariants I-2/I-3; `todo` rows for the measured gaps (14.2). No new module, no schema. | none | no | no | **S** (~250 lines, tests only) |
 | **2. Scenarios, synthetic harness, judge** | `plannerScenarios.js` (introduced here, because this is the first phase that reads it; **S1, S2, S8 only**), `plannerCaseRunner.js` (injected agent), scripted-model builder, invented mini-corpora, synthetic negative rows (8.1-8.4 "A"), pure `plannerJudge.js` (re-verify + 5.1 decision procedure + metrics) | none | no | no | **L** (~1,200 lines; re-scope after 1b) |
-| **3. Capture format and replay** | **P-2 first, as its own tiny PR** (export the instructions text, with a regression test); then `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, import-boundary test with `fetch` disabled | P-2 (1 line, separate PR) | no | no | **M-L** (~800 lines) |
+| **3. Capture format and replay** *(P-2: PR #190; capture and replay built as specified in section 10, reconciled with the recorder)* | **P-2 first, as its own tiny PR** (export the instructions text, with a regression test); then `plannerCapture.js` (header, recorders for `streamTurn`/`retrieve`, fail-closed parser), `plannerReplay.js`, `eval:planner:replay` CLI, committed **synthetic** capture fixture, import-boundary test with `fetch` disabled | P-2 (1 line, separate PR) | no | no | **M-L** (~800 lines) |
 | **4. Corpus survey and fact confirmation** | `surveyPlannerCorpus.js` (read-only): per-fact search, chunk-length distribution vs 1,500, extraction-status and duplicate-group tags, timing-belt precondition, keyword golden-query probes. **Then** human confirmation of each fact against rendered PDF pages; promote facts into `plannerScenarios.js` | none | no | **yes** | **M code + the longest human step** (about 5-8 essential facts per scenario, ~40-60 total; stage it) |
 | **5. Paid capture tool and report** | `capturePlanner.js` (dry-run default, `--yes`, `--max-runs`, `--max-provider-requests`, snapshot; token limits and usage tee only if built, see 12.4), `reportPlannerBaseline.js`, `docs/evals/planner-baseline-log.md` template, docs updates (`quality-testing.md`, `repair-planner.md`, `AGENTS.md`, `CLAUDE.md`) | none | no (stubbed-model end-to-end test only) | no | **L** (~1,000 lines; `--compare` deferred, 14.1) |
 | **6. Baseline run** | Paid sessions, each separately approved (12.4): **6-pilot** S1 x 1 repeat; **6a** S1, S2, S8 x 3 repeats (~$1.6 estimated); **6b** S3-S7 once their facts are confirmed. Report generation, spot-check, committed aggregate log entry. | none | **yes, per-session approval; estimates only (12.1)** | yes | **S** (a session, not a PR of code) |
@@ -894,7 +941,7 @@ that passes it.
 | 1a | Importing `repairTools.js` creates no database file (test shown failing first); the lazy default retriever still resolves and runs against an empty temporary database; `repairPlanner.test.js` passes unchanged; `git diff` shows only the import and the default-retriever lines changed in production code. |
 | 1b | Canonical-brief pins match Appendix A probe A3; the five natural-phrasing briefs and the F4 rows are `todo` rows each naming a finding id and none passes today; invariants I-2/I-3 hold across all briefs x evidence statuses x acknowledgment states; the file runs with no key, network, or real database; no production file changed; A1 and A2 are not pinned. |
 | 2 | `plannerScenarios.js` holds S1, S2, S8 only, with `confirmed` set only on the facts listed in 6.2; the scoring gate is tested (an unconfirmed fact yields `unscored`, never a pass or a failure). A synthetic fixture exists that produces **each** of L0, S, R, V(false rejection), V(false acceptance), G(omission), G(query), G(no_search), G(run_failure), I as the single classification; a hand-built record proves the 5.1 sum reconciles (I-7); NEG-ME-2..5, NEG-WE-1..3, NEG-IP-1..4 and NEG-X-1..5 run through the real agent loop with a scripted model; `todo` rows flip the suite red the moment they start passing (same as `evidenceOracle.test.js`). |
-| 3 | P-2 shipped first as its own tiny PR, with a regression test that the instructions string the agent passes to `streamTurn` equals the exported one and that its hash is stable; the agent's behavior is otherwise unchanged. A committed synthetic capture round-trips; replay of it reports "0 verdicts changed"; an injected stricter/looser verifier makes replay print exactly the changed verdicts; a malformed line is reported with its number and exits 1; the replay test runs with `fetch` disabled and `OPENAI_API_KEY` unset and imports neither `config.js` nor `database.js`. |
+| 3 | P-2 shipped first as its own tiny PR, with a regression test that the instructions string the agent passes to `streamTurn` equals the exported one and that its hash is stable; the agent's behavior is otherwise unchanged. A committed synthetic capture round-trips; replay of it reports "0 verdicts changed"; an injected stricter/looser verifier makes replay print exactly the changed verdicts; a malformed line is reported with its number and exits 1; the replay test runs with `fetch` disabled and `OPENAI_API_KEY` unset and imports neither `config.js` nor `database.js`. *(As built, the closing line is spec 10.1's `0 claim verdicts changed of M`, so the "0 verdicts changed" above is read as that line; it is followed by the three status, readiness, and draft lines.)* |
 | 4 | Every scenario has `corpusSupport` for every fact with a page reference; each promoted fact was checked on the rendered PDF; the chunk-length report states how many chunks exceed 1,500 characters; S8's precondition passes; you have signed off the essential-fact list per scenario. |
 | 5 | `--dry-run` is the default and calls nothing (tested); a real run without `--yes` or without a key refuses; `--max-runs` defaults to 1; with a stubbed model, the wrapper makes **no further `streamTurn` or `retrieve` call** once `--max-provider-requests` is reached, and records the run as Layer I (tested); if the tool has token limits, a scripted usage figure above the limit stops the next request, and unreadable usage stops the tool after that run (tested); the dry-run output prints the estimate labelled as an estimate and lists limit 6 (provider-side budget) as unverified; an end-to-end test with a stubbed model through the real `runRepairPlannerAgent` writes a capture that replays with 0 changes; the report generator produces Tables 0-3, the critical-finding line, and the **"verified/ready plans lacking essential confirmed facts" block** from a synthetic capture (tested with a fixture where a `verified`/`ready` plan omits a confirmed essential fact, one that covers all of them, and one in a scenario with none confirmed; counts A+D+... reconcile to N), and refuses to print if I-7 fails; mandatory limits 1 and 3 are enforced and tested whether or not a token tee exists. |
 | 6 | The pilot ran as one S1 run under its own approval, and its observed requests and tokens are recorded before any further approval; the 6a runs (S1, S2, S8 x 3) are captured (or the shortfall explained as Layer I); every *confirmed* fact attributed exactly once and every other fact reported `unscored`; invariants pass or each failure is explained; the committed log holds aggregates only; the spot-check sample is recorded; **no verifier, readiness, classifier, extractor, or prompt code changed in the baseline PR**. |
@@ -927,7 +974,7 @@ that passes it.
 
 | D9 | Scope trims (14.1). | **Approved with conditions.** Deferred: `--compare`, loop-level replay, automated spot-check sampling, separate Tables 4-7. Token tee only if provider-side controls are verified first, with strict run- and request-count limits regardless. Q2-Q4 deferred as separate metrics, but wrong-engine/wrong-variant detection stays (P2, P3, negative tests). The first report must identify `verified`/`ready` plans lacking essential confirmed facts. Extractor/tool-schema hashes deferred if every capture keeps the exact revision and relevant configuration. | 14.1 conditions column; required block in section 11; `config` snapshot in section 10. |
 | D10 | Spending controls. | Dedicated OpenAI project and key where practical; proposed **$10 monthly project limit with hard-limit enforcement**. **Not yet confirmed or configured. No paid calls authorized.** | Preconditions list in 12.4; 12.3 limit 6. |
-| Phase 1a | Begin P-1. | **Approved to begin** as an isolated PR; no merge, no Phase 1b, no later phase without separate review. | Merged as PR #175. Phase 1b merged as PR #176. Phase 2 was split in two: 2a (scenario data, injected recorder, scripted model, invented corpora) merged as PR #177; 2b (the judge) follows the decisions in 16.1. |
+| Phase 1a | Begin P-1. | **Approved to begin** as an isolated PR; no merge, no Phase 1b, no later phase without separate review. | Merged as PR #175. Phase 1b merged as PR #176. Phase 2 was split in two: 2a (scenario data, injected recorder, scripted model, invented corpora) merged as PR #177; 2b (the judge) follows the decisions in 16.1. Phase 3 followed in two PRs as 14 requires: P-2 (PR #190, one exported constant), then the capture format, `eval:planner:replay`, and a committed synthetic capture. Still no paid call. |
 
 **Still open:**
 

@@ -81,7 +81,8 @@ test("the instruction text is the one this work was built against", () => {
     sha256(agentModule.AGENT_INSTRUCTIONS),
     PINNED_INSTRUCTIONS_SHA256,
     "The planner prompt changed. Prompt edits are outside the eval work: if this one is intended, " +
-      "update PINNED_INSTRUCTIONS_SHA256 here (and in plannerCapture.test.js) and say so in the PR."
+      "update PINNED_INSTRUCTIONS_SHA256 here, regenerate the planner capture fixture " +
+      "(REGENERATE_PLANNER_FIXTURE=1, see plannerCaptureFixture.test.js), and say so in the PR."
   );
 });
 
