@@ -4870,3 +4870,21 @@ by invented tests of prose claims. `eval:replay` on the synthetic capture: 0 of 
 Still accepted: a stated unit from the wrong column (`37 ft-lbf` under N·m — a todo row), a header in
 another sentence, a lone unbracketed header word. The probe outputs quote real manual text and are
 archived under `PrivateArchives`, not here.
+
+### Follow-up: a quote cut below its header (Ask)
+
+An independent review of the change above found that Ask read the header shape in the QUOTE only,
+while the planner reads the source. The model picks its own quote, so "Oil drain plug 37" cut from
+"Torque (N·m): oil drain plug 37, filter cap 25" still verified "the oil drain plug torque is 37".
+`chunkApartFigures` now also reads the figure's sentence in the cited chunk, placing the quote as
+`quoteAppearsInChunk` does (spacing and case ignored, token boundaries kept); a figure counts as
+printed with a unit only when every placement prints one for it. Because of the F1 note above (a
+header unit taken from outside the quote must not verify anything), the chunk can only ADD
+rejections: a figure the quote alone does not support stays unsupported even when the claim states
+the chunk's header unit. Invented tests cover the cut header, the cut next cell, spacing/case
+differences, sentence scope, counts, the token-boundary placement, and the one-way rule, plus two
+rules the review's mutation run found untested (the short-bracket skip before a number, and "37
+brass" not being a plural count); 10 of 10 mutations of the new rules are caught.
+**Not measured on the corpus yet**: this widens the Ask rejection scope from the quote's sentence
+to the chunk's, and the existing probes quote whole sentences, which read the same either way
+(only a quote shorter than its sentence changes). A measurement needs cut-quote probes and the owner's approval.

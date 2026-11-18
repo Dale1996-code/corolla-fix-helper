@@ -1286,6 +1286,80 @@ export function unitApartFigures(text) {
   return figures;
 }
 
+/** collapseForMatch, keeping for each output character its index in the input. */
+function collapseWithIndex(text) {
+  const source = String(text || "")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"');
+  let collapsed = "";
+  const rawIndex = [];
+
+  for (const match of source.matchAll(/\s+|\S+/g)) {
+    if (/^\s/.test(match[0])) {
+      collapsed += " ";
+      rawIndex.push(match.index);
+    } else {
+      collapsed += match[0];
+      for (let offset = 0; offset < match[0].length; offset += 1) rawIndex.push(match.index + offset);
+    }
+  }
+
+  const lead = collapsed.length - collapsed.trimStart().length;
+  const kept = collapsed.trim().length;
+
+  return { text: collapsed.slice(lead, lead + kept), rawIndex: rawIndex.slice(lead, lead + kept) };
+}
+
+/**
+ * unitApartFigures read in the cited CHUNK, for a quote cut from it. The model
+ * picks its own quote, so "Oil drain plug 37" can be cut from "Torque (N·m):
+ * oil drain plug 37, filter cap 25": the quote alone prints no unit, but the
+ * figure's sentence in the chunk does. Each figure is returned in the QUOTE's
+ * positions. The quote is placed in the chunk as quoteAppearsInChunk places it
+ * (whitespace- and case-insensitive, on token boundaries); a figure counts only
+ * when every placement prints a unit for it -- one placement without one is
+ * enough to excuse it, as in the planner's placement check. A quote whose
+ * length changes when lowercased ("İ") is not placed, and only the quote is
+ * read for it, as before.
+ *
+ * @returns {Array<{ start: number, end: number, value: number, unitTexts: string[] }>}
+ */
+function chunkApartFigures(quoteText, chunkText) {
+  const quote = collapseWithIndex(quoteText);
+  const needle = quote.text.toLowerCase();
+  const shown = collapseForMatch(chunkText);
+  const haystack = shown.toLowerCase();
+
+  if (!needle || needle.length !== quote.text.length) {
+    return [];
+  }
+
+  // Units are read with their case ("V" is volts); see claimPlacementProblem.
+  const cased = shown.length === haystack.length ? shown : haystack;
+  const figures = unitApartFigures(cased);
+  /** @type {Array<{ start: number, end: number, value: number, unitTexts: string[] }> | null} */
+  let common = null;
+
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (!startsOnBoundary(haystack, at, needle) || !endsOnBoundary(haystack, at + needle.length, needle)) {
+      continue;
+    }
+
+    const inside = figures
+      .filter((figure) => figure.start >= at && figure.end <= at + needle.length)
+      .map((figure) => ({
+        start: quote.rawIndex[figure.start - at],
+        end: quote.rawIndex[figure.end - at - 1] + 1,
+        value: figure.value,
+        unitTexts: figure.unitSpans.map((unit) => cased.slice(unit.start, unit.end)),
+      }));
+
+    common = common === null ? inside : common.filter((figure) => inside.some((other) => other.start === figure.start));
+  }
+
+  return common || [];
+}
+
 // Words too common to show that two printings of a number are the same thing.
 const NEIGHBOR_GLUE_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on",
@@ -1375,14 +1449,27 @@ function bareUnitText(text) {
  * unsupported number is printed with a unit, `detail` is "unit_missing"; it is
  * set only on a failure.
  *
+ * `chunkText`, when given, is the cited chunk the quote was cut from: a header
+ * or unit cell it prints in the figure's sentence, outside the quote, counts as
+ * that figure's unit too (chunkApartFigures).
+ *
+ * @param {string} claimText
+ * @param {string} evidenceText
+ * @param {string} [chunkText]
  * @returns {{ grounded: boolean, unsupported: Array<{ raw: string, index: number }>, detail?: string }}
  */
-export function checkUnrecognizedFigures(claimText, evidenceText) {
+export function checkUnrecognizedFigures(claimText, evidenceText, chunkText) {
   const claim = String(claimText || "");
   const spans = specificationSpans(claim);
   const evidence = String(evidenceText || "");
   const evidenceSpans = specNumberSpans(evidence);
-  const apart = unitApartFigures(evidence);
+  const apart = [
+    ...unitApartFigures(evidence).map((figure) => ({
+      ...figure,
+      unitTexts: figure.unitSpans.map((unit) => evidence.slice(unit.start, unit.end)),
+    })),
+    ...(chunkText ? chunkApartFigures(evidence, chunkText) : []),
+  ];
   const withUnit = (index) =>
     evidenceSpans.some(({ start, end }) => index >= start && index < end) ||
     apart.some(({ start, end }) => index >= start && index < end);
@@ -1411,8 +1498,8 @@ export function checkUnrecognizedFigures(claimText, evidenceText) {
     return apart.some(
       (figure) =>
         figure.value === number.value &&
-        figure.unitSpans.some((unit) =>
-          ownUnits.some((ownUnit) => sameUnit(ownUnit, bareUnitText(evidence.slice(unit.start, unit.end))))
+        figure.unitTexts.some((unitText) =>
+          ownUnits.some((ownUnit) => sameUnit(ownUnit, bareUnitText(unitText)))
         )
     );
   };
@@ -1422,10 +1509,20 @@ export function checkUnrecognizedFigures(claimText, evidenceText) {
         printing.value === number.value &&
         (!printedWithUnit.includes(number.value) || sameNeighbor(claim, number, evidence, printing))
     );
+  // Reading the chunk may only ADD rejections: a figure the quote alone does
+  // not support stays unsupported, even when the chunk prints a header unit the
+  // claim states. A header unit taken from outside the quote never verifies
+  // anything (the iteration log's F1 note: a quote ending before a row's own
+  // unit must not borrow another column's header).
+  const quoteOnly = chunkText ? checkUnrecognizedFigures(claim, evidence) : null;
   const unread = signedNumbers(claim)
     .filter(({ index }) => !spans.some(([start, end]) => index >= start && index < end))
     .filter(({ index }) => !isIdentifier(claim, index))
-    .filter((number) => !excusedByBarePrinting(number) && !statesApartUnit(number));
+    .filter(
+      (number) =>
+        (!excusedByBarePrinting(number) && !statesApartUnit(number)) ||
+        Boolean(quoteOnly?.unsupported.some(({ index }) => index === number.index))
+    );
   const unsupported = unread.map(({ raw, index }) => ({ raw, index }));
 
   if (!unsupported.length) {
@@ -1445,8 +1542,8 @@ export function checkUnrecognizedFigures(claimText, evidenceText) {
  * quote not in the source), so no figure is spared by it. Without this, a claim
  * rejected for its quote reprinted "999999 drain cycles" in full.
  */
-function gapClaimText(claim, trustedQuote) {
-  return redactFigures(claim, checkUnrecognizedFigures(claim, trustedQuote).unsupported);
+function gapClaimText(claim, trustedQuote, chunkText) {
+  return redactFigures(claim, checkUnrecognizedFigures(claim, trustedQuote, chunkText).unsupported);
 }
 
 /** The claim as a gap may show it: no specification, and none of these figures. */
@@ -3055,7 +3152,8 @@ export function verifyEvidence(validated, chunks) {
       gaps.push(
         `Unverified (the quote is too short to support it): ${gapClaimText(
           claim.claim,
-          claim.evidenceQuote
+          claim.evidenceQuote,
+          mapped.chunk.chunkText
         )}`
       );
       continue;
@@ -3075,7 +3173,8 @@ export function verifyEvidence(validated, chunks) {
       gaps.push(
         `Unverified specification (not found in the cited text): ${gapClaimText(
           claim.claim,
-          claim.evidenceQuote
+          claim.evidenceQuote,
+          mapped.chunk.chunkText
         )}`
       );
       continue;
@@ -3083,7 +3182,7 @@ export function verifyEvidence(validated, chunks) {
 
     // A number no specification pattern could read is checked the only way
     // left: it must be printed in the quote. An unknown unit fails closed.
-    const figures = checkUnrecognizedFigures(claim.claim, claim.evidenceQuote);
+    const figures = checkUnrecognizedFigures(claim.claim, claim.evidenceQuote, mapped.chunk.chunkText);
 
     if (!figures.grounded) {
       rejected.push({
@@ -3100,7 +3199,8 @@ export function verifyEvidence(validated, chunks) {
             : "Unverified (a figure in it is not printed in the cited text)"
         }: ${gapClaimText(
           claim.claim,
-          claim.evidenceQuote
+          claim.evidenceQuote,
+          mapped.chunk.chunkText
         )}`
       );
       continue;
@@ -3118,7 +3218,8 @@ export function verifyEvidence(validated, chunks) {
       gaps.push(
         `Unverified (the cited text does not name the same part): ${gapClaimText(
           claim.claim,
-          claim.evidenceQuote
+          claim.evidenceQuote,
+          mapped.chunk.chunkText
         )}`
       );
       continue;
@@ -3144,7 +3245,8 @@ export function verifyEvidence(validated, chunks) {
       gaps.push(
         `Unverified (the cited table prints that figure in another row or condition): ${gapClaimText(
           claim.claim,
-          claim.evidenceQuote
+          claim.evidenceQuote,
+          mapped.chunk.chunkText
         )}`
       );
       continue;

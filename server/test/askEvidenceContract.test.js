@@ -2820,6 +2820,108 @@ test("only the figure's own sentence header makes a bare table number a united f
   assert.equal(figureDetailOf("The cover bolt torque is 37.", twoRows), "unit_missing");
 });
 
+// The model picks its own quote, so it can start below the header that holds
+// the unit, or stop before the next cell that holds it. The cited chunk still
+// prints that unit in the figure's sentence, so the claim must keep it.
+/** The rejection detail for a claim whose quote is cut from a longer chunk. */
+function cutQuoteDetailOf(claim, quote, chunkText) {
+  const result = verifyEvidence(
+    payload({ documentSupported: [{ claim, sourceId: "S1", evidenceQuote: quote }] }),
+    [chunk({ chunkText })]
+  );
+
+  return result.documentSupported.length ? null : result;
+}
+
+test("a quote cut below its header or before its unit cell still needs the unit", () => {
+  for (const [claim, quote, chunkText] of [
+    ["The oil drain plug torque is 37.", "Oil drain plug 37", "Torque (N·m): oil drain plug 37, filter cap 25"],
+    ["The filter cap torque is 25.", "filter cap 25", "Torque (N·m): oil drain plug 37, filter cap 25"],
+    ["The oil drain plug torque is 37.", "Oil drain plug | 37", "Part | Torque | Oil drain plug | 37 | N·m"],
+    ["The terminal voltage is 11 to 14.", "11 to 14", "Terminal voltage (V): 11 to 14"],
+    // Spacing and case differ between the quote and the chunk, as in extracted text.
+    ["The oil drain plug torque is 37.", "oil drain plug 37", "TORQUE (N·m):  Oil   drain plug\n37"],
+  ]) {
+    const result = cutQuoteDetailOf(claim, quote, chunkText);
+
+    assert.ok(result, claim);
+    assert.equal(result.rejected[0].reason, "unrecognized_figure", claim);
+    assert.equal(result.rejected[0].detail, "unit_missing", claim);
+    // The gap still hides the figure it could not verify.
+    assert.match(result.gaps[0], /\[unverified value\]/, claim);
+  }
+});
+
+test("a cut quote is read only within the figure's own sentence of the chunk", () => {
+  // The header belongs to another sentence of the chunk.
+  assert.equal(
+    cutQuoteDetailOf(
+      "The cover bolt quantity is 4.",
+      "Quantity: cover bolts 4",
+      "Torque (N·m): cover bolt 37. Quantity: cover bolts 4"
+    ),
+    null
+  );
+  // A count beside a header in the chunk is still a count.
+  assert.equal(
+    cutQuoteDetailOf("Remove the 4 cover bolts.", "Remove the 4 cover bolts", "Remove the 4 cover bolts, then torque (N·m): cover bolt 37"),
+    null
+  );
+  // One placement of the quote with no unit is enough, as in the planner.
+  assert.equal(
+    cutQuoteDetailOf("The drain plug batch is 37.", "drain plug 37", "Batch: drain plug 37 marks. Torque (N·m): drain plug 37"),
+    null
+  );
+  // ...but a "placement" inside a longer number ("37" in "375") is no placement.
+  assert.equal(
+    cutQuoteDetailOf("The drain plug torque is 37.", "drain plug 37", "Batch: drain plug 375 marks. Torque (N·m): drain plug 37")
+      ?.rejected[0].detail,
+    "unit_missing"
+  );
+});
+
+test("checkUnrecognizedFigures reads the cited chunk around a cut quote", () => {
+  const chunkText = "Torque (N·m): oil drain plug 37, filter cap 25";
+
+  // Without the chunk only the quote is read, as before.
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "oil drain plug 37"), {
+    grounded: true,
+    unsupported: [],
+  });
+  assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "oil drain plug 37", chunkText), {
+    grounded: false,
+    unsupported: [{ raw: "37", index: 13 }],
+    detail: "unit_missing",
+  });
+  // A claim keeping the chunk's header unit over the same number states it.
+  assert.equal(
+    checkUnrecognizedFigures("Oil drain plug (N·m): 37", "oil drain plug 37", chunkText).grounded,
+    true
+  );
+  // The chunk only adds rejections: a header unit printed outside the quote
+  // never makes a figure the quote alone rejects verify.
+  const quote = "cover 37. Torque: bolt 37 N·m";
+  assert.equal(checkUnrecognizedFigures("Bolt (ft-lbf): 37", quote).grounded, false);
+  assert.equal(
+    checkUnrecognizedFigures("Bolt (ft-lbf): 37", quote, "Torque (ft-lbf): cover 37. Torque: bolt 37 N·m").grounded,
+    false
+  );
+});
+
+// Two rules found untested by mutation (2026-11-17 review). Each makes the
+// check stricter or keeps a real coincidence from excusing a dropped unit.
+test("a short bracket before a number is skipped when matching its neighbor word", () => {
+  // "fuse (15 A) 1" and "fuse 1" are the same fuse 1.
+  assert.equal(figureDetailOf("Check fuse 1.", "Check fuse (15 A) 1 first. Fuse gap: 1 mm"), null);
+});
+
+test("a word ending in ss after a number is not a plural count", () => {
+  // "37 brass" names no count, so the 37 stays under its header unit.
+  assert.equal(figureDetailOf("The banjo bolt torque is 37.", "Torque (N·m): banjo bolt 37 brass washer side"), "unit_missing");
+  // A real plural is still a count.
+  assert.equal(figureDetailOf("Fit 37 washers.", "Torque (N·m): fit 37 washers on the banjo bolt"), null);
+});
+
 test("checkUnrecognizedFigures reads header and next-cell units as the figure's unit", () => {
   assert.deepEqual(checkUnrecognizedFigures("Torque it to 37.", "Torque (N·m): bolt 37"), {
     grounded: false,
