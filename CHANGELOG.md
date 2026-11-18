@@ -1,5 +1,74 @@
 # Changelog
 
+## Week of 2026-11-16
+
+### Highlights
+
+- A figure must keep a unit the manual prints apart from it. A number whose unit sits once in a table header (`Torque (N·m): bolt 37`) or in the next cell (`Bolt | 37 | N·m`) can no longer be restated without that unit: Ask rejects it as `unit_missing`, and the planner rejects a claim covering such a figure but none of its units as `unit_not_stated`. A bare printing of the same number elsewhere ("terminal 1" beside "1 V") no longer excuses a unitless claim ([PR #187](https://github.com/Dale1996-code/corolla-fix-helper/pull/187)).
+- Planner `todo` rows now guard the unit-apart cases, and a ± tolerance cut is pinned ([PR #186](https://github.com/Dale1996-code/corolla-fix-helper/pull/186)).
+
+### Key PR Links
+
+- [PR #187: fix(evidence): a figure must keep a unit printed in its header or next cell](https://github.com/Dale1996-code/corolla-fix-helper/pull/187)
+- [PR #186: test(planner): guard the unit-apart todo rows and pin a ± tolerance cut](https://github.com/Dale1996-code/corolla-fix-helper/pull/186)
+
+## Week of 2026-11-09
+
+### Highlights
+
+- The Repair Planner evaluation suite (N9) has its free half: scenarios, a recorder at the agent's seams, a scripted model, and invented corpora ([PR #177](https://github.com/Dale1996-code/corolla-fix-helper/pull/177)), then a judge that names which layer failed for each fact, an outcome ledger, and negative tests ([PR #178](https://github.com/Dale1996-code/corolla-fix-helper/pull/178)). Nothing in it makes a paid call or changes planner behavior.
+- `npm run backup` writes an archive to a folder you choose, test-restores it, and records it, and Settings shows a **Last backup** panel that reads `unknown` rather than "safe" when it cannot confirm ([PR #179](https://github.com/Dale1996-code/corolla-fix-helper/pull/179)). The Google Cloud guide now sets `NETWORK_MODE=1` with a loopback-only port mapping and replaces the public test with an SSH tunnel or `tailscale serve` ([PR #180](https://github.com/Dale1996-code/corolla-fix-helper/pull/180)).
+- N5 P2: migration `008_document_chunk_applicability_scope` stores each chunk's applicability scope, written with the chunk rebuild, and `npm run backfill:applicability` fills the existing library offline (a dry run by default). On a copy of the library 20,447 of 20,447 chunks were tagged and every embedding was unchanged. Nothing reads the scope yet ([PR #182](https://github.com/Dale1996-code/corolla-fix-helper/pull/182)).
+- N8 slice 1: `npm run diagnose:document-health` is a read-only report of documents needing attention (missing PDF, zero chunks, failed extraction, OCR needed or used, chunks missing the current embedding version) ([PR #181](https://github.com/Dale1996-code/corolla-fix-helper/pull/181)).
+- Units in the evidence checks: the planner rejects a claim that stops before its figure's unit (`unit_cut`, "torque to 37" from "37 N·m") ([PR #183](https://github.com/Dale1996-code/corolla-fix-helper/pull/183)), reading units Ask does not know and pinning range cuts ([PR #184](https://github.com/Dale1996-code/corolla-fix-helper/pull/184)); Ask rejects a figure stated without the unit its quote prints (`unit_missing`) ([PR #185](https://github.com/Dale1996-code/corolla-fix-helper/pull/185)).
+
+### Key PR Links
+
+- [PR #185: fix(ask): reject a figure stated without the unit its quote prints (unit_missing)](https://github.com/Dale1996-code/corolla-fix-helper/pull/185)
+- [PR #184: fix(planner): unit_cut reads units Ask does not know, and pins range cuts](https://github.com/Dale1996-code/corolla-fix-helper/pull/184)
+- [PR #183: fix(planner): reject a claim that cuts a figure off its unit (unit_cut)](https://github.com/Dale1996-code/corolla-fix-helper/pull/183)
+- [PR #182: N5 P2: persist each chunk's applicability scope (migration 008 + backfill)](https://github.com/Dale1996-code/corolla-fix-helper/pull/182)
+- [PR #181: feat(n8): read-only diagnose:document-health report (slice 1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/181)
+- [PR #180: docs(gcp): make the Docker command reachable and keep the app private](https://github.com/Dale1996-code/corolla-fix-helper/pull/180)
+- [PR #179: feat(backup): npm run backup and a Last backup panel in Settings](https://github.com/Dale1996-code/corolla-fix-helper/pull/179)
+- [PR #178: test(planner): eval judge, ledgers, and tier-A negatives (eval Phase 2b)](https://github.com/Dale1996-code/corolla-fix-helper/pull/178)
+- [PR #177: test(planner): scenarios, injected runner and scripted model (eval Phase 2a)](https://github.com/Dale1996-code/corolla-fix-helper/pull/177)
+
+## Week of 2026-11-02
+
+### Highlights
+
+- A specification for the Repair Planner evaluation system ([PR #174](https://github.com/Dale1996-code/corolla-fix-helper/pull/174)) and its first two phases: importing the planner's pure tools no longer opens a database, because the default retriever now loads lazily ([PR #175](https://github.com/Dale1996-code/corolla-fix-helper/pull/175)), and tests pin everything the planner does before the model runs, with `todo` rows for the measured gaps ([PR #176](https://github.com/Dale1996-code/corolla-fix-helper/pull/176)).
+- The backup and restore guide, and the restore text on the Settings page, now match the code: a relative archive path is looked up under `server/`, the safety copy is made at the swap step, and a rollback can itself fail, in which case the CLI prints recovery steps ([PR #171](https://github.com/Dale1996-code/corolla-fix-helper/pull/171), [PR #172](https://github.com/Dale1996-code/corolla-fix-helper/pull/172)).
+- Four load-sensitive client page tests got their own timeout after a starved CI runner tripped Vitest's 5 s default on tests that pass in 0.1–0.4 s locally ([PR #173](https://github.com/Dale1996-code/corolla-fix-helper/pull/173)).
+
+### Key PR Links
+
+- [PR #176: test(planner): pin pre-model behavior (eval Phase 1b)](https://github.com/Dale1996-code/corolla-fix-helper/pull/176)
+- [PR #175: refactor(planner): load the default retriever lazily (eval Phase 1a)](https://github.com/Dale1996-code/corolla-fix-helper/pull/175)
+- [PR #174: docs: propose a Repair Planner evaluation system (draft spec for review)](https://github.com/Dale1996-code/corolla-fix-helper/pull/174)
+- [PR #173: test(client): give four load-sensitive page tests their own timeout](https://github.com/Dale1996-code/corolla-fix-helper/pull/173)
+- [PR #172: fix(settings): make restore guidance match the restore CLI](https://github.com/Dale1996-code/corolla-fix-helper/pull/172)
+- [PR #171: docs: make backup-restore guide match the backup and restore code](https://github.com/Dale1996-code/corolla-fix-helper/pull/171)
+
+## Week of 2026-10-26
+
+### Highlights
+
+- The Ask verifier reads tables the way a person does. A quote printing several table rows is checked row by row (`row_mismatch`), and the `lmp.` spelling of the Imperial unit is read, never as US (S1 and F3; measured offline on a generated corpus, wrong-row false passes fell from 12,098 to 165) ([PR #167](https://github.com/Dale1996-code/corolla-fix-helper/pull/167)). The answer prompt asks for row-scoped claims, and a condition the claim states must be printed beside its figure ([PR #169](https://github.com/Dale1996-code/corolla-fix-helper/pull/169)). In a table that prints its column header once, a figure is tied to its column ([PR #170](https://github.com/Dale1996-code/corolla-fix-helper/pull/170)). A viscosity grade is matched by equality, never as a substring ([PR #166](https://github.com/Dale1996-code/corolla-fix-helper/pull/166)). The two live answer evals on the new prompt held the verified gate at 14/14 (overall 39/47, then 37/47).
+- N7's record pages are done: Procedures and Notes now page, filter, and sort on the server, every link picker searches 25 at a time instead of listing the library, Notes gained `GET /api/notes/:id`, and a payload-budget test keeps a page the same size at 1,500 records as at 100 ([PR #167](https://github.com/Dale1996-code/corolla-fix-helper/pull/167)).
+- Two fixes: deep links now work when the app is installed under a dot-folder, where the single-page-app fallback used to return 404 ([PR #167](https://github.com/Dale1996-code/corolla-fix-helper/pull/167)); and the keyword box and a filter changed at the same moment no longer undo each other's URL write (issue #164, [PR #165](https://github.com/Dale1996-code/corolla-fix-helper/pull/165)).
+- `npm run verify` runs CI's steps locally in CI's order (everything except the backup drill), and `CLAUDE.md` documents the verification workflow ([PR #168](https://github.com/Dale1996-code/corolla-fix-helper/pull/168)).
+
+### Key PR Links
+
+- [PR #170: feat(ask): tie a figure to the column its cell sits under (F4)](https://github.com/Dale1996-code/corolla-fix-helper/pull/170)
+- [PR #169: feat(ask): row-scoped claims prompt and figure-scoped condition checks (F1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/169)
+- [PR #168: chore: add npm run verify and document the verification workflow](https://github.com/Dale1996-code/corolla-fix-helper/pull/168)
+- [PR #167: N7 server paging for Procedures and Notes, row-aware Ask verifier, SPA deep-link fix](https://github.com/Dale1996-code/corolla-fix-helper/pull/167)
+- [PR #166: fix(ask): verify a viscosity grade by equality, never as a substring](https://github.com/Dale1996-code/corolla-fix-helper/pull/166)
+- [PR #165: fix: keyword box and filter URL writes no longer overwrite each other (#164)](https://github.com/Dale1996-code/corolla-fix-helper/pull/165)
+
 ## Week of 2026-10-19
 
 ### Highlights
@@ -10,9 +79,15 @@
 - Started N5 (applicability): migration `006_vehicle_applicability_profile` and a **Variant details** section on Settings ([PR #156](https://github.com/Dale1996-code/corolla-fix-helper/pull/156)), then a deterministic tagger and `npm run diagnose:applicability` report that classify which engine a manual passage is scoped to. Nothing uses the tagger yet ([PR #157](https://github.com/Dale1996-code/corolla-fix-helper/pull/157)).
 - Data integrity (audit Stage 4-D2): a document's extraction and chunk rebuild save in one transaction, deleting a symptom or procedure unlinks its notes, an upload whose bytes are not a PDF is refused, and a web upload records its MD5 so a duplicate gets a 409, with migration `007_backfill_upload_file_md5` hashing older documents ([PR #158](https://github.com/Dale1996-code/corolla-fix-helper/pull/158)).
 - Answer capture and offline replay (audit Stage 1b): `npm run eval:capture` records the answer evals' model replies, and `npm run eval:replay` re-verifies a capture for free and lists every verdict that changed ([PR #159](https://github.com/Dale1996-code/corolla-fix-helper/pull/159)).
+- Documentation truth pass (audit Stage 7), in two parts: the roadmap, the model-written-text channels, the environment-variable docs, and this changelog ([PR #160](https://github.com/Dale1996-code/corolla-fix-helper/pull/160)); then the trust model ("what *verified* means"), what `not_found` means, the Ask and planner diagrams, and the shared rate limiter ([PR #161](https://github.com/Dale1996-code/corolla-fix-helper/pull/161)).
+- N7 began: the Documents and Symptoms pages page, filter, and sort on the server, and their link pickers search instead of listing every record ([PR #162](https://github.com/Dale1996-code/corolla-fix-helper/pull/162), [PR #163](https://github.com/Dale1996-code/corolla-fix-helper/pull/163)).
 
 ### Key PR Links
 
+- [PR #163: feat(n7): server-side paging, filtering, and sorting for the Symptoms page](https://github.com/Dale1996-code/corolla-fix-helper/pull/163)
+- [PR #162: feat(n7): server-side pagination, filtering, and sorting for the Documents page](https://github.com/Dale1996-code/corolla-fix-helper/pull/162)
+- [PR #161: docs: truth pass part 2 - trust model, not_found, diagrams, rate limiter (audit Stage 7)](https://github.com/Dale1996-code/corolla-fix-helper/pull/161)
+- [PR #160: docs: truth pass on roadmap, model-prose channels, env vars, changelog (audit Stage 7)](https://github.com/Dale1996-code/corolla-fix-helper/pull/160)
 - [PR #159: feat(evals): answer capture and offline replay (audit Stage 1b, 4B-11)](https://github.com/Dale1996-code/corolla-fix-helper/pull/159)
 - [PR #158: Audit Stage 4-D2: data integrity (1B-03, 1B-04, 1B-05, 2A-09) + migration 007](https://github.com/Dale1996-code/corolla-fix-helper/pull/158)
 - [PR #157: feat(n5): classification-only applicability tagger and report (N5 P1)](https://github.com/Dale1996-code/corolla-fix-helper/pull/157)

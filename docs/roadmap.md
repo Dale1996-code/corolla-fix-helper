@@ -4,7 +4,7 @@
 > Anything else that looks like a roadmap lives in [`docs/archive/`](archive/) and is history, not a plan.
 >
 > - **Covers:** August 2026 → August 2027
-> - **Last reviewed:** 23 October 2026
+> - **Last reviewed:** 17 November 2026, against `main` at `cf6acf6` (PR #187)
 > - **Supersedes:** [`docs/archive/roadmap-v1.md`](archive/roadmap-v1.md) and the strategy review in [`docs/archive/strategy-review-2026-08.pdf`](archive/strategy-review-2026-08.pdf)
 
 **Naming rule so this never gets confusing again:** the current roadmap is always this
@@ -48,7 +48,9 @@ state a plan imagined.
   Unparsed claim shapes and compound claims are outside even that, and the Repair Planner
   does not use this guard: it has its own, task-based check (see below).
 - Backups snapshot a live database correctly, restore validates and rolls back, and a drill
-  proves the round trip.
+  proves the round trip. `npm run backup` writes an archive to a folder you choose,
+  test-restores it, and records it for Settings → **Last backup**, which reads `unknown`
+  rather than "safe" when it cannot confirm (#179).
 - CI runs lint, typecheck, both test suites, the production build, and a smoke test.
 - The 2026-06-20 health report's findings are, with two exceptions noted below, shipped.
 - **The corpus is no longer silently incomplete.** 128 documents held zero chunks and were
@@ -69,6 +71,17 @@ state a plan imagined.
   the safety gates refuse the defeat requests the review reproduced, a document's text and
   chunks now save together, and a verifier change can be judged for free by replaying
   captured answers. See the [audit record](#the-2026-10-18-full-review) in section 4.
+- **Verification now reads table structure and units, not only numbers.** Between late October
+  and 17 November the Ask verifier learned to check a table the way a person reads it. A quote
+  printing two or more table rows is checked row by row (#167). A condition the claim states
+  must be printed beside its figure, and one printed beside the figure must be stated (#169).
+  In a table that prints its column header once, a figure is tied to its column (#170). A
+  viscosity grade is matched by equality, never as a substring (#166). And a figure must keep
+  its unit: a claim that drops a unit its quote prints is `unit_missing` (#185), including a
+  unit printed once in a header or the next cell (#187), with matching `unit_cut` and
+  `unit_not_stated` checks in the planner (#183, #184, #187). These make the verifier
+  stricter; they still do not prove that a verified claim follows from its quote (see **N4**).
+  The iteration log records what the larger ones newly rejected on the real library.
 
 **Genuinely weak, and the reason for the ordering in section 4:**
 
@@ -80,12 +93,16 @@ state a plan imagined.
   `applicability-engine-mount-build-variant` was demoted for varying at the product level.
   A September slice took it to 14 of 44 with the first verified table-derived value
   (`spark-plug-gap`). Stage 2 of the 2026-10-18 audit added two rejection probes as
-  templates, so it is 14 verified of 46. Almost every remaining idea in this roadmap is a
+  templates, so it was 14 verified of 46, and 47 cases by Experiment K (29 October). Almost every remaining idea in this roadmap is a
   change whose value can only be judged by that suite.
-- **The Repair Planner has no eval suite at all.** `eval:answers` covers Ask only. Five
+- **The Repair Planner's eval suite is half-built, and nothing in it has run live.** `eval:answers` covers Ask only. Five
   hand-reviewed live runs during Stage 5-E2 are the planner's only live check: all five came
   back `partial`, mainly because no run established its tools, and readiness never went
-  above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)).
+  above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)). Since then the free half
+  has landed (**N9**, PRs #175–#178): pins on everything that happens before the model runs,
+  scenarios, a recorder, a scripted model, a judge that names which layer failed, and negative
+  tests. What is missing is the part that touches reality: a capture format and replay, the
+  facts confirmed against rendered manual pages, and any live baseline.
 - **No page downloads a whole library any more, but nothing measures speed or import.**
   Documents, Symptoms, Procedures, Notes, and Ask AI's document card page on the server, and
   every link picker (including the Repair Checklists completion form's symptom choice)
@@ -125,7 +142,9 @@ state a plan imagined.
   printed in the quote, so "Step 3: remove the drain plug" is refused against a quote with
   no 3. But "50 N" passes against "490 N (50 kgf)": the number is printed, the unit is not
   compared. The bare-number table fallback, now limited to quotes carrying a header unit in
-  the claim's unit, still cannot tell which column of a flattened row a number came from.
+  the claim's unit, can tell which column a number came from only where the chunk prints the
+  header and one cell per column (F4, #170, with the limits listed under **N4**); elsewhere it
+  still cannot.
 - **The Repair Planner's claim check is lexical, and narrower than it reads.** Until Stage
   5-E2 of the 2026-10-18 audit (PR #152), a planner claim passed if its text appeared
   anywhere in its quote, so a fragment could drop the "Do not" before it or attach a number
@@ -135,7 +154,9 @@ state a plan imagined.
   `negation_dropped`; a cut through a range or a signed value is `range_cut`; and a
   `numeric_spec` or `safety_instruction` that is not a whole clause of its quote is
   `not_whole_clause`; and a claim of any kind that stops before its figure's unit ("torque
-  to 37" from "37 N·m") is `unit_cut` (November 2026, found by the planner eval). A claim carrying a figure must name a part, and a `numeric_spec` must
+  to 37" from "37 N·m") is `unit_cut` (November 2026, found by the planner eval); and a claim that covers a figure
+  whose unit the source prints apart from it (a table header or the next cell) yet states none
+  of those units is `unit_not_stated` (#187). A claim carrying a figure must name a part, and a `numeric_spec` must
   share a part word with its task, in the claim or its quote (`subject_missing`), so a bare
   "37 N·m" never counts. Tool and part matching against the owner's lists is whole-word, and
   a negated entry ("no torque wrench") counts as absent. What it still cannot see: a
@@ -180,7 +201,7 @@ reasoning is not lost:
 | Multi-vehicle moved from "delay, eventually high" to **not planned, with a trigger** | For a single-owner single-vehicle app it is not "eventually high" value; it becomes valuable the day a second vehicle exists and not before. |
 | A local LLM provider moved to **not planned, with a trigger** | The review itself rated it high effort, high maintenance, medium value, and separately recommends against offline AI as a headline feature. Those two positions are reconciled here. |
 | Diagnostic sessions **reduced in scope** | The smallest useful version is a searchable trouble-code field, not a session subsystem with freeze-frame values and PIDs. |
-| Four items **added** that the review missed | Applicability handling (**N5**), corpus re-processing (**N9**), retiring dormant flags (**N6**), and the odometer gap inside repair history (**N3**). |
+| Four items **added** that the review missed | Applicability handling (**N5**), corpus re-processing (**M3**), retiring dormant flags (**N6**), and the odometer gap inside repair history (**N3**). |
 | Two items **carried forward** from the V1 roadmap | The bulk chunk-rebuild path and incremental typecheck strictness were dropped between roadmap versions; both are still valid. |
 
 ## 4. The plan
@@ -199,10 +220,11 @@ this alone.
 | N2.5 | Enforce T4 safety-system defeat refusal | **Done** | Slight increase (one leaf module) |
 | N3 | Repair history and maintenance records | **Done** | Increase (two migrations, one page) |
 | N4 | Close the two named evidence gaps | High — in progress | Slight increase |
-| N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0, P1 done, P2 in review; classify and store only) | Slight increase |
+| N5 | Applicability: say which variant a spec belongs to | High — **in progress** (P0–P2 done; classify and store only) | Slight increase |
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | **Done**, except two unset budgets (response time, import throughput) | Slight increase |
-| N8 | Document-health report | High | Slight increase |
+| N8 | Document-health report | High — **in progress** (slice 1 done) | Slight increase |
+| N9 | Repair Planner evaluation suite | High — **in progress** (free half done; capture and replay next) | Slight increase (test and eval code only) |
 
 **N0 — Recover the zero-chunk corpus. Done, August 2026.**
 *Problem it solved:* 128 of 1,443 documents held zero `document_chunks`. A document with no
@@ -265,6 +287,17 @@ has a different, genuinely printed value one row away. `spark-plug-gap` is verif
 covered only by templates: two sections that disagree, OCR-noisy pages, and follow-up
 questions. See Experiment D in the
 [iteration log](evals/ask-rag-iteration-log.md).
+
+*October 2026 slice — diagnosing the template failures.* One paid `eval:capture` run was used
+to find out why seven template cases fail, instead of adding cases. It found a latent false
+pass: on the oil-change page a quote spanning two capacity rows verified the without-filter
+figure as the with-filter capacity, and the page's `lmp.` spelling of the Imperial unit was read
+by nothing. That became the row-aware check (#167), a prompt asking for row-scoped claims
+(#169), and the column-aware check (#170), recorded under **N4**. The verified gate held at
+14/14 in both live runs since (K and L); the overall score moved 35/46 (Experiment J), 39/47 (K, prompt
+v2), 37/47 (L, prompt v3 and the condition check). That overall number is a diagnostic
+reading, not a quality score: 33 of the 47 cases are unconfirmed templates, and the finish line
+above has not moved.
 
 **N2 — Repair the eval suite's own defects. Done, August 2026.**
 *Problem it solves:* the vision case `vision-refuses-unsupported-spec` fails every run
@@ -470,6 +503,24 @@ The probes, a gap leak the run found, and an engine-designation misreading its r
 are fixed in follow-up commits. A second live run on `f880c73` (Experiment J) passed 14/14
 verified, 35/46 overall, again with no answer changing status. See the
 [iteration log](evals/ask-rag-iteration-log.md).
+*Tables and units, October–November 2026 (PRs #166, #167, #169, #170, #183–#187):* the
+diagnosis under N1 showed that the numeric and subject checks each looked anywhere in the
+quote, so a quote spanning two table rows could verify one row's part with the other row's
+figure. Ask now checks a multi-row quote row by row (`row_mismatch`); requires a condition the
+claim states to be printed beside its figure, and a condition printed beside the figure to be
+stated; ties a figure to its column in a table that prints its header once; and matches a
+viscosity grade by equality, never as a substring. Separately, a figure must keep its unit: a
+claim stating a number whose unit the quote prints is `unit_missing`, including a unit printed
+once in a table header or the next cell (Ask, #185 and #187), and the planner rejects a claim
+cut off its unit (`unit_cut`, #183 and #184) or covering a figure whose unit sits apart
+(`unit_not_stated`, #187). The iteration log records what the larger ones newly rejected on the
+real library; for the November unit work, Ask rejected 21 of 52,056 sentences citing themselves,
+all scanned wiring-diagram text, and the planner 51 of 95,044 fragments per claim kind, 48 of
+them real dropped torque or size units. *What it still does not cover* (the full list is in
+[`docs/api.md`](api.md)): a header printed only above a table's first row is not read for the
+rows after it; a row printing a single value gets no column reading; a condition outside the
+verifier's vocabulary is not seen; and a stated unit taken from the wrong column (`37 ft-lbf`
+under an N·m column) is still accepted, which is a `todo` row in the oracle.
 *Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
 multi-specification claims, where one subject is derived per claim (described in the known
 limitations above).
@@ -488,7 +539,7 @@ names the condition it is scoped to; make that a property of the answer rather t
 thing the model may or may not mention.
 *Design:* [`docs/n5-applicability-design.md`](n5-applicability-design.md), seven phases,
 P0–P6, one PR each.
-*Status: in progress, classify and store only (November 2026).* Two phases are done and a third is in review:
+*Status: in progress, classify and store only (November 2026).* Three phases are done:
 
 - **P0 — Variant details. Done (PR #156).** Migration `006_vehicle_applicability_profile`
   adds five nullable columns to `vehicles` — engine code, build plant, transmission code,
@@ -503,12 +554,12 @@ P0–P6, one PR each.
   figures was judged to apply to the owner's 2ZR-FE, and none of 81 owner figures was judged
   to belong to another engine. Those are small denominators — a pass, not a proof. See the
   [iteration log](evals/ask-rag-iteration-log.md).
-- **P2 — Persist scope. Implemented, in review** (branch `claude/n5-p2-persist-scope`).
+- **P2 — Persist scope. Done (PR #182).**
   Migration `008_document_chunk_applicability_scope` adds two nullable columns to
   `document_chunks`; the chunk rebuild writes each chunk's starting scope with the same
   inserts, and `npm run backfill:applicability` fills the library already saved (offline,
   dry run by default, resumable). On a `VACUUM INTO` copy of the owner's library: 20,447 of
-  20,447 chunks tagged, every embedding byte-identical, zero API calls. **Still nothing reads
+  20,447 chunks tagged, every embedding byte-identical, zero API calls (applying it to the live library is a separate step: the command is a dry run by default, and the app should be stopped and a backup taken first). **Still nothing reads
   it.**
 
 *Remaining, per the design's section 7:* P3 checks the scope in the Ask verifier, reported in
@@ -580,12 +631,46 @@ needs attention.
 future extraction change. Include the already-measured overprinting artifact — 366 of
 19,636 chunks across 75 documents contain a three-times-repeated phrase — as a display-only
 warning on the affected quotes. No re-extraction, no re-embedding.
-*Progress:* slice 1 (November 2026) is the read-only terminal report
+*Progress:* slice 1 (November 2026, PR #181) is the read-only terminal report
 `npm run diagnose:document-health`. It lists documents whose stored PDF is missing, that
 hold zero chunks, whose extraction failed, that needed or used OCR, or that have chunks
 missing the current embedding version, as counts per problem plus JSON and CSV. Still to
 do: page-level low-text and table flags, the overprinting warning, and the maintenance view
 in the browser.
+
+**N9 — Repair Planner evaluation suite.**
+*Problem it solves:* the planner is the app's second AI feature, and unlike Ask it has no way
+to say whether a change made it better or worse. Its own status words cannot be that measure:
+one grounded claim can read as `verified`, readiness 100, `ready` for a plan whose procedure is
+mostly missing (measured offline, on invented text). The suite asks instead, for each fact a
+plan should contain, which layer failed: task derivation, the source, retrieval, the verifier,
+or the model leaving it out.
+*Design:* [`docs/planner-eval-spec.md`](planner-eval-spec.md). It is measure-only (owner
+decision D1 of that spec): it changes no verifier, prompt, readiness rule, classifier, or task extractor, and
+it sets no live pass/fail target. Phase 3 copies Ask's capture-and-replay pattern (audit Stage
+1b) without sharing its parser, so Ask's gate stays untouched. "Spec decision Dn" below means
+that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
+*Status: in progress, free half done (November 2026).*
+
+| Phase | What | State |
+| --- | --- | --- |
+| 1a (#175) | Importing the planner's pure tools no longer opens a database | Done |
+| 1b (#176) | Pins on everything before the model runs, and `todo` rows for the measured gaps | Done |
+| 2a (#177) | Scenarios, a recorder at the agent's seams, a scripted model, invented corpora | Done |
+| 2b (#178) | The judge, one outcome per fact, and negative tests | Done |
+| 3 | A capture format and `eval:planner:replay`, after exporting the instruction text (P-2) | Next; free |
+| 4 | A corpus survey, and each golden fact confirmed against rendered PDF pages | Needs the owner's machine and eyes |
+| 5 | The paid capture tool and baseline report | Built with no paid call |
+| 6 | The baseline run | Paid, each session approved separately; waits on spec decisions D10b and D11 (section 6) |
+
+*What it has already found,* each recorded as a measurement or a `todo` row: a claim cut off
+its unit passed under every claim kind (found by 2b and **fixed**, `unit_cut`, #183 and #184);
+the planner accepts a drive-belt claim for a "Replace the timing belt" task, because its
+task-subject check needs only one shared word, `belt` (found by 2a, **not fixed**); a symptom
+or context sentence after the repair ("They squeal when I brake.") became an extra, sometimes
+safety-critical, task in five of five briefs (spec decision D7: deferred, pinned as `todo`); and
+whether `verified` / `ready` should require a complete procedure is spec decision D6, deferred until
+a baseline exists.
 
 ### The 2026-10-18 full review
 
@@ -618,7 +703,7 @@ seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6
 - **7, documentation truth pass.** Done in two parts, both docs-only. Part 1 (#160)
   carried the roadmap, model-prose, environment-variable, and changelog findings (3B-05,
   3B-06, 3B-12, 3B-14), with matching fixes to `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`,
-  and [`docs/environment-variables.md`](environment-variables.md). Part 2 carries the
+  and [`docs/environment-variables.md`](environment-variables.md). Part 2 (#161) carries the
   trust model (3B-04: a "What *verified* means" section in `README.md` and
   [`docs/architecture.md`](architecture.md), including what the request gate does and
   does not stop), the network-access docs (3B-08, re-checked against `requestGuard.js` and
@@ -776,6 +861,17 @@ These block or reshape items above and cannot be answered from the repository.
    top "next work" item was hardening that path; it is deliberately not carried forward
    here, because local-first and loopback-by-default is now a settled decision rather than
    an interim state.
+7. **Spending controls for the planner baseline (spec decision D10b).** Create a dedicated OpenAI project
+   and key with a monthly limit (proposed: $10, hard stop), and confirm the setting is in
+   force. This blocks any paid planner session, including the pilot; nothing before Phase 6 of
+   **N9** needs it.
+8. **Essential steps for the first two planner scenarios (spec decision D11).** Confirm a handful of
+   essential procedure steps each for scenarios S1 and S2 against the rendered PDF pages.
+   Without them every S1 and S2 plan reads "not assessable", and the baseline cannot show its
+   core finding: `verified` or `ready` plans that are missing steps.
+9. **When to apply the N5 scope backfill to the live library.** The command is
+   `npm run backfill:applicability -- --apply`; stop the app and take a backup first. Nothing
+   reads the scope yet, so no feature waits on it, but **N5**'s P3 measurements do.
 
 ## 7. Standing rules this project already earned
 
