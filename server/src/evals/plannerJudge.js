@@ -373,14 +373,18 @@ export function judgeClaimSet(claims, scenario) {
  * Rebuild the evidence the agent built, with the CURRENT contract code, from
  * the payload and the chunks retrieved before it.
  *
+ * `buildEvidence` is injectable so the offline replay (plannerReplay.js) can
+ * stand a changed contract in for the real one; it defaults to the real one.
+ *
  * @param {any} payload
  * @param {{ tasks: any[], chunks: any[], request: any }} context
+ * @param {{ buildEvidence?: typeof buildRepairPlanEvidence }} [seams]
  */
-export function rebuildEvidence(payload, { tasks, chunks, request }) {
+export function rebuildEvidence(payload, { tasks, chunks, request }, { buildEvidence = buildRepairPlanEvidence } = {}) {
   const registry = createSourceRegistry();
   chunks.forEach((chunk) => registry.register(chunk));
 
-  return buildRepairPlanEvidence(payload, {
+  return buildEvidence(payload, {
     tasks,
     sources: registry.list(),
     availableTools: parseInventory(request?.availableTools ?? ""),
@@ -395,9 +399,13 @@ const before = (retrieval, finalizer) =>
  * Every finalizer re-verified against the sources the agent held when it ran.
  * The agent keeps the LAST valid finalizer of the turn that ends the run.
  *
+ * `verifyClaims` is injectable for the same reason as `buildEvidence` above; it
+ * defaults to the real verifier, so every existing caller is unchanged.
+ *
  * @param {any} record
+ * @param {{ verifyClaims?: typeof verifyClaims }} [seams]
  */
-export function reverifyRun(record) {
+export function reverifyRun(record, { verifyClaims: verify = verifyClaims } = {}) {
   const tasks = record.tasks ?? [];
   const finalizers = (record.finalizers ?? []).map((finalizer) => {
     const chunks = (record.retrievals ?? [])
@@ -411,7 +419,7 @@ export function reverifyRun(record) {
       sourceIds: new Set(sources.map((source) => source.id)),
     });
     const verified = validation.valid
-      ? verifyClaims(validation.claims, { sourcesById: new Map(sources.map((source) => [source.id, source])), tasks })
+      ? verify(validation.claims, { sourcesById: new Map(sources.map((source) => [source.id, source])), tasks })
       : { accepted: [], rejected: [] };
 
     return {
