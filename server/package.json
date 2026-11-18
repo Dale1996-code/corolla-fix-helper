@@ -25,6 +25,7 @@
     "eval:answers": "node src/scripts/evalAnswers.js",
     "eval:capture": "node src/scripts/captureAnswers.js",
     "eval:replay": "node src/scripts/replayCapture.js",
+    "eval:planner:replay": "node src/scripts/replayPlannerCapture.js",
     "eval:relevance-floor": "node src/scripts/evalRelevanceFloor.js",
     "build": "node -e \"console.log('No server build step needed yet.')\"",
     "test": "node --test"

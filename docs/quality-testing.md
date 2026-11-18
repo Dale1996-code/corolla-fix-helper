@@ -173,11 +173,35 @@ What a replay cannot do:
 - **It can only replay checks whose inputs the capture holds.** Each passage is saved with every
   simple field the search returned. A check that needs a field the search only returns later
   works on captures taken after that, not before.
-- **It does not cover the Repair Planner's verifier.** The planner has no eval case set, so
-  nothing captures what its verifier reads.
+- **`eval:replay` does not cover the Repair Planner's verifier.** The planner has its own
+  replay, `eval:planner:replay`, described below.
 - **It refuses a file it can't read in full.** If it reports lines that "could not be
   replayed", it exits with an error, and its totals don't cover the whole file. That usually
   means a capture from an older format version: take a new capture.
+
+**The Repair Planner has its own replay.**
+
+```powershell
+npm run eval:planner:replay -- server/data/captures/planner-<time>-<revision>.jsonl
+```
+
+It is free and offline in the same way (no key, no database, no network). For every planner
+run in the file it re-checks each claim with the planner's verifier as it is now, and re-works
+out the evidence status, the readiness rating (before and after the owner acknowledges the safety
+warning), and the saved-checklist notes. It prints each change, then four lines:
+
+```
+0 claim verdicts changed of 11
+0 evidence statuses changed of 8 runs
+0 readiness levels changed of 8 runs
+0 draft notes changed of 8 runs
+```
+
+Read them as you read `eval:replay`: every changed row should be one the change was meant to
+move. **There is no tool yet that records a live planner run**, so the only capture today is the
+invented one used by the tests (`server/test/fixtures/synthetic-planner-capture.jsonl`). The
+format and the replay are ready for the day one exists. A planner capture will quote the manuals
+just as an Ask capture does, so `server/data/captures/` stays ignored by git.
 
 ### The automated tests never read your `server/.env`
 
