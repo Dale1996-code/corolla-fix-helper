@@ -208,6 +208,18 @@ for each golden fact f of the scenario:
        no claim matches f                                               -> G: omission
 ```
 
+"f is in evidenceText" is read by `statesFact` (`evals/plannerJudge.js`): some reading of the
+text, judged as a claim, covers f. Every fact is read sentence by sentence. A numeric fact
+also gets two readings that manual layouts need and the verifier accepts as one verbatim
+claim: a sentence joined to the next when the next is a bare specification heading naming no
+part (`Thread in the plugs by hand. Torque : 20 N·m`), and each row of a sentence that flattens a
+table, cut between runs of figures so a condition after the last figure stays on its row.
+Before these readings a fact printed in either layout was never "in evidenceText", so its miss
+fell to G: query_formulation, R, or S: source_unusable instead of G: omission. On the
+2026-11-18 survey snapshot they newly found 38 chunks across 7 numeric facts (the drain-plug,
+spark-plug, and with-filter capacity facts among them), lost none, and every new reading was
+checked by hand to state its fact. Steps stay sentence by sentence, as the survey reads them.
+
 Run-level classifications that are not tied to a single fact:
 
 - A task with **no search at all** -> G: `no_search`.

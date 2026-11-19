@@ -125,6 +125,35 @@ const TOOL_AND_WARNING = [
   ),
 ];
 
+// The part named in one sentence and its figure under a bare "Torque :" heading
+// in the next, the way an instruction and its specification are often printed.
+// No single sentence states the drain-plug torque; the two together do, so a
+// run that searched this page and claimed nothing is G:omission, not a
+// retrieval or query failure (statesFact's adjacent-heading reading).
+const SPLIT_HEADING = [
+  chunk(
+    481,
+    "Oil and Oil Filter Replacement - Synthetic Fixture",
+    1,
+    "Wipe the sealing face around the hole. Fit the oil drain plug with a fresh washer. Torque : 37 N·m (27 ft-lbf) 4. Lower the vehicle.",
+    { purpose: "a part in one sentence and its figure under a bare heading in the next" }
+  ),
+];
+
+// A capacity table flattened into one run of text, its rows side by side. The
+// whole run holds a "without" row, so read as one sentence it is about another
+// fact; its first row alone states the with-filter capacity (statesFact's row
+// reading). The figures are the public golden ones; the wording is invented.
+const FLATTENED_TABLE = [
+  chunk(
+    491,
+    "Oil and Oil Filter Replacement - Synthetic Fixture",
+    4,
+    "Oil amounts Case Case Amount Amount Refill including a new filter 4.2 liters (4.4 US qts, 3.7 Imp. qts) Refill keeping the old filter, without a new one 3.9 liters (4.1 US qts, 3.4 Imp. qts) Empty engine, dry fill 4.7 liters (5.0 US qts, 4.1 Imp. qts) 5. Check for leaks.",
+    { purpose: "a flattened table whose first row alone states the fact" }
+  ),
+];
+
 /** @type {Record<string, any[]>} */
 export const LAYER_CORPORA = {
   empty: [],
@@ -136,4 +165,6 @@ export const LAYER_CORPORA = {
   "one-of-four-steps": ONE_OF_FOUR_STEPS,
   "pads-only": PADS_ONLY,
   "tool-and-warning": TOOL_AND_WARNING,
+  "split-heading": SPLIT_HEADING,
+  "flattened-table": FLATTENED_TABLE,
 };
