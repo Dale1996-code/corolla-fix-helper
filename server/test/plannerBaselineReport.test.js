@@ -520,15 +520,23 @@ test("the per-run JSON keeps every run with its full judgment, claims and quotes
   assert.deepEqual(JSON.parse(text).report.block, analysis.report.block, "the JSON carries the same aggregates the report prints");
 });
 
-test("the committed log is a template with no measured number in it, and passes the verbatim-text scan", () => {
+test("the committed log holds pasted report sections only, no hand-typed dollar figure, and passes the verbatim-text scan", () => {
   const log = fs.readFileSync(path.join(serverRoot, "..", "docs", "evals", "planner-baseline-log.md"), "utf8");
+  const entries = log.split(/^## Baseline /m).slice(1);
 
-  assert.match(log, /No baseline has been captured/);
-  assert.match(log, /VERIFIED\/READY PLANS LACKING ESSENTIAL CONFIRMED FACTS/);
-  for (const table of ["Table 0", "Table 1", "Table 2", "Table 3"]) {
-    assert.match(log, new RegExp(table), `the template has ${table}`);
+  assert.ok(entries.length >= 1, "the log has at least one entry");
+  for (const entry of entries) {
+    assert.match(entry, /^\d{4}-\d{2}-\d{2} at [0-9a-f]{7,}\n/, "each entry keeps the report's own heading");
+    assert.match(entry, /VERIFIED\/READY PLANS LACKING ESSENTIAL CONFIRMED FACTS/);
+    for (const table of ["Table 0", "Table 1", "Table 2", "Table 3"]) {
+      assert.match(entry, new RegExp(table), `each entry has ${table}`);
+    }
+    assert.match(entry, /Spot-check \(spec 7\.3\), recorded by the owner/);
   }
-  assert.doesNotMatch(log, /\$\d/, "no dollar figure has been measured");
+  // Spend is never measured (no usage tee, D9): the only dollar figure allowed is the report's own estimate line.
+  for (const line of log.split(/\r?\n/).filter((text) => /\$\d/.test(text))) {
+    assert.match(line, /ESTIMATE/, `a dollar figure outside the report's estimate line: ${line.slice(0, 80)}`);
+  }
 
   assertNoSourceDerivedText(log, "docs/evals/planner-baseline-log.md");
 });
