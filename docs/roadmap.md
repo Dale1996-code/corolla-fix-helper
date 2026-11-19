@@ -101,8 +101,9 @@ state a plan imagined.
   above 50 (see the [iteration log](evals/ask-rag-iteration-log.md)). Since then the free half
   has landed (**N9**, PRs #175–#178): pins on everything that happens before the model runs,
   scenarios, a recorder, a scripted model, a judge that names which layer failed, and negative
-  tests. What is missing is the part that touches reality: a capture format and replay, the
-  facts confirmed against rendered manual pages, and any live baseline.
+  tests, then a capture format and replay, a paid capture tool with mandatory run and request
+  limits, and a baseline report. What is missing is the part that touches reality: the facts
+  confirmed against rendered manual pages, and any live baseline.
 - **No page downloads a whole library any more, but nothing measures speed or import.**
   Documents, Symptoms, Procedures, Notes, and Ask AI's document card page on the server, and
   every link picker (including the Repair Checklists completion form's symptom choice)
@@ -224,7 +225,7 @@ this alone.
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | **Done**, except two unset budgets (response time, import throughput) | Slight increase |
 | N8 | Document-health report | High — **in progress** (slice 1 done) | Slight increase |
-| N9 | Repair Planner evaluation suite | High — **in progress** (free half done; capture and replay next) | Slight increase (test and eval code only) |
+| N9 | Repair Planner evaluation suite | High — **in progress** (tooling done, no paid call made; facts and a baseline remain) | Slight increase (test and eval code only) |
 
 **N0 — Recover the zero-chunk corpus. Done, August 2026.**
 *Problem it solved:* 128 of 1,443 documents held zero `document_chunks`. A document with no
@@ -650,7 +651,7 @@ decision D1 of that spec): it changes no verifier, prompt, readiness rule, class
 it sets no live pass/fail target. Phase 3 copies Ask's capture-and-replay pattern (audit Stage
 1b) without sharing its parser, so Ask's gate stays untouched. "Spec decision Dn" below means
 that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
-*Status: in progress, free half done (November 2026).*
+*Status: in progress, tooling done (November 2026). No baseline has been run: that waits on Phase 4's confirmed facts and on spec decisions D10b and D11.*
 
 | Phase | What | State |
 | --- | --- | --- |
@@ -658,9 +659,9 @@ that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
 | 1b (#176) | Pins on everything before the model runs, and `todo` rows for the measured gaps | Done |
 | 2a (#177) | Scenarios, a recorder at the agent's seams, a scripted model, invented corpora | Done |
 | 2b (#178) | The judge, one outcome per fact, and negative tests | Done |
-| 3 | A capture format and `eval:planner:replay`, after exporting the instruction text (P-2) | Next; free |
+| 3 (#190, #193) | A capture format and `eval:planner:replay`, after exporting the instruction text (P-2) | Done |
 | 4 | A corpus survey, and each golden fact confirmed against rendered PDF pages | Needs the owner's machine and eyes |
-| 5 | The paid capture tool and baseline report | Built with no paid call |
+| 5 | The paid capture tool (`eval:planner:capture`, a dry run by default, with mandatory run and request limits) and the baseline report (`eval:planner:report`, with the "verified/ready plans lacking essential confirmed facts" block) | **Done**, built and tested with no paid call. Token limits and the usage tee are not built (spec decision D9) |
 | 6 | The baseline run | Paid, each session approved separately; waits on spec decisions D10b and D11 (section 6) |
 
 *What it has already found,* each recorded as a measurement or a `todo` row: a claim cut off

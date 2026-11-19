@@ -399,6 +399,14 @@ turn's tool output carries at most 8 × 8 chunks of evidence text. Live runs
 make about four searches per run (`docs/evals/ask-rag-iteration-log.md`, Stage
 5-E2), far inside these bounds.
 
+The paid capture tool (`npm run eval:planner:capture`, planner eval Phase 5) holds a session to
+these same numbers and adds two limits of its own, both mandatory and exact: `--max-runs`
+(default 1) and `--max-provider-requests`, which counts every model turn and every retrieval and
+refuses the next once it is reached. It passes `maxTurns` to the agent explicitly, so the cap it
+prints is the cap it enforces, and a test fails if the agent's own default ever moves. Token
+limits and a usage tee are not built. See `docs/quality-testing.md` and
+`docs/planner-eval-spec.md` section 12.
+
 ### Refused briefs
 
 A brief, or any optional field, that asks to defeat a vehicle safety system is

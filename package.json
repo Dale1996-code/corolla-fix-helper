@@ -33,6 +33,8 @@
     "eval:capture": "npm --prefix server run eval:capture --",
     "eval:replay": "npm --prefix server run eval:replay --",
     "eval:planner:replay": "npm --prefix server run eval:planner:replay --",
+    "eval:planner:capture": "npm --prefix server run eval:planner:capture --",
+    "eval:planner:report": "npm --prefix server run eval:planner:report --",
     "eval:relevance-floor": "npm --prefix server run eval:relevance-floor",
     "lint": "eslint server && npm --prefix client run lint",
     "test": "npm run test:server && npm run test:client",
