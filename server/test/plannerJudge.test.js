@@ -88,6 +88,21 @@ function variantOf(id, edit) {
   return copy;
 }
 
+/**
+ * A committed scenario cut down to some of its facts (and the claim sets that
+ * name only those). The gate and ledger tests below were written for the
+ * Phase 2a facts alone; Stage B's D11 facts would add entries they do not test.
+ */
+function onlyFacts(id, factIds, edit = () => {}) {
+  return variantOf(id, (copy) => {
+    copy.facts = copy.facts.filter((fact) => factIds.includes(fact.id));
+    copy.claimSetExamples = copy.claimSetExamples.filter((example) =>
+      Object.keys(example.expect).every((factId) => factIds.includes(factId))
+    );
+    edit(copy);
+  });
+}
+
 const SURVEYED = (fact, { quality, probe }) => {
   fact.sourceQuality = quality;
   fact.qualityEvidence = { kind: "synthetic-test", ref: "plannerJudge.test.js" };
@@ -106,6 +121,62 @@ for (const scenario of PLANNER_SCENARIOS) {
     }
   }
 }
+
+// Sibling facts share words ("drain", "filter cap", "spark plug", "install"),
+// so a matcher written for one can quietly cover or contradict another. Each
+// example is checked against EVERY fact of its scenario: it may cover a sibling
+// only when that sibling lists the same text as covers too, and it may never be
+// a wrong figure for a sibling unless the sibling labels it so.
+test("matcher: no labelled example covers or contradicts a sibling fact by accident", () => {
+  for (const scenario of PLANNER_SCENARIOS) {
+    for (const fact of scenario.facts) {
+      for (const example of fact.claimExamples) {
+        for (const sibling of scenario.facts.filter((candidate) => candidate !== fact)) {
+          const label = judge.labelClaimForFact(example.text, sibling);
+          const declared = sibling.claimExamples.find((candidate) => candidate.text === example.text)?.expect;
+
+          if (label === "covers" || label === "wrong_figure" || label === "partial_figure") {
+            assert.equal(declared, label, `"${example.text}" (${fact.id}) is ${label} for ${sibling.id} without saying so`);
+          }
+        }
+      }
+    }
+  }
+});
+
+// The corpus survey decides whether a STEP is in a chunk the way the judge
+// decides it was in front of the model: sentence by sentence. If the two
+// drifted, a survey "found it" could disagree with the judge's "it was there".
+test("survey parity: the survey finds a step in a text exactly when the judge's statesFact does", async () => {
+  const { matcherForFact } = await import("../src/scripts/surveyPlannerCorpus.js");
+  const filler = "Park on level ground. Read the whole procedure first.";
+  let compared = 0;
+
+  for (const scenario of PLANNER_SCENARIOS) {
+    for (const fact of scenario.facts.filter((candidate) => candidate.kind === "procedure_step")) {
+      const holds = matcherForFact(fact).holds;
+      const texts = scenario.facts.flatMap((other) =>
+        other.claimExamples.flatMap((example) => [example.text, `${filler} ${example.text} ${filler}`])
+      );
+
+      for (const text of texts) {
+        assert.equal(holds(text), judge.statesFact(text, fact), `${fact.id} on "${text}"`);
+        compared += 1;
+      }
+    }
+  }
+  assert.ok(compared > 1000, `compared ${compared} texts`);
+});
+
+test("survey parity: a step is not hidden by an exclusion that belongs to another sentence of the chunk", async () => {
+  const { matcherForFact } = await import("../src/scripts/surveyPlannerCorpus.js");
+  const fact = getPlannerScenario("S1-oil-and-filter").facts.find((candidate) => candidate.id === "s1-step-add-oil");
+  const chunk = "Fit a new O-ring to the cap. Pour in fresh engine oil.";
+
+  assert.equal(fact.stepMatchers.every((matcher) => matcher.test(chunk)), false, "read whole, the O-ring hides the step");
+  assert.equal(matcherForFact(fact).holds(chunk), true);
+  assert.equal(judge.statesFact(chunk, fact), true);
+});
 
 test("matcher: every label the scenario data uses is one the matcher can produce", () => {
   for (const scenario of PLANNER_SCENARIOS) {
@@ -184,7 +255,7 @@ test("claim set: a contradiction stays in layer V and keeps the fact out of P1's
 // ---- 3. The scoring gate --------------------------------------------------------
 
 test("scoring gate: an unconfirmed fact is unscored -- never a pass, never a failure", async () => {
-  const scenario = variantOf("S1-oil-and-filter", (copy) => {
+  const scenario = onlyFacts("S1-oil-and-filter", [S1_FACT], (copy) => {
     copy.facts[0].confirmed = false;
   });
   // The contradiction run: with the fact confirmed it is a critical finding.
@@ -217,13 +288,18 @@ test("scoring gate: a truthy non-boolean `confirmed` is still unscored", () => {
 
 // ---- 4. The eight scripted runs, judged ----------------------------------------
 
-/** What the judge must say about each Phase 2a run. Outcomes, not wording. */
+/**
+ * What the judge must say about each Phase 2a run. Outcomes, not wording.
+ * Since Stage B, S1 and S2 each have THREE essential confirmed figures (P1's
+ * denominator), and these runs state only the original one: the two new
+ * figures are missed, which is the honest measurement.
+ */
 const SCRIPTED_EXPECTATIONS = {
-  "S1-correct-only": { facts: { [S1_FACT]: "COVERED" }, P1: { covered: 1, total: 1 }, P2: 0, P3: 0 },
+  "S1-correct-only": { facts: { [S1_FACT]: "COVERED" }, P1: { covered: 1, total: 3 }, P2: 0, P3: 0 },
   "S1-contradiction": {
     facts: { [S1_FACT]: "V:false_acceptance" },
     kind: { [S1_FACT]: "contradicted" },
-    P1: { covered: 0, total: 1 },
+    P1: { covered: 0, total: 3 },
     P2: 1,
     P3: 0,
   },
@@ -231,20 +307,20 @@ const SCRIPTED_EXPECTATIONS = {
     // The used-plug maximum is printed in the same chunk and no claim states it:
     // an omission, but of a non-essential fact, so it costs P1 nothing.
     facts: { "s2-new-plug-gap": "COVERED", "s2-used-plug-max-gap": "G:omission" },
-    P1: { covered: 1, total: 1 },
+    P1: { covered: 1, total: 3 },
     P2: 0,
     P3: 0,
   },
   "S2-trap": {
     facts: { "s2-new-plug-gap": "V:false_acceptance", "s2-used-plug-max-gap": "G:omission" },
     kind: { "s2-new-plug-gap": "contradicted" },
-    P1: { covered: 0, total: 1 },
+    P1: { covered: 0, total: 3 },
     P2: 1,
     P3: 0,
   },
   "S2-both-facts": {
     facts: { "s2-new-plug-gap": "COVERED", "s2-used-plug-max-gap": "COVERED" },
-    P1: { covered: 1, total: 1 },
+    P1: { covered: 1, total: 3 },
     P2: 0,
     P3: 0,
   },
@@ -550,7 +626,7 @@ test("L0: a confirmed job set reports a phantom task the brief did not ask for",
 });
 
 test("corpusSupport partial is never COVERED: the best outcome is PARTIALLY_COVERED, tagged S:partial_source", async () => {
-  const scenario = variantOf("S1-oil-and-filter", (copy) => {
+  const scenario = onlyFacts("S1-oil-and-filter", [S1_FACT], (copy) => {
     copy.facts[0].corpusSupport = "partial";
     copy.facts[0].partial = { partialKind: "qualifier_missing", supported: "the newton-metre figure" };
   });
@@ -637,7 +713,7 @@ function handBuiltRecord(scenario, chunks, claimsFor) {
 }
 
 test("I-7: a hand-built record with every kind of outcome reconciles to one outcome per confirmed fact", () => {
-  const scenario = getPlannerScenario("S2-spark-plugs");
+  const scenario = onlyFacts("S2-spark-plugs", ["s2-new-plug-gap", "s2-used-plug-max-gap"]);
   // New-plug range accepted (COVERED); used-plug maximum printed but not claimed
   // (G:omission). Two confirmed facts, two outcomes.
   const record = handBuiltRecord(scenario, MINI_CORPORA.S2.slice(0, 1), (input) => [
@@ -742,7 +818,9 @@ test("the judge vehicle label matches the one the agent prints in its handoff no
 
 test("metrics: status, readiness, operations, and rejection reasons report even when nothing is scored", async () => {
   const scenario = variantOf("S1-oil-and-filter", (copy) => {
-    copy.facts[0].confirmed = false;
+    for (const fact of copy.facts) {
+      fact.confirmed = false;
+    }
   });
   const { record } = await recordRun(scenario, {
     steps: searchThenFinalize("oil drain plug torque", (input) => [

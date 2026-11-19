@@ -588,6 +588,59 @@ for (const row of ROWS) {
   });
 }
 
+// ---- C3 reads the confirmed essential facts, never the whole procedure ----------
+
+// Owner correction (Phase 4 Stage B): listing `procedure-completeness` as
+// unassessed no longer turns C3 into "not_assessable". C3 answers whether a
+// verified plan lacks a CONFIRMED essential fact; whether the real procedure is
+// complete is a separate statement, always "not established".
+const C3_SCOPE = { basis: "confirmed_essential_facts", fullProcedureCompleteness: "not_established" };
+
+function c3Variant({ confirmSteps, listCompleteness }) {
+  const copy = { ...NEG_STEPS, facts: NEG_STEPS.facts.map((fact) => ({ ...fact })) };
+  copy.id = "NEG-steps-c3";
+  copy.facts.forEach((fact, index) => {
+    fact.confirmed = index === 0 || confirmSteps;
+  });
+  if (listCompleteness) {
+    copy.unassessedAreas = [...NEG_STEPS.unassessedAreas, { id: "procedure-completeness", area: "every step of the procedure" }];
+  }
+  assert.deepEqual(validateScenario(copy), []);
+  return copy;
+}
+
+test("C3: a verified plan covering every confirmed essential fact is not thin, and full completeness is still not established", async () => {
+  const row = ROWS.find((candidate) => candidate.id === "NEG-IP-1");
+  const { judgment } = await runRow({ ...row, scenario: c3Variant({ confirmSteps: false, listCompleteness: true }) });
+
+  assert.equal(judgment.run.evidenceStatus, "verified");
+  assert.deepEqual(judgment.metrics.C1, { covered: 1, total: 1 });
+  assert.equal(judgment.metrics.C3, false, "the confirmed essential facts are all covered");
+  assert.deepEqual(judgment.metrics.C3Scope, C3_SCOPE);
+});
+
+test("C3: a missing confirmed essential fact is thin whether or not completeness is listed as unassessed", async () => {
+  const row = ROWS.find((candidate) => candidate.id === "NEG-IP-1");
+
+  for (const listCompleteness of [true, false]) {
+    const { judgment } = await runRow({ ...row, scenario: c3Variant({ confirmSteps: true, listCompleteness }) });
+
+    assert.equal(judgment.metrics.C3, true, `listCompleteness=${listCompleteness}`);
+    assert.deepEqual(judgment.metrics.C3Scope, C3_SCOPE);
+  }
+});
+
+test("C3: a verified plan in a scenario with no essential confirmed fact is not assessable", async () => {
+  const row = ROWS.find((candidate) => candidate.id === "NEG-IP-1");
+  const scenario = c3Variant({ confirmSteps: false, listCompleteness: true });
+  scenario.facts[0] = { ...scenario.facts[0], essential: false };
+
+  const { judgment } = await runRow({ ...row, scenario });
+
+  assert.equal(judgment.run.evidenceStatus, "verified");
+  assert.equal(judgment.metrics.C3, "not_assessable", "nothing essential is confirmed, so nothing can be thin");
+});
+
 // ---- Desired behavior (todo) ----------------------------------------------------
 
 const TODO_ROWS = [

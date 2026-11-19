@@ -292,14 +292,16 @@ plainly so it is not over-read:
 
 | Scenario | Scored in the first baseline (confirmed seed facts only) | `unscored` until confirmed in Phase 4 |
 |---|---|---|
-| S1 | Drain-plug torque: right figure and unit (P1), wrong figure (P2) | Procedure completeness (C1), tools (T1), parts, safety (W2), filter-cap torque, capacities |
-| S2 | New-plug gap (P1), used-plug maximum given as the new-plug gap (P2, the decoy) | C1, T1, W2, any torque |
+| S1 | Drain-plug torque, filter-cap torque, capacity with a filter change (P1; wrong figures and decoys in P2); 13 essential steps (C1), from removing the drain plug to the leak check; viscosity 0W-20 (C1, see D11) | Full procedure completeness, tools (T1), parts, safety (W2) |
+| S2 | New-plug gap, plug torque, coil-bolt torque (P1; the used-plug maximum and each other's torque as decoys in P2); 8 essential steps (C1), cover off to cover on | Full procedure completeness, T1 as a whole (the 14 mm wrench is an informational figure), W2 |
 | S8 | No accepted claim describes a belt procedure (P3 fabrication check); precondition holds | n/a (an absence scenario needs no steps) |
 
-So the first baseline can say how often the planner states the *confirmed* figures correctly,
-what statuses and readiness levels it produces, why claims are rejected, and whether it
-fabricates a belt procedure. It **cannot** say whether the oil-change or spark-plug plans are
-complete. S3-S7 follow as their facts are confirmed against the PDFs (Phase 4).
+So the first baseline can say how often the planner states the *confirmed* figures and steps
+correctly, what statuses and readiness levels it produces, why claims are rejected, and
+whether it fabricates a belt procedure. Since Phase 4 Stage B (D11) it can also say how many
+of the owner's essential steps each plan covers (C1). It still **cannot** say whether the
+oil-change or spark-plug plans are complete: the confirmed list is the owner's essentials, not
+the whole procedure. S3-S7 follow as their facts are confirmed against the PDFs (Phase 4).
 
 ### 6.3 Scenario file shape (committed, `server/src/evals/plannerScenarios.js`)
 
@@ -351,7 +353,7 @@ the 3 repeats as `min / median / max`.
 |---|---|---|---|
 | **C1** | Procedure completeness | essential `procedure` facts covered by an accepted claim / essential `procedure` facts | Reported alongside status, never inferred from it (F1). |
 | **C2** | Task coverage | tasks the server marks `covered` / tasks | Server's own number; kept so the gap between C1 and C2 is visible. |
-| **C3** | "Verified but thin" flag | `evidenceStatus == verified` **and** C1 < 1 (or any essential fact uncovered) | The headline credibility indicator. |
+| **C3** | "Verified but thin" flag | `evidenceStatus == verified` **and** C1 < 1 (or any essential fact uncovered) | The headline credibility indicator. It reads the CONFIRMED essential facts only: `true`/`false` whenever at least one is confirmed, `not_assessable` only when none is. Listing `procedure-completeness` as unassessed no longer blanks it out (owner correction, Phase 4 Stage B); instead every judgment carries `C3Scope: { basis: "confirmed_essential_facts", fullProcedureCompleteness: "not_established" }`, so `false` never reads as "complete". |
 | **Q1** | Source quality | citations whose title matches `sourceHint.titleLike` on an expected page / citations | Only where a hint is confirmed. |
 | **Q2** | Source quality | duplicate citations (identical normalized chunk text) / citations | Lower is better. Reflects the byte-identical-document groups noted in the roadmap. |
 | **Q3** | Source quality | cited chunks tagged `ocr`, `garbled`, `flattened_table`, or `cap_truncated` / citations | Tags come from the survey (`documents.extraction_status`, length vs 1,500). Lower is better. |
@@ -806,7 +808,7 @@ call was made to build or test them. Where the spec left a choice open:
 | "Config snapshot (10)" in Table 0 | The header holds twelve keys; Table 0 prints all twelve. |
 | Table 2's columns | The spec lists nine. The judge has more outcomes (`PARTIALLY_COVERED`, `CORRECTLY_ABSENT`, `L0:*`, `UNDETERMINED`, `REFUSED`), and "every fact in exactly one outcome" needs a column for each, so the table has them and refuses to print if its columns do not add up to confirmed facts × runs. |
 | 7.3's "fixed-seed list" | Not generated: automated sampling is out of Phase 5's scope. The report states how many accepted claims matched no confirmed fact, and each is in the per-run JSON. |
-| The required block and D11 | D11 predicts every S1/S2 plan lands in "not assessable". The committed S1 and S2 each carry one *essential, confirmed* figure (`s1-drain-plug-torque`, `s2-new-plug-gap`), so by the block's own rule they are assessable, and S8 (no essential fact) is the not-assessable one. The block follows its rule. Whenever a run is counted as covered, the block adds a standing note that "covered" means the confirmed essential facts only and is not completeness (it does not depend on scenario data), and names the scenarios that list `procedure-completeness` as unassessed (S1 and S2 do). Completeness for S1 and S2 still needs D11's confirmed steps. |
+| The required block and D11 | (D11 is now decided; see section 16. S1 and S2 carry 16 and 11 essential confirmed facts.) D11 predicts every S1/S2 plan lands in "not assessable". The committed S1 and S2 each carry one *essential, confirmed* figure (`s1-drain-plug-torque`, `s2-new-plug-gap`), so by the block's own rule they are assessable, and S8 (no essential fact) is the not-assessable one. The block follows its rule. Whenever a run is counted as covered, the block adds a standing note that "covered" means the confirmed essential facts only and is not completeness (it does not depend on scenario data), and names the scenarios that list `procedure-completeness` as unassessed (S1 and S2 do). Completeness for S1 and S2 still needs D11's confirmed steps. |
 
 ---
 
@@ -1000,7 +1002,7 @@ that passes it.
 | # | Question | Needed before |
 |---|---|---|
 | D10b | Configure the dedicated project, key, and $10 hard limit, and confirm the setting in force (value, hard-stop versus notice-only). | Any paid session, including the pilot |
-| D11 | Recommended, not yet decided: before the first baseline, confirm a small list of **essential procedure steps** for S1 and S2 (a handful each, against the rendered PDF pages). Today only one figure each is confirmed, so every S1/S2 plan would land in "NOT assessable" in the required block and the core finding (`verified`/`ready` plans lacking essential facts) could not be demonstrated on them. S8 needs no steps. | The 6a baseline (Phase 4) |
+| D11 | **Decided 2026-11-19 (Phase 4 Stage B).** The owner confirmed 30 facts for S1 and S2 against the rendered PDF pages, after an independent review, and signed off the essential flag of each: 25 essential (4 figures in P1, 21 steps in C1) and 5 informational (filler-cap removal, filter-cap 90° alignment, the plug-tube care notice, the recommended plug part number, and the 14 mm plug wrench, which stays a figure so a wrong size is still a wrong figure). With the 4 earlier facts the set is 34, 27 essential: S1 has 3 essential figures and 13 essential steps, S2 3 and 8, S8 none. Each carries `confirmedBy.ownerReview: "D11"`. Facts spread over two pages were split until one verbatim claim can state each (cap-thread cleaning and surface cleaning; disconnecting and removing the coils; filler-cap removal and refit), and every essential fact was checked against the real text to have a verbatim fragment the planner verifier accepts and the matcher covers. Covering them is never completeness: `procedure-completeness` stays unassessed. The viscosity fact counts only 0W-20 as covering: the library prints 5W-20 only in the Mexico table, and the 2009 owner's manual, not in the library, also permits it, so a plan naming only 5W-20 reads as missing the fact. That is a limit of the measurement, never a finding against 5W-20, and such a claim is never counted wrong. | The 6a baseline (Phase 4) |
 
 ### 16.1 Decisions that bind Phase 2b (made in the owner's review of the Phase 2a plan)
 
@@ -1010,7 +1012,7 @@ implements them; a change to any of them is an owner decision, not a judge fix.
 | # | Decision | What it means for the judge |
 |---|---|---|
 | 2b-1 | **A contradicted fact stays in layer V.** | A fact with an accepted correct claim AND an accepted wrong claim is `V:false_acceptance` with `kind: contradicted`, `alsoCovered: true`. There is no seventh layer, and a correct claim never cancels the critical finding. A contradicted or partly covered fact is **not** in the numerator of P1 or C1 but **is** in the denominator, so it cannot inflate a success rate. C3 counts it as uncovered. |
-| 2b-2 | **Unknown stays unknown.** | `sourceQuality` and `goldenQueryRetrieves` are `null` for S1/S2 (confirming a figure on the rendered page says nothing about the extracted text) and `not_applicable` for S8. Null is never read as clean. R and G(query) are assigned only when support, quality, and the golden-query probe are all known; otherwise a missed fact is `UNDETERMINED` with the missing fields named. `UNDETERMINED` is an attribution status, not a layer, and still counts once for I-7. |
+| 2b-2 | **Unknown stays unknown.** | (Phase 4 Stage B: the 30 D11 facts now carry a `sourceQuality` read from their chosen chunk's extracted text, with `qualityEvidence` naming the page and chunk, and `goldenQueryRetrieves: true` from the keyword-only survey, whose evidence says so. The 3 seed facts were not re-rated and stay `null`. What follows is the rule as first written.) `sourceQuality` and `goldenQueryRetrieves` are `null` for S1/S2 (confirming a figure on the rendered page says nothing about the extracted text) and `not_applicable` for S8. Null is never read as clean. R and G(query) are assigned only when support, quality, and the golden-query probe are all known; otherwise a missed fact is `UNDETERMINED` with the missing fields named. `UNDETERMINED` is an attribution status, not a layer, and still counts once for I-7. |
 | 2b-3 | **Desired jobs are unconfirmed, so L0 is `unscored`.** | Until the owner reviews `desiredJobs`, the judge reports task derivation but scores no L0 failure. Decomposition is kept apart from the vehicle `premise`: S8 deriving a belt task is correct decomposition, never an L0 defect. |
 | 2b-4 | **`corpusSupport: partial` is never `COVERED`.** | The best outcome is `PARTIALLY_COVERED`, the remainder is tagged `S:partial_source`, and the fact stays in the C1 denominator. |
 | 2b-5 | **I-4 is a hard invariant.** | Every detector-visible figure in the plan text, checklist draft, checklist, handoff notes, and gaps must come from an accepted claim's quote, from the owner's own input, or from what the same builders print with zero claims. Q1 stays where the source hint is confirmed; Q2-Q4 stay deferred (D9). |
@@ -1026,8 +1028,9 @@ product change, and each is pinned by a test):
   the right figure while citing text that never showed it is an `ungrounded_rejection`: the
   verifier was right to refuse it, so it is not counted in U4.
 - *`procedure_step` is a new fact kind,* added with its matcher (every step matcher must hit the
-  claim). Only the negative tests' own scenarios use it; no committed scenario has a confirmed
-  step yet (D11), so C1 stays `unscored` for S1, S2, and S8.
+  claim). Since Phase 4 Stage B, S1 and S2 carry the owner's confirmed steps (D11), so C1 is
+  scored for them and stays `unscored` for S8. An essential step's claim-set expectation carries
+  `inC1Numerator`, not `inP1Numerator`, and the validator enforces that.
 - *NEG-ME-4 pins `claim_not_in_quote`, not `unsupported_number`.* The planner first checks that
   a claim is a fragment of its quote, so a claim can print only its quote's numbers and
   `unsupported_number` cannot be reached through a whole run.

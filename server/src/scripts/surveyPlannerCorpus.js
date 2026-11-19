@@ -56,6 +56,37 @@ const CANONICAL_QUERIES = {
   "s1-drain-plug-torque": ["oil drain plug torque", "engine oil drain plug tightening torque"],
   "s2-new-plug-gap": ["spark plug electrode gap", "new spark plug gap"],
   "s2-used-plug-max-gap": ["spark plug electrode gap", "used spark plug maximum electrode gap"],
+  // Phase 4 Stage B (the owner's D11 facts).
+  "s1-step-remove-filler-cap": ["remove oil filler cap"],
+  "s1-step-drain-oil": ["drain engine oil", "remove oil drain plug drain oil"],
+  "s1-step-new-drain-gasket": ["oil drain plug new gasket"],
+  "s1-step-drain-filter-cap": ["loosen oil filter cap drain remaining oil"],
+  "s1-step-remove-old-element": ["remove oil filter element o-ring"],
+  "s1-step-clean-cap-threads": ["clean oil filter cap threads o-ring groove"],
+  "s1-step-new-oring-oiled": ["oil filter cap new o-ring engine oil"],
+  "s1-step-new-filter-element": ["new oil filter element"],
+  "s1-step-clean-install-surface": ["oil filter installation surface dirt"],
+  "s1-cap-alignment": ["align oil filter cap cutout bracket"],
+  "s1-step-install-filter-cap": ["install oil filter cap assembly"],
+  "s1-filter-cap-torque": ["oil filter cap torque", "oil filter cap assembly tightening torque"],
+  "s1-step-add-oil": ["add fresh engine oil"],
+  "s1-step-refit-filler-cap": ["install oil filler cap"],
+  "s1-oil-viscosity": ["engine oil viscosity", "engine oil grade viscosity"],
+  "s1-oil-capacity-with-filter": ["engine oil capacity", "engine oil capacity with oil filter change"],
+  "s1-step-inspect-leak": ["inspect for oil leak"],
+  "s2-step-remove-head-cover": ["remove no. 2 cylinder head cover"],
+  "s2-step-disconnect-coils": ["disconnect ignition coil connectors"],
+  "s2-step-remove-coils": ["remove ignition coil"],
+  "s2-notice-plug-tube": ["ignition coil spark plug tube damage"],
+  "s2-step-remove-plugs": ["remove spark plug"],
+  "s2-plug-wrench-size": ["spark plug wrench"],
+  "s2-recommended-plug": ["recommended spark plug"],
+  "s2-step-install-plugs": ["install spark plug"],
+  "s2-spark-plug-torque": ["spark plug torque", "install spark plug torque"],
+  "s2-step-install-coils": ["install ignition coil"],
+  "s2-coil-bolt-torque": ["ignition coil bolt torque"],
+  "s2-step-connect-coils": ["connect ignition coil connectors"],
+  "s2-step-refit-head-cover": ["install no. 2 cylinder head cover"],
 };
 
 const LENGTH_BUCKETS = [500, 1000, EVIDENCE_WINDOW_CHARS, 2000, 3000];
@@ -289,13 +320,24 @@ function formsFromFact(fact, list) {
   });
 }
 
+// The judge's sentence split (plannerJudge.js statesFact), kept identical.
+const sentencesOf = (text) => String(text ?? "").split(/(?<=[.!?;])\s+(?=[A-Z(])/);
+
 /**
  * One matcher per surveyed item: `holds(text)` says whether the text states it.
  * A numeric fact holds when a part matcher hits and an acceptable figure is
  * printed; a probe holds when every `allOf` pattern hits and, if it lists
  * figures, one of them is printed.
+ *
+ * A STEP is read sentence by sentence. Its matchers are written for one claim
+ * -- every pattern must hit it, and some exclude a neighbouring step's words
+ * ("not when the O-ring is named") -- so testing them across a whole chunk
+ * would let one sentence's exclusion hide another sentence's step. This is the
+ * judge's own rule for whether a step was in front of the model (statesFact).
+ *
+ * @param {any} fact
  */
-function matcherForFact(fact) {
+export function matcherForFact(fact) {
   if (fact.kind === "numeric_spec") {
     const acceptable = formsFromFact(fact, fact.acceptable);
     const decoys = formsFromFact(fact, fact.decoys);
@@ -306,8 +348,9 @@ function matcherForFact(fact) {
     };
   }
   if (fact.kind === "procedure_step") {
+    const statesStep = (sentence) => fact.stepMatchers.every((matcher) => matcher.test(sentence));
     return {
-      holds: (text) => fact.stepMatchers.every((matcher) => matcher.test(text)),
+      holds: (text) => sentencesOf(text).some(statesStep),
       figures: () => [],
       decoys: () => [],
     };

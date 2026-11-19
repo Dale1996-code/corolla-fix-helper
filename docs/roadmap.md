@@ -102,8 +102,8 @@ state a plan imagined.
   has landed (**N9**, PRs #175–#178): pins on everything that happens before the model runs,
   scenarios, a recorder, a scripted model, a judge that names which layer failed, and negative
   tests, then a capture format and replay, a paid capture tool with mandatory run and request
-  limits, and a baseline report. What is missing is the part that touches reality: the facts
-  confirmed against rendered manual pages, and any live baseline.
+  limits, and a baseline report, and (Phase 4) a corpus survey with 30 more facts the owner
+  confirmed against rendered manual pages. What is missing is any live baseline.
 - **No page downloads a whole library any more, but nothing measures speed or import.**
   Documents, Symptoms, Procedures, Notes, and Ask AI's document card page on the server, and
   every link picker (including the Repair Checklists completion form's symptom choice)
@@ -225,7 +225,7 @@ this alone.
 | N6 | Retire dormant flags and the legacy Ask path | Medium | **Reduces** |
 | N7 | Stop the four pages downloading the whole library | **Done**, except two unset budgets (response time, import throughput) | Slight increase |
 | N8 | Document-health report | High — **in progress** (slice 1 done) | Slight increase |
-| N9 | Repair Planner evaluation suite | High — **in progress** (tooling done, no paid call made; facts and a baseline remain) | Slight increase (test and eval code only) |
+| N9 | Repair Planner evaluation suite | High — **in progress** (tooling and confirmed facts done, no paid call made; a baseline remains) | Slight increase (test and eval code only) |
 
 **N0 — Recover the zero-chunk corpus. Done, August 2026.**
 *Problem it solved:* 128 of 1,443 documents held zero `document_chunks`. A document with no
@@ -651,7 +651,7 @@ decision D1 of that spec): it changes no verifier, prompt, readiness rule, class
 it sets no live pass/fail target. Phase 3 copies Ask's capture-and-replay pattern (audit Stage
 1b) without sharing its parser, so Ask's gate stays untouched. "Spec decision Dn" below means
 that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
-*Status: in progress, tooling done (November 2026). No baseline has been run: that waits on Phase 4's confirmed facts and on spec decisions D10b and D11.*
+*Status: in progress, tooling and facts done (November 2026). No baseline has been run: that waits on spec decision D10b (spending controls). D11 is decided: the owner signed off 30 more facts for S1 and S2 (Phase 4 Stage B).*
 
 | Phase | What | State |
 | --- | --- | --- |
@@ -660,9 +660,9 @@ that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
 | 2a (#177) | Scenarios, a recorder at the agent's seams, a scripted model, invented corpora | Done |
 | 2b (#178) | The judge, one outcome per fact, and negative tests | Done |
 | 3 (#190, #193) | A capture format and `eval:planner:replay`, after exporting the instruction text (P-2) | Done |
-| 4 | A corpus survey, and each golden fact confirmed against rendered PDF pages | Needs the owner's machine and eyes |
+| 4 (#194, Stage B) | A corpus survey (`eval:planner:survey`, read-only, keyword ranking), and each golden fact confirmed against rendered PDF pages | **Done.** The owner confirmed 30 facts for S1 and S2 against the rendered pages (spec decision D11, 2026-11-19): 25 essential (4 figures, 21 steps), 5 informational. The set is now 34 facts, 27 essential. Every S1 source is the oil-change article, whose text layer repeats itself, so those facts are rated `garbled` or `flattened_table`, never clean, though each one's own phrase survives intact |
 | 5 | The paid capture tool (`eval:planner:capture`, a dry run by default, with mandatory run and request limits) and the baseline report (`eval:planner:report`, with the "verified/ready plans lacking essential confirmed facts" block) | **Done**, built and tested with no paid call. Token limits and the usage tee are not built (spec decision D9) |
-| 6 | The baseline run | Paid, each session approved separately; waits on spec decisions D10b and D11 (section 6) |
+| 6 | The baseline run | Paid, each session approved separately; waits on spec decision D10b (section 6) |
 
 *What it has already found,* each recorded as a measurement or a `todo` row: a claim cut off
 its unit passed under every claim kind (found by 2b and **fixed**, `unit_cut`, #183 and #184);
@@ -866,10 +866,10 @@ These block or reshape items above and cannot be answered from the repository.
    and key with a monthly limit (proposed: $10, hard stop), and confirm the setting is in
    force. This blocks any paid planner session, including the pilot; nothing before Phase 6 of
    **N9** needs it.
-8. **Essential steps for the first two planner scenarios (spec decision D11).** Confirm a handful of
-   essential procedure steps each for scenarios S1 and S2 against the rendered PDF pages.
-   Without them every S1 and S2 plan reads "not assessable", and the baseline cannot show its
-   core finding: `verified` or `ready` plans that are missing steps.
+8. **Essential steps for the first two planner scenarios (spec decision D11). Decided
+   2026-11-19.** The owner confirmed 30 facts for S1 and S2 against the rendered PDF pages
+   and signed off which are essential (Phase 4 Stage B). Covering them is still not proof that
+   a plan is complete.
 9. **When to apply the N5 scope backfill to the live library.** The command is
    `npm run backfill:applicability -- --apply`; stop the app and take a backup first. Nothing
    reads the scope yet, so no feature waits on it, but **N5**'s P3 measurements do.
