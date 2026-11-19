@@ -23,6 +23,7 @@
     "diagnose:zero-chunks": "npm --prefix server run diagnose:zero-chunks --",
     "diagnose:applicability": "npm --prefix server run diagnose:applicability --",
     "diagnose:document-health": "npm --prefix server run diagnose:document-health --",
+    "eval:planner:survey": "npm --prefix server run eval:planner:survey --",
     "backfill:applicability": "npm --prefix server run backfill:applicability --",
     "recover:zero-chunks": "npm --prefix server run recover:zero-chunks --",
     "analyze:ocr-quality": "npm --prefix server run analyze:ocr-quality --",
