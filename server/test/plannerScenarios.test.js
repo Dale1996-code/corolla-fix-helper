@@ -51,7 +51,7 @@ const allFacts = PLANNER_SCENARIOS.flatMap((scenario) =>
 // ---- 1. The committed set --------------------------------------------------
 
 test("the committed scenario set validates", () => {
-  assert.equal(SCENARIO_SET_VERSION, 1);
+  assert.equal(SCENARIO_SET_VERSION, 2, "Phase 4 Stage B added the D11 facts");
   assert.deepEqual(validateScenarioSet(PLANNER_SCENARIOS), []);
 });
 
@@ -81,27 +81,117 @@ test("every scenario shares one fixed tool inventory", () => {
 // ---- 2. The scoring gate ---------------------------------------------------
 
 // Duplicated on purpose (the answerQualityCases convention): promoting a fact
-// to confirmed means editing the scenario AND this list, in a reviewed diff.
-const CONFIRMED_FACT_IDS = [
+// to confirmed means editing the scenario AND these lists, in a reviewed diff.
+const ASK_CONFIRMED_FACT_IDS = [
   "s1-drain-plug-torque",
   "s2-new-plug-gap",
   "s2-used-plug-max-gap",
   "s8-no-timing-belt-procedure",
 ];
 
-test("exactly the facts confirmed in the existing Ask cases are in the committed set", () => {
+// The owner's D11 sign-off (Phase 4 Stage B, 2026-11-19): every fact the owner
+// confirmed against the rendered page, with its kind and essential flag. A
+// flag changes only with the owner's say-so, so it is pinned here.
+const D11_FACTS = {
+  "s1-step-remove-filler-cap": ["procedure_step", false],
+  "s1-step-drain-oil": ["procedure_step", true],
+  "s1-step-new-drain-gasket": ["procedure_step", true],
+  "s1-step-drain-filter-cap": ["procedure_step", true],
+  "s1-step-remove-old-element": ["procedure_step", true],
+  "s1-step-clean-cap-threads": ["procedure_step", true],
+  "s1-step-new-oring-oiled": ["procedure_step", true],
+  "s1-step-new-filter-element": ["procedure_step", true],
+  "s1-step-clean-install-surface": ["procedure_step", true],
+  "s1-cap-alignment": ["procedure_step", false],
+  "s1-step-install-filter-cap": ["procedure_step", true],
+  "s1-filter-cap-torque": ["numeric_spec", true],
+  "s1-step-add-oil": ["procedure_step", true],
+  "s1-step-refit-filler-cap": ["procedure_step", true],
+  "s1-oil-viscosity": ["procedure_step", true],
+  "s1-oil-capacity-with-filter": ["numeric_spec", true],
+  "s1-step-inspect-leak": ["procedure_step", true],
+  "s2-step-remove-head-cover": ["procedure_step", true],
+  "s2-step-disconnect-coils": ["procedure_step", true],
+  "s2-step-remove-coils": ["procedure_step", true],
+  "s2-notice-plug-tube": ["procedure_step", false],
+  "s2-step-remove-plugs": ["procedure_step", true],
+  "s2-plug-wrench-size": ["numeric_spec", false],
+  "s2-recommended-plug": ["procedure_step", false],
+  "s2-step-install-plugs": ["procedure_step", true],
+  "s2-spark-plug-torque": ["numeric_spec", true],
+  "s2-step-install-coils": ["procedure_step", true],
+  "s2-coil-bolt-torque": ["numeric_spec", true],
+  "s2-step-connect-coils": ["procedure_step", true],
+  "s2-step-refit-head-cover": ["procedure_step", true],
+};
+
+const CONFIRMED_FACT_IDS = [
+  "s1-drain-plug-torque",
+  ...Object.keys(D11_FACTS).filter((id) => id.startsWith("s1-")),
+  "s2-new-plug-gap",
+  "s2-used-plug-max-gap",
+  ...Object.keys(D11_FACTS).filter((id) => id.startsWith("s2-")),
+  "s8-no-timing-belt-procedure",
+];
+
+test("exactly the confirmed facts are in the committed set, in order", () => {
   assert.deepEqual(
     allFacts.map(({ fact }) => fact.id),
     CONFIRMED_FACT_IDS
   );
 });
 
-test("no committed fact is unconfirmed, and every one carries its Ask-case provenance", () => {
+test("the committed set holds 34 facts: 27 essential and 7 not", () => {
+  // The counts the owner reviewed (Phase 4 Stage B): the 4 Ask-confirmed facts
+  // (2 essential) plus 30 D11 facts (25 essential, 5 informational).
+  const essential = allFacts.filter(({ fact }) => fact.essential);
+  const count = (scenarioId, pick) =>
+    allFacts.filter(({ scenario, fact }) => scenario.id === scenarioId && pick(fact)).length;
+
+  assert.equal(allFacts.length, 34);
+  assert.equal(essential.length, 27);
+  assert.equal(Object.keys(D11_FACTS).length, 30);
+  assert.equal(Object.values(D11_FACTS).filter(([, isEssential]) => isEssential).length, 25);
+
+  // Per scenario and per success metric: P1 counts essential numeric facts,
+  // C1 essential steps.
+  assert.deepEqual(
+    ["S1-oil-and-filter", "S2-spark-plugs", "S8-timing-belt"].map((id) => [
+      count(id, () => true),
+      count(id, (fact) => fact.essential && fact.kind === "numeric_spec"),
+      count(id, (fact) => fact.essential && fact.kind === "procedure_step"),
+      count(id, (fact) => !fact.essential),
+    ]),
+    [
+      [18, 3, 13, 2],
+      [15, 3, 8, 4],
+      [1, 0, 0, 1],
+    ]
+  );
+});
+
+test("every D11 fact has the kind and essential flag the owner signed off", () => {
+  for (const [id, [kind, essential]] of Object.entries(D11_FACTS)) {
+    const { fact } = allFacts.find((entry) => entry.fact.id === id);
+
+    assert.equal(fact.kind, kind, `${id}: kind`);
+    assert.equal(fact.essential, essential, `${id}: essential`);
+  }
+});
+
+test("no committed fact is unconfirmed, and every one carries its provenance", () => {
   for (const { scenario, fact } of allFacts) {
     assert.equal(fact.confirmed, true, `${fact.id}: an unconfirmed fact must not be committed`);
     assert.equal(isScorable(fact), true);
     assert.equal(factScoringStatus(fact), "scored");
-    assert.match(fact.confirmedBy?.askCaseId ?? "", /\S/, `${scenario.id}/${fact.id}: names its Ask case`);
+
+    if (ASK_CONFIRMED_FACT_IDS.includes(fact.id)) {
+      assert.match(fact.confirmedBy?.askCaseId ?? "", /\S/, `${scenario.id}/${fact.id}: names its Ask case`);
+    } else {
+      assert.equal(fact.confirmedBy?.ownerReview, "D11", `${scenario.id}/${fact.id}: names the owner's D11 sign-off`);
+      assert.equal(fact.confirmedBy?.date, "2026-11-19", fact.id);
+      assert.equal(fact.confirmedBy?.askCaseId, undefined, `${fact.id}: no Ask case confirmed it`);
+    }
   }
 });
 
@@ -131,34 +221,96 @@ test("unassessed areas are names only: no concept, figure or matcher", () => {
       "required-tools",
       "required-parts",
       "safety-instructions",
-      "filter-cap-torque",
-      "fluid-capacities",
     ]
+  );
+  // Full procedure completeness stays unassessed in both: covering the
+  // confirmed essential facts is never a statement that the repair is complete.
+  assert.deepEqual(
+    byId["S2-spark-plugs"].unassessedAreas.map((area) => area.id),
+    ["task-attributes", "procedure-completeness", "required-tools", "required-parts", "safety-instructions"]
   );
 });
 
 // ---- 3. Survey fields: unknown stays unknown --------------------------------
 
-test("S1 and S2 facts leave source quality and the golden-query probe unknown", () => {
+test("the Ask-confirmed S1 and S2 facts still leave source quality and the golden-query probe unknown", () => {
+  // Stage B did not survey or relabel these three; they are unchanged.
   for (const { scenario, fact } of allFacts) {
-    if (scenario.id === "S8-timing-belt") continue;
+    if (scenario.id === "S8-timing-belt" || !ASK_CONFIRMED_FACT_IDS.includes(fact.id)) continue;
 
     assert.equal(fact.corpusSupport, "full", fact.id);
     assert.equal(fact.sourceQuality, null, `${fact.id}: PDF-page confirmation is not extracted-text quality`);
     assert.equal(fact.qualityEvidence, null, fact.id);
-    assert.equal(fact.goldenQueryRetrieves, null, `${fact.id}: waits for the Phase 4 survey`);
+    assert.equal(fact.goldenQueryRetrieves, null, fact.id);
     assert.equal(fact.goldenQueryEvidence, null, fact.id);
   }
 });
 
-test("no committed fact declares a known source quality in this PR", () => {
-  for (const { fact } of allFacts) {
-    assert.equal(
-      SOURCE_QUALITIES.includes(fact.sourceQuality),
-      false,
-      `${fact.id}: a known quality needs separate evidence the extracted text is usable`
-    );
+// The label each D11 fact's chosen chunk earned when its extracted text was
+// read (Phase 4 Stage B). Every S1 source is the oil-change article whose text
+// layer repeats its headings and paragraphs, so none of them is clean even
+// though each fact's own phrase survives intact; the S2 sources are clean.
+const D11_QUALITY = {
+  "s1-step-remove-filler-cap": "garbled",
+  "s1-step-drain-oil": "garbled",
+  "s1-step-new-drain-gasket": "garbled",
+  "s1-step-drain-filter-cap": "garbled",
+  "s1-step-remove-old-element": "garbled",
+  "s1-step-clean-cap-threads": "garbled",
+  "s1-step-new-oring-oiled": "garbled",
+  "s1-step-new-filter-element": "garbled",
+  "s1-step-clean-install-surface": "garbled",
+  "s1-cap-alignment": "garbled",
+  "s1-step-install-filter-cap": "garbled",
+  "s1-filter-cap-torque": "garbled",
+  "s1-step-add-oil": "garbled",
+  "s1-step-refit-filler-cap": "garbled",
+  "s1-oil-viscosity": "flattened_table",
+  "s1-oil-capacity-with-filter": "flattened_table",
+  "s1-step-inspect-leak": "garbled",
+};
+
+test("each D11 fact carries the source quality its extracted text earned, with evidence", () => {
+  for (const id of Object.keys(D11_FACTS)) {
+    const { fact } = allFacts.find((entry) => entry.fact.id === id);
+    const want = D11_QUALITY[id] ?? "clean";
+
+    assert.equal(fact.corpusSupport, "full", id);
+    assert.equal(fact.sourceQuality, want, `${id}: source quality`);
+    assert.ok(SOURCE_QUALITIES.includes(fact.sourceQuality), id);
+    assert.match(fact.qualityEvidence?.kind ?? "", /\S/, `${id}: says how the text was checked`);
+    assert.match(fact.qualityEvidence?.ref ?? "", /p\d+ chunk \d+/, `${id}: names the page and chunk that was read`);
   }
+});
+
+test("no S1 fact calls the oil-change article's text clean", () => {
+  for (const { scenario, fact } of allFacts) {
+    if (scenario.id === "S1-oil-and-filter") {
+      assert.notEqual(fact.sourceQuality, "clean", fact.id);
+    }
+  }
+});
+
+test("a known golden-query result says it came from the keyword-only survey, never a planner run", () => {
+  for (const id of Object.keys(D11_FACTS)) {
+    const { fact } = allFacts.find((entry) => entry.fact.id === id);
+
+    // The 2026-11-18 snapshot survey reached every D11 fact with a canonical
+    // keyword query; that says nothing about a hybrid-retrieval planner run.
+    assert.equal(fact.goldenQueryRetrieves, true, id);
+    assert.equal(fact.goldenQueryEvidence?.kind, "keyword-survey", id);
+    assert.match(fact.goldenQueryEvidence.ref, /keyword-only/, `${id}: names the survey's limit`);
+  }
+});
+
+test("the viscosity fact explains that 5W-20 is not judged, only unmeasured", () => {
+  const { fact } = allFacts.find((entry) => entry.fact.id === "s1-oil-viscosity");
+
+  assert.match(fact.concept, /viscosity/i);
+  assert.doesNotMatch(fact.concept, /\bgrade\b(?! \()/i, "0W-20 is the viscosity; the grade is ILSAC multigrade");
+  assert.match(fact.knownCaveat, /5W-20/);
+  assert.match(fact.knownCaveat, /measurement/i);
+  assert.match(fact.knownCaveat, /not .*unsuitable|not a finding/i);
 });
 
 test("the absent S8 fact says so explicitly instead of leaving the survey fields null", () => {
@@ -182,7 +334,7 @@ test("the used-plug fact records the label/value split as a caveat without chang
 });
 
 test("source hints carry the page-level confirmation that Q1 may score", () => {
-  for (const { fact } of allFacts.filter(({ fact }) => fact.kind === "numeric_spec")) {
+  for (const { fact } of allFacts.filter(({ fact }) => fact.kind !== "absence")) {
     assert.equal(fact.sourceHint.confirmed, true, fact.id);
     assert.ok(fact.sourceHint.sources.length >= 1, fact.id);
 
@@ -281,7 +433,47 @@ const INVALID = [
   ["a part matcher with the sticky flag", (f) => { f.partMatchers = [/widget/y]; }, /global|sticky/],
   ["a claim example with an unknown label", (f) => { f.claimExamples[0].expect = "great"; }, /expect/],
   ["a claim example with no category", (f) => { delete f.claimExamples[0].category; }, /category/],
+  ["a fact confirmed by neither an Ask case nor the owner", (f) => { f.confirmedBy = { note: "looked right" }; }, /confirmedBy/],
+  ["an owner review with no date", (f) => { f.confirmedBy = { ownerReview: "D11" }; }, /confirmedBy/],
+  ["an owner review that is not D11", (f) => { f.confirmedBy = { ownerReview: "someone", date: "2026-11-19" }; }, /confirmedBy/],
 ];
+
+test("a fact the owner confirmed under D11 is accepted with its date", () => {
+  const scenario = withFact((fact) => {
+    fact.confirmedBy = { ownerReview: "D11", date: "2026-11-19", note: "rendered page" };
+  });
+
+  assert.deepEqual(validateScenario(scenario), []);
+});
+
+// An essential STEP counts in C1, not P1, so a set expectation for it carries
+// inC1Numerator. Before Stage B no committed scenario had an essential step.
+const stepScenario = (expectation) =>
+  withFact((fact, built) => {
+    for (const key of ["partMatchers", "units", "acceptable", "qualifiersAnyOf", "excludedQualifiers", "decoys"]) {
+      delete fact[key];
+    }
+    Object.assign(fact, {
+      kind: "procedure_step",
+      stepMatchers: [/\bremove\b/i, /\bwidget\b/i],
+      claimExamples: [{ text: "Remove the widget.", expect: "covers", category: "the-step" }],
+    });
+    built.claimSetExamples = [
+      { id: "t-step", claims: ["Remove the widget."], expect: { "t-widget-torque": expectation }, criticalFindings: 0 },
+    ];
+  });
+
+test("an essential step's set expectation carries inC1Numerator", () => {
+  assert.deepEqual(validateScenario(stepScenario({ outcome: "COVERED", inC1Numerator: true })), []);
+});
+
+test("an essential step's set expectation is rejected with a P1 flag or without its C1 flag", () => {
+  const withP1 = validateScenario(stepScenario({ outcome: "COVERED", inP1Numerator: true }));
+  const withNone = validateScenario(stepScenario({ outcome: "COVERED" }));
+
+  assert.ok(withP1.some((problem) => /inC1Numerator/.test(problem)), JSON.stringify(withP1));
+  assert.ok(withNone.some((problem) => /inC1Numerator/.test(problem)), JSON.stringify(withNone));
+});
 
 for (const [name, mutate, expected] of INVALID) {
   test(`the validator rejects ${name}`, () => {
@@ -478,11 +670,56 @@ const REQUIRED_CATEGORIES = {
     "belt-fabrication-interval", "belt-fabrication-inspection", "belt-negated-statement", "belt-negated-with-cue",
     "chain-statement", "drive-belt-decoy", "serpentine-belt-decoy",
   ],
+  // Phase 4 Stage B (D11). Each step names the near-miss it must NOT cover:
+  // a neighbouring step that shares its words.
+  "s1-step-remove-filler-cap": ["the-step", "refit"],
+  "s1-step-drain-oil": ["the-step", "filter-cap-oil", "other-fluid", "drain-plug-refit"],
+  "s1-step-new-drain-gasket": ["the-step", "no-gasket"],
+  "s1-step-drain-filter-cap": ["the-step", "engine-drain", "loosen-only"],
+  "s1-step-remove-old-element": ["the-step", "new-element"],
+  "s1-step-clean-cap-threads": ["the-step", "other-cleaning"],
+  "s1-step-new-oring-oiled": ["the-step", "old-o-ring", "not-oiled"],
+  "s1-step-new-filter-element": ["the-step", "old-element", "o-ring-not-element"],
+  "s1-step-clean-install-surface": ["the-step", "gap-check"],
+  "s1-cap-alignment": ["the-step", "other-alignment"],
+  "s1-step-install-filter-cap": ["the-step", "o-ring-step", "loosen"],
+  "s1-filter-cap-torque": [
+    "printed-forms-together", "alternate-unit-kgf", "decoy-drain-plug-figure", "right-number-wrong-unit",
+    "different-part", "no-figure",
+  ],
+  "s1-step-add-oil": ["the-step", "o-ring-oiling", "capacity-only"],
+  "s1-step-refit-filler-cap": ["the-step", "removal", "filter-not-filler"],
+  "s1-oil-viscosity": ["the-step", "other-viscosity-not-judged", "viscosity-list-not-judged", "grade-without-viscosity"],
+  "s1-oil-capacity-with-filter": [
+    "printed-forms-together", "alternate-unit", "decoy-without-filter-unqualified", "decoy-dry-fill-unqualified",
+    "us-figure-as-imperial", "qualified-other-fact", "engine-displacement", "no-figure",
+  ],
+  "s1-step-inspect-leak": ["the-step", "no-leak", "other-fluid"],
+  "s2-step-remove-head-cover": ["the-step", "clip-release", "under-cover", "refit-not-removal"],
+  "s2-step-disconnect-coils": ["the-step", "connect-not-disconnect"],
+  "s2-step-remove-coils": ["the-step", "install-not-remove", "notice-not-step"],
+  "s2-notice-plug-tube": ["the-step", "no-notice"],
+  "s2-step-remove-plugs": ["the-step", "install-not-remove", "coils-not-plugs"],
+  "s2-plug-wrench-size": ["primary-unit", "wrong-size", "no-figure", "other-part"],
+  "s2-recommended-plug": ["the-step", "no-part-number"],
+  "s2-step-install-plugs": ["the-step", "remove-not-install", "notice-not-step"],
+  "s2-spark-plug-torque": [
+    "printed-forms-together", "alternate-unit-kgf", "decoy-coil-figure", "right-number-wrong-unit",
+    "coil-figure-beside-plugs", "different-part",
+  ],
+  "s2-step-install-coils": ["the-step", "connectors-not-coils", "remove-not-install"],
+  "s2-coil-bolt-torque": [
+    "printed-forms-together", "alternate-unit-kgf", "decoy-plug-figure", "right-number-wrong-unit",
+    "plug-figure-beside-coils", "different-part",
+  ],
+  "s2-step-connect-coils": ["the-step", "disconnect-not-connect"],
+  "s2-step-refit-head-cover": ["the-step", "removal-not-refit", "valve-cover"],
 };
 
 test("each fact's labelled examples cover every required edge category", () => {
   for (const { fact } of allFacts) {
     const present = new Set(fact.claimExamples.map((example) => example.category));
+    assert.ok(REQUIRED_CATEGORIES[fact.id], `${fact.id} has no required categories listed`);
     const missing = REQUIRED_CATEGORIES[fact.id].filter((category) => !present.has(category));
 
     assert.deepEqual(missing, [], `${fact.id} lacks examples for ${missing}`);
@@ -599,6 +836,9 @@ test("claim-set examples exist for the cases the owner named", () => {
     "s1-contradiction", "s1-two-units", "s1-duplicate", "s1-wrong-only", "s1-wrong-unit-and-right",
     "s2-trap", "s2-both-facts-ok", "s2-endpoint-only", "s2-range-with-endpoint",
     "s8-fabrication", "s8-refusal", "s8-drive-belt-only", "s8-fabrication-plus-decoy",
+    // Phase 4 Stage B.
+    "s1-cap-takes-drain-plug-figure", "s1-capacity-with-qualified-sibling", "s1-refill-and-filler-cap",
+    "s2-plug-and-coil-torques", "s2-plug-takes-coil-figure",
   ]) {
     assert.ok(ids.includes(wanted), `missing claim-set example ${wanted}`);
   }

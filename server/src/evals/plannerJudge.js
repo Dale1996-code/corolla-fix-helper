@@ -489,7 +489,7 @@ export function evaluateTaskDerivation(tasks, scenario) {
 const sentencesOf = (text) => String(text ?? "").split(/(?<=[.!?;])\s+(?=[A-Z(])/);
 
 /** True when some sentence of the text states the fact as the fact needs. */
-function statesFact(text, fact) {
+export function statesFact(text, fact) {
   return sentencesOf(text).some((sentence) => labelClaimForFact(sentence, fact) === "covers");
 }
 
@@ -901,13 +901,22 @@ function computeMetrics(record, scenario, facts, claims, finalizerInfo) {
   const P3 = anyScored ? accepted.filter((claim) => Object.values(claim.labels).includes("forbidden")).length : "unscored";
 
   const evidenceStatus = record.outcome?.evidenceStatus ?? null;
+  // C3 ("verified but thin") reads the CONFIRMED essential facts and nothing
+  // else: true when a verified plan lacks one of them. With none confirmed it
+  // has nothing to read, so it is not assessable. Whether the real procedure is
+  // complete is a separate statement the judge can never make from a fact list
+  // (owner correction, Phase 4 Stage B), so C3Scope says so beside every value;
+  // listing `procedure-completeness` as unassessed no longer blanks C3 out.
+  const essentialScored = scored.filter((fact) => fact.essential);
   /** @type {boolean | "not_assessable"} */
   let C3 = false;
   if (evidenceStatus === "verified") {
-    const essentialMissed = scored.filter((fact) => fact.essential).some((fact) => entry(fact.id).outcome !== "COVERED");
-    const completenessUnassessed = (scenario.unassessedAreas ?? []).some((area) => area.id === "procedure-completeness");
-    C3 = essentialMissed ? true : completenessUnassessed ? "not_assessable" : false;
+    C3 =
+      essentialScored.length === 0
+        ? "not_assessable"
+        : essentialScored.some((fact) => entry(fact.id).outcome !== "COVERED");
   }
+  const C3Scope = { basis: "confirmed_essential_facts", fullProcedureCompleteness: "not_established" };
 
   const hinted = scored.filter((fact) => fact.sourceHint?.confirmed);
   const citations = record.outputs?.citations ?? [];
@@ -933,6 +942,7 @@ function computeMetrics(record, scenario, facts, claims, finalizerInfo) {
     P3,
     C1: ratio(essentialOf("procedure_step"), "inC1Numerator"),
     C3,
+    C3Scope,
     Q1,
     // U1 and U4 travel together (7.4 rule 1).
     U1: {

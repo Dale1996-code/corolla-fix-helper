@@ -73,11 +73,46 @@ function parse(keys, options) {
   return parsed;
 }
 
+// The fixture's runs were scripted against the Phase 2a answer key (one
+// essential figure per scenario). Phase 4 Stage B added the owner's D11 facts,
+// which those runs never state, so these tests judge against the Phase 2a key
+// to keep testing the report's own rules; one test below uses the committed
+// key to show what the D11 facts change.
+const PHASE_2A_FACTS = ["s1-drain-plug-torque", "s2-new-plug-gap", "s2-used-plug-max-gap", "s8-no-timing-belt-procedure"];
+
+function phase2aScenario(id) {
+  const scenario = getPlannerScenario(id);
+
+  return scenario
+    ? {
+        ...scenario,
+        facts: scenario.facts.filter((fact) => PHASE_2A_FACTS.includes(fact.id)),
+        claimSetExamples: scenario.claimSetExamples.filter((example) =>
+          Object.keys(example.expect).every((factId) => PHASE_2A_FACTS.includes(factId))
+        ),
+      }
+    : scenario;
+}
+
 function analyze(keys, { capture, build } = {}) {
   const { header, records } = parse(keys, capture);
 
-  return buildBaselineReport({ header, records, source: "fixture.jsonl", ...build });
+  return buildBaselineReport({ header, records, source: "fixture.jsonl", resolveScenario: phase2aScenario, ...build });
 }
+
+test("against the committed D11 answer key, the run that covers the drain-plug torque lacks the facts it never states", () => {
+  const { report } = analyze(["s1-covers-all"], { build: { resolveScenario: getPlannerScenario } });
+
+  assert.deepEqual([report.block.assessable, report.block.covered, report.block.lacking], [1, 0, 1]);
+  const uncovered = report.block.lackingRuns[0].uncovered.map((fact) => fact.factId);
+
+  assert.ok(!uncovered.includes("s1-drain-plug-torque"), "the figure it states is covered");
+  // Its invented filter-cap claim ("tighten the cap by hand...") states the
+  // install-filter-cap step, so that one D11 step is covered too.
+  assert.ok(!uncovered.includes("s1-step-install-filter-cap"), "the cap step it states is covered");
+  assert.ok(uncovered.includes("s1-filter-cap-torque") && uncovered.includes("s1-step-add-oil"), JSON.stringify(uncovered));
+  assert.equal(uncovered.length, 14, "the other 14 of S1's 15 essential D11 facts");
+});
 
 const textOf = (keys, options) => formatBaselineReport(analyze(keys, options).report);
 
@@ -242,7 +277,7 @@ test("a covered run is never presented as complete, even if the scenario data fo
   // Coverage of the few confirmed facts is not completeness of the repair. The
   // note must not depend on a scenario remembering to list procedure-completeness.
   const withoutAreas = (id) => {
-    const scenario = getPlannerScenario(id);
+    const scenario = phase2aScenario(id);
 
     return scenario ? { ...scenario, unassessedAreas: [] } : scenario;
   };
@@ -292,7 +327,7 @@ test("Table 0 says what produced the runs, and flags an uncommitted revision as 
   assert.match(text, new RegExp(INSTRUCTIONS_HASH));
   assert.match(text, /answerModel=synthetic-model/);
   assert.match(text, /retrievalMode=keyword/);
-  assert.match(text, /scenarioSetVersion 1/);
+  assert.match(text, /scenarioSetVersion 2/);
   assert.match(text, /4 confirmed, 0 unconfirmed/);
   assert.match(text, /7 documents, 11 chunks/);
   assert.match(text, new RegExp("c".repeat(32)));
@@ -311,7 +346,7 @@ test("Table 0 says what produced the runs, and flags an uncommitted revision as 
 test("Table 0 says when the scenario data changed since the capture", () => {
   const text = textOf(["s1-covers-all"], { capture: { header: { scenarioSetVersion: 99 } } });
 
-  assert.match(text, /scenarioSetVersion 99.*current 1/);
+  assert.match(text, /scenarioSetVersion 99.*current 2/);
   assert.match(text, /NOT COMPARABLE/);
 });
 
