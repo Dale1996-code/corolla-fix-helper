@@ -789,6 +789,25 @@ limits 1-3 and 5-6 still work and limit 4 is simply absent: the pilot-then-appro
 replaces it, **provided the provider-side budget above has been verified first**. Without that
 verification, the tee is not optional.
 
+**As built (Phase 5).** `server/src/scripts/capturePlanner.js` (with `evals/plannerCaptureSession.js`)
+and `server/src/scripts/reportPlannerBaseline.js` (with `evals/reportPlannerBaseline.js`). No paid
+call was made to build or test them. Where the spec left a choice open:
+
+| Question | Resolution |
+|---|---|
+| What makes a run real? | `--no-dry-run --yes`. `--yes` alone stays a dry run and says so; either flag missing refuses. |
+| Does `--max-provider-requests` have a default? | No. A real run refuses without it, because the owner's approval names the number (12.4 item 4). The dry run prints the worst case so it can be chosen. |
+| A plan larger than `--max-runs` | Refused, not trimmed: a baseline silently missing a scenario is worse than one that did not start. With no `--scenario`, the default plan (S1, S2, S8) exceeds the default `--max-runs 1`, so the pilot must name `--scenario S1-oil-and-filter`. |
+| Run order | Repeat by repeat, so a session cut short still holds each scenario once. After the request limit trips, no further run starts. |
+| A refused retrieval | The agent turns it into a tool error and may still finalize. So the session wraps `runAgent`: any run during which a request was refused is recorded as `outcome.reason: "request_limit_reached"`, which the judge already classes as Layer I. |
+| Per-run accounting | Each capture line gains `session: { attempts, providerRequests, limitReached }` (an extra key the parser keeps; format version unchanged). Table 0's provider-request total sums it, and falls back to the recorded calls for a line without it. |
+| A record that disagrees with its own re-derivation | Not written to the capture (as 10 requires); kept in a `.rejected.jsonl` beside it so the spend is not lost. |
+| The S8 precondition | `checkTimingBeltRefusalPrecondition` runs before an S8 run (spec 6.2 asks for it), not only in the survey. |
+| "Config snapshot (10)" in Table 0 | The header holds twelve keys; Table 0 prints all twelve. |
+| Table 2's columns | The spec lists nine. The judge has more outcomes (`PARTIALLY_COVERED`, `CORRECTLY_ABSENT`, `L0:*`, `UNDETERMINED`, `REFUSED`), and "every fact in exactly one outcome" needs a column for each, so the table has them and refuses to print if its columns do not add up to confirmed facts × runs. |
+| 7.3's "fixed-seed list" | Not generated: automated sampling is out of Phase 5's scope. The report states how many accepted claims matched no confirmed fact, and each is in the per-run JSON. |
+| The required block and D11 | D11 predicts every S1/S2 plan lands in "not assessable". The committed S1 and S2 each carry one *essential, confirmed* figure (`s1-drain-plug-torque`, `s2-new-plug-gap`), so by the block's own rule they are assessable, and S8 (no essential fact) is the not-assessable one. The block follows its rule. Whenever a run is counted as covered, the block adds a standing note that "covered" means the confirmed essential facts only and is not completeness (it does not depend on scenario data), and names the scenarios that list `procedure-completeness` as unassessed (S1 and S2 do). Completeness for S1 and S2 still needs D11's confirmed steps. |
+
 ---
 
 ## 13. Risks

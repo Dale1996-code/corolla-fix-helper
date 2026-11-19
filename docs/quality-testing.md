@@ -198,10 +198,51 @@ warning), and the saved-checklist notes. It prints each change, then four lines:
 ```
 
 Read them as you read `eval:replay`: every changed row should be one the change was meant to
-move. **There is no tool yet that records a live planner run**, so the only capture today is the
-invented one used by the tests (`server/test/fixtures/synthetic-planner-capture.jsonl`). The
-format and the replay are ready for the day one exists. A planner capture will quote the manuals
-just as an Ask capture does, so `server/data/captures/` stays ignored by git.
+move. A planner capture quotes the manuals just as an Ask capture does, so
+`server/data/captures/` stays ignored by git. The capture committed for the tests is invented
+(`server/test/fixtures/synthetic-planner-capture.jsonl`).
+
+**Recording a live planner run (paid) and reading it (free).** Two commands finish the planner
+evaluation's tooling. Nothing in the repository has ever run the first one against a real model.
+
+```powershell
+npm run eval:planner:capture      # a DRY RUN: calls nothing, prints the plan and an ESTIMATE
+npm run eval:planner:report -- server/data/captures/planner-<time>-<revision>.jsonl
+```
+
+`eval:planner:capture` is **paid** when, and only when, it is run with `--no-dry-run --yes`. Run it
+only with the owner's approval in the session, naming the scenarios, the repeats, `--max-runs`,
+and `--max-provider-requests`. The default dry run lists the scenarios, the run count, the
+worst-case request count beside `AI_DAILY_CALL_LIMIT`, every limit with its value, and an
+estimate of the dollars from a price table marked with its date. The estimate is **not a limit**.
+A real run refuses, and says why, unless all of these hold:
+
+- `--no-dry-run` and `--yes` are both given, and `OPENAI_API_KEY` is set;
+- `--max-provider-requests N` is given. It is mandatory. The tool counts every model turn and
+  every retrieval, refuses the next one once the limit is reached, and records the run that hit
+  it as infrastructure (Layer I), never as a product failure;
+- the plan (scenarios × repeats) fits `--max-runs`, which defaults to 1. A plan that does not fit
+  is refused, not trimmed, so name the scenarios with `--scenario <id>`;
+- the database is a `VACUUM INTO` snapshot, not the default `server/data` one, and has no
+  write-ahead log. Set it with `DATABASE_FILE`; `--allow-default-database` overrides it;
+- if S8 is in the plan, the corpus still has no timing belt (the same check the Ask eval uses).
+
+Token limits and the token-usage tee are **not built** (spec decision D9), so the tool cannot
+measure spend. The only real dollar bound is a budget set on the OpenAI project itself, which the
+dry run lists as **UNVERIFIED** until the owner confirms it. The first paid session is a one-run
+pilot (`--scenario S1-oil-and-filter`).
+
+`eval:planner:report` is free and offline (it imports neither `config.js` nor `database.js`). It
+judges every run in a capture and writes two files beside it: a per-run JSON, which quotes the
+manuals and stays out of git, and an aggregates-only section for
+[`docs/evals/planner-baseline-log.md`](evals/planner-baseline-log.md). The first thing it prints
+is the critical-findings line; the second is the block that matters most: **verified or ready
+plans that lack essential confirmed facts**. A plan the planner labels `verified` and `ready` can
+still omit a figure the manual prints, and a run in a scenario with no confirmed essential fact is
+reported as *not assessable*, never as complete. The report refuses to print if any confirmed fact
+fails to land in exactly one outcome (I-7), or if the capture could not be read in full. It
+measures; it sets no pass or fail target, and nothing it reports is ever a reason to loosen the
+verifier. The committed log is a blank template until the owner approves a paid baseline.
 
 ### The automated tests never read your `server/.env`
 
