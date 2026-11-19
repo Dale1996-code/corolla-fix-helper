@@ -123,6 +123,16 @@ const RANGE_JOIN = String.raw`\s*(?:to|-|–|—|~)\s*`;
 const toNumber = (raw) => Number(raw.replace(/,/g, ""));
 const same = (a, b) => Math.abs(a - b) < 1e-9;
 
+/** Every spelling of the given units, longest first, and one regex alternation of them. */
+function unitSpellings(units) {
+  const spellings = units
+    .flatMap((unit) => [unit.canonical, ...unit.aliases].map((spelling) => ({ spelling, canonical: unit.canonical })))
+    .sort((a, b) => b.spelling.length - a.spelling.length);
+  return { spellings, unitPattern: spellings.map((entry) => escapeRegex(entry.spelling)).join("|") };
+}
+
+const UNIT_END = String.raw`(?![A-Za-z])`;
+
 /**
  * Every figure the claim states in one of the fact's declared units, as values
  * and ranges. A number with no declared unit after it is not read: the matcher
@@ -134,25 +144,21 @@ const same = (a, b) => Math.abs(a - b) < 1e-9;
  * @param {Array<{ canonical: string, aliases: string[] }>} units
  */
 function parseFigures(text, units) {
-  const spellings = units
-    .flatMap((unit) => [unit.canonical, ...unit.aliases].map((spelling) => ({ spelling, canonical: unit.canonical })))
-    .sort((a, b) => b.spelling.length - a.spelling.length);
-  const unitPattern = spellings.map((entry) => escapeRegex(entry.spelling)).join("|");
+  const { spellings, unitPattern } = unitSpellings(units);
   const canonicalOf = (found) =>
     spellings.find((entry) => entry.spelling.toLowerCase() === found.toLowerCase())?.canonical ?? null;
-  const unitEnd = String.raw`(?![A-Za-z])`;
 
   /** @type {any[]} */
   const figures = [];
   let rest = String(text);
 
-  const range = new RegExp(`${NUMBER_START}${NUMBER}${RANGE_JOIN}${NUMBER}\\s*(${unitPattern})${unitEnd}`, "gi");
+  const range = new RegExp(`${NUMBER_START}${NUMBER}${RANGE_JOIN}${NUMBER}\\s*(${unitPattern})${UNIT_END}`, "gi");
   rest = rest.replace(range, (_match, low, high, unit) => {
     figures.push({ kind: "range", low: toNumber(low), high: toNumber(high), unit: canonicalOf(unit) });
     return " ";
   });
 
-  const value = new RegExp(`${NUMBER_START}${NUMBER}\\s*(${unitPattern})${unitEnd}`, "gi");
+  const value = new RegExp(`${NUMBER_START}${NUMBER}\\s*(${unitPattern})${UNIT_END}`, "gi");
   rest.replace(value, (_match, number, unit) => {
     figures.push({ kind: "value", value: toNumber(number), unit: canonicalOf(unit) });
     return " ";
@@ -488,9 +494,82 @@ export function evaluateTaskDerivation(tasks, scenario) {
 /** Sentences, split where a sentence-ending mark is followed by a capital. */
 const sentencesOf = (text) => String(text ?? "").split(/(?<=[.!?;])\s+(?=[A-Z(])/);
 
-/** True when some sentence of the text states the fact as the fact needs. */
+// A sentence that is only a specification heading and its figure ("Torque : 37
+// N·m (27 ft-lbf) 2."): a quantity word, a colon, then a number. It names no
+// part, so the part it specifies is the one the sentence right before it names.
+const BARE_SPEC_HEADING = /^\s*(?:tightening\s+)?(?:torque|capacity|gap|clearance)\s*:\s*-?\d/i;
+
+/**
+ * Where a flattened table's rows meet inside one sentence: after each run of
+ * figures in the fact's units -- a figure and the alternate units bracketed
+ * after it, "4.2 liters (4.4 US qts, 3.7 Imp. qts)" -- except the last, so a
+ * condition printed after the last figure stays on its row. A sentence with
+ * one run of figures, or none, is one row: itself.
+ */
+function rowsOf(sentence, units) {
+  const { unitPattern } = unitSpellings(units);
+  const figure = new RegExp(`${NUMBER_START}${NUMBER}(?:${RANGE_JOIN}${NUMBER})?\\s*(?:${unitPattern})${UNIT_END}`, "gi");
+  const runEnds = [];
+  let previousEnd = null;
+
+  for (const match of sentence.matchAll(figure)) {
+    const start = /** @type {number} */ (match.index);
+    let end = start + match[0].length;
+    end += /^\s*\)/.exec(sentence.slice(end))?.[0].length ?? 0;
+
+    if (previousEnd !== null && /^[\s(,/]*$/.test(sentence.slice(previousEnd, start))) {
+      runEnds[runEnds.length - 1] = end;
+    } else {
+      runEnds.push(end);
+    }
+    previousEnd = end;
+  }
+
+  const cuts = [0, ...runEnds.slice(0, -1), sentence.length];
+  return cuts.slice(0, -1).map((cut, index) => sentence.slice(cut, cuts[index + 1]));
+}
+
+/**
+ * The texts whose reading as a claim decides whether a fact was in front of the
+ * model. Every fact: each sentence. A numeric fact also gets two readings that
+ * manual layouts need and the verifier accepts as one verbatim claim:
+ *
+ *  - a sentence joined to the next when the next is a bare specification
+ *    heading (`BARE_SPEC_HEADING`): "Thread in the plugs by hand. Torque :
+ *    20 N·m". Only the very next sentence, only forward, and only a heading
+ *    that names nothing itself; the pair is then judged as one claim, so a
+ *    part it also names (the coils) or an excluded condition still decides.
+ *  - each row of a sentence that flattens a table (`rowsOf`), so a "without
+ *    filter change" row no longer hides the "with filter change" row beside it.
+ *
+ * Both only ADD readings: anything one sentence states is still seen. Known
+ * limits, both on the side of calling a fact seen: a heading that follows a
+ * sentence naming two parts is read with both ("loosen the drain plug and fit
+ * the cap. Torque : 37 N·m" is seen for the drain plug, as the same pair would
+ * be accepted and labelled as a claim); and a condition printed AFTER the
+ * figure of a row that is not the last ("4.2 L without a filter, 4.7 L dry")
+ * is read with the next row. Steps stay sentence by sentence, the survey's
+ * step reading (`matcherForFact`), which a parity test pins.
+ */
+function readingsOf(text, fact) {
+  const sentences = sentencesOf(text);
+  if (fact.kind !== "numeric_spec") {
+    return sentences;
+  }
+  return sentences.flatMap((sentence, index) => {
+    const next = sentences[index + 1];
+    const rows = rowsOf(sentence, fact.units);
+    return [
+      sentence,
+      ...(rows.length > 1 ? rows : []),
+      ...(next !== undefined && BARE_SPEC_HEADING.test(next) ? [`${sentence} ${next}`] : []),
+    ];
+  });
+}
+
+/** True when some reading of the text (`readingsOf`) states the fact as the fact needs. */
 export function statesFact(text, fact) {
-  return sentencesOf(text).some((sentence) => labelClaimForFact(sentence, fact) === "covers");
+  return readingsOf(text, fact).some((reading) => labelClaimForFact(reading, fact) === "covers");
 }
 
 function onHintedSource(source, fact) {

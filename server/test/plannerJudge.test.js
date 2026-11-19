@@ -178,6 +178,97 @@ test("survey parity: a step is not hidden by an exclusion that belongs to anothe
   assert.equal(judge.statesFact(chunk, fact), true);
 });
 
+// ---- Evidence presence across a sentence boundary or a flattened table --------
+//
+// Manuals print an instruction in one sentence and its figure under a bare
+// "Torque :" heading in the next, and flatten a table's rows into one run of
+// text. Read one sentence at a time, neither states the fact, so a run shown
+// that text and claiming nothing was attributed to retrieval or the query
+// instead of G:omission. All text here is invented.
+
+const factIn = (scenarioId, factId) => getPlannerScenario(scenarioId).facts.find((fact) => fact.id === factId);
+const DRAIN = () => factIn("S1-oil-and-filter", "s1-drain-plug-torque");
+const PLUG = () => factIn("S2-spark-plugs", "s2-spark-plug-torque");
+const COIL = () => factIn("S2-spark-plugs", "s2-coil-bolt-torque");
+const CAPACITY = () => factIn("S1-oil-and-filter", "s1-oil-capacity-with-filter");
+
+const SPLIT_TEXT = {
+  drain: "Fit the oil drain plug with a fresh washer. Torque : 37 N·m (27 ft-lbf) 4. Lower the vehicle.",
+  plug: "Thread in the 4 spark plugs with a plug socket . Torque : 20 Nm (204 kgf-cm, 15 ft-lbf) 2. Refit the covers.",
+  table:
+    "Oil amounts Case Amount Refill including a new filter 4.2 liters (4.4 US qts, 3.7 Imp. qts) Refill keeping the old filter, without a new one 3.9 liters (4.1 US qts, 3.4 Imp. qts) Empty engine, dry fill 4.7 liters (5.0 US qts) 5. Check for leaks.",
+};
+
+test("statesFact: a part in one sentence and its figure under a bare heading in the next is seen", () => {
+  assert.equal(judge.statesFact(SPLIT_TEXT.drain, DRAIN()), true);
+  assert.equal(judge.statesFact(SPLIT_TEXT.plug, PLUG()), true);
+  // The figure is the plugs', so it is not the coil bolts' however it is read.
+  assert.equal(judge.statesFact(SPLIT_TEXT.plug, COIL()), false);
+});
+
+test("statesFact: a figure is not borrowed from a sentence that names its own subject, or from further away", () => {
+  const drain = DRAIN();
+  // The next sentence's figure belongs to the filter cap it names.
+  assert.equal(judge.statesFact("Fit the oil drain plug with a fresh washer. Tighten the oil filter cap to 37 N·m.", drain), false);
+  // A heading two sentences on belongs to the instruction right before it.
+  assert.equal(judge.statesFact("Fit the oil drain plug with a fresh washer. Wipe away any spilled oil. Torque : 37 N·m", drain), false);
+  // A heading belongs to the instruction BEFORE it, never the one after.
+  assert.equal(
+    judge.statesFact("Tighten the oil filter cap by hand. Torque : 37 N·m (27 ft-lbf) 3. Remove the oil drain plug.", drain),
+    false
+  );
+  // The pair is still judged as one claim: the coils it names make it the
+  // coil-bolt figure, not the plugs'.
+  assert.equal(judge.statesFact("Seat the ignition coils over the spark plugs. Torque : 20 N·m", PLUG()), false);
+});
+
+test("statesFact: one row of a flattened table is seen although another row carries an excluded condition", () => {
+  assert.equal(judge.statesFact(SPLIT_TEXT.table, CAPACITY()), true);
+});
+
+test("statesFact: a table row keeps its own label, and a single figure keeps the condition printed after it", () => {
+  const capacity = CAPACITY();
+  // The right figure sits on another part's row.
+  assert.equal(
+    judge.statesFact("Engine oil refill without a new filter 3.9 liters (4.1 US qts) Coolant 4.2 liters (4.4 US qts)", capacity),
+    false
+  );
+  // One figure: nothing is cut, so the trailing condition still applies.
+  assert.equal(judge.statesFact("Refill the engine oil with 4.2 liters without changing the filter.", capacity), false);
+});
+
+test("statesFact: the new readings only add -- every text a single sentence states is still seen", () => {
+  for (const scenario of PLANNER_SCENARIOS) {
+    for (const fact of scenario.facts.filter((candidate) => candidate.kind !== "absence")) {
+      for (const example of fact.claimExamples.filter((candidate) => candidate.expect === "covers")) {
+        assert.equal(judge.statesFact(`Park on level ground. ${example.text} Read on.`, fact), true, `${fact.id}: ${example.text}`);
+      }
+    }
+  }
+});
+
+// The survey reads a numeric fact across the whole chunk, so anything the judge
+// now sees in a text the survey must find there too: a judge "it was there" the
+// survey cannot reproduce would be a fact the survey never located.
+test("survey parity: every numeric fact the judge sees in a text, the survey finds in it", async () => {
+  const { matcherForFact } = await import("../src/scripts/surveyPlannerCorpus.js");
+  const texts = [
+    ...Object.values(SPLIT_TEXT),
+    ...PLANNER_SCENARIOS.flatMap((scenario) => scenario.facts.flatMap((fact) => fact.claimExamples.map((example) => example.text))),
+  ];
+  let seen = 0;
+
+  for (const scenario of PLANNER_SCENARIOS) {
+    for (const fact of scenario.facts.filter((candidate) => candidate.kind === "numeric_spec")) {
+      for (const text of texts.filter((candidate) => judge.statesFact(candidate, fact))) {
+        assert.equal(matcherForFact(fact).holds(text), true, `${fact.id} on "${text}"`);
+        seen += 1;
+      }
+    }
+  }
+  assert.ok(seen > 20, `checked ${seen} seen texts`);
+});
+
 test("matcher: every label the scenario data uses is one the matcher can produce", () => {
   for (const scenario of PLANNER_SCENARIOS) {
     for (const fact of scenario.facts) {
@@ -482,6 +573,16 @@ const LAYER_ROWS = [
     steps: searchThenFinalize("oil drain plug torque", () => []),
   },
   {
+    // The drain plug in one sentence, its torque under a bare heading in the
+    // next. Surveyed clean with a golden query that finds it, so reading one
+    // sentence at a time would call this G:query_formulation.
+    id: "G:omission (split heading)",
+    outcome: "G:omission",
+    scenario: () => variantOf("S1-oil-and-filter", (copy) => SURVEYED(copy.facts[0], { quality: "clean", probe: true })),
+    corpus: LAYER_CORPORA["split-heading"],
+    steps: searchThenFinalize("oil drain plug torque", () => []),
+  },
+  {
     id: "G:no_search",
     outcome: "G:no_search",
     scenario: () => getPlannerScenario("S1-oil-and-filter"),
@@ -520,6 +621,21 @@ for (const row of LAYER_ROWS) {
     assert.equal(judgment.invariants["I-7"].status, "pass", JSON.stringify(judgment.invariants["I-7"]));
   });
 }
+
+// The capacity fact is rated flattened_table, so if no reading found it on the
+// hinted page the judge would call the miss S:source_unusable. One row states
+// it, the model was shown it, and claimed nothing: G:omission.
+test("layer fixture: a fact stated by one row of a flattened table, shown and not claimed, is G:omission", async () => {
+  const scenario = getPlannerScenario("S1-oil-and-filter");
+  const { record } = await recordRun(scenario, {
+    steps: searchThenFinalize("engine oil refill amount", () => []),
+    corpus: LAYER_CORPORA["flattened-table"],
+  });
+  const judgment = judge.judgeRun(record, scenario);
+
+  assert.equal(factOf(judgment, "s1-oil-capacity-with-filter").outcome, "G:omission");
+  assert.equal(judgment.invariants["I-7"].status, "pass", JSON.stringify(judgment.invariants["I-7"]));
+});
 
 test("layer fixtures cover every layer the acceptance criteria require", () => {
   const layers = new Set(LAYER_ROWS.map((row) => row.outcome));
