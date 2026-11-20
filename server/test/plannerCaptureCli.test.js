@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -78,7 +80,16 @@ const oilChangeSteps = () => [
 function world({ steps = oilChangeSteps(), config = baseConfig(), corpus = {}, ...overrides } = {}) {
   const model = createScriptedModel(steps);
   const keyword = createKeywordRetriever(MINI_CORPORA.S1);
-  const seen = { retrievals: 0, runtimeLoaded: 0, inspected: 0, timingBeltChecks: 0 };
+  const seen = {
+    retrievals: 0,
+    runtimeLoaded: 0,
+    inspected: 0,
+    timingBeltChecks: 0,
+    /** @type {string[]} */ workingCopies: [],
+    cleanups: 0,
+    /** @type {string[]} */ runtimeDatabaseFiles: [],
+  };
+  const corpusMd5 = corpus.dbSnapshotMd5 ?? "b".repeat(32);
   const out = [];
   const err = [];
 
@@ -91,8 +102,9 @@ function world({ steps = oilChangeSteps(), config = baseConfig(), corpus = {}, .
       log: (line) => out.push(line),
       error: (line) => err.push(line),
       loadConfig: async () => config,
-      loadRuntime: async () => {
+      loadRuntime: async (loadedConfig) => {
         seen.runtimeLoaded += 1;
+        seen.runtimeDatabaseFiles.push(loadedConfig.databaseFile);
         return {
           runAgent: runRepairPlannerAgent,
           extractTasks: extractRepairTasks,
@@ -126,6 +138,18 @@ function world({ steps = oilChangeSteps(), config = baseConfig(), corpus = {}, .
       readRevision: () => ({ revision: "abc1234", dirty: false }),
       now: () => new Date("2026-11-18T09:30:15.000Z"),
       sleep: async () => {},
+      hashFile: async () => corpusMd5,
+      listSidecars: () => [],
+      prepareWorkingCopy: (file) => {
+        seen.workingCopies.push(file);
+        return {
+          file: path.join(scratchRoot, "working-copy.db"),
+          cleanup: () => {
+            seen.cleanups += 1;
+            return null;
+          },
+        };
+      },
       ...overrides,
     },
   };
@@ -219,6 +243,7 @@ test("the dry run calls neither the model nor the retriever, loads no agent, and
   assert.equal(seen.retrievals, 0);
   assert.equal(model.turnsStarted, 0);
   assert.equal(seen.inspected, 0, "the database was not read");
+  assert.deepEqual(seen.workingCopies, [], "no working copy of the snapshot was made");
   assert.equal(fs.existsSync(dir), false, "no capture folder or file was created");
   assert.deepEqual(err, []);
 
@@ -557,4 +582,131 @@ test("a capture is never written over an existing file", async () => {
   assert.match(err.join("\n"), /already exists/);
   assert.equal(seen.runtimeLoaded, 0, "no paid call was made before the file name was checked");
   assert.equal(fs.readFileSync(path.join(dir, "planner-2026-11-18T09-30-15Z-abc1234.jsonl"), "utf8"), "keep me\n");
+});
+
+// ---- The snapshot is only read (the 6-pilot finding) ------------------------------------------------
+
+const sha256OfFile = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+
+/** A real VACUUM INTO snapshot in its own folder, with invented text: rollback-journal mode, no sidecar. */
+function makeRealSnapshot(name) {
+  const folder = fs.mkdtempSync(path.join(scratchRoot, `${name}-`));
+  const source = path.join(folder, "source.db");
+  const snapshot = path.join(folder, "snapshot.db");
+  const database = new DatabaseSync(source);
+
+  database.exec(`
+    CREATE TABLE documents (id INTEGER PRIMARY KEY, title TEXT);
+    CREATE TABLE document_chunks (id INTEGER PRIMARY KEY, document_id INTEGER, chunk_text TEXT);
+    CREATE TABLE vehicles (id INTEGER PRIMARY KEY, engine_code TEXT, build_plant TEXT);
+    INSERT INTO documents (title) VALUES ('Invented note');
+    INSERT INTO document_chunks (document_id, chunk_text) VALUES (1, 'Invented text.');
+    INSERT INTO vehicles (engine_code, build_plant) VALUES (NULL, NULL);
+  `);
+  database.exec(`VACUUM INTO '${snapshot.replace(/'/g, "''")}'`);
+  database.close();
+  fs.rmSync(source);
+  return snapshot;
+}
+
+/** Real snapshot checks: the tool's own copy, hash, and sidecar listing, and the real read-only corpus inspection. */
+const realSnapshotIo = { hashFile: undefined, listSidecars: undefined, prepareWorkingCopy: undefined, inspectCorpus: undefined, databaseExists: undefined };
+
+test("the agent is handed a verified copy in a new folder, so a runtime that writes to its database leaves the snapshot byte-identical", async () => {
+  const snapshot = makeRealSnapshot("writes");
+  const before = sha256OfFile(snapshot);
+  const workingDir = fs.mkdtempSync(path.join(scratchRoot, "working-"));
+  const config = { ...baseConfig(), databaseFile: snapshot };
+  const base = world({ config });
+  let opened = null;
+  let closed = 0;
+  const { io, out, err } = world({
+    config,
+    ...realSnapshotIo,
+    // What database.js does on import, done here on purpose: open writable, set WAL, write a row.
+    loadRuntime: async (loadedConfig) => {
+      opened = loadedConfig.databaseFile;
+      const database = new DatabaseSync(opened);
+
+      database.exec("PRAGMA journal_mode = WAL;");
+      database.exec("INSERT INTO documents (title) VALUES ('written by the run')");
+      const runtime = await base.io.loadRuntime(loadedConfig);
+
+      return { ...runtime, close: () => ((closed += 1), database.close()) };
+    },
+  });
+  const result = await runCli(realRunArgs(outputDir(), "--working-dir", workingDir), io);
+
+  assert.equal(result.mode, "captured", err.join("\n"));
+  assert.equal(result.exitCode, 0, err.join("\n"));
+  assert.notEqual(opened, null);
+  assert.notEqual(path.dirname(path.resolve(opened)), path.dirname(path.resolve(snapshot)), "the copy is never beside the snapshot");
+  assert.ok(path.resolve(opened).startsWith(path.resolve(workingDir)), "the copy is under --working-dir");
+  assert.equal(sha256OfFile(snapshot), before, "the snapshot's bytes did not change");
+  assert.deepEqual(fs.readdirSync(path.dirname(snapshot)), ["snapshot.db"], "no -wal or -shm appeared beside the snapshot");
+  assert.equal(closed, 1, "the runtime's database was closed");
+  assert.deepEqual(fs.readdirSync(workingDir), [], "the copy and its folder were deleted");
+  assert.equal(result.snapshotCheck.unchanged, true);
+  assert.match(out.join("\n"), /Working copy: .*MD5 matches the snapshot/);
+  assert.match(out.join("\n"), /Snapshot unchanged: .* still has MD5 [0-9a-f]{32}/);
+});
+
+test("a working copy whose MD5 differs from the snapshot's is refused before the agent loads, and is deleted", async () => {
+  const { io, err, seen } = world({ hashFile: async (file) => (file.endsWith("working-copy.db") ? "c".repeat(32) : "b".repeat(32)) });
+  const result = await runCli(realRunArgs(outputDir()), io);
+
+  assert.equal(result.mode, "refused");
+  assert.equal(result.exitCode, 1);
+  assert.equal(seen.runtimeLoaded, 0, "nothing was spent");
+  assert.equal(seen.cleanups, 1);
+  assert.match(err.join("\n"), /Refused: The working copy .* is not the snapshot/);
+});
+
+test("the runtime always gets the copy's path, never the snapshot's", async () => {
+  const { io, seen } = world();
+  const result = await runCli(realRunArgs(outputDir()), io);
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(seen.workingCopies, [baseConfig().databaseFile], "the copy was made from the snapshot");
+  assert.deepEqual(seen.runtimeDatabaseFiles, [path.join(scratchRoot, "working-copy.db")]);
+});
+
+test("a snapshot that changes during the session is reported loudly and the command exits 1", async () => {
+  let hashes = 0;
+  const { io, err } = world({ hashFile: async () => ((hashes += 1) === 1 ? "b".repeat(32) : "d".repeat(32)) });
+  const result = await runCli(realRunArgs(outputDir()), io);
+
+  assert.equal(result.mode, "captured", "the runs themselves were recorded");
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.snapshotCheck.unchanged, false);
+  assert.match(err.join("\n"), /SNAPSHOT CHANGED: .* now has MD5 d{32} \(Table 0 records b{32}\)/);
+});
+
+test("a sidecar file that appears beside the snapshot counts as a change", async () => {
+  let listings = 0;
+  const { io, err } = world({ listSidecars: () => ((listings += 1) === 1 ? [] : ["-wal"]) });
+  const result = await runCli(realRunArgs(outputDir()), io);
+
+  assert.equal(result.exitCode, 1);
+  assert.match(err.join("\n"), /SNAPSHOT CHANGED: .*a new -wal file beside it/);
+});
+
+test("the copy is deleted and the snapshot re-checked even when loading the agent throws", async () => {
+  let hashes = 0;
+  const { io, seen } = world({
+    hashFile: async () => ((hashes += 1), "b".repeat(32)),
+    loadRuntime: async () => {
+      throw new Error("agent failed to load");
+    },
+  });
+
+  await assert.rejects(runCli(realRunArgs(outputDir()), io), /agent failed to load/);
+  assert.equal(seen.cleanups, 1);
+  assert.equal(hashes, 2, "the copy was checked before, and the snapshot after");
+});
+
+test("--working-dir is read, and needs a folder", () => {
+  assert.equal(parseArguments(["--working-dir", "D:/scratch"]).workingDir, "D:/scratch");
+  assert.equal(parseArguments([]).workingDir, undefined);
+  assert.match(parseArguments(["--working-dir"]).errors.join(" "), /--working-dir needs a folder/);
 });

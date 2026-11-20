@@ -227,6 +227,15 @@ A real run refuses, and says why, unless all of these hold:
   write-ahead log. Set it with `DATABASE_FILE`; `--allow-default-database` overrides it;
 - if S8 is in the plan, the corpus still has no timing belt (the same check the Ask eval uses).
 
+The snapshot itself is only read. The app's database module opens its file writable and sets
+WAL mode, which rewrites the file's header: in the 6-pilot that changed the snapshot, so it no
+longer matched the MD5 its own Table 0 recorded. The agent now runs against a copy in a new
+folder under `--working-dir` (default: the system temp folder). The copy must match the
+snapshot's MD5 before anything is spent, it is deleted when the session ends, and the snapshot is
+hashed again afterwards. If the snapshot changed, or a `-wal`/`-shm` file appeared beside it, the
+tool prints `SNAPSHOT CHANGED` and exits 1. `plannerCaptureSnapshotIntegrity.test.js` runs the
+real command against a real snapshot (no network, fake key) and checks its bytes are unchanged.
+
 Token limits and the token-usage tee are **not built** (spec decision D9), so the tool cannot
 measure spend. The only real dollar bound is a budget set on the OpenAI project itself, which the
 dry run lists as **UNVERIFIED** until the owner confirms it. The first paid session is a one-run

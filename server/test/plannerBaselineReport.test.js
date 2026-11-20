@@ -427,6 +427,37 @@ test("Table 3 counts rejection reasons and names the facts a rejection wrongly c
   assert.match(text, /S1-oil-and-filter repeat 4: s1-drain-plug-torque \(claim_not_in_quote\)/);
 });
 
+test("the two false-rejection counts say which one counts claims and which one counts facts (the 6-pilot's confusion)", () => {
+  const { report } = analyze(ALL);
+  // The pilot's shape: one rejected claim stated a confirmed fact the model was
+  // shown (Table 1 counts it), but another claim for that fact was accepted, so
+  // the fact is Covered and no fact is V: false rejection.
+  const pilotShaped = {
+    ...report,
+    table1: report.table1.map((row, index) => ({ ...row, U1: { ...row.U1, falseRejections: index === 0 ? 1 : 0 } })),
+    table3: { ...report.table3, falseRejections: [] },
+  };
+  const text = formatBaselineReport(pilotShaped);
+  const header = text.split("\n").find((line) => line.startsWith("| Scenario | Corpus support")) ?? "";
+
+  assert.match(header, /U1 claims rejected\/submitted/, "Table 1's column says it counts claims");
+  assert.match(text, /\| \d+\/\d+ claims \(false acc \d+, false rej \d+\) \|/, "Table 1's cell says claims");
+  assert.match(text, /^Confirmed facts whose outcome is V: false rejection \(Table 2\): none\.$/m);
+  assert.match(text, /^Rejected claims the judge counts as false rejections \(Table 1, U1\): 1\. /m);
+  assert.match(text, /another claim for (that|the same) fact was accepted/, "the line says why the two counts can differ");
+  assert.doesNotMatch(text, /^False rejections: none\.$/m, "the ambiguous line is gone");
+});
+
+test("a fact that a rejection cost is listed under the facts line, and the claims line still totals Table 1", () => {
+  const { report } = analyze(ALL);
+  const text = formatBaselineReport(report);
+  const claimTotal = report.table1.reduce((total, row) => total + row.U1.falseRejections, 0);
+
+  assert.match(text, /^Confirmed facts whose outcome is V: false rejection \(Table 2\)/m);
+  assert.match(text, /- S1-oil-and-filter repeat 4: s1-drain-plug-torque \(claim_not_in_quote\)/);
+  assert.match(text, new RegExp(`^Rejected claims the judge counts as false rejections \\(Table 1, U1\\): ${claimTotal}\\.`, "m"));
+});
+
 test("the invariants and the operations are each one line, with their totals", () => {
   const { report } = analyze(ALL, {
     capture: { sessions: { "s1-covers-all": { attempts: 2, providerRequests: 9, limitReached: false } } },

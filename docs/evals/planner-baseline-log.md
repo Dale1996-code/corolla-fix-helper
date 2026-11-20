@@ -41,16 +41,23 @@
 >
 > - **Spend** is the tool's estimate. The provider dashboard is the only real figure, and it is
 >   not recorded here.
-> - **"False rejections: none." and Table 1's "false rej 1" count different things.** Table 1's
->   U1 counts every rejected claim the judge classes as a false rejection. Here that is one
->   required-tool claim turned down as `item_name_too_short`, which matches no confirmed fact. The
->   line under Table 3 lists only confirmed *facts* whose outcome is `V:false_rejection`, and
->   there are none (Table 2).
+> - **"False rejections: none." and Table 1's "false rej 1" count different things.** *(Corrected
+>   the same day: the first version of this note said the claim matched no confirmed fact, which
+>   was wrong.)* Table 1's U1 counts rejected *claims* the judge classes as false rejections. Here
+>   that is one required-tool claim, turned down as `item_name_too_short`, that states the
+>   confirmed fact `s1-step-drain-filter-cap` from text the model was shown. Another claim for that
+>   fact was accepted, so the fact's outcome is Covered (Table 2). The line under Table 3 lists
+>   only confirmed *facts* whose outcome is `V:false_rejection`, and there are none. Reports made
+>   after this entry print the two counts as "Rejected claims the judge counts as false
+>   rejections" and "Confirmed facts whose outcome is V: false rejection"; the section below is
+>   left as the tool printed it then.
 > - **The snapshot file changed when the run started.** The planner's normal database module
 >   opens the file writable and sets `journal_mode = WAL`, which rewrites the file header. No
 >   migration ran, and the corpus counts in Table 0 are unchanged. Table 0's MD5 was taken before
 >   that, so it is the snapshot as made. The file the run left behind hashes differently, and a
->   second session against it would not match this Table 0.
+>   second session against it would not match this Table 0. The capture tool has since been
+>   changed: it reads the snapshot only, runs the agent against a checked copy, and re-hashes the
+>   snapshot when the session ends. 6a needs a fresh snapshot.
 
 CRITICAL FINDINGS: none.
 

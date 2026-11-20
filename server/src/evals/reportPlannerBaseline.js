@@ -535,7 +535,7 @@ function renderTable1(rows) {
       "P1",
       "T1 recall",
       "W2",
-      "U1 rejected/submitted",
+      "U1 claims rejected/submitted",
       "Critical (P2, P3, false acc.)",
     ],
     rows.map((row) => {
@@ -551,7 +551,7 @@ function renderTable1(rows) {
         cell(row.P1),
         row.T1,
         row.W2,
-        `${row.U1.rejected}/${row.U1.submitted} (false acc ${row.U1.falseAcceptances}, false rej ${row.U1.falseRejections})`,
+        `${row.U1.rejected}/${row.U1.submitted} claims (false acc ${row.U1.falseAcceptances}, false rej ${row.U1.falseRejections})`,
         `P2 ${row.critical.P2}, P3 ${row.critical.P3}, false acc ${row.critical.falseAcceptances}`,
       ];
     })
@@ -631,14 +631,27 @@ function renderBody(report) {
 
   add("### Table 3: rejection reasons", "", ...table(["Reason", "Rejected claims"], reasonRows.length ? reasonRows.map(([reason, count]) => [reason, String(count)]) : [["none", "0"]]), "");
 
+  // Two counts, two units: the facts line counts confirmed FACTS (Table 2's
+  // column); the claims line counts rejected CLAIMS (Table 1's U4). They differ
+  // whenever a rejected claim's fact was covered by another, accepted claim.
   if (report.table3.falseRejections.length === 0) {
-    add("False rejections: none.");
+    add("Confirmed facts whose outcome is V: false rejection (Table 2): none.");
   } else {
-    add("False rejections (a correct figure the verifier turned down, with the reason):");
+    add(
+      "Confirmed facts whose outcome is V: false rejection (Table 2), each stated in text the model was shown, with no claim for it accepted, and the reasons its claims were rejected:"
+    );
     for (const entry of report.table3.falseRejections) {
       add(`- ${entry.scenarioId} repeat ${entry.repeat}: ${entry.factId} (${entry.reasons.join(", ") || "no reason recorded"})`);
     }
   }
+
+  const falseRejectedClaims = sum(report.table1.map((row) => row.U1.falseRejections));
+
+  add(
+    `Rejected claims the judge counts as false rejections (Table 1, U1): ${falseRejectedClaims}. ` +
+      "These are claims, not facts: a rejected claim counts when it states a confirmed fact from text the model was shown, " +
+      "and its fact is Covered, not V: false rejection, when another claim for that fact was accepted."
+  );
 
   const failures = report.invariants.failures;
 

@@ -36,10 +36,20 @@
 //
 // The real agent is imported lazily, after every guard has passed: loading it
 // opens the database.
+//
+// The snapshot itself is only ever READ. The app's database module opens its
+// file writable and sets journal_mode = WAL, which rewrites the file header, so
+// the 6-pilot's snapshot no longer matched the MD5 its own Table 0 recorded.
+// The agent therefore runs against a throwaway copy in a fresh folder under
+// --working-dir (default: the system temp folder). The copy is checked against
+// the snapshot's MD5 before anything is spent, deleted when the session ends,
+// and the snapshot is hashed again afterwards: a changed snapshot is reported
+// and the command exits 1. The copy quotes real manual text like the snapshot.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkTimingBeltRefusalPrecondition } from "../evals/negativeCorpusPreconditions.js";
@@ -64,7 +74,7 @@ export const DEFAULT_DATABASE_FILE = path.join(SERVER_DIR, "data", "corolla-fix-
 const S8_ID = "S8-timing-belt";
 const USAGE =
   "Usage: npm run eval:planner:capture -- [--scenario <id>]... [--repeats N] [--max-runs N] " +
-  "[--max-provider-requests N] [--no-dry-run --yes] [--allow-default-database] [--output-dir DIR]";
+  "[--max-provider-requests N] [--no-dry-run --yes] [--allow-default-database] [--output-dir DIR] [--working-dir DIR]";
 
 /** `planner-2026-11-18T09-30-15Z-abc1234.jsonl`: sortable, and safe in a Windows path. */
 export function buildCaptureFileName({ capturedAt, revision }) {
@@ -83,6 +93,7 @@ export function parseArguments(argv = []) {
     maxProviderRequests: /** @type {number | null} */ (null),
     allowDefaultDatabase: false,
     outputDir: /** @type {string | undefined} */ (undefined),
+    workingDir: /** @type {string | undefined} */ (undefined),
     help: false,
     unknown: /** @type {string[]} */ ([]),
     errors: /** @type {string[]} */ ([]),
@@ -123,6 +134,15 @@ export function parseArguments(argv = []) {
       index += 1;
     } else if (argument === "--output-dir") {
       options.outputDir = String(argv[index + 1] ?? "");
+      index += 1;
+    } else if (argument === "--working-dir") {
+      const dir = String(argv[index + 1] ?? "").trim();
+
+      if (dir) {
+        options.workingDir = dir;
+      } else {
+        options.errors.push("--working-dir needs a folder.");
+      }
       index += 1;
     } else if (argument === "--max-runs") {
       options.maxRuns = positiveInteger(argument, argv[(index += 1)]) ?? options.maxRuns;
@@ -175,8 +195,11 @@ async function defaultLoadRuntime() {
   const { createPlanRunStore } = await import("../services/agent/planRunStore.js");
   const { streamResponsesTurn } = await import("../services/agent/openAiResponsesClient.js");
   const { retrieveRelevantChunks } = await import("../services/chunkRetrievalService.js");
+  const { closeDatabase } = await import("../database.js");
 
   return {
+    // Closes the working copy so it can be deleted (Windows keeps an open file).
+    close: closeDatabase,
     runAgent: runRepairPlannerAgent,
     extractTasks: extractRepairTasks,
     createPlanRuns: () => createPlanRunStore(),
@@ -196,6 +219,45 @@ async function md5OfFile(file) {
     hash.update(chunk);
   }
   return hash.digest("hex");
+}
+
+const SIDECAR_SUFFIXES = ["-wal", "-shm", "-journal"];
+
+/** Which SQLite sidecar files sit beside `file`. A run must not add one beside the snapshot. */
+function defaultListSidecars(file) {
+  return SIDECAR_SUFFIXES.filter((suffix) => fs.existsSync(`${file}${suffix}`));
+}
+
+/**
+ * Copies the snapshot into a NEW folder under `workingDir` for the agent to open.
+ * The snapshot is only read (copyFile reads its source); the copy is made
+ * writable, because database.js opens its file writable and sets WAL mode.
+ *
+ * @param {string} file
+ * @param {{ workingDir?: string }} [options]
+ * @returns {{ file: string, cleanup: () => string | null }} cleanup returns the folder it could NOT remove, or null
+ */
+function defaultPrepareWorkingCopy(file, { workingDir } = {}) {
+  const root = workingDir ?? os.tmpdir();
+
+  fs.mkdirSync(root, { recursive: true });
+  const folder = fs.mkdtempSync(path.join(root, "corolla-planner-capture-db-"));
+  const copy = path.join(folder, path.basename(file));
+
+  fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(copy, 0o600);
+
+  return {
+    file: copy,
+    cleanup: () => {
+      try {
+        fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        return null;
+      } catch {
+        return folder;
+      }
+    },
+  };
 }
 
 /** Read-only: counts, the saved Variant details, and whether a write-ahead log means the file is not a snapshot. */
@@ -258,6 +320,9 @@ const samePath = (a, b) => path.relative(path.resolve(a), path.resolve(b)) === "
  *   inspectCorpus?: (file: string) => any, checkTimingBelt?: (file: string) => any,
  *   readRevision?: () => { revision: string | null, dirty: boolean | null },
  *   now?: () => Date, sleep?: (ms: number) => Promise<void>, delayMs?: number,
+ *   hashFile?: (file: string) => Promise<string> | string,
+ *   listSidecars?: (file: string) => string[],
+ *   prepareWorkingCopy?: (file: string, options: { workingDir?: string }) => { file: string, cleanup: () => string | null },
  * }} CliIo
  */
 
@@ -279,6 +344,9 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
     now = () => new Date(),
     sleep,
     delayMs = Number(process.env.EVAL_CASE_DELAY_MS || 2000),
+    hashFile = md5OfFile,
+    listSidecars = defaultListSidecars,
+    prepareWorkingCopy = defaultPrepareWorkingCopy,
   } = io;
   const options = parseArguments(argv);
 
@@ -405,98 +473,163 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
     return { mode: "refused", exitCode: 1, reasons: refusals };
   }
 
-  // Every guard has passed. Only now is the real agent (and the database it opens) loaded.
-  const runtime = await loadRuntime(config);
-  const header = buildPlannerCaptureHeader({
-    capturedAt,
-    // An unreadable revision or an unknown dirty state is recorded as such: a
-    // capture that cannot name its code is NOT COMPARABLE, never silently clean.
-    revision: revision || "unknown",
-    dirty: dirty ?? true,
-    config: {
-      answerModel: config.openAiAnswerModel,
-      reasoningEffort: buildModelTuning(config.openAiAnswerModel).reasoning?.effort ?? null,
-      maxOutputTokens: config.openAiMaxOutputTokens,
-      maxTurns: PLANNER_RUN_BOUNDS.maxTurns,
-      maxToolCallsPerTurn: runtime.maxToolCallsPerTurn,
-      maxSearchResults: PLANNER_RUN_BOUNDS.maxSearchResults,
-      evidenceContextCharLimit: PLANNER_RUN_BOUNDS.evidenceContextCharLimit,
-      retrievalMode: "hybrid",
-      retrievalMaxChunksPerSource: config.retrievalMaxChunksPerSource,
-      rerankEnabled: config.rerankEnabled,
-      relevanceFloorEnabled: config.askRelevanceFloor,
-      embeddingVersion: config.openAiEmbeddingVersion ?? null,
-    },
-    instructionsHash: hashInstructions(runtime.instructions),
-    scenarioSetVersion: SCENARIO_SET_VERSION,
-    repeats: options.repeats,
-    vehicleProfile: corpus.vehicleProfile,
-    corpus: { documents: corpus.documents, chunks: corpus.chunks, dbSnapshotMd5: corpus.dbSnapshotMd5 },
-    limits: {
+  // Every guard has passed. From here on the snapshot is only READ: the real
+  // agent (and the database module it imports, which opens its file writable and
+  // sets WAL mode) gets a copy, checked against the snapshot's MD5 first.
+  const sidecarsBefore = listSidecars(database.file);
+  const working = prepareWorkingCopy(database.file, {
+    workingDir: options.workingDir ? resolveInvocationPath(options.workingDir) : undefined,
+  });
+  /** @type {any} */ let loadedRuntime = null;
+  /** @type {any} */ let result;
+  /** @type {{ unchanged: boolean, md5: string, sidecarsAdded: string[] } | undefined} */ let snapshotCheck;
+
+  /** @param {any} runtime */
+  const captureWith = async (runtime) => {
+    const header = buildPlannerCaptureHeader({
+      capturedAt,
+      // An unreadable revision or an unknown dirty state is recorded as such: a
+      // capture that cannot name its code is NOT COMPARABLE, never silently clean.
+      revision: revision || "unknown",
+      dirty: dirty ?? true,
+      config: {
+        answerModel: config.openAiAnswerModel,
+        reasoningEffort: buildModelTuning(config.openAiAnswerModel).reasoning?.effort ?? null,
+        maxOutputTokens: config.openAiMaxOutputTokens,
+        maxTurns: PLANNER_RUN_BOUNDS.maxTurns,
+        maxToolCallsPerTurn: runtime.maxToolCallsPerTurn,
+        maxSearchResults: PLANNER_RUN_BOUNDS.maxSearchResults,
+        evidenceContextCharLimit: PLANNER_RUN_BOUNDS.evidenceContextCharLimit,
+        retrievalMode: "hybrid",
+        retrievalMaxChunksPerSource: config.retrievalMaxChunksPerSource,
+        rerankEnabled: config.rerankEnabled,
+        relevanceFloorEnabled: config.askRelevanceFloor,
+        embeddingVersion: config.openAiEmbeddingVersion ?? null,
+      },
+      instructionsHash: hashInstructions(runtime.instructions),
+      scenarioSetVersion: SCENARIO_SET_VERSION,
+      repeats: options.repeats,
+      vehicleProfile: corpus.vehicleProfile,
+      corpus: { documents: corpus.documents, chunks: corpus.chunks, dbSnapshotMd5: corpus.dbSnapshotMd5 },
+      limits: {
+        maxRuns: options.maxRuns,
+        maxProviderRequests: options.maxProviderRequests,
+        maxInputTokensPerRun: null,
+        maxInputTokensTotal: null,
+      },
+    });
+
+    fs.mkdirSync(outputDir, { recursive: true });
+    // "wx": an existing file is an error, never overwritten.
+    fs.writeFileSync(capturePath, "", { flag: "wx" });
+    const rejectedPath = capturePath.replace(/\.jsonl$/, ".rejected.jsonl");
+
+    log(
+      `Capturing ${plan.runs} run(s): ${scenarios.map((scenario) => scenario.id).join(", ")}, ${options.repeats} repeat(s), ` +
+        `at most ${options.maxProviderRequests} provider request(s).`
+    );
+    log("Not built, on purpose (owner decision D9): token limits and the usage tee. Read dollars from the OpenAI dashboard.");
+    log(`Writing ${capturePath}\n`);
+
+    const limiter = createRequestLimiter({ maxProviderRequests: /** @type {number} */ (options.maxProviderRequests) });
+    const summary = await runCaptureSession({
+      scenarios,
+      repeats: options.repeats,
       maxRuns: options.maxRuns,
-      maxProviderRequests: options.maxProviderRequests,
-      maxInputTokensPerRun: null,
-      maxInputTokensTotal: null,
-    },
-  });
+      limiter,
+      runtime,
+      header,
+      // Appended line by line, so a run that dies halfway keeps what it paid for.
+      writeLine: (line) => fs.appendFileSync(capturePath, `${line}\n`, "utf8"),
+      writeRejected: (line) => fs.appendFileSync(rejectedPath, `${line}\n`, "utf8"),
+      log,
+      delayMs,
+      ...(sleep ? { sleep } : {}),
+    });
 
-  fs.mkdirSync(outputDir, { recursive: true });
-  // "wx": an existing file is an error, never overwritten.
-  fs.writeFileSync(capturePath, "", { flag: "wx" });
-  const rejectedPath = capturePath.replace(/\.jsonl$/, ".rejected.jsonl");
-
-  log(
-    `Capturing ${plan.runs} run(s): ${scenarios.map((scenario) => scenario.id).join(", ")}, ${options.repeats} repeat(s), ` +
-      `at most ${options.maxProviderRequests} provider request(s).`
-  );
-  log("Not built, on purpose (owner decision D9): token limits and the usage tee. Read dollars from the OpenAI dashboard.");
-  log(`Writing ${capturePath}\n`);
-
-  const limiter = createRequestLimiter({ maxProviderRequests: /** @type {number} */ (options.maxProviderRequests) });
-  const summary = await runCaptureSession({
-    scenarios,
-    repeats: options.repeats,
-    maxRuns: options.maxRuns,
-    limiter,
-    runtime,
-    header,
-    // Appended line by line, so a run that dies halfway keeps what it paid for.
-    writeLine: (line) => fs.appendFileSync(capturePath, `${line}\n`, "utf8"),
-    writeRejected: (line) => fs.appendFileSync(rejectedPath, `${line}\n`, "utf8"),
-    log,
-    delayMs,
-    ...(sleep ? { sleep } : {}),
-  });
-
-  log("");
-  log(
-    `${summary.recorded} of ${summary.planned} run(s) recorded in ${capturePath}; ` +
-      `${summary.providerRequests} provider request(s) sent, ${summary.refusedRequests} refused by the limit.`
-  );
-
-  if (summary.limitReached) {
+    log("");
     log(
-      `REQUEST LIMIT REACHED: --max-provider-requests ${options.maxProviderRequests} was spent. ` +
-        `${summary.notStarted} run(s) were not started, and the run that hit it is recorded as infrastructure (Layer I), not a product failure.`
+      `${summary.recorded} of ${summary.planned} run(s) recorded in ${capturePath}; ` +
+        `${summary.providerRequests} provider request(s) sent, ${summary.refusedRequests} refused by the limit.`
     );
-  }
-  if (summary.rejected) {
-    log(
-      `${summary.rejected} run(s) were NOT written to the capture because the recorder or the re-derivation disagreed with the run. ` +
-        `That is a tool bug, not a model problem. The raw records are in ${rejectedPath}.`
-    );
-  }
-  if (summary.rateLimitedRuns) {
-    log(`${summary.rateLimitedRuns} run(s) met a 429 rate limit (retried, bounded).`);
+
+    if (summary.limitReached) {
+      log(
+        `REQUEST LIMIT REACHED: --max-provider-requests ${options.maxProviderRequests} was spent. ` +
+          `${summary.notStarted} run(s) were not started, and the run that hit it is recorded as infrastructure (Layer I), not a product failure.`
+      );
+    }
+    if (summary.rejected) {
+      log(
+        `${summary.rejected} run(s) were NOT written to the capture because the recorder or the re-derivation disagreed with the run. ` +
+          `That is a tool bug, not a model problem. The raw records are in ${rejectedPath}.`
+      );
+    }
+    if (summary.rateLimitedRuns) {
+      log(`${summary.rateLimitedRuns} run(s) met a 429 rate limit (retried, bounded).`);
+    }
+
+    log("\nThe capture quotes real manual text. Keep it out of git and out of committed docs.");
+    log(`Replay it for free:  npm run eval:planner:replay -- "${capturePath}"`);
+    log(`Report on it:        npm run eval:planner:report -- "${capturePath}"`);
+
+    const exitCode = summary.limitReached || summary.rejected > 0 || summary.recorded === 0 ? 1 : 0;
+
+    return { mode: "captured", exitCode, summary, capturePath };
+  };
+
+  try {
+    const copyMd5 = await hashFile(working.file);
+
+    if (copyMd5 !== corpus.dbSnapshotMd5) {
+      const reason =
+        `The working copy ${working.file} has MD5 ${copyMd5}, not the snapshot's ${corpus.dbSnapshotMd5}. ` +
+        "The copy is not the snapshot, so nothing was run.";
+
+      error(`Refused: ${reason}`);
+      result = { mode: "refused", exitCode: 1, reasons: [reason] };
+    } else {
+      // database.js reads config.databaseFile when it is first imported, which loadRuntime does next.
+      config.databaseFile = working.file;
+      if (config.databaseFile !== working.file) {
+        throw new Error("Could not point the agent at the working copy; refusing to open the snapshot itself.");
+      }
+      log(`Working copy: ${working.file} (MD5 matches the snapshot; the snapshot itself is only read, and is checked again at the end).`);
+      loadedRuntime = await loadRuntime(config);
+      result = await captureWith(loadedRuntime);
+    }
+  } finally {
+    try {
+      loadedRuntime?.close?.();
+    } catch {
+      // A close that fails must not hide the session's own result or error.
+    }
+
+    const leftover = working.cleanup();
+
+    if (leftover) {
+      error(`Could not delete the working copy folder ${leftover}. It quotes real manual text: delete it by hand.`);
+    }
+
+    const md5 = await hashFile(database.file);
+    const sidecarsAdded = listSidecars(database.file).filter((suffix) => !sidecarsBefore.includes(suffix));
+
+    snapshotCheck = { unchanged: md5 === corpus.dbSnapshotMd5 && sidecarsAdded.length === 0, md5, sidecarsAdded };
+
+    if (snapshotCheck.unchanged) {
+      log(`Snapshot unchanged: ${database.file} still has MD5 ${md5}, the value Table 0 records.`);
+    } else {
+      error(
+        `SNAPSHOT CHANGED: ${database.file} now has MD5 ${md5} (Table 0 records ${corpus.dbSnapshotMd5})` +
+          (sidecarsAdded.length > 0 ? ` and a new ${sidecarsAdded.join(", ")} file beside it` : "") +
+          ". The capture's corpus fingerprint no longer describes the file on disk: make a fresh snapshot before another session."
+      );
+    }
   }
 
-  log("\nThe capture quotes real manual text. Keep it out of git and out of committed docs.");
-  log(`Replay it for free:  npm run eval:planner:replay -- "${capturePath}"`);
-  log(`Report on it:        npm run eval:planner:report -- "${capturePath}"`);
+  const check = /** @type {{ unchanged: boolean, md5: string, sidecarsAdded: string[] }} */ (snapshotCheck);
 
-  const exitCode = summary.limitReached || summary.rejected > 0 || summary.recorded === 0 ? 1 : 0;
-
-  return { mode: "captured", exitCode, summary, capturePath };
+  return { ...result, exitCode: check.unchanged ? result.exitCode : 1, snapshotCheck: check };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
