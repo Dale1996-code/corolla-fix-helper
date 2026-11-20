@@ -796,7 +796,11 @@ whether it stops requests before the first paid session.
 6. Between-case delay (`EVAL_CASE_DELAY_MS`, as Ask) and bounded 429 retry; a persistent 429 is
    reported as infrastructure, never as a product failure.
 7. Run against a `VACUUM INTO` snapshot of the database (as the Stage 5-E2 runs did) so the
-   corpus cannot change mid-baseline; the snapshot's MD5 goes in the header.
+   corpus cannot change mid-baseline; the snapshot's MD5 goes in the header. *Added after the
+   6-pilot:* the snapshot is only read. The agent runs against an MD5-checked copy that is
+   deleted afterwards, and the snapshot is re-hashed when the session ends (a change exits 1),
+   because the app's database module opens its file writable and its WAL setting rewrote the
+   pilot snapshot's header.
 
 The token-usage tee is the fragile part (Risk R6). It is deferred (D9). If it is not built,
 limits 1-3 and 5-6 still work and limit 4 is simply absent: the pilot-then-approve staging
