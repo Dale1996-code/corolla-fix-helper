@@ -118,4 +118,4 @@ Operations: 1 run, 7 model turns, 8 tool calls, 4 searches, 4 retrievals, 0 fina
 - 2 cells print `unscored` because the fact they depend on has not been confirmed: S1-oil-and-filter T1, S1-oil-and-filter W2.
 - Spot-check (spec 7.3): automated sampling is deferred (owner decision D9). 8 accepted claims matched no confirmed fact; they are in the per-run JSON for review against the rendered PDF pages.
 
-Spot-check (spec 7.3), recorded by the owner against the rendered PDF pages: *(not done)*
+Spot-check (spec 7.3), recorded by the owner against the rendered PDF pages on 2026-11-26: all 8 accepted claims that matched no confirmed fact were reviewed (the report listed 8; the spec's sample is 5 per scenario). Correct 7, Wrong 1, Cannot Tell 0; spot-check precision 7/8 on N = 8, one run, not a population estimate. Wrong: SC-8 (`vehicle_fact`, Vehicle Maintenance Filters Parts and Labor p. 1): a figure from a parts table was accepted without its column heading, so its meaning (a price) was lost. The owner judged this a contextual verification failure, not a numerical error.
