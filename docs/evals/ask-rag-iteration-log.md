@@ -4804,6 +4804,304 @@ would show it; it is not part of this change.
 7. F2 (header in the previous chunk), the 12× `in.*lbf` unit false accept, and applicability (build
    variant) remain separate and unstarted.
 
+## R3: a single unmarked figure that the next sentence compares with its limit (2026-11-01)
+
+**Free validation only. No model call was made.** Everything here is the verifier judged against invented
+text, the saved captures, and a copy of the pinned snapshot (sha `7eb9a0d69ef7cb20`, unchanged by every scan).
+
+### What was wrong
+
+The qualifier checks read a figure's qualifiers from the part of its own sentence before the figure. For
+"Flange gap 2.4 mm. If the gap is greater than the maximum, replace the coupler." the sentence after the
+figure says the figure *is* the maximum, so a plain claim ("the flange gap is 2.4 mm") presents the limit as
+the normal value. The saved used-plug replies showed it: 9 replies stated the figure, 4 of them plainly.
+Those four were one (claim, quote, chunk) triple, rejected only by `unlabelled_row`, and only because a
+neighbouring row happened to say "new" **and** the quote named the part. Changing that one word, removing the
+neighbouring row, or quoting the bare figure made the verifier accept it; two other chunks in the library
+with the same shape had no such neighbour and were accepted. The cause is structural: chunks are cut per
+page, so a page break can leave a label at the bottom of one page and its figure at the top of the next.
+
+### The change
+
+`leavesLimitUnmarked`, last in `judgeFigureRow`, so it can only turn an accept into a reject. A claim is
+refused (`row_mismatch`, server-side detail `qualifier_after_figure`) when, for any source row the quote
+could be: the figure's own sentence prints no condition word and not "standard"; the figure is a single value
+(not `to` / a dash range); and the sentence right after it (one closing bracket, then one `.` or `;`,
+skipped; another figure in between ends the search) compares with the maximum, minimum or limit within its
+first 24 words; **and** the comparison is about the figure's own component (A2, below).
+
+**A2, the component tie.** Component words (the twelve measured quantities the code knows, a short list of action words and generic
+nouns, and abbreviations of those, are left out; every other word counts) of the figure's label sentence and of the claim are compared with those of the comparison sentence; a
+shared word, or a shared prefix of three letters or more, ties them. Two named components with nothing in
+common mean the comparison is about something else and the claim stands. If either side names none (a page
+break cut the label off and the claim says only "the value"), the figure is refused. Evaluated before it was
+included: without A2, 2,480 of 9,122 invented correct controls were newly rejected in a 20,000-case run (27%
+over 450,000); with it, none. That generator was built around A2's own assumptions; the independent review
+below, whose layouts were not, found A2 fixed none of its 22 false rejects and left 15 more of its 32
+misleading layouts accepted. On the real library A2 changes nothing (the same 5 rows with and without it), so
+its only justification is invented cross-component cases.
+
+### Test-first, and what mutation testing found
+
+23 oracle rows were added before any code and were red on the original verifier (12 of 12 must-reject rows
+accepted). The first implementation had no A2; it passed the 12 and failed the 2 cross-component controls, which
+is why A2 exists. Mutation testing (72 mutants, first pass: 46 killed, 24 survived, 2 not matching) then
+found three real defects, each fixed after red rows were added: a comparison after "26.0 mm." or "mm;" was
+missed because the full stop was left in front of the next sentence; a "new" borrowed from the previous sentence
+exempted the figure; and the range check listed "and"/"or" and spaced hyphens, which the older checks already
+refuse (unreachable). Three untested pieces were then deleted rather than tested. The fuzz found a fourth: an
+action word in the comparison ("…, adjust it") counted as a component and vetoed the rule. Final: **89 mutants,
+89 killed, 0 survivors.**
+
+| | Count |
+|---|---|
+| Oracle rows | 28 must-reject, 25 controls, 3 pinned limits (`todo`) |
+| `limitComparisonClaims.test.js` | exact detail, precedence over older rejections, A2 edge cases, the 24-word edge, limits, a time bound |
+| Mutants | 89 / 89 killed (five passes; every survivor was a missing test, an equivalent piece of code that was deleted, or a real defect) |
+
+### Fuzz (invented text; truth is set by the generator, never by a verifier)
+
+| Run | Cases | Misleading claims accepted | Correct controls newly rejected | Subset violations | Throws |
+|---|---|---|---|---|---|
+| Structured, seeds 101/202/303 (first generator) | 450,000 | 0 of 187,004 | **8** | 0 | 0 |
+| Structured, seeds 111/222/333 (fresh seeds) | 450,000 | 0 of 187,074 | 0 of 206,825 | 0 | 0 |
+| Unstructured (random fragments, random quotes, junk), 3 seeds | 445,853 | n/a | n/a | 0 | 0 (slowest call 4.7 ms, 0 non-deterministic) |
+
+The old verifier accepted about 94% of the misleading claims. The 8 rejections in the first structured run
+were all one generator artifact: the "intervening figure" of one layout was sometimes drawn identical to the
+main figure, so the quote matched two identical rows and the claim was refused, which is the designed
+fail-closed reading (oracle row `R3-W-same-figure-printed-twice`). The generator was corrected and the run
+repeated on fresh seeds. Its first small run had also shown the action-word weakness above. The generator's
+documented known limits (a comparison that is not the next sentence, more than 24 words in, a qualifier
+after the figure in its own sentence: 56,101 cases in the fresh runs) are accepted exactly as before and
+counted apart.
+
+### Real library
+
+| | |
+|---|---|
+| Chunks / pairs tried | 20,447 / 161,058 (119,958 unit-bearing, 41,100 bare-number) |
+| Accepted by the old verifier | 92,078 |
+| **Newly accepted** | **0** |
+| Newly rejected | 12 pairs = 5 rows = **3 distinct chunk texts** in 5 documents (all unit-bearing; 0 bare-number) |
+| Same, with A2 removed | the same 5 rows |
+
+All 5 rows were read by hand. Three distinct chunk texts are the genuine cases: a minimum-length label at the
+bottom of one page, a maximum-wear label at the bottom of another, and the used-plug maximum. Two of the five
+rows are the labelled "maximum wear" rows of the second text, refused only because a bare-figure quote also matches
+its unlabelled row (the designed reading of an ambiguous quote). No other row changed.
+
+Bare-number tables: the 41,100 bare-number pairs changed nothing, and an invented bare-number table row under a
+`(mm)` header unit is refused when its quote carries the header (a claim whose quote leaves the header out is
+already refused earlier as an unsupported figure, so this check is not needed there).
+
+### Saved captures
+
+`eval:replay` over the six real captures and the two synthetic fixtures prints byte-identical output to the
+unchanged `c17758c` tree (the "verdicts changed" it shows in two files compare with the verdicts recorded under
+older verifiers). Claim by claim, 190 real captured claims (137 accepted by the old verifier, 74 of them with a
+figure): 0 newly rejected, 0 newly accepted.
+
+### What this does not do
+
+- **A correctly qualified claim is still rejected** (`condition_not_in_row`): "the MAXIMUM flange gap is 2.4 mm"
+  against the same text. Trusting the comparison or the previous page's heading to qualify a figure was measured
+  on invented text: a following comparison accepted **34.4%** of wrongly qualified claims (a standard range, a
+  declared standard), and the previous chunk's open heading **17.0%** (a heading about another part), while
+  gaining 43% and 86% of the true ones. Five of the nine saved used-plug replies stated the figure with its
+  qualifier and were refused (three on the short quote, two because the model joined text across the page break);
+  none was ever accepted, before or after. Recovering these answers needs the qualifier inside the quote's own
+  sentence (context expansion, a retrieval and prompt change) and is separate work.
+- Not read: a comparison that is not the sentence right after the figure; one more than 24 words in, or whose limit
+  word is more than 40 characters from its comparing word; one in the next chunk; the previous page's heading when no
+  comparison follows (the verifier is not given neighbouring text); a qualifier printed after the figure in its own
+  sentence (no instance in the library); a comparison that names only a remedy part or an unlisted word, which
+  A2 takes to be about another component, so the plain claim stands (see the review below).
+- A layout with an unlabelled standard value followed by such a sentence would be refused (a correct claim lost, never
+  a wrong figure let through). None exists in the library.
+- Nothing here measures what a model writes. Whether the model states the figure plainly on the two other affected
+  pages is unknown; a small paid capture is proposed separately.
+
+
+### Independent review (Opus), my reproduction, and what changed
+
+A separate Opus agent reviewed commits `c17758c..dfcbee6` with its own generators and probes, and was told not to
+trust the numbers above. It confirmed the hard constraints: accepts(new) is a subset of accepts(old) (read from the
+code, and ~460k differential cases of its own, 0 violations, 0 throws), the `sourceRowIndex` refactor is
+behaviour-preserving, the qualified claim is still `condition_not_in_row`, and there is no Rule C, chunking,
+retrieval or prompt change. Its verdict was **merge-ready after fixes**. I re-ran every case it described against
+the real old and new modules before accepting it:
+
+| | Finding | Reproduced |
+|---|---|---|
+| F1 | possible real text: a quoted heading in a comment; a real figure beside "electrode gap … plug" | yes; **fixed** (unrelated figures, comment reworded, sibling phrased like the earlier F1v3 rows) |
+| F2 | A2's quantity list holds 12 words; gap, play, runout, wear, length… count as components: a miss ("Flange clearance 2.4 mm. If the clearance is greater than the maximum, replace the coupler.") and a cost ("Hub runout … If the rotor runout …") | yes |
+| F3 | a pronoun subject plus an unusual remedy word ("…, renew.", "regrind", "shim it") makes the comparison look like it is about another component | 12 of 13 tails |
+| F4 | correct claims refused: the comparison prints its own limit; a gauge mark; another quantity of the same component; "Nominal/Specified/Reference/…" labels; a shared modifier or 3-letter prefix; a negated comparison | all 22 layouts built from its cases |
+| F5 | wordings not read: "max.", "exceeded", "limits", "reaches the limit", "out of the limit" | yes |
+| F6 | words trailing the figure in its own sentence, or `..` / `.;` / `!`, hide the comparison | yes |
+| F7 | one test pinned a miss as required behaviour | yes; **fixed** (now a named LIMIT test) |
+| F8 | a bare-figure quote with a claim that names another part escapes the rule | yes |
+
+**A2 against Rule A alone, on the reviewer's 54 layouts** (32 where the claim is misleading, 22 where it is correct;
+none of them in the real library):
+
+| | misleading claims still accepted | correct claims refused |
+|---|---|---|
+| with A2 (as committed) | 30 of 32 | 22 of 22 |
+| Rule A alone | 15 of 32 | 22 of 22 |
+
+So on these layouts A2 costs 15 detections and removes none of the refusals: the 22 come from other causes
+(a limit printed in the sentence, gauge words, labels, negation, shared words). The reviewer's layouts were
+built to break A2, and my generator's controls to suit it, so neither number is a rate. The real library is
+neutral: with and without A2 the same 5 rows (3 chunk texts) are refused.
+
+**Recall census on the real library** (a looser detector than the rule): of 14,060 unmarked single-value unit rows,
+only 7 pairs are followed by any broad limit-comparison wording (comparing or reaching word, then max/min/limit, in
+the next 250 characters up to the next figure). The rule rejects the genuine ones; the one other row is a speed
+threshold, not a limit. So the wording and A2 misses above hide no exposure in this library today; they are
+robustness concerns for pages not yet imported.
+
+**Changed after the review:** F1 hygiene, the F7 test, a LIMIT test per miss and per refused layout (so each is
+pinned and named), and the documentation (`docs/api.md`, `CLAUDE.md`, `AGENTS.md`) now says what the code does,
+including that A2 is a word-overlap heuristic that errs both ways. **Not changed: no rule behaviour.**
+
+**Open decision (owner):** (1) keep Rule A with A2 as committed, with the limits above documented; (2) keep Rule A and
+drop A2, adding narrowings that only remove refusals (skip when the comparison prints its own limit; skip a limit
+word followed by mark/line/level; skip a negated comparison; read "specified/nominal/reference/typical" like
+"standard"), then repeat the validation; (3) redesign A2 (compare only the comparison's subject, a longer
+quantity list, a different-quantity check) and repeat the whole validation. The author recommends (2): the rule
+exists to stop a misleading figure being shown, a refused correct claim is the safe direction, and A2 is the
+only piece whose errors go the unsafe way.
+
+
+## R3 review corrections: the component tie removed, four narrowings added (2026-11-05)
+
+**Free validation on invented text only. No model call was made, no real manual text, database snapshot or saved
+capture was read, and nothing about the real library was measured.** Branch `fix/r3-review-corrections`, started
+from `eb2c465` (the R3 branch as reviewed, preserved as `origin/backup/r3-comparator-tell-20261105`); the original
+R3 branch and `main` were not touched. Two revisions, both before this work: pre-R3 `c17758c`, reviewed R3
+`eb2c465`.
+
+### What was decided
+
+Option (2) of the open decision above: keep Rule A, **drop A2**, and add four narrowings that can only remove
+refusals, then repeat the validation. Not part of it, and so unchanged: the wordings the rule does not read (F5) and
+the words trailing the figure in its own sentence (F6).
+
+### What changed
+
+| | |
+|---|---|
+| Removed | A2, the word-overlap tie to the figure's component (`comparisonIsAboutFigure`, `componentWords`, `componentWordsTie`, two word lists, the `claim` plumbing) |
+| N1 | a comparison that prints a limit of its own straight after the limit word (past connecting words and an opening bracket) is not about this figure; a printed limit **equal** to the figure restates it and is still refused |
+| N2 | a limit word followed by *mark*, *line* or *level* names a gauge mark |
+| N3 | a comparison negated right before the comparing word (at most one of *be, been, ever, go, get, yet* between); a "not" belonging to the remedy excuses nothing |
+| N4 | "specified", "nominal", "reference", "typical" in the figure's **own** sentence read like "standard" (a local list: the shared condition vocabulary is not widened) |
+| Also | the 40-character reach counts runs of white space as one space, as the old word-join did; `judgeFigureRow` takes the source text instead of a `{claim, source}` object |
+
+### Test-first, and what it found
+
+The tests were written and run against the unchanged rule first: 9 of 26 unit tests failed and 8 oracle rows (3
+must-reject, 5 controls) plus the stale-todo guard failed, each on the intended verdict flip. Removing A2 moves exactly
+**6 of 212** oracle rows, all controls that only passed because of A2; they are now named cost rows
+(`R3-C-*`, expect accept, `todo`). The first green run found **one regression I had caused**: `R3-W-bare-cell-under-a-header-unit`
+carried the column header "Item **Specified** Condition (mm)", and N4 reads "specified" from the whole sentence. The
+header was changed to a neutral one in that row and its sibling control (both exist to test the bare-cell path), and the
+interaction itself is pinned as `R3-L-specified-condition-column-header` (a known limit, `todo`).
+
+| Oracle (R3 rows) | before (`eb2c465`) | now |
+|---|---|---|
+| must-reject | 28 | 35 |
+| controls (accept) | 25 | 24 |
+| cost rows (accept, `todo`) | 0 | 6 |
+| pinned limits (reject, `todo`) | 3 | 4 |
+| all Ask-oracle rows | 212 | 225 |
+
+### Mutation testing
+
+134 mutants of the rule code (regex words, gauge words, negation words and anchors, every connecting word, number
+signs and thousands separators, the next-figure and sentence-end logic, the four narrowings, the candidate loop):
+**132 killed, 2 survived, 0 invalid.** The first pass was 135: 129 killed and 6 survived. Three survivors were weak
+tests and are fixed with new tests (a word merely ending in a negation, "knot"; a bare negative limit; a remedy made of
+plain words after the limit word); one was redundant code (`printedNumbers(nextValues ?? "")` is the same as the
+explicit null check) and was simplified. The 2 left are equivalent: `\s*` for `\s+` after a word boundary, and the
+defensive null source of an internal function with one caller. Writing the mutants first exposed the other gaps in my
+own tests (plural gauge words, most connecting words, the sign and thousands separator, the whitespace change), which
+were closed before the run.
+
+### Fuzz (invented text; truth set by the generator, never by a verifier)
+
+Pre-R3 (`c17758c`), reviewed R3 (`eb2c465`) and the corrected rule on the same cases: 4 seeds x 150,000 = **600,000
+cases, 0 throws, 0 subset violations** (nothing the pre-R3 verifier refused is accepted). Seeds 411, 522, 633, and 744
+on the final code. `MIS` = a plain claim presents a limit as the ordinary value; `OK` = a correct claim; `OKX` = a
+correct claim about another component than the comparison (the designed cost of removing A2).
+
+| Class | reviewed R3 | corrected |
+|---|---|---|
+| `MIS` accepted | 19.7-20.1% of 69,500-70,000 per seed | **0 of 279,307** |
+| `OK` accepted | 47.8-47.9% | 92.2-92.7% |
+| `OK` old-accepted but refused | 25,147-25,387 per seed | 284-328 per seed |
+| `OKX` accepted | 100% | **0 of 41,617** |
+
+The reviewed R3's `MIS` misses are the layouts built for it (a pronoun with an unlisted remedy word: 6,780 of 6,849
+accepted; a quantity-synonym subject: 6,979 of 6,979; both seed 411); that percentage is a property of this generator, not a rate.
+The remaining `OK` refusals are one layout, ranges written with a spaced hyphen, and are **identical in the reviewed
+R3** (see below). The four narrowings: every correct case the pre-R3 verifier accepted is accepted again (about 570
+of 1,014 `N1`, all of `N2`, `N3` and `N4` per 20,000-case sample), and every boundary layout (a restated figure, a figure
+followed by words that are not connectors, a negation that belongs to the remedy, the word in an earlier sentence, an
+inflected word, the word in the comparison) stays refused.
+
+### The review's own layouts
+
+26 layouts the review classed as misleading and 20 as correct, replayed through both versions:
+
+| Review finding | layouts | wrong outcome, reviewed R3 | corrected |
+|---|---|---|---|
+| F2 misleading (synonym of the quantity) | 2 | 2 | 0 |
+| F3 misleading (pronoun + remedy word) | 12 | 12 | 0 |
+| F8 misleading (bare figure, other part named) | 1 | 1 | 0 |
+| F5 misleading (wordings not read) | 6 | 6 | **6** |
+| F6 misleading (words trailing the figure) | 4 | 4 | **4** |
+| F4.1 correct (prints its own limit) | 3 | 3 | 0 |
+| F4.6 correct (negated) | 1 | 1 | 0 |
+| F4.4 correct (nominal / specified / reference / typical / **Std**) | 5 | 5 | 1 (`Std`) |
+| F4.2 correct (gauge mark / limit on the sidewall) | 3 | 3 | 1 (sidewall) |
+| F2 correct, F4.3, F4.5 (another quantity or part) | 2 + 2 + 4 | 8 | 8 |
+
+So the unsafe direction falls from 25 of 26 to **10 of 26, all of them F5 and F6**: the rule never sees those
+comparisons, which has nothing to do with A2 and was not part of option (2). The costs fall from 20 of 20 to 10 of 20;
+what remains is the three causes option (2) does not address plus `Std` and the sidewall limit.
+
+### Found along the way, not caused by this work
+
+- **Ranges written with a spaced hyphen ("1.5 - 1.6 mm") or with the unit repeated ("1.5 mm to 1.6 mm") are read as
+  separate single figures** and refused when a limit comparison follows. "to" and the en dash are read as ranges.
+  Identical in the reviewed R3; now pinned in the `LIMIT (cost)` test. It is also the only source of the `OK`
+  refusals above.
+- `Std` (no full stop) is not among the four words. `Std.` with its full stop is a sentence end and would never be
+  seen as part of the figure's sentence anyway.
+- **One transient failure of `serverLifecycle.test.js`** in the first full server run (a bare file-level "test failed"
+  after 2.9 s, no assertion text, log kept). It passed alone (3/3, then 6 more runs) and in the second full run
+  (1,891 tests, 0 failing). The cause is unexplained; the file spawns real server processes on OS-assigned ports and
+  nothing in this change touches it.
+
+### Gate
+
+`lint`, `typecheck`, `test:server` (1,896 tests, 1,881 pass, 0 fail, 15 todo), `test:client` (539 pass), `build`,
+`smoke` (13 checks) all green on the final code. `eval:replay` on both synthetic captures: 0 verdicts changed.
+`backup:drill` was not run: nothing in backup, restore, tar or uploads changed.
+
+### What this does not establish
+
+- **Nothing about the real library.** The effect of the removal and the four narrowings on the 5 rows (3 chunk texts)
+  the reviewed R3 refused there, and on the 161,058 pairs, is unmeasured. Two questions only the real text can answer:
+  whether any of the 3 genuine chunk texts is now excused by a narrowing, and how many rows have a "Specified
+  Condition" column header ahead of a table's first row (N4 reads those as ordinary).
+- No model reply was judged; the saved captures were not replayed.
+- Removing A2 makes the rule refuse correct claims it used to pass (all of `OKX`); on the real library it changed
+  nothing in the earlier measurement, but that was measured before the narrowings.
+
 ## 2026-11-14 — Ask: a figure stated without its printed unit (`unit_missing`)
 
 Found in the independent review of PR #183: "The oil drain plug torque is 37" was ACCEPTED against a
@@ -4888,3 +5186,104 @@ brass" not being a plural count); 10 of 10 mutations of the new rules are caught
 **Not measured on the corpus yet**: this widens the Ask rejection scope from the quote's sentence
 to the chunk's, and the existing probes quote whole sentences, which read the same either way
 (only a quote shorter than its sentence changes). A measurement needs cut-quote probes and the owner's approval.
+
+## 2026-11-26 — R3 integrated onto current `main`, and measured on the real library
+
+**Free validation only. No model call was made.** Branch `claude/r3-limit-comparison`, started from
+`origin/main` at `6ef36b9` and rebased onto `4f4fc11` (#200, a planner-log edit only: the verifier and
+every measurement below are unchanged). The reviewed-and-corrected R3 (`fix/r3-review-corrections` at `cb6889f`,
+base `c17758c`) was 69 commits behind `main`; both of its branches are preserved, unchanged, as local
+backup refs and as test-restored git bundles in the owner's private archive.
+
+### How it was integrated, and why not by rebase
+
+The **final** R3 code (`git diff c17758c cb6889f` of `askEvidenceContract.js`) was applied to `main`
+as one change; the five original commits were not replayed. Replaying them would have resolved the
+same documentation conflicts three times over, re-created the intermediate commits that carry the
+component tie (A2) the review removed, and copied into new commits the earlier fixture wording that
+`eb2c465` replaced because it resembled a real page. The code applied without conflict. The four doc
+changes are pure insertions into `main`'s current text (the two R3 sections above sit in date order).
+
+### Is it still needed on `main`?
+
+Yes. R3's test file and oracle rows, run against `main`'s unchanged verifier, fail: 13 of 30 tests,
+and 35 must-reject oracle rows are **accepted** by `main` today. None of the unit work merged since
+(`unit_missing` #185, units printed apart from the figure #187, a cut quote's header read in the
+chunk #188) reads a comparison after the figure. With R3 applied, all pass.
+
+### What R3 is, and what it is not
+
+It closes one false accept: an unmarked single figure that the sentence right after it compares
+with "the maximum / minimum / limit" (the used-plug case, seen in real model replies). It is **not**
+the "quote drops a leading condition word while keeping every cell" false accept recorded under F4
+(2,796 invented cases); that one is unchanged, and the owner's earlier decision keeps its fix (C1b)
+separate.
+
+### Real library (a copy of the pinned snapshot, sha `7eb9a0d69ef7cb20`, unchanged by the scan)
+
+The archived 2026-11-01 harness, re-pointed at current `main` as the baseline:
+
+| | |
+|---|---|
+| Chunks / pairs tried | 20,447 / 161,058 (119,958 unit-bearing, 41,100 bare-number) |
+| Accepted by `main` | 90,854 (92,078 at `c17758c`: the unit rules since then refuse more) |
+| **Newly accepted by R3** | **0** |
+| Newly rejected | 12 pairs = 5 rows = 3 distinct chunk texts in 5 documents (the same 5 rows as on `c17758c`) |
+| R3 without N1 / N2 / N3 / N4 (one removed at a time) | the same 5 rows each: **no narrowing changes any real row** |
+| R3 with position and state words no longer exempting a figure (experiment, not proposed) | the same 5 rows |
+| The final code of this branch (after the review's ± fix below), re-run | the same 5 rows, 0 newly accepted |
+
+All 5 rows were read by hand and every one is a correct refusal: each pair is a plain claim (no
+"maximum" or "minimum") of a figure the page treats as a limit. Three are figures whose label was cut
+off by a page break (a minimum length, a maximum wear, the used-plug maximum); two are labelled
+"maximum wear" rows refused only for a bare-figure quote with a claim that names no condition, which
+drops the word "maximum" anyway. **No false rejection was found.**
+
+`eval:replay` over the six saved real captures and the two synthetic fixtures: output byte-identical
+to `main` (0 verdicts change between the two codes; the "changed" counts the tool prints compare with
+the verdicts recorded under older verifiers, and are the same for both).
+
+### Added on this branch
+
+- Guard tests for the rules merged after R3: a dropped unit keeps `unit_missing` on an R3 layout; a
+  figure whose unit is printed in a header is still read; a labelled minimum followed by its comparison
+  stays verifiable for the qualified claim, and its plain claim keeps `condition_dropped`.
+- A pinned miss (`LIMIT (miss)`): a position or state word in the figure's own sentence (front, rear,
+  left, right, intake, cold, inner) exempts an unmarked limit, so the plain claim is still accepted.
+  No real row has this shape today (the experiment above), so the rule is not widened for it.
+- Fixture hygiene: one invented row reproduced a real page's sentence frame (figure, comparison,
+  remedy, numbered next step) with only the figure and part changed; it is reworded. Checked against
+  the real library with the repository's own test for copied prose (8 shared tokens, at least 6 words):
+  the lines this branch adds share 14 such runs, all stock warning phrases of the form "if the … is
+  greater than the maximum, replace the …"; no vendor marker. For comparison, `main`'s own tracked
+  files already share 274 runs with the library, vendor marker included.
+
+### Independent review of this port (one reviewer, 2026-11-26)
+
+Verdict "ready after fixes", nothing blocking. It confirmed the port is line-for-line the reviewed code,
+that `main`'s later unit rules run first and keep their reasons, and, on 110,000 invented cases of its
+own, 0 newly accepted claims and 0 throws. Every behaviour finding below was reproduced before acting.
+
+| Finding | Done here |
+|---|---|
+| **N3 lets misleading claims through.** A negation says whether the part passes; the only figure next to "the maximum" is still that maximum ("the gap must not exceed the limit") | Not changed (owner decision); pinned as `LIMIT (miss)`, the rationale in `docs/api.md` corrected |
+| **N1 reads any number as the comparison's own limit**, so a temperature or a count ("…the maximum at 20°C", "…, 2 shims must be added") excuses the figure | Not changed (owner decision); pinned as `LIMIT (miss)`, documented |
+| A value with a tolerance ("7.0 ± 1.0 mm") was read as a single figure and its correct claim refused | **Fixed**: read like a range (test first, red then green). Only removes refusals |
+| A fill warning after a capacity ("Do not fill above the upper limit of the reservoir") refuses a correct claim | Pinned as `LIMIT (cost)`, documented |
+| A comparison with the printed number ("If the gap exceeds 2.4 mm"), and a header unit turning a count in the comparison into a row, are not read | Documented as misses |
+| A test asserted a miss as required behaviour; a fixture block was shaped like a spark-plug page; a doc comment sat on the wrong function | Moved into a named `LIMIT (miss)` test; rows renamed to an invented sensor; comment moved |
+
+Not acted on, because neither a real row nor a measurement supports it: widening N2 to allow a word
+between the limit word and the gauge word.
+
+The real-library effect of the 2026-11-05 corrections, measured on 2026-11-06 but never logged, is
+superseded by the measurement above, which uses current `main` as the baseline.
+
+### What this does not establish
+
+- Nothing about what a model writes: no paid capture was run. The two pages other than the used plug
+  have never been asked about live.
+- The narrowings are justified by invented layouts only (the 2026-11-05 entry); on this library they
+  are neutral.
+- The F5 wordings, the F6 trailing words, the position-word miss, and a correctly qualified claim
+  (`condition_not_in_row`) remain as described above.

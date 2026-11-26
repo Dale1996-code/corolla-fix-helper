@@ -586,7 +586,7 @@ condition word stays rejected (`unlabelled_row`); the old verifier rejects it to
 **A figure the manual then compares with its limit (R3).** A figure that has no
 qualifier before it (no new/used, maximum/minimum/limit, standard, nominal, specified,
 reference, typical, … in its own sentence) and is a single value rather than a range
-is the limit itself when the
+or a value with a tolerance ("7.0 ± 1.0 mm", "7.0 +/- 1.0 mm") is the limit itself when the
 text right after it compares the part with "the maximum", "the minimum" or
 "the limit" ("Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
 coupler."). A claim that states it plainly ("the flange gap is 2.4 mm") presents the
@@ -625,13 +625,20 @@ the part.
      sentence prints a number: "greater than the maximum of 2.8 mm", "the limit
      (2.8 mm)". That is a different limit, so the figure is not it. A printed limit that
      equals the figure (in either unit, or spelled "2.40") restates it, and the claim
-     is still refused.
+     is still refused. Any number counts, whatever its unit, so a temperature or a
+     count after the limit word ("greater than the maximum at 20°C", "the minimum, 2
+     shims must be added") is also taken for the comparison's own limit and the plain
+     claim stands (a miss, found by the 2026-11-26 review).
   2. **A gauge mark.** A limit word followed by *mark*, *line* or *level* ("lower than
      the minimum line", "above the maximum mark") names a mark on a reservoir or
      dipstick, not a limit of the figure. A longer word ("linear", "marking") is not
      the gauge word.
   3. **A negated comparison.** "Is not greater than the maximum", "does not exceed",
-     "never exceeds", "cannot exceed", "isn't": the figure is within the limit. The
+     "never exceeds", "cannot exceed", "isn't". This was written on the reading that the
+     figure is then within the limit; the 2026-11-26 review showed that reading is
+     wrong: the negation says whether the part passes, while the only figure next to
+     "the maximum" is still that maximum, so "the gap must not exceed the limit" after an
+     unlabelled figure leaves a plain claim for that limit accepted (a miss). The
      negation must stand right before the comparing word, with at most one of
      *be, been, ever, go, get, yet* between them. A "not" that belongs to the remedy
      ("Do not reuse the coupler if the gap is greater than the maximum", "Do not use
@@ -668,7 +675,16 @@ What it does **not** do, on purpose:
   and then such a sentence is refused (a correct claim lost, never a wrong figure let
   through); none exists in the saved library.
 - *Wordings not read:* "max." / "Max", "exceeded", the plural "limits", "reaches the
-  limit", "out of / not within the limit", "… when the maximum is reached".
+  limit", "out of / not within the limit", "… when the maximum is reached", and a
+  comparison with the printed number itself rather than a limit word ("If the gap
+  exceeds 2.4 mm, replace …").
+- *A position or state word exempts the figure.* Any condition word in the figure's own
+  sentence counts as a qualifier, so "Front …", "Rear …", "Left …", "Intake …", "Cold …"
+  or "Inner …" before an unlabelled limit leaves its plain claim accepted. No row of the
+  saved library has this shape (measured 2026-11-26), so the rule is not widened for it.
+- *A unit printed in a header elsewhere in the chunk* can turn a bare count inside the
+  comparison into a row of its own ("If the gap at 2 points is greater than the
+  maximum …" after "Torque (N·m): bolt 5"), and the comparison is then not seen.
 - *A word that declares the ordinary value is trusted.* If a real table ever prints a
   limit under a column headed "Specified Condition", narrowing 4 would let a plain claim
   for it stand. That has been checked on invented text only.
@@ -681,8 +697,10 @@ What it does **not** do, on purpose:
   greater than the maximum …"); a limit printed elsewhere rather than straight after the
   limit word ("… above the limit shown on the sidewall"); and a range spelled with a
   spaced hyphen or with its unit repeated ("1.5 - 1.6 mm", "1.5 mm to 1.6 mm"), which is
-  read as separate single figures. They are the cost of a lexical rule that refuses
-  rather than guesses.
+  read as separate single figures; and a fill warning after a capacity ("Do not fill
+  above the upper limit of the reservoir", "above the maximum fill line"), because the
+  gauge-mark narrowing reads only a mark/line/level straight after the limit word. They
+  are the cost of a lexical rule that refuses rather than guesses.
 
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
