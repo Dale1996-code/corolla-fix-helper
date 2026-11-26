@@ -1,9 +1,12 @@
 # Repair Planner evaluation system: specification (DRAFT for owner review)
 
-> **Status:** proposal. Nothing in this document is implemented. No code, test, schema, or
-> prompt was changed to write it, and no paid AI call was made. Every "Measured" statement
-> below was produced offline, either by reading the code or by running copies of six pure
-> planner modules in a scratch folder with the retriever stubbed and **invented** fixture
+> **Status:** specification, largely implemented. Phases 1-5 are done (the pure pins, judge,
+> scenarios and confirmed facts, corpus survey, and the paid capture tool plus baseline report) and
+> the Phase 6 one-run pilot has run (2026-11-19; `docs/roadmap.md` N9). The full baseline (6a) has
+> not been captured. Parts of this document still read as a proposal and describe the design as it
+> was first written. Every "Measured" statement below was produced offline, either by reading the
+> code or by running copies of six pure planner modules in a scratch folder with the retriever
+> stubbed and **invented** fixture
 > text (see [Appendix A](#appendix-a-what-was-measured-and-how)).
 >
 > **Revision 2 (2026-11-05), after owner review.** Owner decisions are recorded in section 16.
