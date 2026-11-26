@@ -5190,7 +5190,7 @@ to the chunk's, and the existing probes quote whole sentences, which read the sa
 ## 2026-11-26 — R3 integrated onto current `main`, and measured on the real library
 
 **Free validation only. No model call was made.** Branch `claude/r3-limit-comparison`, started from
-`origin/main` at `6ef36b9` and rebased onto `4f4fc11` (#200, a planner-log edit only: the verifier and
+`origin/main` at `6ef36b9` and rebased onto `f6071cb` (#200 and #201, planner docs only: the verifier and
 every measurement below are unchanged). The reviewed-and-corrected R3 (`fix/r3-review-corrections` at `cb6889f`,
 base `c17758c`) was 69 commits behind `main`; both of its branches are preserved, unchanged, as local
 backup refs and as test-restored git bundles in the owner's private archive.
@@ -5266,12 +5266,28 @@ own, 0 newly accepted claims and 0 throws. Every behaviour finding below was rep
 
 | Finding | Done here |
 |---|---|
-| **N3 lets misleading claims through.** A negation says whether the part passes; the only figure next to "the maximum" is still that maximum ("the gap must not exceed the limit") | Not changed (owner decision); pinned as `LIMIT (miss)`, the rationale in `docs/api.md` corrected |
-| **N1 reads any number as the comparison's own limit**, so a temperature or a count ("…the maximum at 20°C", "…, 2 shims must be added") excuses the figure | Not changed (owner decision); pinned as `LIMIT (miss)`, documented |
+| **N3 lets misleading claims through.** A negation says whether the part passes; the only figure next to "the maximum" is still that maximum ("the gap must not exceed the limit") | **Removed** on the owner's decision (below) |
+| **N1 reads any number as the comparison's own limit**, so a temperature or a count ("…the maximum at 20°C", "…, 2 shims must be added") excuses the figure | **Modified** on the owner's decision (below): only a value in the figure's own unit counts |
 | A value with a tolerance ("7.0 ± 1.0 mm") was read as a single figure and its correct claim refused | **Fixed**: read like a range (test first, red then green). Only removes refusals |
 | A fill warning after a capacity ("Do not fill above the upper limit of the reservoir") refuses a correct claim | Pinned as `LIMIT (cost)`, documented |
 | A comparison with the printed number ("If the gap exceeds 2.4 mm"), and a header unit turning a count in the comparison into a row, are not read | Documented as misses |
 | A test asserted a miss as required behaviour; a fixture block was shaped like a spark-plug page; a doc comment sat on the wrong function | Moved into a named `LIMIT (miss)` test; rows renamed to an invented sensor; comment moved |
+
+### Owner decision, same day: N1 needs the figure's unit, N3 is removed
+
+- **N1, modified.** A comparison's own printed limit excuses the figure only when it is a value in a
+  unit the figure is printed in (spellings matched by the module's `sameUnit`) and differs from the
+  figure in that unit. A bare number ("the maximum of 3", "-0.5"), an unknown unit ("3.5 mils"), a
+  temperature after a gap or a resistance ("…the maximum at 20°C"), another quantity ("30 N·m"), or a
+  count ("…, 2 shims must be removed", "(1)") excuses nothing. A limit in the figure's other unit
+  ("0.1102 in." after "2.4 mm (0.0945 in.)") still does.
+- **N3, removed.** A negated comparison counts like any other. The oracle control
+  `control-R3-negated-comparison` is now the must-reject row `R3-W-negated-comparison`. Cost, the safe
+  direction: a correct claim is refused when the negated comparison is about another quantity than the
+  figure's, as it already was for one that is not negated.
+- Test first: 6 tests failed on the previous code, each on the verdict the decision flips, then passed.
+- **Real library, re-run on the final code:** the same 5 rows (3 chunk texts), 0 newly accepted. No
+  real row depended on either narrowing. `eval:replay` on the eight captures: byte-identical to `main`.
 
 Not acted on, because neither a real row nor a measurement supports it: widening N2 to allow a word
 between the limit word and the gauge word.

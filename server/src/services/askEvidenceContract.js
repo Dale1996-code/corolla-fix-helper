@@ -2861,11 +2861,14 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
 // `condition_not_in_row`, because trusting a nearby sentence to qualify a figure
 // was measured to accept wrong claims.
 //
-// Four layouts are NOT read as "this figure is the limit", each because the
-// sentence plainly compares something else: it prints a limit of its own (N1), the
-// limit word names a gauge mark (N2), the comparison is negated (N3), or the
-// figure's own sentence says "nominal" and the like (N4). Each only removes a
-// refusal and is kept as narrow as its wording allows. There is deliberately NO
+// Three layouts are NOT read as "this figure is the limit", each because the
+// sentence plainly compares something else: it prints a limit of its own in the
+// figure's unit (N1), the limit word names a gauge mark (N2), or the figure's own
+// sentence says "nominal" and the like (N4). Each only removes a refusal and is kept
+// as narrow as its wording allows. A negated comparison is NOT one of them: an
+// earlier narrowing (N3) excused it, but the negation says whether the part passes,
+// while the only figure next to "the maximum" is still that maximum, so it was
+// removed (owner decision, 2026-11-26). There is deliberately NO
 // test of whether the comparison is about the figure's own part: a word-overlap tie
 // that did that (A2) was removed after the independent review, because the claims
 // it let through were the dangerous ones and the correct claims it saved were not.
@@ -2881,52 +2884,65 @@ const LIMIT_COMPARISON_REGEX =
 const LIMIT_COMPARISON_WORDS = 24;
 const COMPARISON_WINDOW_REGEX = new RegExp(`^(?:\\S+\\s+){0,${LIMIT_COMPARISON_WORDS - 1}}\\S+`);
 
-// N3: "is not greater than the maximum" says the figure is WITHIN the limit. The
-// negation must stand right before the comparing word, with at most one auxiliary
-// between ("must not BE greater", "does not GO above"), so a "not" that belongs to
-// the remedy ("Do not reuse the coupler if ...") excuses nothing.
-const NEGATED_COMPARISON_REGEX = /(?:\b(?:not|never|no|cannot)|n['\u2019]t)\s+(?:(?:be|been|ever|go|get|yet)\s+)?$/i;
-
 // N1: "greater than the maximum of 2.8 mm" names a limit that is not this figure.
 // What follows the limit word, past connecting words and an opening bracket, is
 // that limit. The lead can match nothing at all, so it never backtracks.
 const OWN_LIMIT_LEAD_REGEX =
   /^\s*[,:=]?\s*(?:(?:value|of|is|at|was|being|set|specified|stated|listed|shown|equals?)\s+)*[[(]?\s*/i;
-const PRINTED_NUMBER_REGEX = /[-+]?\d[\d,]*(?:\.\d+)?/g;
-const LEADING_NUMBER_REGEX = /^[-+]?\d[\d,]*(?:\.\d+)?/;
+// The figure's alternate unit printed in brackets straight after the limit's first
+// value ("2.8 mm (0.1102 in.)") belongs to the same limit.
+const ALTERNATE_UNIT_GAP_REGEX = /^\s*[[(]\s*$/;
 
 // N4: words that declare a figure the ordinary value the way "standard" does. They
 // are read here only; the shared condition vocabulary is not widened, because that
 // would change every older qualifier check as well.
 const DECLARED_ORDINARY_WORDS = ["specified", "nominal", "reference", "typical"];
 
-/** The numbers printed in a text, as numbers: "2.40" equals "2.4" and "1,500" equals "1500". */
-function printedNumbers(text) {
-  return (String(text).match(PRINTED_NUMBER_REGEX) || []).map((number) => Number(number.replace(/,/g, "")));
-}
-
 /**
- * The limit a comparison prints for itself, as numbers; [] when it prints none.
- * `afterLimit` is the rest of the sentence after the limit word. A unit-bearing
- * figure is a row of its own, so when the sentence runs straight into the next
- * figure (`nextValues`) and only connecting words come first, that figure is the
- * limit; otherwise it is a number the reader does not take for a figure.
+ * The limit a comparison prints for itself, as unit-bearing values; [] when it prints
+ * none. `afterLimit` is the rest of the sentence after the limit word. A
+ * unit-bearing figure is a row of its own, so when the sentence runs straight into
+ * the next figure (`nextValues`) and only connecting words come first, that figure
+ * is the limit. Otherwise the limit is the value printed straight after the lead,
+ * with its bracketed alternate unit. A number with no unit the reader knows (a bare
+ * "3", "3.5 mils", a count such as "2 shims") is no limit at all.
  */
 function printedLimit(afterLimit, nextValues) {
   const rest = afterLimit.slice((OWN_LIMIT_LEAD_REGEX.exec(afterLimit) || [""])[0].length);
 
   if (rest === "") {
-    return printedNumbers(nextValues ?? "");
+    return extractSpecNumbers(nextValues ?? "");
   }
 
-  const number = LEADING_NUMBER_REGEX.exec(rest);
+  const [first, second] = extractSpecNumbers(rest);
 
-  return number ? printedNumbers(number[0]) : [];
+  if (!first || !rest.startsWith(first.raw)) {
+    return [];
+  }
+
+  const between = second ? rest.slice(first.raw.length, rest.indexOf(second.raw, first.raw.length)) : null;
+
+  return second && between !== null && ALTERNATE_UNIT_GAP_REGEX.test(between) ? [first, second] : [first];
+}
+
+/**
+ * Is a comparison's own printed limit a DIFFERENT limit of this figure (N1)? Only a
+ * value in a unit the figure is printed in can be one: "the maximum at 20°C" after a
+ * gap in mm is a condition of the measurement, not its limit, and excuses nothing
+ * (owner decision, 2026-11-26). A value equal to the figure in that unit restates it
+ * ("2.40 mm" for "2.4 mm") and excuses nothing either.
+ */
+function isOtherLimitOfFigure(own, figure) {
+  const shared = own.flatMap((limit) =>
+    figure.filter((value) => sameUnit(limit.unit, value.unit)).map((value) => [limit, value])
+  );
+
+  return shared.length > 0 && !shared.some(([limit, value]) => limit.value === value.value);
 }
 
 /**
  * Does the text right after the figure of `sourceRows[k]` compare the part with a
- * limit that is not excused (N1-N3)? The text between one figure and the next is the
+ * limit that is not excused (N1)? The text between one figure and the next is the
  * NEXT row's label, so only its first sentence belongs to this figure, and a
  * comparison that follows another figure belongs to that figure. What closes the
  * figure's own sentence first -- a bracket, a full stop, a semicolon -- is not part
@@ -2944,17 +2960,11 @@ function comparesWithLimit(sourceRows, k, source) {
   const readable = COMPARISON_WINDOW_REGEX.exec(sentence)?.[0] ?? "";
   // No sentence end before the next figure: the sentence runs straight into it.
   const nextValues = next && sentence.length === gap.length ? next.values : null;
-  const figure = printedNumbers(row.values);
+  const figure = extractSpecNumbers(row.values);
 
-  return [...readable.matchAll(LIMIT_COMPARISON_REGEX)].some((match) => {
-    const own = printedLimit(sentence.slice(match.index + match[0].length), nextValues);
-
-    return (
-      !NEGATED_COMPARISON_REGEX.test(readable.slice(0, match.index)) &&
-      // A limit of its own is a different figure; one equal to this figure restates it.
-      !(own.length && !own.some((number) => figure.includes(number)))
-    );
-  });
+  return [...readable.matchAll(LIMIT_COMPARISON_REGEX)].some(
+    (match) => !isOtherLimitOfFigure(printedLimit(sentence.slice(match.index + match[0].length), nextValues), figure)
+  );
 }
 
 /** Does the figure's sentence print no condition at all, not even "standard"? */

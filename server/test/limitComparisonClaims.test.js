@@ -62,8 +62,8 @@ const controls = ASK_ORACLE.filter((row) => /^control-R3-/.test(row.id));
 // ---- The oracle rows reach the stage they are about ----
 
 test("R3 oracle rows exist and every one passes the earlier gates", () => {
-  assert.ok(mustReject.length >= 35, `expected the R3 rows, found ${mustReject.length}`);
-  assert.ok(controls.length >= 24, `expected the R3 controls, found ${controls.length}`);
+  assert.ok(mustReject.length >= 36, `expected the R3 rows, found ${mustReject.length}`);
+  assert.ok(controls.length >= 23, `expected the R3 controls, found ${controls.length}`);
 
   // A red row is only evidence about the new rule if the quote, the figures, the
   // part name and the row check all pass first. A row that died at an earlier
@@ -173,9 +173,11 @@ test("with no component tie, a plain claim for a limit is refused whatever the c
 // ---- Narrowing 1: the comparison prints its own limit ----
 //
 // "...greater than the maximum of 2.8 mm" names a limit that is NOT this figure.
-// The limit is the next figure of the text (a unit-bearing one is a row of its
-// own) or a number the reader does not take for a figure; either way what follows
-// the limit word, past connecting words and an opening bracket, is that number.
+// What follows the limit word, past connecting words and an opening bracket (or the
+// next figure of the text, when the sentence runs straight into it), is that limit,
+// and it counts only when it is printed with a unit the figure is printed in (owner
+// decision, 2026-11-26): a bare number, a temperature, a count or a step number
+// after the limit word is not a limit of this figure, so it excuses nothing.
 
 test("N1: a comparison that prints its own limit is not about this figure", () => {
   for (const sentence of [
@@ -188,12 +190,37 @@ test("N1: a comparison that prints its own limit is not about this figure", () =
     "If the gap is greater than the limit (2.8 mm), replace the coupler.",
     "If the gap is greater than the limit [2.8 mm], replace the coupler.",
     "If the gap is less than the minimum of 2.0 mm, replace the coupler.",
-    // a number the reader does not take for a figure sits in the same sentence
-    "If the gap is greater than the maximum of 3, replace the coupler.",
-    "If the gap is greater than the maximum of 3.5 mils, replace the coupler.",
+    // the figure's other unit, with a different value
+    "If the gap is greater than the maximum of 0.1102 in., replace the coupler.",
   ]) {
     assert.equal(figureThen(sentence), "accept", sentence);
   }
+});
+
+test("N1: a number not printed in the figure's own unit is not the comparison's own limit", () => {
+  for (const sentence of [
+    // no unit, or a unit the reader does not know
+    "If the gap is greater than the maximum of 3, replace the coupler.",
+    "If the gap is greater than the maximum of 3.5 mils, replace the coupler.",
+    // a condition of the measurement, not a limit of the gap
+    "If the gap is greater than the maximum at 20°C, replace the coupler.",
+    // another quantity altogether
+    "If the gap is greater than the maximum of 30 N*m, replace the coupler.",
+    // a count after the limit word
+    "If the gap is greater than the maximum, 2 shims must be removed.",
+    "If the gap is greater than the maximum (1), replace the coupler.",
+  ]) {
+    assert.equal(figureThen(sentence), REJECT_DETAIL, sentence);
+  }
+  // The same holds for an electrical figure (found by the 2026-11-26 review).
+  assert.equal(
+    outcome(
+      "The coil resistance is 1.5 Ω.",
+      "Coil resistance 1.5 Ω",
+      "Coil resistance 1.5 Ω. If the resistance is greater than the maximum at 20°C, replace the coil."
+    ),
+    REJECT_DETAIL
+  );
 });
 
 test("N1: a printed limit that is this very figure excuses nothing", () => {
@@ -242,14 +269,14 @@ test("N1: a printed limit is compared as a number, with its sign and thousands s
     ),
     "accept"
   );
-  // The same for a limit the reader does not take for a figure.
+  // Without its unit the same number is no limit of this figure, so it excuses nothing.
   assert.equal(
     outcome(
       "The flange offset is 0.5 mm.",
       "Flange offset 0.5 mm",
       "Flange offset 0.5 mm. If the offset is less than the minimum of -0.5, replace the coupler."
     ),
-    "accept"
+    REJECT_DETAIL
   );
   // "1,500" is the figure 1500.
   assert.equal(
@@ -316,9 +343,15 @@ test("N2: 'the minimum line', 'the maximum mark' and 'the limit level' are gauge
   }
 });
 
-// ---- Narrowing 3: a negated comparison ----
+// ---- A negated comparison is still a comparison with the limit ----
+//
+// An earlier narrowing (N3) excused a comparison negated right before its comparing
+// word ("must not be greater than the maximum") on the reading that the figure is
+// then within the limit. The 2026-11-26 review showed that reading is wrong: the
+// negation says whether the PART passes, while the only figure next to "the maximum"
+// is still that maximum. N3 was removed (owner decision, 2026-11-26).
 
-test("N3: a negated comparison says the figure is within the limit", () => {
+test("a negated comparison still makes the unmarked figure the limit", () => {
   const claim = "The flange gap is 2.4 mm.";
   const quote = "Flange gap 2.4 mm";
 
@@ -338,12 +371,14 @@ test("N3: a negated comparison says the figure is within the limit", () => {
     "If the gap is not ever greater than the maximum, reuse the coupler.",
     "The gap does not get above the maximum.",
     "The gap is not yet greater than the maximum.",
+    "Make sure the gap is not greater than the maximum.",
+    "The gap must not exceed the limit.",
   ]) {
-    assert.equal(outcome(claim, quote, `${quote}. ${sentence}`), "accept", sentence);
+    assert.equal(outcome(claim, quote, `${quote}. ${sentence}`), REJECT_DETAIL, sentence);
   }
 });
 
-test("N3: a negation that does not belong to the comparison excuses nothing", () => {
+test("a negation elsewhere in the sentence changes nothing either", () => {
   const claim = "The flange gap is 2.4 mm.";
   const quote = "Flange gap 2.4 mm";
 
@@ -665,9 +700,9 @@ test("a labelled limit followed by its comparison stays verifiable, and a droppe
   );
 });
 
-test("LIMIT (miss): N3 and N1 excuse comparisons that still make the figure the limit", () => {
-  // Found by the 2026-11-26 independent review. These are MISLEADING claims that
-  // stay accepted, pinned so a decision on N1 and N3 changes a named test.
+test("the review's misleading layouts for N1 and N3 are refused", () => {
+  // Found by the 2026-11-26 independent review, accepted before the owner's decision
+  // that day to require the figure's own unit (N1) and to remove N3.
   const claim = "The slider thickness is 2.4 mm (0.0945 in.).";
   const quote = "Slider Thickness 2.4 mm (0.0945 in.)";
 
@@ -677,22 +712,14 @@ test("LIMIT (miss): N3 and N1 excuse comparisons that still make the figure the 
     "The thickness must not be less than the minimum after grinding.",
     "Make sure the thickness is not less than the minimum.",
   ]) {
-    assert.equal(outcome(claim, quote, `${quote} ${sentence}`), "accept", sentence);
+    assert.equal(outcome(claim, quote, `${quote} ${sentence}`), REJECT_DETAIL, sentence);
   }
 
   // N1: a temperature or a count after the limit word is read as the comparison's
   // own limit, though it is not a thickness at all.
   assert.equal(
     outcome(claim, quote, `${quote} If the thickness is less than the minimum, 2 shims must be added.`),
-    "accept"
-  );
-  assert.equal(
-    outcome(
-      "The coil resistance is 1.5 Ω.",
-      "Coil resistance 1.5 Ω",
-      "Coil resistance 1.5 Ω. If the resistance is greater than the maximum at 20°C, replace the coil."
-    ),
-    "accept"
+    REJECT_DETAIL
   );
 });
 

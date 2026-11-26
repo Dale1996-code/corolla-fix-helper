@@ -2805,16 +2805,16 @@ export const ASK_ORACLE = [
     note: "'The minimum line' is a mark on a reservoir, not a limit of the capacity.",
   },
   {
-    id: "control-R3-negated-comparison",
+    id: "R3-W-negated-comparison",
     verifier: "ask",
     channel: "documentSupported",
     chunkText:
       "Flange gap 2.4 mm. If the gap is not greater than the maximum, the coupler may be reused.",
     quote: "Flange gap 2.4 mm",
     claim: "The flange gap is 2.4 mm.",
-    expect: "accept",
-    finding: "control",
-    note: "The comparison is negated: the gap is within the maximum, so 2.4 mm is an ordinary value, not the maximum.",
+    expect: "reject",
+    finding: "R3-qualifier-after-figure",
+    note: "Negating the comparison says whether the part passes, not what 2.4 mm is: the only figure next to 'the maximum' is that maximum (a control until N3 was removed, 2026-11-26).",
   },
   {
     id: "control-R3-nominal-label",

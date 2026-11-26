@@ -618,39 +618,38 @@ the part.
   removed. The cost is the safe direction: a correct claim is refused when the
   comparison really is about another part ("Spacer width 2.0 mm. If the gap is greater
   than the maximum, replace the coupler.").
-- *Four layouts are not read as "this figure is the limit".* Each only ever removes a
+- *Three layouts are not read as "this figure is the limit".* Each only ever removes a
   refusal, and each is as narrow as the wording allows:
-  1. **The comparison prints a limit of its own.** Straight after the limit word, past
-     connecting words (of, is, at, value, specified, …) and an opening bracket, the
-     sentence prints a number: "greater than the maximum of 2.8 mm", "the limit
-     (2.8 mm)". That is a different limit, so the figure is not it. A printed limit that
-     equals the figure (in either unit, or spelled "2.40") restates it, and the claim
-     is still refused. Any number counts, whatever its unit, so a temperature or a
-     count after the limit word ("greater than the maximum at 20°C", "the minimum, 2
-     shims must be added") is also taken for the comparison's own limit and the plain
-     claim stands (a miss, found by the 2026-11-26 review).
+  1. **The comparison prints a limit of its own, in the figure's unit.** Straight after
+     the limit word, past connecting words (of, is, at, value, specified, …) and an
+     opening bracket, the sentence prints a value in a unit the figure is printed in
+     ("greater than the maximum of 2.8 mm" after "2.4 mm", "the limit (2.8 mm)"). That is
+     a different limit, so the figure is not it. A printed limit that equals the figure
+     in that unit (or spelled "2.40") restates it, and the claim is still refused. A
+     number with no unit, or in another unit, is no limit of the figure and excuses
+     nothing: "the maximum of 3", "the maximum at 20°C" after a gap or a resistance,
+     "the maximum, 2 shims must be removed" (owner decision, 2026-11-26; the first
+     version took any number for the comparison's own limit).
   2. **A gauge mark.** A limit word followed by *mark*, *line* or *level* ("lower than
      the minimum line", "above the maximum mark") names a mark on a reservoir or
      dipstick, not a limit of the figure. A longer word ("linear", "marking") is not
      the gauge word.
-  3. **A negated comparison.** "Is not greater than the maximum", "does not exceed",
-     "never exceeds", "cannot exceed", "isn't". This was written on the reading that the
-     figure is then within the limit; the 2026-11-26 review showed that reading is
-     wrong: the negation says whether the part passes, while the only figure next to
-     "the maximum" is still that maximum, so "the gap must not exceed the limit" after an
-     unlabelled figure leaves a plain claim for that limit accepted (a miss). The
-     negation must stand right before the comparing word, with at most one of
-     *be, been, ever, go, get, yet* between them. A "not" that belongs to the remedy
-     ("Do not reuse the coupler if the gap is greater than the maximum", "Do not use
-     above the maximum") excuses nothing, nor does a second comparison in the same
-     sentence that is not negated.
-  4. **A word that declares the ordinary value.** "Specified", "Nominal", "Reference"
+  3. **A word that declares the ordinary value.** "Specified", "Nominal", "Reference"
      or "Typical" in the figure's own sentence reads like "Standard". Only that
      sentence counts (a word in an earlier sentence, or borrowed from the previous
      sentence to name the part, does not), and only these exact words. The word is
      read from the whole sentence, so a column header that carries it ("Item
      Specified Condition (mm) Flange Gap 2.4") also declares the first row of the
      table ordinary.
+- *A negated comparison counts like any other.* "The gap must not exceed the limit",
+  "Make sure the gap is not greater than the maximum": the negation says whether the
+  part passes, while the only figure next to "the maximum" is still that maximum. A first
+  version excused such sentences on the reading that the figure was then within the
+  limit; the 2026-11-26 review showed that reading is wrong, and it was removed (owner
+  decision). The cost is the safe direction: a correct claim is refused when the negated
+  comparison is about another quantity than the figure's ("Torque 37 N·m. Check that the
+  runout is not more than the maximum."), as it already was when the comparison is not
+  negated.
 - *Bare-number table rows* are covered as the older rules cover them: a claim is
   verified only when its quote carries the header unit, and this check applies then.
 
@@ -686,7 +685,7 @@ What it does **not** do, on purpose:
   comparison into a row of its own ("If the gap at 2 points is greater than the
   maximum …" after "Torque (N·m): bolt 5"), and the comparison is then not seen.
 - *A word that declares the ordinary value is trusted.* If a real table ever prints a
-  limit under a column headed "Specified Condition", narrowing 4 would let a plain claim
+  limit under a column headed "Specified Condition", narrowing 3 would let a plain claim
   for it stand. That has been checked on invented text only.
 - *Correct claims the rule can refuse* (the old verifier accepted them): a comparison
   about another part than the figure's ("Spacer width 2.0 mm. If the gap is greater than
