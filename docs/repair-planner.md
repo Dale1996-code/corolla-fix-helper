@@ -233,6 +233,38 @@ also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
      the engine oil") or named bare by the task ("Replace the belt") counts as
      before. The modifier is only the subject word printed right before it, so
      "timing belt" vs "belt, timing" or a modifier two words away is not seen;
+   - what the task check still cannot see, each pinned as a `todo` row in
+     `repairPlanEvidenceContract.test.js` (invented text; counts from a
+     read-only snapshot of the library, 2026-11-27, against 35 owner-style
+     task titles):
+     - **only a `numeric_spec` is matched to its task.** The same off-task
+       figure filed as a `procedure`, `vehicle_fact`, or `safety_instruction`
+       is accepted and covers the task, so a drive-belt interval filed as a
+       procedure still covers "Replace the timing belt". The N9 fix holds only
+       while the model files the figure as a `numeric_spec`;
+     - **one shared word is enough, including the word the task uses as a
+       modifier**: "engine" in "engine oil" grounds "Engine coolant capacity …",
+       and "drive" grounds "Drive the car at 40 km/h …" for a drive-belt task.
+       This is by far the largest gap in the library: 952 figure sentences that
+       never print the task's own part word would verify under these tasks
+       (123 of the 137 accepted for "Change the engine oil" do not say "oil"),
+       and every one sampled was about another part. Requiring the task's last
+       subject word removed them all but is not safe: a task title is the
+       owner's free text ("Front brakes squeak." ends in a verb), and it also
+       rejected "Air cleaner filter element" for an air filter;
+     - another task word grounds a contradicted one ("Drive belt tensioner …"
+       for "Replace the timing belt tensioner");
+     - reversed or separated wording ("Belt, drive", "drive V-belt"): neither
+       shape occurs in the library, so this one is theoretical;
+     - **the safe direction, since N9:** an owner's word that differs from the
+       manual's now rejects an honest spec. The manuals call the drive belt
+       "V-ribbed belt" (83 times, 16 documents) or "drive belt", never
+       "serpentine belt", so a "Replace the serpentine belt" task loses them;
+       likewise "transmission" vs "transaxle" fluid and "wheel" vs "hub"
+       bearing;
+     - punctuation is not a boundary, so a heading word before a colon
+       ("LUBRICATION: OIL") reads as the part's modifier and rejects an honest
+       oil spec (24 such headings, 9 documents; not the S1 drain-plug line);
 6. a `required_tool` / `required_part` `itemName` is at least two words or
    four letters (`item_name_too_short`) and appears in the claim as whole
    words (`item_not_in_claim`).

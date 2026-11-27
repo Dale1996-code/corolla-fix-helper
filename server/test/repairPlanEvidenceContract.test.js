@@ -1098,3 +1098,162 @@ test("a spec naming another kind of the task's part is not grounded by the share
   const { rejected } = verifyAgainst(text, { claim: statement, evidenceQuote: statement }, "Change the engine oil");
   assert.equal(rejected[0]?.reason, "subject_missing");
 });
+
+// --- The task-subject check: what it still cannot see -----------------------
+//
+// Invented text, from an investigation after roadmap N9 / PR #203 (2026-11-27),
+// which also measured each gap against the real library (counts in
+// docs/repair-planner.md). Same convention as plannerNegatives.test.js: each
+// pin row describes what the code does TODAY and passes; where that is not the
+// desired behavior, a `todo` row states the desired behavior, and the stale-todo
+// guard fails the suite the moment one starts passing, so the fix must remove
+// its `todo`. Never delete or relabel a row to make it pass.
+
+const TIMING_TASK = "Replace the timing belt";
+
+function subjectVerdict(statement, task, kind = "numeric_spec") {
+  const { accepted, rejected } = verifyAgainst(`${statement}.`, { kind, claim: statement, evidenceQuote: statement }, task);
+  return accepted.length ? "accepted" : rejected[0]?.reason;
+}
+
+function coversTask(statement, task, kind) {
+  const result = build([claim({ kind, claim: statement, evidenceQuote: statement })], {
+    tasks: [{ id: 1, title: task, compound: false, clauses: [] }],
+    sources: [makeSource("S1", `${statement}.`)],
+  });
+  return result.coverage[0].covered;
+}
+
+// S-1: only a numeric_spec is matched to its task. The same off-task figure
+// filed as a procedure, vehicle_fact, or safety_instruction is accepted, and it
+// covers the task, so it can move the plan to partial or verified.
+const OFF_TASK_FIGURE = "Swap the accessory belt every 50,000 miles";
+const NON_SPEC_KINDS = ["procedure", "vehicle_fact", "safety_instruction"];
+
+// S-2: a word the TASK uses as a modifier ("engine" in "engine oil") counts on
+// its own, so any spec sharing it is grounded: another part, or a verb.
+const MODIFIER_SHARE_CASES = [
+  ["Engine coolant capacity 5.9 L", "Change the engine oil"],
+  ["Ignition timing 9 deg BTDC at idle", "Replace the timing chain"],
+  ["Drive the car at 40 km/h for 2 minutes", "Replace the drive belt"],
+  ["Ignition switch ON, battery voltage 12 V", "Replace the ignition coils"],
+  ["Brake pedal free play 3 mm", "Replace the front brake pads"],
+];
+
+// S-3: another task word grounds the claim when the shared head is
+// contradicted: "tensioner" carries a drive-belt part into a timing-belt job.
+const OTHER_TASK_WORD_CASE = ["Drive belt tensioner bolt 21 N*m", "Replace the timing belt tensioner"];
+
+// S-4: the modifier is only the word right before, so reversed or separated
+// wording escapes. Neither shape was found in the library.
+const REVERSED_CASES = ["Belt, drive: deflection 9 mm", "Drive V-belt deflection 9 mm"];
+
+// S-5 (the safe direction, since N9): when the owner's word for a part is not
+// the manual's, an honest spec is rejected. Each verified before N9.
+const SYNONYM_CASES = [
+  ["V-ribbed belt deflection 9 mm", "Replace the serpentine belt"],
+  ["Generator drive belt deflection 9 mm", "Replace the alternator belt"],
+  ["Automatic transaxle fluid capacity 3.5 L", "Change the transmission fluid"],
+  ["Front axle hub bearing play 0.05 mm", "Replace the front wheel bearing"],
+  ["Sump oil plug 39 N*m", "Change the engine oil"],
+];
+
+// S-6 (the safe direction): punctuation is not a boundary, so a heading's word
+// before a colon reads as the part's modifier ("lubrication" for "oil").
+const HEADING_CASE = ["FIT SUMP PLUG [ LUBRICATION: OIL AND OIL FILTER ] Torque: 39 N*m", "Change the engine oil"];
+
+test("today: an off-task figure is rejected as a numeric_spec but covers the task under any other kind", () => {
+  assert.equal(subjectVerdict(OFF_TASK_FIGURE, TIMING_TASK), "subject_missing");
+  assert.equal(coversTask(OFF_TASK_FIGURE, TIMING_TASK, "numeric_spec"), false);
+
+  for (const kind of NON_SPEC_KINDS) {
+    assert.equal(subjectVerdict(OFF_TASK_FIGURE, TIMING_TASK, kind), "accepted", kind);
+    assert.equal(coversTask(OFF_TASK_FIGURE, TIMING_TASK, kind), true, kind);
+  }
+});
+
+test("today: a shared modifier word, another task word, or reversed wording grounds an off-task spec", () => {
+  for (const [statement, task] of [...MODIFIER_SHARE_CASES, OTHER_TASK_WORD_CASE]) {
+    assert.equal(subjectVerdict(statement, task), "accepted", `${statement} / ${task}`);
+  }
+
+  for (const statement of REVERSED_CASES) {
+    assert.equal(subjectVerdict(statement, TIMING_TASK), "accepted", statement);
+  }
+});
+
+test("today: a synonym for the task's modifier, or a heading word before a colon, rejects an honest spec", () => {
+  for (const [statement, task] of [...SYNONYM_CASES, HEADING_CASE]) {
+    assert.equal(subjectVerdict(statement, task), "subject_missing", `${statement} / ${task}`);
+  }
+});
+
+test("controls any change to the task-subject check must keep", () => {
+  for (const [statement, task, want] of [
+    ["Oil sump plug 39 N*m", "Change the engine oil", "accepted"],
+    ["Gearbox oil plug 41 N*m", "Change the engine oil", "subject_missing"],
+    ["Seat belt anchor bolt 42 N*m", TIMING_TASK, "subject_missing"],
+    ["Disc brake pad thickness 11 mm", "Replace the front brake pads", "accepted"],
+    ["Front brake pad thickness 11 mm", "Front brakes squeak", "accepted"],
+  ]) {
+    assert.equal(subjectVerdict(statement, task), want, `${statement} / ${task}`);
+  }
+});
+
+const SUBJECT_TODO_ROWS = [
+  {
+    id: "S-1",
+    todo: "planner-subject-kind-bypass",
+    check() {
+      for (const kind of NON_SPEC_KINDS) {
+        assert.equal(coversTask(OFF_TASK_FIGURE, TIMING_TASK, kind), false, `${kind} covers the timing-belt task`);
+      }
+    },
+  },
+  ...MODIFIER_SHARE_CASES.map(([statement, task], index) => ({
+    id: `S-2.${index + 1}`,
+    todo: "planner-subject-modifier-share",
+    check: () => assert.equal(subjectVerdict(statement, task), "subject_missing", `${statement} / ${task}`),
+  })),
+  {
+    id: "S-3",
+    todo: "planner-subject-other-task-word",
+    check: () => assert.equal(subjectVerdict(...OTHER_TASK_WORD_CASE), "subject_missing"),
+  },
+  ...REVERSED_CASES.map((statement, index) => ({
+    id: `S-4.${index + 1}`,
+    todo: "planner-subject-reversed-wording",
+    check: () => assert.equal(subjectVerdict(statement, TIMING_TASK), "subject_missing", statement),
+  })),
+  ...SYNONYM_CASES.map(([statement, task], index) => ({
+    id: `S-5.${index + 1}`,
+    todo: "planner-subject-synonym",
+    check: () => assert.equal(subjectVerdict(statement, task), "accepted", `${statement} / ${task}`),
+  })),
+  {
+    id: "S-6",
+    todo: "planner-subject-heading-punctuation",
+    check: () => assert.equal(subjectVerdict(...HEADING_CASE), "accepted"),
+  },
+];
+
+for (const desired of SUBJECT_TODO_ROWS) {
+  test(`desired behavior ${desired.id} [${desired.todo}]`, { todo: desired.todo }, () => {
+    desired.check();
+  });
+}
+
+test("every task-subject todo row still fails (remove todo when a fix lands)", () => {
+  const nowPassing = [];
+
+  for (const desired of SUBJECT_TODO_ROWS) {
+    try {
+      desired.check();
+      nowPassing.push(`${desired.id} [${desired.todo}]`);
+    } catch {
+      // Still failing: the gap still reproduces.
+    }
+  }
+
+  assert.deepEqual(nowPassing, [], "These rows now pass. Remove their `todo` so they gate from here on.");
+});

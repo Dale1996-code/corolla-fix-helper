@@ -165,7 +165,10 @@ state a plan imagined.
   qualifier the quote itself leaves off by stopping mid-sentence ("at 2,000 rpm"); a later
   stage joined by a comma ("then a further 90°"); which row of a flattened table a value came
   from, unless the quote is that one row; and two parts that both share a word with the
-  task. Being lexical, the task check can also reject an honest claim whose quote does not
+  task — including a word the task only uses as a modifier ("engine" grounds an engine-coolant
+  spec for an oil change), the largest gap measured (2026-11-27) — and any off-task figure
+  filed as a kind other than `numeric_spec`, which skips the task check entirely and still covers
+  the task (both pinned as `todo` rows; `docs/repair-planner.md`). Being lexical, the task check can also reject an honest claim whose quote does not
   repeat the task's wording, and the two-words-or-four-letters rule for a tool or part name
   refuses Toyota's bare "SST". Ask's subject guard was not ported, on purpose: a planner
   claim is a fragment of its quote, so its part is always "in the quote". See
@@ -669,7 +672,9 @@ that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
 its unit passed under every claim kind (found by 2b and **fixed**, `unit_cut`, #183 and #184);
 the planner accepted a drive-belt claim for a "Replace the timing belt" task, because its
 task-subject check needed only one shared word, `belt` (found by 2a; **fixed**: a shared word no longer counts
-when the evidence prints it only with a different modifier than the task, `subject_missing`); a symptom
+when the evidence prints it only with a different modifier than the task, `subject_missing` — but only for a
+`numeric_spec`: the same claim filed as a procedure still covers the task, and a shared modifier word
+such as "engine" still grounds another part's spec, both `todo` rows from a 2026-11-27 investigation); a symptom
 or context sentence after the repair ("They squeal when I brake.") became an extra, sometimes
 safety-critical, task in five of five briefs (spec decision D7: deferred, pinned as `todo`); and
 whether `verified` / `ready` should require a complete procedure is spec decision D6, deferred until
