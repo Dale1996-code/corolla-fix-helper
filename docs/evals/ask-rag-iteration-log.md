@@ -5303,3 +5303,54 @@ superseded by the measurement above, which uses current `main` as the baseline.
   are neutral.
 - The F5 wordings, the F6 trailing words, the position-word miss, and a correctly qualified claim
   (`condition_not_in_row`) remain as described above.
+
+## 2026-11-27 — `fuel-injector-resistance`: a structured check of the verified claims
+
+**Free validation only. No model call was made, no capture was run.** Branch
+`feat/injector-eval-claims-rule`, from `origin/main` at `1a164b2`. This is a rewrite of the earlier local
+branch `fix/eval-injector-units-temperature`, which was 149 commits behind `main`; that branch was used
+as a reference only and is neither merged nor rebased. Its fixture held real manual text, so none of its
+fixture or commits are carried here.
+
+### What changed
+
+- `evals/fuelInjectorClaims.js` (new): a pure check of `result.evidence`, three records. (1) The answer is
+  exactly `renderEvidenceAnswer(evidence)`. (2) One verified claim names the injector, gives its range in
+  **ohms**, gives the **test temperature** (20°C or 68°F), and names no other part. (3) No rendered line
+  naming the injector prints another resistance, the range in another unit, or another temperature.
+  It is lexical and conservative; its known limits are in the file and each is pinned by a test.
+- `answerQualityScoring.js`: the generic `resultChecks` hook (pure synchronous functions of the result).
+  A check that throws, returns a promise or malformed records, repeats a name, mutates the result, or
+  answers differently twice FAILS. Declared on a refused/rejected case it reports a failing check.
+- `fuel-injector-resistance` gains `resultChecks`; its regex rules are kept. It stays `verified: false`.
+
+### Why it is not redundant with the verifier
+
+Measured against the current verifier on invented material: a wrong value, a wrong temperature, a dropped
+unit (`unit_missing`), kilo-ohms, and another part's figures given to the injector are all **rejected by
+the verifier** now (D1 exact values, `unit_missing`, `subject_mismatch`, F1 row checks), so the old
+branch's "the verifier accepts this wrong answer" cases no longer exist. What the verifier still
+**accepts** and this check catches: the correct range with **no test temperature** (printed in the quote,
+omitted by the claim), and a **harness figure attributed to the injector** (the claim is printed and the
+part is named). The regexes cannot express either across several sentences.
+
+### Evidence
+
+- 23 new tests in `server/test/fuelInjectorClaims.test.js`, run through the real `validateEvidencePayload` /
+  `verifyEvidence` / `renderEvidenceAnswer` on `fixtures/invented-injector-chunks.json`: two made-up pages
+  with made-up figures (7.7 to 8.3 Ω at 25°C). The scorer takes its expectation as a parameter, so the rule
+  is proven by structure, not by the real page. One test pins the shipped case's real expectation on a
+  hand-built result.
+- Mutation checks: dropping the temperature requirement fails 4 tests, dropping the other-part exclusion
+  fails 1, disabling the other-resistance rule fails 2.
+- A wording lesson recorded for fixture authors: a row printed "…Ω when measured at 25°C" is rejected
+  (`row_mismatch/figures_split`) for a claim saying "…Ω at 25°C"; the verifier wants the claim's connecting
+  words to match the quote's.
+
+### What this does not establish
+
+- Nothing about what a model writes today. The case has not been run live since the earlier eleven
+  observations (2026-09-27); promoting it needs an independent later `eval:answers` run, which needs the
+  owner's approval for the spend.
+- The check is word-based. It fails a correct claim that names the injector and another part, or that
+  prints a harness figure beside "injector"; it passes a pronoun-only claim and a figure it cannot place.
