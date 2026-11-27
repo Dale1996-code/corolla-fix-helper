@@ -107,13 +107,15 @@ export const SCRIPTED_RUNS = {
     claims: [S8_BELT_CLAIM],
     expect: { evidenceStatus: "partial", accepted: [S8_BELT], rejected: 0 },
   },
-  // Real drive-belt replacement text, cited for the timing-belt task.
+  // Real drive-belt replacement text, cited for the timing-belt task. Since
+  // roadmap N9 the task check rejects it (subject_missing): the task calls the
+  // belt "timing", the evidence only "drive".
   "S8-drive-belt-decoy": {
     scenarioId: "S8-timing-belt",
     corpus: "S8-premise-holds",
     query: "timing belt replacement interval",
     claims: [S8_DRIVE_CLAIM],
-    expect: { evidenceStatus: "partial", accepted: [S8_DRIVE], rejected: 0 },
+    expect: { evidenceStatus: "not_found", accepted: [], rejected: 1 },
   },
 };
 

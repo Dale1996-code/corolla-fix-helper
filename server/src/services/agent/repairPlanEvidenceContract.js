@@ -711,8 +711,64 @@ function claimSubjectProblem(claim, task) {
 
   const taskWords = taskSubjectWords(task, claim.clauseIndex);
   const evidenceWords = new Set([...named, ...subjectWords(claim.evidenceQuote)]);
+  const taskModifiers = subjectModifiers(taskSubjectText(task, claim.clauseIndex));
+  const evidenceModifiers = mergeModifiers(subjectModifiers(claim.claim), subjectModifiers(claim.evidenceQuote));
 
-  return [...taskWords].some((word) => evidenceWords.has(word)) ? null : "subject_missing";
+  // A shared word does not count when the evidence names it only with a
+  // different modifier than the task: "timing belt" is not grounded by "drive
+  // belt" (roadmap N9). A word the task names bare ("belt"), or the evidence
+  // prints bare ("Oil drain plug" for "engine oil"), counts as before.
+  const grounded = (word) => {
+    const wanted = taskModifiers.get(word);
+    const printed = evidenceModifiers.get(word);
+
+    if (!wanted || !printed) {
+      return true;
+    }
+
+    return [...wanted].some((modifier) => printed.has(modifier));
+  };
+
+  return [...taskWords].some((word) => evidenceWords.has(word) && grounded(word)) ? null : "subject_missing";
+}
+
+function taskSubjectText(task, clauseIndex) {
+  const clause = task?.compound && Number.isInteger(clauseIndex) ? task.clauses?.[clauseIndex] : null;
+  return subjectWords(clause).size ? clause : task?.title;
+}
+
+/** Stemmed words of `text` in order, with null for a word that names nothing. */
+function subjectSequence(text) {
+  return (String(text || "").toLowerCase().match(/\p{L}+/gu) || []).map((word) => {
+    const stem = stemWord(word);
+    return word.length >= 2 && !NON_SUBJECT_WORDS.has(word) && !NON_SUBJECT_WORDS.has(stem) ? stem : null;
+  });
+}
+
+/** Each subject word mapped to the subject words printed right before it. */
+function subjectModifiers(text) {
+  const sequence = subjectSequence(text);
+  const modifiers = new Map();
+
+  sequence.forEach((word, index) => {
+    const before = sequence[index - 1];
+
+    if (word && before) {
+      modifiers.set(word, (modifiers.get(word) || new Set()).add(before));
+    }
+  });
+
+  return modifiers;
+}
+
+function mergeModifiers(first, second) {
+  const merged = new Map(first);
+
+  for (const [word, modifiers] of second) {
+    merged.set(word, new Set([...(merged.get(word) || []), ...modifiers]));
+  }
+
+  return merged;
 }
 
 /**
