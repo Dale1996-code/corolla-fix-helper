@@ -151,14 +151,16 @@ test("S8-fabrication: a timing-belt claim is accepted only because the premise w
   assert.equal(scriptedRun("S8-fabrication").corpus, "S8-premise-violated");
 });
 
-test("S8-drive-belt-decoy: a drive-belt claim is accepted for the timing-belt task (an observation, not a requirement)", async () => {
-  // The planner's task check needs only a shared word, and "belt" is one. This
-  // run exists so the Phase 2b matcher can be shown NOT to call it a timing-belt
-  // fabrication. If the verifier ever starts rejecting it, this fixture stops
-  // producing its situation and must be reported, not bent.
+test("S8-drive-belt-decoy: a drive-belt claim is rejected for the timing-belt task (roadmap N9)", async () => {
+  // Until N9 the task check needed only a shared word, and "belt" is one, so this
+  // claim was accepted. The task now names the belt "timing" and the evidence
+  // only "drive", so the shared head word no longer counts (subject_missing).
+  // The judge's "not a fabrication" label for this text is still pinned by the
+  // S8 claimExamples (`drive-belt-decoy`).
   const result = await record("S8-drive-belt-decoy");
 
-  assert.deepEqual(accepted(result), ["Replace the drive belt every 60,000 miles in severe service."]);
+  assert.deepEqual(accepted(result), []);
+  assert.equal(result.outcome.evidenceStatus, "not_found");
   assert.equal(scriptedRun("S8-drive-belt-decoy").corpus, "S8-premise-holds");
 });
 

@@ -226,6 +226,13 @@ also carry a `clauseIndex`. `required_tool` / `required_part` add an `itemName`.
      clause its `clauseIndex` names, for a compound task), in the claim or in
      its quote. Ask's subject guard could not do this: a planner claim is a
      verbatim fragment of its quote, so its part is always "in the quote";
+   - a shared word does not count when the task names it with a modifier and
+     the evidence prints it only with a different one (roadmap N9): "Replace
+     the drive belt …" is not grounded for "Replace the timing belt", though
+     "belt" is in both. A word printed bare ("Oil pan drain plug" for "Change
+     the engine oil") or named bare by the task ("Replace the belt") counts as
+     before. The modifier is only the subject word printed right before it, so
+     "timing belt" vs "belt, timing" or a modifier two words away is not seen;
 6. a `required_tool` / `required_part` `itemName` is at least two words or
    four letters (`item_name_too_short`) and appears in the claim as whole
    words (`item_not_in_claim`).

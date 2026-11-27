@@ -423,8 +423,8 @@ const SCRIPTED_EXPECTATIONS = {
     P2: 0,
     P3: 1,
   },
-  // The planner accepts a drive-belt claim for the timing-belt task (its task
-  // check shares only the word "belt"); the judge must not call it fabrication.
+  // The planner once accepted a drive-belt claim for the timing-belt task (its task
+  // check shared only the word "belt"; rejected since N9); either way, not a fabrication.
   "S8-drive-belt-decoy": { facts: { "s8-no-timing-belt-procedure": "CORRECTLY_ABSENT" }, P1: "unscored", P2: 0, P3: 0 },
 };
 

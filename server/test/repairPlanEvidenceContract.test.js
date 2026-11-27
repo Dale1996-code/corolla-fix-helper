@@ -1053,3 +1053,48 @@ test("a current-symbol value verifies when restated and is redacted when rejecte
   assert.match(gapText, /\[unverified value\]/);
   assert.doesNotMatch(gapText, /25/, "the rejected value must not be reprinted in the gaps");
 });
+
+// --- Multi-word part names (roadmap N9: drive belt filed under timing belt) ---
+//
+// Invented text. A shared head word ("belt") is not enough when the task names
+// it with a modifier ("timing") and the evidence names a different one.
+
+const BELT_TEXT = "Fit a new drive belt at 45,000 miles. Timing belt tension 12 mm.";
+
+test("a drive-belt spec is not grounded for a timing-belt task", () => {
+  const { accepted, rejected } = verifyAgainst(
+    BELT_TEXT,
+    { claim: "Fit a new drive belt at 45,000 miles", evidenceQuote: "Fit a new drive belt at 45,000 miles" },
+    "Replace the timing belt"
+  );
+
+  assert.equal(accepted.length, 0);
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});
+
+test("controls: matching multi-word part names still verify, and a one-word part behaves as before", () => {
+  for (const [statement, task] of [
+    ["Timing belt tension 12 mm", "Replace the timing belt"],
+    ["Fit a new drive belt at 45,000 miles", "Replace the drive belt"],
+    ["Fit a new drive belt at 45,000 miles", "Replace the belt"],
+    ["Timing belt tension 12 mm", "Inspect the timing-belt"],
+  ]) {
+    const { accepted, rejected } = verifyAgainst(BELT_TEXT, { claim: statement, evidenceQuote: statement }, task);
+    assert.equal(accepted.length, 1, `${statement} / ${task}: ${rejected[0]?.reason}`);
+  }
+});
+
+test("control: a word the evidence prints bare still counts for a task that gives it a modifier", () => {
+  // "engine oil" in the task, "Oil pan drain plug" in the evidence: no other
+  // kind of oil is named, so the shared word stands.
+  const statement = "Oil pan drain plug 37 N*m";
+  const { accepted, rejected } = verifyAgainst(DRAIN_TEXT, { claim: statement, evidenceQuote: statement }, "Change the engine oil");
+  assert.equal(accepted.length, 1, rejected[0]?.reason);
+});
+
+test("a spec naming another kind of the task's part is not grounded by the shared head word", () => {
+  const text = "Transmission oil drain plug 39 N*m.";
+  const statement = "Transmission oil drain plug 39 N*m";
+  const { rejected } = verifyAgainst(text, { claim: statement, evidenceQuote: statement }, "Change the engine oil");
+  assert.equal(rejected[0]?.reason, "subject_missing");
+});

@@ -158,7 +158,8 @@ state a plan imagined.
   to 37" from "37 N·m") is `unit_cut` (November 2026, found by the planner eval); and a claim that covers a figure
   whose unit the source prints apart from it (a table header or the next cell) yet states none
   of those units is `unit_not_stated` (#187). A claim carrying a figure must name a part, and a `numeric_spec` must
-  share a part word with its task, in the claim or its quote (`subject_missing`), so a bare
+  share a part word with its task, in the claim or its quote (`subject_missing`) — not one the task names
+  with a modifier the evidence replaces ("drive belt" for "timing belt", N9) — so a bare
   "37 N·m" never counts. Tool and part matching against the owner's lists is whole-word, and
   a negated entry ("no torque wrench") counts as absent. What it still cannot see: a
   qualifier the quote itself leaves off by stopping mid-sentence ("at 2,000 rpm"); a later
@@ -666,8 +667,9 @@ that spec's own numbering (its section 16), not the 2026-10-18 audit's D1–D7.
 
 *What it has already found,* each recorded as a measurement or a `todo` row: a claim cut off
 its unit passed under every claim kind (found by 2b and **fixed**, `unit_cut`, #183 and #184);
-the planner accepts a drive-belt claim for a "Replace the timing belt" task, because its
-task-subject check needs only one shared word, `belt` (found by 2a, **not fixed**); a symptom
+the planner accepted a drive-belt claim for a "Replace the timing belt" task, because its
+task-subject check needed only one shared word, `belt` (found by 2a; **fixed**: a shared word no longer counts
+when the evidence prints it only with a different modifier than the task, `subject_missing`); a symptom
 or context sentence after the repair ("They squeal when I brake.") became an extra, sometimes
 safety-critical, task in five of five briefs (spec decision D7: deferred, pinned as `todo`); and
 whether `verified` / `ready` should require a complete procedure is spec decision D6, deferred until
