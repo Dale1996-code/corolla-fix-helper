@@ -1,0 +1,4 @@
+# Eval logs are read by tests that match LF line endings (for example
+# server/test/plannerBaselineReport.test.js). Check them out with LF on every
+# platform, whatever core.autocrlf says.
+docs/evals/*.md text eol=lf
