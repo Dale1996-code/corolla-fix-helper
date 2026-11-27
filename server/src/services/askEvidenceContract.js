@@ -2695,20 +2695,28 @@ export function quoteRowCells(text, row) {
 }
 
 /**
- * Which row of the cited chunk is this quote row? The chunk's row whose label
- * ENDS with the quote row's label (the quote may start inside it) and whose
- * values START with the quote row's values (the quote may stop inside them).
- * Exactly one such row, or -1: two identical rows in one chunk cannot be told
- * apart, so no column is read and the older rules decide.
+ * Every row of the cited chunk this quote row could be: a row whose label ENDS
+ * with the quote row's label (the quote may start inside it) and whose values
+ * START with the quote row's values (the quote may stop inside them).
  */
-function sourceRowIndex(quoteRow, sourceRows) {
+function sourceRowCandidates(quoteRow, sourceRows) {
   const label = normalizeForMatch(quoteRow.label);
   const values = normalizeForMatch(quoteRow.values);
-  const candidates = sourceRows.flatMap((row, index) =>
+
+  return sourceRows.flatMap((row, index) =>
     normalizeForMatch(row.label).endsWith(label) && normalizeForMatch(row.values).startsWith(values)
       ? [index]
       : []
   );
+}
+
+/**
+ * Which row of the cited chunk is this quote row? Exactly one candidate, or -1:
+ * two identical rows in one chunk cannot be told apart, so no column is read
+ * and the older rules decide.
+ */
+function sourceRowIndex(quoteRow, sourceRows) {
+  const candidates = sourceRowCandidates(quoteRow, sourceRows);
 
   return candidates.length === 1 ? candidates[0] : -1;
 }
@@ -2834,7 +2842,184 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   return { status: "aligned", group: run.group, columnsOf: columnsOf || new Set() };
 }
 
-function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null) {
+// ---------------------------------------------------------------------------
+// A figure the manual goes on to compare with "the maximum" (R3)
+// ---------------------------------------------------------------------------
+//
+// "Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
+// coupler." The sentence right after an unmarked figure compares the part with
+// "the maximum", so the figure IS the maximum -- but the qualifier checks above
+// read only the words BEFORE a figure, so a plain claim ("the flange gap is
+// 2.4 mm") was accepted whenever no neighbouring row happened to be marked
+// new, used or standard AND the quote happened to name the part. This is the
+// used-plug case: the label that names the used-plug maximum ended the previous
+// page and the page break left the figure bare.
+//
+// The rule only ever REJECTS, and only a claim the checks above accepted, so it
+// cannot let through anything they refused. It does not make the qualified claim
+// ("the MAXIMUM flange gap is 2.4 mm") verifiable: that still fails
+// `condition_not_in_row`, because trusting a nearby sentence to qualify a figure
+// was measured to accept wrong claims.
+//
+// Three layouts are NOT read as "this figure is the limit", each because the
+// sentence plainly compares something else: it prints a limit of its own in the
+// figure's unit (N1), the limit word names a gauge mark (N2), or the figure's own
+// sentence says "nominal" and the like (N4). Each only removes a refusal and is kept
+// as narrow as its wording allows. A negated comparison is NOT one of them: an
+// earlier narrowing (N3) excused it, but the negation says whether the part passes,
+// while the only figure next to "the maximum" is still that maximum, so it was
+// removed (owner decision, 2026-11-26). There is deliberately NO
+// test of whether the comparison is about the figure's own part: a word-overlap tie
+// that did that (A2) was removed after the independent review, because the claims
+// it let through were the dangerous ones and the correct claims it saved were not.
+
+// A comparison with a limit: a comparing word, then the maximum, minimum or limit.
+// Bounded gaps keep the match linear; it is only ever run on one short sentence.
+// Global, because a sentence may hold several comparisons and each is judged alone.
+// A limit word followed by "mark", "line" or "level" names a mark on a gauge, not a
+// limit of the part ("lower than the minimum line"), so it is not a comparison (N2).
+const LIMIT_COMPARISON_REGEX =
+  /\b(?:greater|larger|more|exceeds?|exceeding|above|beyond|over|less|smaller|below|under|shorter|longer|higher|lower)\b[^.;]{0,40}?\b(?:than\s+)?(?:the\s+)?(?:maximum|minimum|limit)\b(?!\s+(?:marks?|lines?|levels?)\b)/gi;
+// How far into the sentence after the figure the comparison may start.
+const LIMIT_COMPARISON_WORDS = 24;
+const COMPARISON_WINDOW_REGEX = new RegExp(`^(?:\\S+\\s+){0,${LIMIT_COMPARISON_WORDS - 1}}\\S+`);
+
+// N1: "greater than the maximum of 2.8 mm" names a limit that is not this figure.
+// What follows the limit word, past connecting words and an opening bracket, is
+// that limit. The lead can match nothing at all, so it never backtracks.
+const OWN_LIMIT_LEAD_REGEX =
+  /^\s*[,:=]?\s*(?:(?:value|of|is|at|was|being|set|specified|stated|listed|shown|equals?)\s+)*[[(]?\s*/i;
+// The figure's alternate unit printed in brackets straight after the limit's first
+// value ("2.8 mm (0.1102 in.)") belongs to the same limit.
+const ALTERNATE_UNIT_GAP_REGEX = /^\s*[[(]\s*$/;
+
+// N4: words that declare a figure the ordinary value the way "standard" does. They
+// are read here only; the shared condition vocabulary is not widened, because that
+// would change every older qualifier check as well.
+const DECLARED_ORDINARY_WORDS = ["specified", "nominal", "reference", "typical"];
+
+/**
+ * The limit a comparison prints for itself, as unit-bearing values; [] when it prints
+ * none. `afterLimit` is the rest of the sentence after the limit word. A
+ * unit-bearing figure is a row of its own, so when the sentence runs straight into
+ * the next figure (`nextValues`) and only connecting words come first, that figure
+ * is the limit. Otherwise the limit is the value printed straight after the lead,
+ * with its bracketed alternate unit. A number with no unit the reader knows (a bare
+ * "3", "3.5 mils", a count such as "2 shims") is no limit at all.
+ */
+function printedLimit(afterLimit, nextValues) {
+  const rest = afterLimit.slice((OWN_LIMIT_LEAD_REGEX.exec(afterLimit) || [""])[0].length);
+
+  if (rest === "") {
+    return extractSpecNumbers(nextValues ?? "");
+  }
+
+  const [first, second] = extractSpecNumbers(rest);
+
+  if (!first || !rest.startsWith(first.raw)) {
+    return [];
+  }
+
+  const between = second ? rest.slice(first.raw.length, rest.indexOf(second.raw, first.raw.length)) : null;
+
+  return second && between !== null && ALTERNATE_UNIT_GAP_REGEX.test(between) ? [first, second] : [first];
+}
+
+/**
+ * Is a comparison's own printed limit a DIFFERENT limit of this figure (N1)? Only a
+ * value in a unit the figure is printed in can be one: "the maximum at 20°C" after a
+ * gap in mm is a condition of the measurement, not its limit, and excuses nothing
+ * (owner decision, 2026-11-26). A value equal to the figure in that unit restates it
+ * ("2.40 mm" for "2.4 mm") and excuses nothing either.
+ */
+function isOtherLimitOfFigure(own, figure) {
+  const shared = own.flatMap((limit) =>
+    figure.filter((value) => sameUnit(limit.unit, value.unit)).map((value) => [limit, value])
+  );
+
+  return shared.length > 0 && !shared.some(([limit, value]) => limit.value === value.value);
+}
+
+/**
+ * Does the text right after the figure of `sourceRows[k]` compare the part with a
+ * limit that is not excused (N1)? The text between one figure and the next is the
+ * NEXT row's label, so only its first sentence belongs to this figure, and a
+ * comparison that follows another figure belongs to that figure. What closes the
+ * figure's own sentence first -- a bracket, a full stop, a semicolon -- is not part
+ * of the next sentence. Whitespace is read as single spaces, so a line break in the
+ * source does not shorten the distance between the two words of a comparison.
+ */
+function comparesWithLimit(sourceRows, k, source) {
+  const row = sourceRows[k];
+  const next = sourceRows[k + 1];
+  const gap = source
+    .slice(row.end, next ? next.start : source.length)
+    .replace(/^[\s)\]]*(?:[.;]\s*)?/, "")
+    .replace(/\s+/g, " ");
+  const sentence = gap.split(SENTENCE_END_REGEX)[0] || "";
+  const readable = COMPARISON_WINDOW_REGEX.exec(sentence)?.[0] ?? "";
+  // No sentence end before the next figure: the sentence runs straight into it.
+  const nextValues = next && sentence.length === gap.length ? next.values : null;
+  const figure = extractSpecNumbers(row.values);
+
+  return [...readable.matchAll(LIMIT_COMPARISON_REGEX)].some(
+    (match) => !isOtherLimitOfFigure(printedLimit(sentence.slice(match.index + match[0].length), nextValues), figure)
+  );
+}
+
+/** Does the figure's sentence print no condition at all, not even "standard"? */
+function printsNoCondition(words) {
+  return ROW_CONDITION_GROUPS.every((group) =>
+    group === WITH_GROUP ? !words.has("without") : !alternativesIn(words, group).length
+  );
+}
+
+/** Does the figure's sentence declare it the ordinary value ("nominal", "typical", ...)? */
+function declaresOrdinaryValue(words) {
+  return DECLARED_ORDINARY_WORDS.some((word) => words.has(word));
+}
+
+// A tolerance sign straight before the figure: the row reader puts "7.0 \u00b1" of
+// "7.0 \u00b1 1.0 mm" in the label and reads "1.0 mm" as the value.
+const TOLERANCE_BEFORE_REGEX = /\d\s*(?:\u00b1|\+\s*\/\s*-)\s*$/;
+
+/**
+ * Is the figure a single value? A range, or a value with a tolerance ("7.0 \u00b1 1.0 mm",
+ * "7.0 +/- 1.0 mm"), is a value to hold, not a limit.
+ */
+function isSingleValue(row) {
+  return !/\d\s*to\s*-?\d|\d\s*[-\u2013\u2014]\s*\d/i.test(row.values) && !TOLERANCE_BEFORE_REGEX.test(row.label);
+}
+
+/**
+ * Is this figure, left unmarked, the limit a sentence right after it compares the
+ * part with? Checked against EVERY source row the quoted row could be: a quote of
+ * the bare figure, or one that is printed twice, does not say which, and the claim
+ * is refused if any of them is an unmarked limit.
+ *
+ * The comparison is applied whatever component it names. An earlier version tied it
+ * to the figure's own part by word overlap and let the claim stand when the two
+ * looked unrelated; the independent review showed that tie erred both ways and that
+ * its errors went the unsafe way (a plain claim for a limit accepted), so it was
+ * removed. A refused correct claim is the safe direction.
+ */
+function leavesLimitUnmarked(quoteRow, sourceRows, source, subject) {
+  return sourceRowCandidates(quoteRow, sourceRows).some((k) => {
+    const printed = figureSentence(sourceRows, k, subject);
+
+    return (
+      isSingleValue(sourceRows[k]) &&
+      // The figure's OWN sentence: "Install a new rotor. Thickness 26.0 mm" lends
+      // the thickness the previous sentence's "new" for a claim that states it, but
+      // that word qualifies the rotor, not the figure, and must not exempt it here.
+      printsNoCondition(printed.ownWords) &&
+      !declaresOrdinaryValue(printed.ownWords) &&
+      comparesWithLimit(sourceRows, k, source)
+    );
+  });
+}
+
+function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = null, limitSource = null) {
   const row = rows[index];
   const own = figureSentence(rows, index, subject);
 
@@ -2924,6 +3109,11 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
     }
   }
 
+  // Last, so every older rejection keeps its own detail (R3).
+  if (limitSource !== null && leavesLimitUnmarked(row, sourceRows, limitSource, subject)) {
+    return "qualifier_after_figure";
+  }
+
   return "";
 }
 
@@ -2956,7 +3146,13 @@ function judgeFigureRow(rows, index, claimWords, sourceRows, subject, reading = 
  * above a table's first row is not read for the rows after it, and a row whose
  * cell count does not match its header is not read at all.
  *
- * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "wrong_column" | "column_unstated" | "column_unresolved" }}
+ * R3 adds `qualifier_after_figure` last, after every check above: an unmarked
+ * single-value figure that the sentence right after it compares with "the
+ * maximum / minimum / limit" is that limit, and a plain claim is refused (see
+ * leavesLimitUnmarked). It never makes a claim pass and does not read a
+ * qualifier printed after the figure or on the previous page.
+ *
+ * @returns {{ grounded: boolean, checked: boolean, detail: "" | "condition_not_in_row" | "condition_dropped" | "unlabelled_row" | "qualifier_after_figure" | "wrong_column" | "column_unstated" | "column_unresolved" }}
  */
 export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
   const clauses = String(claimText || "")
@@ -2990,7 +3186,8 @@ export function checkClaimQualifiers(claimText, evidenceText, sourceText) {
       claimWords,
       sourceRows,
       subject,
-      columnReading(rows, row, specs, evidence, sourceRows, source)
+      columnReading(rows, row, specs, evidence, sourceRows, source),
+      source
     )
   );
 

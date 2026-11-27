@@ -583,6 +583,124 @@ condition word stays rejected (`unlabelled_row`); the old verifier rejects it to
   Column order is the order of the extracted text, the same assumption every
   other check makes.
 
+**A figure the manual then compares with its limit (R3).** A figure that has no
+qualifier before it (no new/used, maximum/minimum/limit, standard, nominal, specified,
+reference, typical, … in its own sentence) and is a single value rather than a range
+or a value with a tolerance ("7.0 ± 1.0 mm", "7.0 +/- 1.0 mm") is the limit itself when the
+text right after it compares the part with "the maximum", "the minimum" or
+"the limit" ("Flange gap 2.4 mm. If the gap is greater than the maximum, replace the
+coupler."). A claim that states it plainly ("the flange gap is 2.4 mm") presents the
+limit as the normal value and is rejected as `row_mismatch` with the server-side
+detail `qualifier_after_figure`. The check runs after every older one and only ever
+turns an accept into a reject. It does not depend on how much of the row the quote
+copied: the label and the figure, the bare figure, or a figure the chunk prints in
+several rows (the claim is refused if any row the quote could be is an unmarked
+limit). Before this check a plain claim was refused only by accident, when a
+neighbouring row happened to be marked new, used or standard **and** the quote named
+the part.
+
+- *What counts as the comparison.* The text that follows the figure, up to the end of
+  its sentence. A closing bracket and one full stop or semicolon straight after the
+  figure are skipped, so the comparison is usually the next sentence; another figure in
+  between means the comparison belongs to that figure. It is read within its first 24
+  words, runs of white space counting as one space: a comparing word (greater, larger,
+  more, exceeds, above, beyond, over, less, smaller, below, under, shorter, longer,
+  higher, lower) followed, within 40 characters and in the same sentence, by the
+  maximum, minimum or limit. Words that trail the figure in its own sentence ("at the
+  rim", "(see illustration)", "each side") make that sentence, so a comparison after
+  them is not seen.
+- *It is applied whatever part the comparison names.* An earlier version tied the
+  comparison to the figure's own part by word overlap (called A2) and let the claim
+  stand when the two looked unrelated. An independent review showed that tie erred in
+  both directions, and that its errors went the unsafe way: a plain claim for a limit
+  stayed accepted whenever a synonym ("clearance" for the gap), an unusual remedy word
+  ("regrind"), or the claim's own words made the two sentences look unrelated. It was
+  removed. The cost is the safe direction: a correct claim is refused when the
+  comparison really is about another part ("Spacer width 2.0 mm. If the gap is greater
+  than the maximum, replace the coupler.").
+- *Three layouts are not read as "this figure is the limit".* Each only ever removes a
+  refusal, and each is as narrow as the wording allows:
+  1. **The comparison prints a limit of its own, in the figure's unit.** Straight after
+     the limit word, past connecting words (of, is, at, value, specified, …) and an
+     opening bracket, the sentence prints a value in a unit the figure is printed in
+     ("greater than the maximum of 2.8 mm" after "2.4 mm", "the limit (2.8 mm)"). That is
+     a different limit, so the figure is not it. A printed limit that equals the figure
+     in that unit (or spelled "2.40") restates it, and the claim is still refused. A
+     number with no unit, or in another unit, is no limit of the figure and excuses
+     nothing: "the maximum of 3", "the maximum at 20°C" after a gap or a resistance,
+     "the maximum, 2 shims must be removed" (owner decision, 2026-11-26; the first
+     version took any number for the comparison's own limit).
+  2. **A gauge mark.** A limit word followed by *mark*, *line* or *level* ("lower than
+     the minimum line", "above the maximum mark") names a mark on a reservoir or
+     dipstick, not a limit of the figure. A longer word ("linear", "marking") is not
+     the gauge word.
+  3. **A word that declares the ordinary value.** "Specified", "Nominal", "Reference"
+     or "Typical" in the figure's own sentence reads like "Standard". Only that
+     sentence counts (a word in an earlier sentence, or borrowed from the previous
+     sentence to name the part, does not), and only these exact words. The word is
+     read from the whole sentence, so a column header that carries it ("Item
+     Specified Condition (mm) Flange Gap 2.4") also declares the first row of the
+     table ordinary.
+- *A negated comparison counts like any other.* "The gap must not exceed the limit",
+  "Make sure the gap is not greater than the maximum": the negation says whether the
+  part passes, while the only figure next to "the maximum" is still that maximum. A first
+  version excused such sentences on the reading that the figure was then within the
+  limit; the 2026-11-26 review showed that reading is wrong, and it was removed (owner
+  decision). The cost is the safe direction: a correct claim is refused when the negated
+  comparison is about another quantity than the figure's ("Torque 37 N·m. Check that the
+  runout is not more than the maximum."), as it already was when the comparison is not
+  negated.
+- *Bare-number table rows* are covered as the older rules cover them: a claim is
+  verified only when its quote carries the header unit, and this check applies then.
+
+What it does **not** do, on purpose:
+
+- **It does not make the qualified claim verifiable.** "The maximum flange gap is
+  2.4 mm" against the same text is still rejected (`condition_not_in_row`): the word is
+  not in the figure's sentence, and trusting a nearby sentence or the previous page's
+  heading to qualify a figure was measured, on invented text, to accept wrongly
+  qualified claims (34% and 17% of them). In the saved replies to the used-plug question
+  five of nine stated the figure with its qualifier and were refused; recovering such
+  answers is separate work.
+- It does not read a comparison that is not the sentence right after the figure, one
+  that starts more than 24 words in or whose limit word is more than 40 characters from
+  its comparing word, or one in the next chunk. Nor does it read the previous page's
+  heading when no comparison follows the figure: no neighbouring text is passed to the
+  verifier.
+- It does not read a qualifier printed after the figure in its own sentence ("2.4 mm for a
+  used coupler"). No such figure without a qualifier before it exists in the saved library.
+- Its reading of "the figure just before a comparison with the maximum is the maximum"
+  is the manual's idiom, not a proof. A layout that prints an unlabelled standard value
+  and then such a sentence is refused (a correct claim lost, never a wrong figure let
+  through); none exists in the saved library.
+- *Wordings not read:* "max." / "Max", "exceeded", the plural "limits", "reaches the
+  limit", "out of / not within the limit", "… when the maximum is reached", and a
+  comparison with the printed number itself rather than a limit word ("If the gap
+  exceeds 2.4 mm, replace …").
+- *A position or state word exempts the figure.* Any condition word in the figure's own
+  sentence counts as a qualifier, so "Front …", "Rear …", "Left …", "Intake …", "Cold …"
+  or "Inner …" before an unlabelled limit leaves its plain claim accepted. No row of the
+  saved library has this shape (measured 2026-11-26), so the rule is not widened for it.
+- *A unit printed in a header elsewhere in the chunk* can turn a bare count inside the
+  comparison into a row of its own ("If the gap at 2 points is greater than the
+  maximum …" after "Torque (N·m): bolt 5"), and the comparison is then not seen.
+- *A word that declares the ordinary value is trusted.* If a real table ever prints a
+  limit under a column headed "Specified Condition", narrowing 3 would let a plain claim
+  for it stand. That has been checked on invented text only.
+- *Correct claims the rule can refuse* (the old verifier accepted them): a comparison
+  about another part than the figure's ("Spacer width 2.0 mm. If the gap is greater than
+  the maximum, replace the coupler."), including two parts that share a measurement
+  ("Hub runout 0.05 mm. If the rotor runout is greater than the maximum …") or a modifier
+  word ("Oil pump clearance 0.1 mm. If the oil pressure is lower than the minimum …"); a
+  different quantity of the same component ("Disc thickness 25.0 mm. If the runout is
+  greater than the maximum …"); a limit printed elsewhere rather than straight after the
+  limit word ("… above the limit shown on the sidewall"); and a range spelled with a
+  spaced hyphen or with its unit repeated ("1.5 - 1.6 mm", "1.5 mm to 1.6 mm"), which is
+  read as separate single figures; and a fill warning after a capacity ("Do not fill
+  above the upper limit of the reservoir", "above the maximum fill line"), because the
+  gauge-mark narrowing reads only a mark/line/level straight after the limit word. They
+  are the cost of a lexical rule that refuses rather than guesses.
+
 "Verified" means a claimed figure is **printed in the cited quote, in the same
 unit** — not that it is right for this car. In a multi-row quote it also means
 the figure's own row names the part, and in any quote that the claim and the
