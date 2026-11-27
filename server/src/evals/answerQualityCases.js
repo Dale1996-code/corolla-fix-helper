@@ -50,6 +50,12 @@
 //                    carry `qualifier`; `required: true` also demands the pairing appear
 //                    at all. Lets a correct multi-variant answer quote another variant's
 //                    figure while still failing a bare unconditional assertion (optional)
+//   resultChecks     structured checks for a contract the patterns above cannot express:
+//                    a list of pure, synchronous functions of the result, each returning
+//                    [{ name, pass, detail }]. fuel-injector-resistance reads the verified
+//                    claims in result.evidence. A check that throws, returns a promise or
+//                    malformed records, or answers differently twice on the same result
+//                    FAILS; it never passes silently. Scored on answered cases only.
 //   followUp         a second question in the same conversation (tests multi-turn memory).
 //                    standaloneIncludes checks the rewritten follow-up query.
 //
@@ -61,6 +67,7 @@
 import {
   REJECTION_PROBE_SENTINEL_PATTERN,
 } from "./answerRejectionProbes.js";
+import { checkFuelInjectorClaims } from "./fuelInjectorClaims.js";
 import { loadVisionFixtureDataUri } from "./visionFixtures.js";
 
 export const answerQualityCases = [
@@ -433,6 +440,13 @@ export const answerQualityCases = [
         label: "the fuel sender gauge's resistance",
       },
     ],
+    // The regexes above cannot tell which part owns a figure across several
+    // sentences, and they accept a figure with no unit or no test temperature.
+    // This reads the verified claims in result.evidence and requires the
+    // injector's range in ohms WITH the 20°C (68°F) test temperature, and no
+    // other resistance, unit, or temperature for the injector. See
+    // fuelInjectorClaims.js for the contract and its known limits.
+    resultChecks: [checkFuelInjectorClaims],
     verified: false,
   },
   {

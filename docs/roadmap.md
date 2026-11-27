@@ -285,7 +285,7 @@ N1, not for declaring it done.
 expected values were confirmed on the rendered PDF pages, each asking for a table value that
 has a different, genuinely printed value one row away. `spark-plug-gap` is verified (14 of
 44), the first gate on a table-derived value and on a wrong-row value in real generation.
-`fuel-pressure-spec` and `fuel-injector-resistance` report as templates for now. Still
+`fuel-pressure-spec` and `fuel-injector-resistance` report as templates for now (the injector case also carries a structured check of its verified claims, see the 2026-11-27 iteration-log entry). Still
 covered only by templates: two sections that disagree, OCR-noisy pages, and follow-up
 questions. See Experiment D in the
 [iteration log](evals/ask-rag-iteration-log.md).

@@ -1395,13 +1395,27 @@ test("fuel pressure: no rendered title can qualify a bare 147 kPa", () => {
   }
 });
 
+/**
+ * The structured claims check reads result.evidence, which a hand-written answer
+ * lacks. Derive the evidence the server would have rendered this text from: one
+ * verified claim per "claim [title, page N]" line.
+ */
+function evidenced(result) {
+  const documentSupported = result.answer.split("\n").flatMap((line) => {
+    const match = /^(.*) \[(.+), page (\d+)\]$/.exec(line);
+    return match ? [{ claim: match[1], documentTitle: match[2], pageNumber: Number(match[3]) }] : [];
+  });
+
+  return { ...result, evidence: { documentSupported, generalGuidance: [], gaps: [] } };
+}
+
 test("fuel injector: the injector's own row PASSES", () => {
   const scored = evaluateAnswerCase(
     fuelInjectorCase(),
-    answered(
+    evidenced(answered(
       `The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
       cite(FUEL_SERVICE_DATA, 1)
-    )
+    ))
   );
 
   assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
@@ -1410,14 +1424,14 @@ test("fuel injector: the injector's own row PASSES", () => {
 test("fuel injector: the other rows quoted with their own components PASS", () => {
   const scored = evaluateAnswerCase(
     fuelInjectorCase(),
-    answered(
+    evidenced(answered(
       [
         `The fuel injector assembly standard resistance is 11.6 to 12.4 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
         `The fuel pump standard resistance is 0.2 to 3.0 Ω at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
         `The fuel sender gauge assembly standard resistance is 13.5 to 16.5 Ω at float level F. [${FUEL_SERVICE_DATA}, page 1]`,
       ].join("\n"),
       cite(FUEL_SERVICE_DATA, 1)
-    )
+    ))
   );
 
   assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
@@ -1540,11 +1554,11 @@ test("fuel pressure: the real live answer that withheld the operating range FAIL
 });
 
 test("fuel injector: the real live answer PASSES", () => {
-  const scored = evaluateAnswerCase(fuelInjectorCase(), {
+  const scored = evaluateAnswerCase(fuelInjectorCase(), evidenced({
     status: "answered",
     answer: LIVE_FUEL_INJECTOR_ANSWER,
     citations: cite(FUEL_SERVICE_DATA, 1),
-  });
+  }));
 
   assert.equal(scored.pass, true, `unexpected failures: ${failedChecks(scored).join("; ")}`);
 });
@@ -1558,10 +1572,10 @@ test("fuel injector: both ohm code points and spelled-out ohms are read", () => 
   for (const unit of [GREEK_CAPITAL_OMEGA, OHM_SIGN, "ohms"]) {
     const scored = evaluateAnswerCase(
       fuelInjectorCase(),
-      answered(
+      evidenced(answered(
         `The fuel injector assembly standard resistance is 11.6 to 12.4 ${unit} at 20°C (68°F). [${FUEL_SERVICE_DATA}, page 1]`,
         cite(FUEL_SERVICE_DATA, 1)
-      )
+      ))
     );
 
     assert.equal(scored.pass, true, `${unit}: ${failedChecks(scored).join("; ")}`);

@@ -212,6 +212,143 @@ function checkQualifiedValues(result, spec, label) {
   return checks;
 }
 
+const RESULT_CHECK_RECORD_FIELDS = ["name", "pass", "detail"];
+
+/** Why a structured check's return value cannot be scored, or [] when it can. */
+function resultCheckRecordProblems(records) {
+  if (records && typeof records.then === "function") {
+    return ["returned a promise; result checks must be synchronous"];
+  }
+  if (!Array.isArray(records)) {
+    return [`returned ${records === null ? "null" : typeof records}, not a list of check records`];
+  }
+  if (!records.length) {
+    return ["returned no check records"];
+  }
+
+  const problems = [];
+  const names = new Set();
+  for (const [index, record] of records.entries()) {
+    const at = `record ${index + 1}`;
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      problems.push(`${at} is not an object`);
+      continue;
+    }
+    if (typeof record.name !== "string" || !record.name.trim()) {
+      problems.push(`${at} has no name`);
+    } else if (names.has(record.name)) {
+      problems.push(`${at} repeats the name "${record.name}"`);
+    } else {
+      names.add(record.name);
+    }
+    if (typeof record.pass !== "boolean") {
+      problems.push(`${at} has a pass that is not true or false`);
+    }
+    if (record.detail !== undefined && typeof record.detail !== "string") {
+      problems.push(`${at} has a detail that is not text`);
+    }
+    const unknown = Object.keys(record).filter((key) => !RESULT_CHECK_RECORD_FIELDS.includes(key));
+    if (unknown.length) {
+      problems.push(`${at} has unknown field(s) ${unknown.join(", ")}`);
+    }
+  }
+  return problems;
+}
+
+function deepFreeze(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value)) {
+      deepFreeze(value[key]);
+    }
+  }
+  return value;
+}
+
+/**
+ * Run a case's own structured checks: `resultChecks`, a list of pure functions
+ * of the result, for a contract that pattern matching on the rendered answer
+ * cannot express (fuel-injector-resistance reads the verified claims in
+ * `result.evidence`). Each returns a list of `{ name, pass, detail? }` records,
+ * which become ordinary checks.
+ *
+ * Fails explicitly, never silently. A check that is not a function, throws,
+ * returns a promise, returns anything but well-formed records, or returns
+ * different records for the same result becomes one failing check naming why.
+ * Checks read a deep-frozen copy of the result, so a check cannot change what
+ * the next check or the rest of the scorer reads, and a check that tries to
+ * fails. Running every check twice is what makes "deterministic" enforceable
+ * rather than a convention; they are small pure functions, so the cost is
+ * nothing next to the model call being scored.
+ *
+ * Cases without the field get no checks from here: they score exactly as before.
+ */
+function checkResultFunctions(result, spec, label) {
+  if (!Array.isArray(spec.resultChecks) || !spec.resultChecks.length) {
+    return [];
+  }
+
+  let frozen;
+  try {
+    frozen = deepFreeze(structuredClone(result ?? null));
+  } catch (error) {
+    return [
+      {
+        name: `${label}: result checks can read the result`,
+        pass: false,
+        detail: `the result could not be copied: ${error?.message || String(error)}`,
+      },
+    ];
+  }
+
+  const checks = [];
+
+  for (const [index, check] of spec.resultChecks.entries()) {
+    const name = `${label}: result check ${typeof check === "function" && check.name ? check.name : index + 1}`;
+
+    if (typeof check !== "function") {
+      checks.push({ name, pass: false, detail: "is not a function" });
+      continue;
+    }
+
+    let runs;
+    try {
+      runs = [check(frozen), check(frozen)];
+    } catch (error) {
+      checks.push({ name, pass: false, detail: `threw: ${error?.message || String(error)}` });
+      continue;
+    }
+
+    for (const run of runs) {
+      // A rejected promise nobody awaits would surface later as an unhandled
+      // rejection; it is already reported below as a malformed result.
+      if (run && typeof run.then === "function") {
+        Promise.resolve(run).catch(() => {});
+      }
+    }
+
+    const problems = resultCheckRecordProblems(runs[0]);
+    if (problems.length) {
+      checks.push({ name, pass: false, detail: problems.join("; ") });
+      continue;
+    }
+    if (JSON.stringify(runs[0]) !== JSON.stringify(runs[1])) {
+      checks.push({ name, pass: false, detail: "returned different records for the same result" });
+      continue;
+    }
+
+    checks.push(
+      ...runs[0].map((record) => ({
+        name: `${label}: ${record.name}`,
+        pass: record.pass,
+        detail: record.detail ?? "",
+      }))
+    );
+  }
+
+  return checks;
+}
+
 function checkAnswered(result, spec, label) {
   const checks = [];
 
@@ -291,6 +428,7 @@ function checkAnswered(result, spec, label) {
   }
 
   checks.push(...checkQualifiedValues(result, spec, label));
+  checks.push(...checkResultFunctions(result, spec, label));
 
   const supportsAny =
     Array.isArray(spec.citationSupportsAny) && spec.citationSupportsAny.length
@@ -420,6 +558,20 @@ function checkRejected(result, spec) {
 
 export function evaluateAnswerCase(testCase, primaryResult, followUpResult = null) {
   const checks = [];
+
+  // resultChecks are scored with an answered expectation only. Declared on any
+  // other case they would gate nothing, so say so rather than skip them.
+  if (
+    (testCase.expect === "refused" || testCase.expect === "rejected") &&
+    Array.isArray(testCase.resultChecks) &&
+    testCase.resultChecks.length
+  ) {
+    checks.push({
+      name: "resultChecks are only scored on answered cases",
+      pass: false,
+      detail: `this case expects ${testCase.expect}`,
+    });
+  }
 
   if (testCase.expect === "refused") {
     checks.push({

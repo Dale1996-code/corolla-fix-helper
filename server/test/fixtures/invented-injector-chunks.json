@@ -1,0 +1,22 @@
+{
+  "about": "INVENTED test material for fuelInjectorClaims.test.js. Not taken from any manual or document: every title, filename, sentence and figure here was made up for the test. Do not paste real manual text into this file.",
+  "expectation": { "low": 7.7, "high": 8.3, "celsius": 25, "fahrenheit": 77 },
+  "chunks": [
+    {
+      "documentId": 9001,
+      "documentTitle": "Invented Workshop Sheet A",
+      "originalFilename": "invented-workshop-sheet-a.pdf",
+      "pageNumber": 1,
+      "chunkIndex": 0,
+      "chunkText": "Bench figures for the Zephyr test rig. Fuel injector assembly coil resistance 7.7 to 8.3 Ω at 25°C (77°F). Fuel pump motor coil resistance 1.4 to 2.6 Ω at 25°C (77°F). Fuel level sender track resistance 21.5 to 24.5 Ω with the float high."
+    },
+    {
+      "documentId": 9001,
+      "documentTitle": "Invented Workshop Sheet A",
+      "originalFilename": "invented-workshop-sheet-a.pdf",
+      "pageNumber": 2,
+      "chunkIndex": 1,
+      "chunkText": "Harness test for the Zephyr test rig. With the connector removed, the wire between pin 4 and the controller should read below 2 Ω. Between pin 4 and the chassis it should read 50 kΩ or higher. Reconnect the fuel injector assembly after the test."
+    }
+  ]
+}

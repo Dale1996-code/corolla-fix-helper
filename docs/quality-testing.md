@@ -406,3 +406,7 @@ Edit `server/src/evals/answerQualityCases.js`. Each question is either:
 
 Aim for ~15–20 verified cases covering the specs and procedures you care about most, plus a
 few refusal cases. That set becomes your safety net for every future change.
+
+## Structured checks on verified claims
+
+A case may carry `resultChecks`: pure, synchronous functions of the Ask result that return `[{ name, pass, detail }]`, for a contract that patterns on the answer text cannot express. `fuel-injector-resistance` uses one (`server/src/evals/fuelInjectorClaims.js`) that reads the verified claims in `result.evidence` and requires the injector's range in ohms **with** the test temperature, and no other resistance, unit, or temperature beside the injector. A check that throws, returns a promise or malformed records, or answers differently twice fails rather than passing silently. Its tests (`server/test/fuelInjectorClaims.test.js`) use invented material only (`server/test/fixtures/invented-injector-chunks.json`); never put real manual text in a fixture, because the repository is public.
