@@ -5354,3 +5354,61 @@ part is named). The regexes cannot express either across several sentences.
   owner's approval for the spend.
 - The check is word-based. It fails a correct claim that names the injector and another part, or that
   prints a harness figure beside "injector"; it passes a pronoun-only claim and a figure it cannot place.
+
+## 2026-11-28 — N4-U: a bare table number is printed in its own column's unit
+
+Found by the 2026-11-28 TODO-test audit (`docs/evals/todo-test-audit-2026-11-28.md`). The todo row in
+`askEvidenceContract.test.js` pinned one case, "37 ft-lbf" for the N·m cell of `N*m kgf*cm ft.*lbf … 37
+377 27`. The hole was wider: the bare-number fallback accepted any number of the quote under any header
+unit, so **"377 N·m"** (the kgf·cm cell, ten times the torque), "27 N·m", and another row's number
+under the right unit all verified. Base `2b90e4b`; no model call, no prompt, retrieval, or embedding change.
+
+### What changed
+
+- `unitColumnCells` (exported, pure): under a run of two or more **different** header units with only
+  spaces or brackets between them, a run of exactly that many whole bare-number tokens is a row, and its
+  i-th number is printed in the i-th unit. Not read: a row printing fewer or more numbers, two rows run
+  together with no label, a range or tolerance touching the row (`37 - 43`, `+/- 4`, `27 to 30`), a
+  piece of a name (`P185/65R15 88S`), a unit printed twice in the header, a unit-bearing figure among
+  the cells. The table ends at the next header unit, even a lone one.
+- `cutOffUnitCell` (Ask only): when the quote stops just before the unit the cited chunk prints after its
+  last number, that number is printed in that unit. Placed in the chunk as `chunkApartFigures` places a
+  quote; it counts only when every placement prints the same unit; a bare `A` or `L` after it is set
+  aside for a claim that is not a current or a volume, as `comparableSpecs` does.
+- `evidenceMatchesFor` drops a candidate printing whose cell is under another unit. Its five consumers
+  (numeric check, row check, F4 column reading, gap redaction, the planner's `checkClaimNumbers`) only ask
+  where a figure is printed, so **removing a printing can only add rejections**. Reason stays
+  `numeric_anomaly`; no new reason, detail, or client string.
+
+### Measured (2026-11-28 `VACUUM INTO` snapshot, 20,447 chunks, read-only, old = `2b90e4b`)
+
+| Probe | Claims | Wrong-unit accepted, old → new | Correct newly rejected | Newly accepted |
+| --- | --- | --- | --- | --- |
+| Real contiguous quotes (header … end of each number run), full verifier, real chunk | 1,884 on 183 quotes | **335 → 0** (69 of them the cut-off in·lbf / ° case) | **0** (9 unlabelled rejections, all hand-checked true catches) | 0 |
+| Self-quotes, header + row span, full verifier | 1,116 | 208 → 0 | 0 | 0 |
+| Self-quotes, header + row alone | 1,116 | 420 → 18 (all a probe artefact: a doubled header, deliberately unread) | 0 | 0 |
+| Planner: every 2–12-token fragment of 45 torque-table chunks | 37,686 | — | 0 numeric-check and 0 planner-verdict differences | 0 |
+
+- Rows read: 124 in 20 chunks of 11 documents; 123 agree with unit conversion (N·m ≈ kgf·cm ÷ 10.2 ≈ ft·lbf ×
+  1.36), the other is the page's own rounding (its three cells just over 6% apart). A first version also read tire-size pieces
+  (digits inside a tire size) as a kPa row; the whole-token rule removed them before any number above was taken.
+- Two hand-checked catches are worth naming: an in·lbf cell claimed in N·m from a quote cut before
+  `in.*lbf`, and an angle-tightening step ("Turn 90" followed by `°`) claimed as 90 N·m.
+- Free replays: `eval:replay` 0 of 9 and 0 of 12 verdicts changed (synthetic and row-scoped captures);
+  `eval:planner:replay` 0 of 11 claim verdicts, 0 statuses, readiness levels, or draft notes changed.
+- Mutation check: removing the column filter, the joiner, whole-token, or distinct-unit guard, the cut-off
+  rule, its fuse-symbol exclusion, or the every-placement rule each fails at least one test.
+- Probe outputs quote real manual text and stayed in the session scratch folder; the snapshot was deleted.
+
+### What this does not establish
+
+- How often a model writes such a claim: no Ask capture was replayed (none is on this machine). The change
+  shows what the verifier now refuses, not that answers improve.
+- Still judged as before (wrong unit still accepted): a row printing fewer or more numbers than the header
+  has units (the `N4-U9` todo row), two rows with no label between them, a range or tolerance touching the
+  row, a doubled header, and a quote printed twice in its chunk with different units after it. 189 number
+  runs under the 45 real torque headers are not read; most print a unit-bearing last cell (`… 40 in.*lbf`),
+  which disables the bare fallback anyway, and the rest are 2-, 4-, or 5-number runs or long runs of
+  several rows.
+- A cut-off unit outside the quote's header units cannot verify a claim in it: "35 in-lbf" against a quote
+  that stops before `in.*lbf` is still refused (the safe direction).

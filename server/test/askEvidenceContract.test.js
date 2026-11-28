@@ -2981,16 +2981,15 @@ test("a degree or percent sign is a header only in brackets", () => {
   assert.equal(figureDetailOf("The duty is 40.", "Duty (%): 40 at idle"), "unit_missing");
 });
 
-// Found while closing the holes above, NOT fixed here: a claim that states a
-// unit, but the wrong one for its column, still verifies, because the bare-
-// number header fallback accepts any header unit anywhere in the quote.
-// Each row is the desired behavior and turns into a real test once fixed.
-const WRONG_HEADER_TODO = "header-unit fallback does not tie a bare number to its own column";
-
+// Found while closing the holes above, fixed by N4-U: a claim that states a
+// unit, but the wrong one for its column, used to verify, because the bare-
+// number header fallback accepted any header unit anywhere in the quote. Each
+// row of a unit-header table is now read cell by cell (unitColumnCells); the
+// evidence oracle's N4-U rows and unitColumns.test.js hold the full picture.
 for (const [id, claim, quote] of [
   ["wrong column", "The oil pan drain plug torque is 37 ft-lbf.", "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27"],
 ]) {
-  test(`desired behavior: ${id} unit is not the figure's unit [${WRONG_HEADER_TODO}]`, { todo: WRONG_HEADER_TODO }, () => {
+  test(`a ${id} unit is not the figure's unit (N4-U)`, () => {
     assert.equal(verifySingleClaim(claim, quote).documentSupported.length, 0);
   });
 }

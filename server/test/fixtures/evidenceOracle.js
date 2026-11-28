@@ -2881,7 +2881,118 @@ export const ASK_ORACLE = [
     todo: "R3-declared-ordinary-column-header",
     note: "Known limit of reading 'specified' like 'standard': the word is read from the figure's whole sentence, so a column header ('Specified Condition') ahead of a table's first row declares that row ordinary and the comparison after it is not applied. Whether any real table prints a limit under such a header is a question for the library, not for invented text.",
   },
+
+  // ---- N4-U: a bare number belongs to the unit column it is printed under ----
+  // A torque table prints its units once, as a header run ("N*m kgf*cm
+  // ft.*lbf"), and each row as that many bare numbers. The bare-number
+  // fallback accepted any of the row's numbers under any of the header's
+  // units, so "377 N*m" -- the kgf*cm cell, ten times the torque -- verified.
+  // Invented tables; the figures convert into one another like real rows.
+  ...unitColumnRows(),
 ];
+
+/**
+ * The N4-U rows (see the comment above). Invented text only.
+ *
+ * @returns {EvidenceOracleRow[]}
+ */
+function unitColumnRows() {
+  const chunk =
+    "Torque specifications. Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27 " +
+    "Oil filter cap 25 255 18 Replace the gasket.";
+  const oneRow = "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27";
+  const twoRows = "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 377 27 Oil filter cap 25 255 18";
+  // 18 is printed twice: the crossmember bolt's ft*lbf cell and the link nut's N*m cell.
+  const repeated = "Part tightened N*m kgf*cm ft.*lbf Crossmember bolt 25 255 18 Stabilizer link nut 18 184 13";
+  const bracketed = "Part tightened (N*m) (kgf*cm) (ft.*lbf) Oil pan drain plug 37 377 27";
+  // Two numbers under a three-unit header: no cell can be placed.
+  const unaligned = "Part tightened N*m kgf*cm ft.*lbf Oil pan drain plug 37 27";
+  // The chunk goes on "in.*lbf": the last cell is in in*lbf, not ft*lbf.
+  const smallRowCut = "Part tightened N*m kgf*cm ft.*lbf Trim bracket x Panel 4.0 41 35";
+  /**
+   * @param {string} id
+   * @param {string} quote
+   * @param {string} claim
+   * @param {"accept" | "reject"} expect
+   * @param {string} note
+   * @param {{ finding?: string, todo?: string }} [extra]
+   * @returns {EvidenceOracleRow}
+   */
+  const row = (id, quote, claim, expect, note, extra = {}) => ({
+    id,
+    verifier: "ask",
+    channel: "documentSupported",
+    chunkText: quote === bracketed || quote === repeated || quote === unaligned ? `${quote} Replace the gasket.` : chunk,
+    quote,
+    claim,
+    expect,
+    finding: extra.finding ?? (expect === "accept" ? "control" : "N4-unit-column"),
+    note,
+    ...extra,
+  });
+
+  return [
+    row("N4-U1-ft-lbf-claim-on-the-n-m-cell", oneRow, "The oil pan drain plug torque is 37 ft-lbf.", "reject",
+      "37 is the N*m cell; the ft*lbf cell prints 27. Formerly the todo row in askEvidenceContract.test.js."),
+    row("N4-U2-kgf-cm-cell-claimed-as-n-m", oneRow, "The oil pan drain plug torque is 377 N*m.", "reject",
+      "377 is the kgf*cm cell: claimed in N*m it is ten times the torque."),
+    row("N4-U3-ft-lbf-cell-claimed-as-n-m", oneRow, "The oil pan drain plug torque is 27 N*m.", "reject",
+      "27 is the ft*lbf cell; in N*m the plug takes 37."),
+    row("N4-U4-kgf-cm-cell-claimed-as-ft-lbf", oneRow, "The oil pan drain plug torque is 377 ft-lbf.", "reject",
+      "377 is the kgf*cm cell."),
+    row("N4-U5-second-row-wrong-column", twoRows, "The oil filter cap torque is 25 ft-lbf.", "reject",
+      "In the second row 25 is the N*m cell and 18 the ft*lbf cell."),
+    row("N4-U6-second-row-ft-lbf-cell-as-n-m", twoRows, "The oil filter cap torque is 18 N*m.", "reject",
+      "18 is the filter cap's ft*lbf cell."),
+    row("N4-U7-repeated-value-other-row-other-column", repeated, "The crossmember bolt torque is 18 N*m.", "reject",
+      "18 is printed twice: under ft*lbf in the crossmember row and under N*m in the link-nut row. Before N4-U the row check found the crossmember's own 18 and verified it in N*m."),
+    row("N4-U8-bracketed-header-wrong-column", bracketed, "The oil pan drain plug torque is 377 N*m.", "reject",
+      "The same header with each unit in brackets."),
+    row("N4-U9-unaligned-row-wrong-unit", unaligned, "The oil pan drain plug torque is 37 ft-lbf.", "reject",
+      "KNOWN LIMIT, pinned, safety-relevant (roadmap N4, N4-U9): a row printing fewer (or more) numbers than the header has units gets no reading, so any of its numbers still verifies under any header unit, as before -- a wrong torque shown as verified. Which unit a cell is under cannot be read by position here.",
+      { finding: "N4-U9-unplaceable-row", todo: "N4-U9-unplaceable-row" }),
+    {
+      id: "N4-U10-quote-cut-off-the-cells-own-unit",
+      verifier: "ask",
+      channel: "documentSupported",
+      chunkText: `${smallRowCut} in.*lbf Oil pan drain plug 37 377 27`,
+      quote: smallRowCut,
+      claim: "The trim bracket torque is 35 ft-lbf.",
+      expect: "reject",
+      finding: "N4-unit-column",
+      note: "Small torques print their last cell in in*lbf under the ft*lbf header. The quote stops before 'in.*lbf', so 35 read as the ft*lbf cell: about twelve times the torque.",
+    },
+    {
+      id: "control-N4-U-cut-quote-earlier-cell",
+      verifier: "ask",
+      channel: "documentSupported",
+      chunkText: `${smallRowCut} in.*lbf Oil pan drain plug 37 377 27`,
+      quote: smallRowCut,
+      claim: "The trim bracket torque is 4.0 N*m.",
+      expect: "accept",
+      finding: "control",
+      note: "The cut only takes the last number's unit; the N*m cell is still the N*m cell.",
+    },
+    row("control-N4-U-n-m-cell", oneRow, "The oil pan drain plug torque is 37 N*m.", "accept",
+      "The N*m cell in N*m."),
+    row("control-N4-U-kgf-cm-cell", oneRow, "The oil pan drain plug torque is 377 kgf*cm.", "accept",
+      "The kgf*cm cell in kgf*cm."),
+    row("control-N4-U-ft-lbf-cell", oneRow, "The oil pan drain plug torque is 27 ft-lbf.", "accept",
+      "The ft*lbf cell, spelled differently from the header (ft-lbf for ft.*lbf)."),
+    row("control-N4-U-second-row-n-m", twoRows, "The oil filter cap torque is 25 N*m.", "accept",
+      "The second row is read as its own row of three cells."),
+    row("control-N4-U-second-row-ft-lbf", twoRows, "The oil filter cap torque is 18 ft-lbf.", "accept",
+      "The second row's ft*lbf cell."),
+    row("control-N4-U-repeated-value-right-row", repeated, "The stabilizer link nut torque is 18 N*m.", "accept",
+      "The link nut's own N*m cell, though 18 is also printed under ft*lbf in the row above."),
+    row("control-N4-U-repeated-value-ft-lbf", repeated, "The crossmember bolt torque is 18 ft-lbf.", "accept",
+      "The crossmember's own ft*lbf cell."),
+    row("control-N4-U-bracketed-header", bracketed, "The oil pan drain plug torque is 37 N*m.", "accept",
+      "A bracketed header reads like a bare one."),
+    row("control-N4-U-two-figures-own-columns", oneRow, "The oil pan drain plug torque is 37 N*m (27 ft-lbf).", "accept",
+      "Two figures, each in its own column's unit."),
+  ];
+}
 
 /** @type {EvidenceOracleRow[]} */
 export const PLANNER_ORACLE = [
