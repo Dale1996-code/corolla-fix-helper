@@ -863,8 +863,8 @@ function sameUnit(left, right) {
  * manual's figure beside the claim (owner decision D1) from the very comparison
  * that verified it, so the figure shown can never be one this check did not use.
  */
-function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
-  const [first] = evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits);
+function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells) {
+  const [first] = evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells);
 
   return first ? first.printed : null;
 }
@@ -877,7 +877,7 @@ function printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
  *
  * @returns {Array<{ printed: string, index: number }>}
  */
-function evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
+function evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells) {
   if (!Number.isFinite(spec.value)) {
     return [];
   }
@@ -932,8 +932,28 @@ function evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
     return [];
   }
 
+  // A number that sits in a unit-header table's row is printed in its own
+  // column's unit and no other (N4-U, unitColumnCells): "37 377 27" under
+  // "N*m kgf*cm ft.*lbf" prints 37 N*m, never 37 ft-lbf or 377 N*m. A number
+  // no cell holds is judged as before.
+  // A fuse rating or a gear position cut off a quote ("10 A", "2 L") is set
+  // aside for a claim of another kind, as comparableSpecs sets it aside above.
+  const cellAt = (index) =>
+    unitCells.find(
+      (cell) =>
+        index >= cell.start &&
+        index < cell.end &&
+        !(cell.cut && isCurrentSymbol(cell.unit) && !findCurrentUnit(spec.unit)) &&
+        !(cell.cut && isVolumeSymbol(cell.unit) && !isVolumeClaim)
+    );
+
   return evidenceNumbers
     .filter((candidate) => candidate.value === spec.value)
+    .filter((candidate) => {
+      const cell = cellAt(candidate.index);
+
+      return !cell || sameUnit(cell.unit, spec.unit);
+    })
     .map(({ raw, index }) => ({ printed: raw, index }));
 }
 
@@ -960,6 +980,193 @@ function headerUnitsIn(text) {
   ];
 }
 
+// N4-U: the unit column a bare table number is printed under. A torque table
+// prints its units once, side by side ("N*m kgf*cm ft.*lbf", or each one in
+// brackets), then each row as one bare number per unit. The fallback in
+// evidenceMatchesFor used to accept any of a row's numbers under any of those
+// units, so "377 N*m" -- the kgf*cm cell, ten times the torque -- verified.
+//
+// Read narrowly, by position, and only where the layout is unmistakable: a run
+// of two or more DIFFERENT header units with nothing but spaces or brackets
+// between them, then, up to the next such run, rows whose numbers stand one
+// space-separated run apiece. A run of exactly as many bare numbers as the
+// header has units is a row, and its i-th number is printed in the i-th unit.
+// Anything else -- a row printing fewer or more numbers (an omitted column, a
+// footnoted extra cell, a label ending in a number), two rows with no label
+// between them, a range or a unit-bearing figure among the cells -- places no
+// cell at all, so those numbers are judged exactly as before. Reading a cell
+// only ever REMOVES candidate printings of a figure, never adds one.
+const UNIT_HEADER_GAP_REGEX = /^[\s()[\]]*$/;
+const TABLE_CELL_GAP_REGEX = /^[ \t\u00a0]+$/;
+// The sign of a following "- 4" may already be read into that number, so a
+// joiner can be left as a bare "+/" or nothing but a "+".
+const TABLE_CELL_JOINER_REGEX = /^\s*(?:[-–—~/±+]|\+\s*\/\s*-?|to|and|or)\s*$/i;
+
+/**
+ * The bare numbers of a unit-header table that can be placed under a unit, as
+ * { raw, value, start, end, unit } with `unit` the header's own text.
+ *
+ * @param {string} text
+ */
+export function unitColumnCells(text) {
+  const source = String(text || "");
+  const units = [
+    ...[...source.matchAll(SPELLED_HEADER_UNIT_REGEX)].map((match) => ({
+      unit: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    })),
+    ...[...source.matchAll(SYMBOL_HEADER_UNIT_REGEX)].map((match) => ({
+      unit: match[1],
+      start: match.index,
+      end: match.index + match[0].length,
+    })),
+  ]
+    .sort((left, right) => left.start - right.start)
+    .filter((unit, index, all) => index === 0 || unit.start >= all[index - 1].end);
+
+  /** @type {Array<Array<{ unit: string, start: number, end: number }>>} */
+  const runs = [];
+
+  for (const unit of units) {
+    const run = runs[runs.length - 1];
+    const previous = run?.[run.length - 1];
+
+    if (previous && UNIT_HEADER_GAP_REGEX.test(source.slice(previous.end, unit.start))) {
+      run.push(unit);
+    } else {
+      runs.push([unit]);
+    }
+  }
+
+  const headers = runs.filter(
+    (run) =>
+      run.length >= 2 &&
+      run.every((unit, index) => run.slice(index + 1).every((other) => !sameUnit(unit.unit, other.unit)))
+  );
+  const named = specificationSpans(source);
+  // Only a whole bare-number token can be a cell: the "15" and "89" inside a
+  // tire size ("P185/65R15 88S") are pieces of a name. Leaving them out keeps
+  // their text between the numbers around them, so it also breaks any run.
+  const numbers = signedNumbers(source).filter(
+    (number) => Number.isFinite(number.value) && tokenAt(source, number.index) === number.raw
+  );
+  const cells = [];
+
+  for (const header of headers) {
+    const regionStart = header[header.length - 1].end;
+    // A table ends where the next header unit stands, even a lone one: the
+    // rows after it are no longer known to sit under this header.
+    const nextRun = runs.find((run) => run[0].start >= regionStart);
+    const regionEnd = nextRun ? nextRun[0].start : source.length;
+    const inRegion = numbers.filter((number) => number.index >= regionStart && number.index < regionEnd);
+    /** @type {Array<Array<{ raw: string, value: number, index: number }>>} */
+    const numberRuns = [];
+
+    for (const number of inRegion) {
+      const run = numberRuns[numberRuns.length - 1];
+      const previous = run?.[run.length - 1];
+
+      if (previous && TABLE_CELL_GAP_REGEX.test(source.slice(previous.index + previous.raw.length, number.index))) {
+        run.push(number);
+      } else {
+        numberRuns.push([number]);
+      }
+    }
+
+    for (const [runIndex, run] of numberRuns.entries()) {
+      const first = run[0];
+      const last = run[run.length - 1];
+      const before = numberRuns[runIndex - 1]?.at(-1);
+      const after = numberRuns[runIndex + 1]?.[0];
+      // A run joined to a neighbouring number by a range or tolerance ("37 - 43
+      // 377 27") is part of a wider cell, so its numbers are not in position.
+      const joined =
+        (before && TABLE_CELL_JOINER_REGEX.test(source.slice(before.index + before.raw.length, first.index))) ||
+        (after && TABLE_CELL_JOINER_REGEX.test(source.slice(last.index + last.raw.length, after.index)));
+
+      if (joined || run.length !== header.length || run.some((number) => insideSpans(named, number.index))) {
+        continue;
+      }
+
+      run.forEach((number, position) =>
+        cells.push({
+          raw: number.raw,
+          value: number.value,
+          start: number.index,
+          end: number.index + number.raw.length,
+          unit: header[position].unit,
+        })
+      );
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * The unit the cited CHUNK prints right after the quote's last number, when the
+ * quote stops before it: "Trim bracket x Panel 4.0 41 35" cut from "... 4.0 41 35
+ * in.*lbf". That number is printed in that unit, whatever column header sits
+ * above it -- small torques print their last cell in in.*lbf under an ft.*lbf
+ * header, so the cut quote read as "35 ft-lbf", about twelve times the torque.
+ *
+ * Only a quote's last number can lose its unit to the cut. The quote is placed
+ * as chunkApartFigures places it (whitespace- and case-insensitive, on token
+ * boundaries), and, as there, the unit counts only when EVERY placement prints
+ * one, the same one. Returned as a cell in the quote's positions, or null.
+ *
+ * @param {string} quoteText
+ * @param {string} chunkText
+ */
+function cutOffUnitCell(quoteText, chunkText) {
+  const quote = String(quoteText || "");
+  const last = signedNumbers(quote).at(-1);
+
+  if (!last || quote.slice(last.index + last.raw.length).trim() || !chunkText) {
+    return null;
+  }
+
+  const placed = collapseWithIndex(quote);
+  const needle = placed.text.toLowerCase();
+  const shown = collapseForMatch(chunkText);
+  const haystack = shown.toLowerCase();
+
+  if (!needle || needle.length !== placed.text.length) {
+    return null;
+  }
+
+  const cased = shown.length === haystack.length ? shown : haystack;
+  const lastNumber = String(last.raw).replace(/\s+/g, " ");
+  /** @type {string | null | undefined} */
+  let unit;
+
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    if (!startsOnBoundary(haystack, at, needle) || !endsOnBoundary(haystack, at + needle.length, needle)) {
+      continue;
+    }
+
+    // The quote's last number and the next few characters of the chunk: a
+    // specification starting at that number carries the unit the cut dropped.
+    const end = at + needle.length;
+    const window = cased.slice(end - lastNumber.length, end + 24);
+    const spec = readSpecs(window).find(
+      (candidate) => candidate.value === last.value && window.indexOf(candidate.printed) === 0
+    );
+    const found = spec && spec.printed.length > lastNumber.length ? spec.unit : null;
+
+    if (unit === undefined) {
+      unit = found;
+    } else if (unit !== found) {
+      unit = null;
+    }
+
+    if (unit === null) break;
+  }
+
+  return unit ? { raw: last.raw, value: last.value, start: last.index, end: last.index + last.raw.length, unit } : null;
+}
+
 /** All numbers appearing anywhere in the evidence text, unit or not, signed. */
 function allNumbersIn(text) {
   return signedNumbers(text).filter((number) => Number.isFinite(number.value));
@@ -981,9 +1188,13 @@ function collapseGrade(text) {
  * own text for each (deduplicated, in claim order -- both ends of a claimed
  * range usually match one printed range).
  *
+ * `chunkText`, when given, is the cited chunk: a last number whose unit the
+ * quote cut off is printed in that unit (cutOffUnitCell). It only ever adds
+ * rejections.
+ *
  * @returns {{ unsupported: string[], printedFigures: string[] }}
  */
-function matchClaimNumbers(claimText, evidenceText) {
+function matchClaimNumbers(claimText, evidenceText, chunkText) {
   const specs = extractSpecNumbers(claimText);
 
   if (!specs.length) {
@@ -993,6 +1204,9 @@ function matchClaimNumbers(claimText, evidenceText) {
   const evidenceNumbers = allNumbersIn(evidenceText);
   const evidenceSpecs = readSpecs(evidenceText);
   const headerUnits = headerUnitsIn(evidenceText);
+  // A number the chunk prints with the unit the quote cut off is read first.
+  const cutOff = cutOffUnitCell(evidenceText, chunkText);
+  const unitCells = [...(cutOff ? [{ ...cutOff, cut: true }] : []), ...unitColumnCells(evidenceText)];
   const unsupported = [];
   const printedFigures = [];
 
@@ -1015,7 +1229,7 @@ function matchClaimNumbers(claimText, evidenceText) {
 
       printed = evidenceGrade.printed;
     } else {
-      printed = printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits);
+      printed = printedSpecFor(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells);
 
       if (printed === null) {
         unsupported.push(spec.raw);
@@ -2173,7 +2387,7 @@ export function quoteRows(text) {
 }
 
 /** Where the evidence prints one claimed figure, by position. */
-function claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits) {
+function claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells) {
   if (spec.unit === "viscosity") {
     const grade = collapseGrade(spec.raw);
 
@@ -2182,7 +2396,7 @@ function claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
       .map(({ index }) => index);
   }
 
-  return evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits).map(({ index }) => index);
+  return evidenceMatchesFor(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells).map(({ index }) => index);
 }
 
 /** Subject tokens of a label, without the column-header units it carries. */
@@ -2399,11 +2613,12 @@ function rowsHoldingFigures(specs, rows, evidence) {
   const evidenceNumbers = allNumbersIn(evidence);
   const evidenceSpecs = readSpecs(evidence);
   const headerUnits = headerUnitsIn(evidence);
+  const unitCells = unitColumnCells(evidence);
   const rowOf = (index) => rows.findIndex((row) => index >= row.start && index < row.end);
   const figureRows = specs.map(
     (spec) =>
       new Set(
-        claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
+        claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells)
           .map(rowOf)
           .filter((row) => row >= 0)
       )
@@ -2817,6 +3032,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
   const evidenceNumbers = allNumbersIn(evidence);
   const evidenceSpecs = readSpecs(evidence);
   const headerUnits = headerUnitsIn(evidence);
+  const unitCells = unitColumnCells(evidence);
   const cellAt = (position) =>
     quoteCells.findIndex(([start, end]) => position >= start && position < end);
   /** @type {Set<number> | null} */
@@ -2829,7 +3045,7 @@ function columnReading(rows, index, specs, evidence, sourceRows, sourceText) {
     // `columnsOf` would not contain the column a claim names and it would be
     // rejected: the failure direction is the safe one.
     const printedUnder = new Set(
-      claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits)
+      claimFigurePositions(spec, evidenceNumbers, evidenceSpecs, headerUnits, unitCells)
         .filter((position) => position >= row.start && position < row.end)
         .map((position) => run.alternatives[cellAt(position)])
     );
@@ -3357,7 +3573,7 @@ export function verifyEvidence(validated, chunks) {
     }
 
     // The quote is real; now the numbers in the CLAIM must be present in it.
-    const numeric = matchClaimNumbers(claim.claim, claim.evidenceQuote);
+    const numeric = matchClaimNumbers(claim.claim, claim.evidenceQuote, mapped.chunk.chunkText);
 
     if (numeric.unsupported.length) {
       rejected.push({

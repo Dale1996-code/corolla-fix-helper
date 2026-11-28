@@ -4,7 +4,7 @@
 > Anything else that looks like a roadmap lives in [`docs/archive/`](archive/) and is history, not a plan.
 >
 > - **Covers:** August 2026 → August 2027
-> - **Last reviewed:** 17 November 2026, against `main` at `cf6acf6` (PR #187)
+> - **Last reviewed:** 17 November 2026, against `main` at `cf6acf6` (PR #187); **N4** updated 28 November 2026 for N4-U, against `2b90e4b`
 > - **Supersedes:** [`docs/archive/roadmap-v1.md`](archive/roadmap-v1.md) and the strategy review in [`docs/archive/strategy-review-2026-08.pdf`](archive/strategy-review-2026-08.pdf)
 
 **Naming rule so this never gets confusing again:** the current roadmap is always this
@@ -79,7 +79,9 @@ state a plan imagined.
   viscosity grade is matched by equality, never as a substring (#166). And a figure must keep
   its unit: a claim that drops a unit its quote prints is `unit_missing` (#185), including a
   unit printed once in a header or the next cell (#187), with matching `unit_cut` and
-  `unit_not_stated` checks in the planner (#183, #184, #187). These make the verifier
+  `unit_not_stated` checks in the planner (#183, #184, #187). Under a header of several units
+  (`N*m kgf*cm ft.*lbf`), a bare table number now counts only in its own column's unit (N4-U),
+  except in rows the reader cannot place (N4-U9, open). These make the verifier
   stricter; they still do not prove that a verified claim follows from its quote (see **N4**).
   The iteration log records what the larger ones newly rejected on the real library.
 
@@ -144,8 +146,10 @@ state a plan imagined.
   no 3. But "50 N" passes against "490 N (50 kgf)": the number is printed, the unit is not
   compared. The bare-number table fallback, now limited to quotes carrying a header unit in
   the claim's unit, can tell which column a number came from only where the chunk prints the
-  header and one cell per column (F4, #170, with the limits listed under **N4**); elsewhere it
-  still cannot.
+  header and one cell per column (F4, #170, with the limits listed under **N4**), and which
+  **unit** column only where a header of two or more units sits over a row printing one number
+  per unit (N4-U, November 2026); elsewhere it still cannot, and a row it cannot place can
+  still verify a number in the wrong unit (**N4-U9**, open).
 - **The Repair Planner's claim check is lexical, and narrower than it reads.** Until Stage
   5-E2 of the 2026-10-18 audit (PR #152), a planner claim passed if its text appeared
   anywhere in its quote, so a fragment could drop the "Do not" before it or attach a number
@@ -524,11 +528,32 @@ all scanned wiring-diagram text, and the planner 51 of 95,044 fragments per clai
 them real dropped torque or size units. *What it still does not cover* (the full list is in
 [`docs/api.md`](api.md)): a header printed only above a table's first row is not read for the
 rows after it; a row printing a single value gets no column reading; a condition outside the
-verifier's vocabulary is not seen; and a stated unit taken from the wrong column (`37 ft-lbf`
-under an N·m column) is still accepted, which is a `todo` row in the oracle.
-*Remaining before N4 is done:* one decision, needing its own reviewed change — compound,
-multi-specification claims, where one subject is derived per claim (described in the known
-limitations above).
+verifier's vocabulary is not seen.
+*Unit columns, November 2026 (N4-U):* found by the 2026-11-28 TODO-test audit
+([`docs/evals/todo-test-audit-2026-11-28.md`](evals/todo-test-audit-2026-11-28.md)). Under a unit
+header such as `N*m kgf*cm ft.*lbf`, the bare-number fallback accepted any number of the quote under
+any header unit, so "377 N·m" — the kgf·cm cell, ten times the torque — verified. A row printing
+exactly one whole bare number per header unit now puts each number in its own column's unit and no
+other, and a last number whose unit the quote cut off (`… 4.0 41 35` before `in.*lbf`, `Turn 90`
+before `°`) is printed in that unit. It can only add rejections. Measured offline on a snapshot of
+the owner's library: of 1,884 claims on 183 real quotes, wrong-unit accepts went 335 → 0, no
+correct claim was newly rejected, and 37,686 planner fragments were unchanged (see the
+[iteration log](evals/ask-rag-iteration-log.md)). It does not measure how often a model writes such
+a claim: no Ask capture was replayed.
+*Remaining before N4 is done:* two items, each needing its own reviewed change.
+
+- **N4-U9 — rows the unit-column reader cannot place (safety-relevant).** Where a row prints fewer
+  or more numbers than its header has units (an omitted column, a footnoted extra cell, a label
+  ending in a number), two rows run together with no label, a range or tolerance touches the row,
+  the header prints a unit twice, or the chunk prints the quote twice with different units after
+  it, no number is placed and the old fallback still applies: a number can verify in another
+  column's unit, a wrong torque shown as verified. 189 number runs under the 45 real torque headers
+  are not read; most end in a unit-bearing cell (`… 40 in.*lbf`), which turns the fallback off
+  anyway, so how many remain exposed has not been counted. Pinned as the `N4-U9` `todo` row in the
+  evidence oracle. A fail-closed rule for such rows was costly for F4 (one correct torque row lost,
+  none protected), so measure before choosing between refusing them and reading them.
+- **Compound claims** — one decision: multi-specification claims, where one subject is derived per
+  claim (described in the known limitations above).
 *What it still does not cover:* claim shapes with no parsable head noun keep the numeric
 check alone, as before.
 
