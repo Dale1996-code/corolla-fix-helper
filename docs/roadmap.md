@@ -703,11 +703,10 @@ seven decisions (D1–D7) on 19 October; D4 also answers question 5 in section 6
 | 5-E1 | #155 | Planner stream frames carry no model arguments and no provider error body; searches and tool calls per turn have fixed bounds; embedding requests time out and count against the daily ceiling (D4); the defeat gate also runs inside the planner, not only at its route |
 | 4-D2 | #158 | A document's extraction and its chunk rebuild save in one transaction; deleting a symptom or procedure unlinks its notes; an upload whose bytes are not a PDF is refused; and a web upload records its MD5, so the same bytes uploaded twice get a 409. Migration `007_backfill_upload_file_md5` hashes older documents (D6); a byte-identical later copy keeps no hash and is only named on the startup console, and deleting it is left to the owner |
 | 1b | #159 | `npm run eval:capture` (paid) records each model reply the answer evals produce; `npm run eval:replay` (free, offline) re-verifies a capture and prints every verdict that changed. Ask only: the planner has no eval cases to capture |
+| 1b injector | #205 | The `fuel-injector-resistance` answer-eval case also checks its verified claims: one must name the injector and give its range in ohms and its test temperature. Built on current `main` with an invented fixture; none of the old local branch's manual text was carried, which settles the D7 blocker |
 
 *Not delivered yet:*
 
-- **1b's injector eval branch.** It waits on D7: a synthetic fixture must replace the
-  verbatim manual text in it before the public repository can carry it.
 - **7, documentation truth pass.** Done in two parts, both docs-only. Part 1 (#160)
   carried the roadmap, model-prose, environment-variable, and changelog findings (3B-05,
   3B-06, 3B-12, 3B-14), with matching fixes to `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`,
